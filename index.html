@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Portrait Value Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Portrait Value Studio</h1>
+      <p>Turn a reference portrait into a three-value study and a color-block study. Hover any image to sample it; click to keep the color.</p>
+    </div>
+    <div class="topbar-actions">
+      <input type="file" id="file" accept="image/*" class="visually-hidden">
+      <label for="file" class="btn btn-primary">Load photo</label>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="rail" aria-label="Study settings">
+      <section class="group">
+        <h2>Shapes</h2>
+        <div class="field">
+          <div class="field-head"><label for="simplify">Simplify</label><output id="simplifyOut" for="simplify"></output></div>
+          <input type="range" id="simplify" min="0" max="10" step="1" value="3">
+          <p class="hint">Softens detail so values gather into larger masses.</p>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="merge">Merge small shapes</label><output id="mergeOut" for="merge"></output></div>
+          <input type="range" id="merge" min="0" max="10" step="1" value="4">
+          <p class="hint">Folds specks into the shape around them.</p>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="detail">Working size</label></div>
+          <select id="detail">
+            <option value="600">600 px (fastest)</option>
+            <option value="900" selected>900 px</option>
+            <option value="1400">1400 px (most detail)</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Values</h2>
+          <button type="button" class="btn btn-small" id="autoSplit">Auto split</button>
+        </div>
+        <canvas id="hist" class="hist" aria-label="Value histogram with the two split points"></canvas>
+        <div class="field">
+          <div class="field-head"><label for="t1">Shadow / middle split</label><output id="t1Out" for="t1"></output></div>
+          <input type="range" id="t1" min="1" max="98" step="1" value="35">
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div>
+          <input type="range" id="t2" min="2" max="99" step="1" value="65">
+        </div>
+
+        <fieldset class="field">
+          <legend>Gray values</legend>
+          <div class="seg seg-full">
+            <input type="radio" name="grayMode" id="grayCustom" value="custom" checked><label for="grayCustom">Set values</label>
+            <input type="radio" name="grayMode" id="grayAvg" value="average"><label for="grayAvg">Photo average</label>
+          </div>
+        </fieldset>
+        <div id="customGrays">
+          <div class="field">
+            <div class="field-head"><label for="g0">Shadow value</label><output id="g0Out" for="g0"></output></div>
+            <input type="range" id="g0" min="0" max="100" step="1" value="20">
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="g1">Middle value</label><output id="g1Out" for="g1"></output></div>
+            <input type="range" id="g1" min="0" max="100" step="1" value="50">
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="g2">Light value</label><output id="g2Out" for="g2"></output></div>
+            <input type="range" id="g2" min="0" max="100" step="1" value="85">
+          </div>
+        </div>
+
+        <ol class="zones" id="zones" aria-label="The three values"></ol>
+      </section>
+
+      <section class="group">
+        <h2>Color blocks</h2>
+        <div class="field">
+          <div class="field-head"><label for="colors">Colors per value</label><output id="colorsOut" for="colors"></output></div>
+          <input type="range" id="colors" min="1" max="6" step="1" value="3">
+          <p class="hint">How many averaged colors each of the three values is split into.</p>
+        </div>
+        <label class="check" for="outlines"><input type="checkbox" id="outlines"> Outline shapes on both studies</label>
+        <button type="button" class="btn" id="addBlocks">Add block colors to palette</button>
+      </section>
+    </aside>
+
+    <main class="work">
+      <div class="work-bar">
+        <p class="source" id="source"></p>
+        <div class="seg" role="radiogroup" aria-label="Show">
+          <input type="radio" name="view" id="vAll" value="all" checked><label for="vAll">All three</label>
+          <input type="radio" name="view" id="vOrig" value="orig"><label for="vOrig">Original</label>
+          <input type="radio" name="view" id="vValue" value="value"><label for="vValue">Values</label>
+          <input type="radio" name="view" id="vBlock" value="block"><label for="vBlock">Blocks</label>
+        </div>
+      </div>
+
+      <div class="panels" id="panels" data-view="all">
+        <figure class="panel" data-panel="orig">
+          <figcaption><span>Original</span><button type="button" class="btn btn-ghost" data-save="orig">Save PNG</button></figcaption>
+          <div class="matte"><canvas id="cv-orig" class="view" aria-label="Original photo"></canvas></div>
+        </figure>
+        <figure class="panel" data-panel="value">
+          <figcaption><span>Three values</span><button type="button" class="btn btn-ghost" data-save="value">Save PNG</button></figcaption>
+          <div class="matte"><canvas id="cv-value" class="view" aria-label="Three-value study"></canvas></div>
+        </figure>
+        <figure class="panel" data-panel="block">
+          <figcaption><span>Color blocks</span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
+          <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas></div>
+        </figure>
+        <div class="busy" id="busy" hidden>Updating…</div>
+      </div>
+
+      <section class="palette" aria-labelledby="palTitle">
+        <div class="palette-head">
+          <h2 id="palTitle">Palette <span class="count" id="palCount"></span></h2>
+          <div class="palette-actions">
+            <button type="button" class="btn btn-small" id="palSort">Sort dark to light</button>
+            <button type="button" class="btn btn-small" id="palCopy">Copy hex codes</button>
+            <button type="button" class="btn btn-small" id="palSave">Save palette PNG</button>
+            <button type="button" class="btn btn-small btn-danger" id="palClear">Clear</button>
+          </div>
+        </div>
+        <ul class="swatches" id="swatches"></ul>
+        <p class="empty" id="palEmpty">Hover any of the three images to sample a color, then click to add it here.</p>
+        <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="loupe" id="loupe" hidden aria-hidden="true">
+  <canvas id="loupeCanvas"></canvas>
+  <div class="loupe-info">
+    <span class="chip" id="loupeChip"></span>
+    <span class="loupe-hex" id="loupeHex"></span>
+    <span class="loupe-val" id="loupeVal"></span>
+  </div>
+</div>
+<div class="drop-hint" id="dropHint" hidden><span>Drop the portrait to load it</span></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/processing.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
