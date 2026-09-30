@@ -44,7 +44,6 @@
     meterValue: $('meterValue'),
     meterShapes: $('meterShapes'),
     fixList: $('fixList'),
-    diffLegend: $('diffLegend'),
     alignPanel: $('alignPanel'),
     alignState: $('alignState'),
     onion: $('onion'), onionOut: $('onionOut'),
@@ -476,7 +475,7 @@
         els.loupeVal.textContent = 'left out';
       } else {
         els.loupeChip.style.background = `linear-gradient(90deg, ${toHex(region.ref)} 50%, ${toHex(region.art)} 50%)`;
-        els.loupeHex.textContent = Study.DIFF_BINS[region.bin].label;
+        els.loupeHex.textContent = region.pct + '% match';
         els.loupeVal.textContent = 'ΔE ' + region.dE.toFixed(1);
       }
     } else {
@@ -1219,7 +1218,7 @@
     repaintArt();
     paint(els.canvases.artblock, artRes.blockImage, w, h);
     paint(els.canvases.diff, cmp.diffImage, w, h);
-    drawMarkers(els.canvases.diff, cmp.top);
+    drawLabels(els.canvases.diff, cmp);
     state.pixels.refblock = state.result.blockImage;
     state.pixels.art = state.art.prep.rgba;
     state.pixels.artblock = artRes.blockImage;
@@ -1227,23 +1226,47 @@
     renderScore(cmp);
   }
 
-  // Numbered circles on the accuracy map, matching the list of differences
-  function drawMarkers(canvas, top) {
+  // Match percentage on each shape of the accuracy map. The biggest differences get a
+  // white label with their number from the list; shapes too small for a label stay bare.
+  function drawLabels(canvas, cmp) {
     const g = canvas.getContext('2d');
-    const r = Math.max(10, Math.max(canvas.width, canvas.height) / 30);
-    top.forEach((reg, i) => {
+    const long = Math.max(canvas.width, canvas.height);
+    const minFont = Math.round(long / 60);
+    const maxFont = Math.round(long / 26);
+    const rank = new Set(cmp.top.map((r) => r.id));
+
+    const pill = (reg, text, font, strong) => {
+      g.font = `600 ${font}px "IBM Plex Mono", ui-monospace, monospace`;
+      const pw = g.measureText(text).width + font * 0.9;
+      const ph = font * 1.45;
+      // keep the whole label inside the picture
+      const pad = 3;
+      const x = Math.max(pad, Math.min(canvas.width - pw - pad, reg.lx + 0.5 - pw / 2));
+      const y = Math.max(pad, Math.min(canvas.height - ph - pad, reg.ly + 0.5 - ph / 2));
       g.beginPath();
-      g.arc(reg.mx + 0.5, reg.my + 0.5, r, 0, Math.PI * 2);
-      g.fillStyle = '#1c1d20';
+      if (g.roundRect) g.roundRect(x, y, pw, ph, ph / 2);
+      else g.rect(x, y, pw, ph);
+      g.fillStyle = strong ? '#ffffff' : 'rgba(20, 21, 24, 0.78)';
       g.fill();
-      g.lineWidth = Math.max(2, r / 5);
-      g.strokeStyle = '#ffffff';
-      g.stroke();
-      g.fillStyle = '#ffffff';
-      g.font = `600 ${Math.round(r * 1.15)}px "IBM Plex Mono", monospace`;
+      if (strong) {
+        g.lineWidth = Math.max(1.5, font / 7);
+        g.strokeStyle = '#1c1d20';
+        g.stroke();
+      }
+      g.fillStyle = strong ? '#1c1d20' : '#ffffff';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(String(i + 1), reg.mx + 0.5, reg.my + 1.5);
+      g.fillText(text, x + pw / 2, y + ph / 2 + font * 0.05);
+    };
+
+    cmp.regions.forEach((reg) => {
+      if (!reg.ref || rank.has(reg.id)) return;
+      const font = Math.min(maxFont, Math.floor(reg.room / 1.5));
+      if (font >= minFont) pill(reg, reg.pct + '%', font, false);
+    });
+    cmp.top.forEach((reg, i) => {
+      const font = Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
+      pill(reg, `${i + 1} · ${reg.pct}%`, font, true);
     });
   }
 
@@ -1304,27 +1327,10 @@
       const strong = document.createElement('strong');
       strong.textContent = describe(reg);
       const small = document.createElement('small');
-      small.textContent = `${ZONE_NAMES[reg.zone]} shape · ${(reg.share * 100).toFixed(1)}% of picture · ΔE ${reg.dE.toFixed(1)} · ${toHex(reg.ref)} → ${toHex(reg.art)}`;
+      small.textContent = `${reg.pct}% match · ${ZONE_NAMES[reg.zone]} shape · ${(reg.share * 100).toFixed(1)}% of picture · ΔE ${reg.dE.toFixed(1)} · ${toHex(reg.ref)} → ${toHex(reg.art)}`;
       text.append(strong, small);
       li.append(num, sw, text);
       els.fixList.append(li);
-    });
-  }
-
-  function renderLegend() {
-    const ranges = ['under 5', '5–10', '10–20', '20+'];
-    Study.DIFF_BINS.forEach((bin, i) => {
-      const li = document.createElement('li');
-      const key = document.createElement('span');
-      key.className = 'key';
-      key.style.background = bin.fill ? `rgb(${bin.fill.join(',')})` : 'rgb(214, 214, 212)';
-      const label = document.createElement('span');
-      label.textContent = bin.label;
-      const range = document.createElement('span');
-      range.className = 'range';
-      range.textContent = 'ΔE ' + ranges[i];
-      li.append(key, label, range);
-      els.diffLegend.append(li);
     });
   }
 
@@ -1432,7 +1438,6 @@
   function start() {
     updateOutputs();
     renderPalette();
-    renderLegend();
     updateLineButtons();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);

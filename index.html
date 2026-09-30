@@ -259,9 +259,9 @@
             <div class="matte"><canvas id="cv-artblock" class="view" aria-label="Your painting as color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
           </figure>
           <figure class="panel">
-            <figcaption><span>Accuracy map</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
-            <div class="matte"><canvas id="cv-diff" class="view" aria-label="Accuracy map: shapes shaded by how far your color is from the reference"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-            <ul class="legend" id="diffLegend" aria-label="Color difference (ΔE)"></ul>
+            <figcaption><span>Accuracy by shape</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
           </figure>
         </div>
       </section>

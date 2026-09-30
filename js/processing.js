@@ -563,7 +563,7 @@
     for (let c = 0; c < count; c++) {
       const k = cnt[c];
       if (!k) {
-        regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0 };
+        regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0 };
         continue;
       }
       const refLab = linToLab(rr[c] / k, rg[c] / k, rb[c] / k);
@@ -585,6 +585,7 @@
         cx: sx[c] / k,
         cy: sy[c] / k,
         bin: binFor(dE),
+        pct: Math.round(Math.max(0, 100 - 2.5 * dE)), // same per-shape score the color accuracy averages
         zone: Math.floor(refRes.block[first[c]] / refRes.K),
       };
     }
@@ -595,20 +596,39 @@
       .sort((a, b) => b.share * b.dE - a.share * a.dE)
       .slice(0, 5);
 
-    // Put each marker on a pixel inside its shape, nearest the shape's centre
-    const best = new Map(top.map((r) => [r.id, { d: Infinity, x: r.cx, y: r.cy }]));
+    // Label spot for each shape: its most interior pixel (largest inscribed circle),
+    // found with a two-pass chamfer distance to the shape's edge.
+    const dist = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = i % w, y = (i / w) | 0, c = comp[i];
+      const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1 || (mask && !mask[i]) ||
+        comp[i - 1] !== c || comp[i + 1] !== c || comp[i - w] !== c || comp[i + w] !== c;
+      dist[i] = edge ? 0 : 1e9;
+    }
+    const D = Math.SQRT2;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (!dist[i]) continue;
+        dist[i] = Math.min(dist[i], dist[i - 1] + 1, dist[i - w] + 1, dist[i - w - 1] + D, dist[i - w + 1] + D);
+      }
+    }
+    for (let y = h - 2; y > 0; y--) {
+      for (let x = w - 2; x > 0; x--) {
+        const i = y * w + x;
+        if (!dist[i]) continue;
+        dist[i] = Math.min(dist[i], dist[i + 1] + 1, dist[i + w] + 1, dist[i + w + 1] + D, dist[i + w - 1] + D);
+      }
+    }
+    regions.forEach((r) => { r.lx = r.cx; r.ly = r.cy; r.room = -1; });
     for (let i = 0; i < n; i++) {
       if (mask && !mask[i]) continue;
-      const b = best.get(comp[i]);
-      if (!b) continue;
-      const x = i % w, y = (i / w) | 0;
       const r = regions[comp[i]];
-      const d = (x - r.cx) * (x - r.cx) + (y - r.cy) * (y - r.cy);
-      if (d < b.d) { b.d = d; b.x = x; b.y = y; }
+      if (dist[i] > r.room) { r.room = dist[i]; r.lx = i % w; r.ly = (i / w) | 0; }
     }
-    top.forEach((r) => { const b = best.get(r.id); r.mx = b.x; r.my = b.y; });
 
-    // Accuracy map: the reference in light gray, shapes filled by how far off they are
+    // Accuracy map: the reference's color blocks with shape borders drawn in
+    const blockImg = refRes.blockImage;
     const diffImage = new Uint8ClampedArray(n * 4);
     for (let i = 0, p = 0; i < n; i++, p += 4) {
       const c = comp[i];
@@ -621,16 +641,11 @@
         continue;
       }
       const edge = (x < w - 1 && comp[i + 1] !== c) || (i < n - w && comp[i + w] !== c);
-      const base = 150 + 0.9 * grayForL(ref.L[i]) * 0.4;
-      const fill = DIFF_BINS[regions[c].bin].fill;
-      let r = base, g = base, b = base;
-      if (fill) {
-        r = fill[0] * 0.85 + base * 0.15;
-        g = fill[1] * 0.85 + base * 0.15;
-        b = fill[2] * 0.85 + base * 0.15;
-      }
-      if (edge) { r *= 0.55; g *= 0.55; b *= 0.55; }
-      diffImage[p] = r; diffImage[p + 1] = g; diffImage[p + 2] = b; diffImage[p + 3] = 255;
+      const k = edge ? 0.35 : 1;
+      diffImage[p] = blockImg[p] * k;
+      diffImage[p + 1] = blockImg[p + 1] * k;
+      diffImage[p + 2] = blockImg[p + 2] * k;
+      diffImage[p + 3] = 255;
     }
 
     return {
