@@ -532,8 +532,15 @@
     const { w, h } = ref;
     const n = w * h;
 
-    let sameZone = 0;
-    for (let i = 0; i < n; i++) if (refRes.zone[i] === artRes.zone[i]) sameZone++;
+    // Pixels the painting photo doesn't cover (after moving it) are left out
+    const mask = art.mask;
+    let covered = 0, sameZone = 0;
+    for (let i = 0; i < n; i++) {
+      if (mask && !mask[i]) continue;
+      covered++;
+      if (refRes.zone[i] === artRes.zone[i]) sameZone++;
+    }
+    covered = covered || 1;
 
     const { comp, count } = components(refRes.block, w, h);
     const rr = new Float64Array(count), rg = new Float64Array(count), rb = new Float64Array(count);
@@ -541,6 +548,7 @@
     const cnt = new Float64Array(count), sx = new Float64Array(count), sy = new Float64Array(count);
     const first = new Int32Array(count);
     for (let i = 0, p = 0; i < n; i++, p += 4) {
+      if (mask && !mask[i]) continue;
       const c = comp[i];
       if (!cnt[c]) first[c] = i;
       rr[c] += SRGB_TO_LIN[ref.rgba[p]]; rg[c] += SRGB_TO_LIN[ref.rgba[p + 1]]; rb[c] += SRGB_TO_LIN[ref.rgba[p + 2]];
@@ -554,10 +562,14 @@
     let colorScore = 0, valueScore = 0;
     for (let c = 0; c < count; c++) {
       const k = cnt[c];
+      if (!k) {
+        regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0 };
+        continue;
+      }
       const refLab = linToLab(rr[c] / k, rg[c] / k, rb[c] / k);
       const artLab = linToLab(ar[c] / k, ag[c] / k, ab[c] / k);
       const dE = deltaE2000(refLab[0], refLab[1], refLab[2], artLab[0], artLab[1], artLab[2]);
-      const share = k / n;
+      const share = k / covered;
       const dL = artLab[0] - refLab[0];
       colorScore += share * Math.max(0, 100 - 2.5 * dE);
       valueScore += share * Math.max(0, 100 - 5 * Math.abs(dL));
@@ -586,6 +598,7 @@
     // Put each marker on a pixel inside its shape, nearest the shape's centre
     const best = new Map(top.map((r) => [r.id, { d: Infinity, x: r.cx, y: r.cy }]));
     for (let i = 0; i < n; i++) {
+      if (mask && !mask[i]) continue;
       const b = best.get(comp[i]);
       if (!b) continue;
       const x = i % w, y = (i / w) | 0;
@@ -600,6 +613,13 @@
     for (let i = 0, p = 0; i < n; i++, p += 4) {
       const c = comp[i];
       const x = i % w;
+      if (mask && !mask[i]) {
+        // not covered: dark diagonal hatching
+        const v = ((x + ((i / w) | 0)) % 10) < 3 ? 105 : 78;
+        diffImage[p] = diffImage[p + 1] = diffImage[p + 2] = v;
+        diffImage[p + 3] = 255;
+        continue;
+      }
       const edge = (x < w - 1 && comp[i + 1] !== c) || (i < n - w && comp[i + w] !== c);
       const base = 150 + 0.9 * grayForL(ref.L[i]) * 0.4;
       const fill = DIFF_BINS[regions[c].bin].fill;
@@ -616,12 +636,37 @@
     return {
       colorScore: Math.round(colorScore),
       valueScore: Math.round(valueScore),
-      shapeMatch: Math.round((sameZone / n) * 100),
+      shapeMatch: Math.round((sameZone / covered) * 100),
+      coverage: covered / n,
       regions,
       top,
       comp,
       diffImage,
     };
+  }
+
+  // ---- White balance -------------------------------------------------------
+
+  // Multiplies each channel in linear light (gains = [r, g, b]).
+  function applyGains(rgba, gains) {
+    const luts = gains.map((gain) => {
+      const t = new Uint8ClampedArray(256);
+      for (let i = 0; i < 256; i++) t[i] = linToSrgb(SRGB_TO_LIN[i] * gain);
+      return t;
+    });
+    for (let p = 0; p < rgba.length; p += 4) {
+      rgba[p] = luts[0][rgba[p]];
+      rgba[p + 1] = luts[1][rgba[p + 1]];
+      rgba[p + 2] = luts[2][rgba[p + 2]];
+    }
+  }
+
+  // Gains that turn the given color neutral gray at the same luminance, or null if it is too dark.
+  function neutralGains(r, g, b) {
+    const lr = SRGB_TO_LIN[r], lg = SRGB_TO_LIN[g], lb = SRGB_TO_LIN[b];
+    if (Math.min(lr, lg, lb) < 0.02) return null;
+    const y = 0.2126729 * lr + 0.7151522 * lg + 0.072175 * lb;
+    return [y / lr, y / lg, y / lb];
   }
 
   window.Study = {
@@ -633,6 +678,8 @@
     lightnessOf,
     grayForL,
     compare,
+    applyGains,
+    neutralGains,
     deltaE2000,
     DIFF_BINS,
   };

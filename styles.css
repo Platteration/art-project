@@ -159,7 +159,7 @@ select {
 .group + .group { border-top: 1px solid var(--line); }
 .group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
-.field { display: grid; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.field { display: grid; gap: 6px; align-content: start; border: 0; margin: 0; padding: 0; min-width: 0; }
 .field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .field label, .field legend { font-weight: 500; }
 .field legend { padding: 0; margin-bottom: 6px; }
@@ -312,6 +312,28 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .check-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .inline-field { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .inline-field select { width: auto; }
+
+.align {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.align summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  font: 700 0.95rem var(--display);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.align-state { font: 500 0.8rem var(--mono); color: var(--muted); }
+.align-body { padding: 0 16px 16px; display: grid; gap: 14px; }
+.align-grid { display: grid; gap: 14px 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); }
+.align-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.align-actions .hint { flex: 1 1 280px; }
+.btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.picking-neutral #cv-art { cursor: copy; }
 
 .check-empty {
   border: 2px dashed var(--line);

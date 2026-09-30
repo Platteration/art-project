@@ -29,7 +29,13 @@ The second tab scores a photo of your finished piece against the reference.
    - **Biggest differences**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm".
    - **Accuracy map**: the reference shapes shaded by ΔE (close under 5, noticeable 5–10, off 10–20, far off 20+), numbered to match the list. Hover it to see ΔE for each shape.
 
-With the built-in sample, the tab opens with a made-up example painting so you can see how the scoring works.
+**Line up and color-correct your photo** (the panel above the score) makes the comparison fair:
+
+- **Show reference on top** fades the reference over your painting so you can see where they differ.
+- **Move**, **Size** and **Rotate** shift your photo until it lines up. Any part of the reference your photo no longer covers is left out of the score. It shows hatched on the accuracy map, and the panel says how much was left out.
+- **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. **Remove color fix** undoes it. It corrects tint only, not exposure.
+
+With the built-in sample, the tab opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
 ## Running it
 

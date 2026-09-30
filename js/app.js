@@ -45,6 +45,17 @@
     meterShapes: $('meterShapes'),
     fixList: $('fixList'),
     diffLegend: $('diffLegend'),
+    alignPanel: $('alignPanel'),
+    alignState: $('alignState'),
+    onion: $('onion'), onionOut: $('onionOut'),
+    alignX: $('alignX'), alignXOut: $('alignXOut'),
+    alignY: $('alignY'), alignYOut: $('alignYOut'),
+    alignScale: $('alignScale'), alignScaleOut: $('alignScaleOut'),
+    alignRot: $('alignRot'), alignRotOut: $('alignRotOut'),
+    alignReset: $('alignReset'),
+    wbPick: $('wbPick'),
+    wbUndo: $('wbUndo'),
+    wbStatus: $('wbStatus'),
     swatches: $('swatches'),
     palCount: $('palCount'),
     palEmpty: $('palEmpty'),
@@ -88,7 +99,9 @@
       result: null,
       cmp: null,
       dirty: true,
+      gains: [1, 1, 1],  // white-balance correction, linear light
     },
+    picking: false,      // waiting for a click on a neutral spot of the painting
   };
 
   // ---- Helpers ------------------------------------------------------------
@@ -454,10 +467,18 @@
     const cmp = state.art.cmp;
     if (s.id === 'diff' && cmp) {
       // on the accuracy map, show the reference color against yours for the shape
-      const region = cmp.regions[cmp.comp[s.y * s.w + s.x]];
-      els.loupeChip.style.background = `linear-gradient(90deg, ${toHex(region.ref)} 50%, ${toHex(region.art)} 50%)`;
-      els.loupeHex.textContent = Study.DIFF_BINS[region.bin].label;
-      els.loupeVal.textContent = 'ΔE ' + region.dE.toFixed(1);
+      const i = s.y * s.w + s.x;
+      const region = cmp.regions[cmp.comp[i]];
+      const mask = state.art.prep && state.art.prep.mask;
+      if (!region.ref || (mask && !mask[i])) {
+        els.loupeChip.style.background = 'transparent';
+        els.loupeHex.textContent = 'Not covered';
+        els.loupeVal.textContent = 'left out';
+      } else {
+        els.loupeChip.style.background = `linear-gradient(90deg, ${toHex(region.ref)} 50%, ${toHex(region.art)} 50%)`;
+        els.loupeHex.textContent = Study.DIFF_BINS[region.bin].label;
+        els.loupeVal.textContent = 'ΔE ' + region.dE.toFixed(1);
+      }
     } else {
       els.loupeChip.style.background = hex;
       els.loupeHex.textContent = hex;
@@ -552,6 +573,7 @@
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button > 0) return;
       down = { x: e.clientX, y: e.clientY };
+      if (state.picking) return;
       if (state.tool === 'line') {
         if (!canvas.width) return;
         e.preventDefault();
@@ -586,6 +608,11 @@
       if (!start || e.button > 0) return;
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
       const s = showLoupeFor(canvas, e);
+      if (state.picking) {
+        if (canvas === els.canvases.art && s && moved < 10) pickNeutral(s);
+        else if (moved < 10) toast('Click a white or gray spot on Your painting');
+        return;
+      }
       // the accuracy map's tints are not colors worth keeping
       if (s && moved < 10 && s.id !== 'diff') addColor(s);
       if (e.pointerType === 'touch') {
@@ -1022,6 +1049,7 @@
     drawAllOverlays();
   });
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.picking) setPicking(false);
     if (e.key === 'Escape' && state.drawing) {
       state.drawing = null;
       els.loupe.hidden = true;
@@ -1062,7 +1090,10 @@
   // ---- Check my painting --------------------------------------------------
 
   function setArt(img, name, isExample) {
-    Object.assign(state.art, { source: img, name: name || '', isExample: !!isExample, key: '', prep: null, cmp: null, dirty: true });
+    Object.assign(state.art, { source: img, name: name || '', isExample: !!isExample, key: '', prep: null, cmp: null, dirty: true, gains: [1, 1, 1] });
+    resetAlign();
+    setPicking(false);
+    updateColorFix();
     els.artSource.textContent = '';
     if (!img) {
       els.artSource.textContent = 'Load a photo of your finished painting to score it against the reference.';
@@ -1071,28 +1102,94 @@
     const strong = document.createElement('strong');
     strong.textContent = isExample ? 'Example painting' : name;
     els.artSource.append(strong, isExample
-      ? ' · a made-up attempt at the sample with lifted shadows and warmer skin, to show how scoring works. Load your own to replace it.'
+      ? ' · a made-up attempt at the sample: lifted shadows, warmer skin, and photographed slightly tilted. Line it up below to see the score change. Load your own to replace it.'
       : ` · ${img.naturalWidth || img.width} × ${img.naturalHeight || img.height} px`);
   }
 
-  // Crops (or stretches) the painting to the reference's exact size
+  const align = () => ({
+    x: +els.alignX.value, y: +els.alignY.value, scale: +els.alignScale.value, rot: +els.alignRot.value,
+  });
+  const isIdentity = (a) => !a.x && !a.y && a.scale === 100 && !a.rot;
+
+  // Fits the painting to the reference's exact size (crop or stretch), then applies the
+  // user's move / size / rotate and color fix. Pixels it no longer covers go in a mask.
   function alignArt() {
     const { w, h } = state.prep;
     const src = state.art.source;
     const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
+    const a = align();
+    const place = (g) => {
+      g.translate(w / 2 + (a.x / 100) * w, h / 2 + (a.y / 100) * h);
+      g.rotate((a.rot * Math.PI) / 180);
+      g.scale(a.scale / 100, a.scale / 100);
+    };
+
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
-    const g = c.getContext('2d');
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.fillStyle = '#7f7f7f';
+    g.fillRect(0, 0, w, h);
+    g.save();
+    place(g);
     g.imageSmoothingQuality = 'high';
     if (els.artFit.value === 'stretch') {
-      g.drawImage(src, 0, 0, w, h);
+      g.drawImage(src, -w / 2, -h / 2, w, h);
     } else {
       const scale = Math.max(w / sw, h / sh);
       const cw = w / scale, ch = h / scale;
-      g.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, w, h);
+      g.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, -w / 2, -h / 2, w, h);
     }
-    return Study.prepare(c, Math.max(w, h));
+    g.restore();
+
+    const gains = state.art.gains;
+    if (gains.some((v) => v !== 1)) {
+      const img = g.getImageData(0, 0, w, h);
+      Study.applyGains(img.data, gains);
+      g.putImageData(img, 0, 0);
+    }
+
+    let mask = null;
+    if (!isIdentity(a)) {
+      const m = document.createElement('canvas');
+      m.width = w;
+      m.height = h;
+      const mg = m.getContext('2d', { willReadFrequently: true });
+      mg.save();
+      place(mg);
+      mg.fillStyle = '#fff';
+      mg.fillRect(-w / 2, -h / 2, w, h);
+      mg.restore();
+      const md = mg.getImageData(0, 0, w, h).data;
+      mask = new Uint8Array(w * h);
+      for (let i = 0; i < mask.length; i++) mask[i] = md[i * 4 + 3] > 250 ? 1 : 0;
+    }
+
+    const prep = Study.prepare(c, Math.max(w, h));
+    prep.mask = mask;
+    return prep;
+  }
+
+  // Shows the painting, with the reference faded on top while lining up
+  function repaintArt() {
+    const canvas = els.canvases.art;
+    const prep = state.art.prep;
+    if (!prep || canvas.width !== prep.w) return;
+    const g = canvas.getContext('2d');
+    g.putImageData(new ImageData(prep.rgba, prep.w, prep.h), 0, 0);
+    const alpha = +els.onion.value / 100;
+    if (alpha > 0) {
+      g.globalAlpha = alpha;
+      g.drawImage(els.canvases.orig, 0, 0);
+      g.globalAlpha = 1;
+    }
+  }
+
+  let checkTimer = 0;
+  function checkSoon() {
+    els.busy.hidden = false;
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(() => { runCheck(); els.busy.hidden = true; }, 120);
   }
 
   function runCheck() {
@@ -1101,9 +1198,11 @@
     els.checkEmpty.hidden = ready;
     els.checkBody.hidden = !ready;
     els.checkPanels.hidden = !ready;
+    els.alignPanel.hidden = !ready;
     if (!ready) return;
 
-    const key = `${state.prep.w}x${state.prep.h}:${els.artFit.value}:${state.prep.rgba.length}`;
+    const a = align();
+    const key = [state.prep.w, state.prep.h, els.artFit.value, a.x, a.y, a.scale, a.rot, state.art.gains.join(',')].join(':');
     if (state.art.key !== key || state.art.prepFor !== state.prep) {
       state.art.prep = alignArt();
       state.art.key = key;
@@ -1117,6 +1216,7 @@
     const { w, h } = state.prep;
     paint(els.canvases.refblock, state.result.blockImage, w, h);
     paint(els.canvases.art, state.art.prep.rgba, w, h);
+    repaintArt();
     paint(els.canvases.artblock, artRes.blockImage, w, h);
     paint(els.canvases.diff, cmp.diffImage, w, h);
     drawMarkers(els.canvases.diff, cmp.top);
@@ -1167,6 +1267,13 @@
     els.scoreValue.textContent = cmp.valueScore;
     els.meterValue.style.width = cmp.valueScore + '%';
     els.scoreShapes.textContent = cmp.shapeMatch + '%';
+    const left = Math.round((1 - cmp.coverage) * 100);
+    const moved = !isIdentity(align());
+    const fixed = state.art.gains.some((v) => v !== 1);
+    els.alignState.textContent = [
+      moved ? `moved${left ? `, ${left}% of picture left out` : ''}` : '',
+      fixed ? 'color cast fixed' : '',
+    ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
 
     els.fixList.innerHTML = '';
@@ -1221,6 +1328,72 @@
     });
   }
 
+  function updateAlignOutputs() {
+    els.onionOut.value = els.onion.value + '%';
+    const sign = (v) => (v > 0 ? '+' : '') + v;
+    els.alignXOut.value = sign(+els.alignX.value) + '%';
+    els.alignYOut.value = sign(+els.alignY.value) + '%';
+    els.alignScaleOut.value = els.alignScale.value + '%';
+    els.alignRotOut.value = sign(+els.alignRot.value) + '°';
+  }
+
+  function resetAlign() {
+    els.alignX.value = 0;
+    els.alignY.value = 0;
+    els.alignScale.value = 100;
+    els.alignRot.value = 0;
+    updateAlignOutputs();
+  }
+
+  [els.alignX, els.alignY, els.alignScale, els.alignRot].forEach((el) =>
+    el.addEventListener('input', () => { updateAlignOutputs(); checkSoon(); })
+  );
+  els.onion.addEventListener('input', () => { updateAlignOutputs(); repaintArt(); });
+  els.alignReset.addEventListener('click', () => { resetAlign(); checkSoon(); });
+
+  function setPicking(on) {
+    state.picking = on;
+    document.body.classList.toggle('picking-neutral', on);
+    els.wbPick.classList.toggle('is-active', on);
+    els.wbPick.textContent = on ? 'Click a white or gray spot… (Esc to cancel)' : 'Fix color cast';
+  }
+
+  function updateColorFix() {
+    const fixed = state.art.gains.some((v) => v !== 1);
+    els.wbUndo.hidden = !fixed;
+  }
+
+  // Averages a 5 x 5 patch of the painting and makes that color neutral
+  function pickNeutral(s) {
+    let r = 0, g = 0, b = 0, k = 0;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const x = s.x + dx, y = s.y + dy;
+        if (x < 0 || y < 0 || x >= s.w || y >= s.h) continue;
+        const p = (y * s.w + x) * 4;
+        r += s.data[p]; g += s.data[p + 1]; b += s.data[p + 2]; k++;
+      }
+    }
+    const patch = { r: Math.round(r / k), g: Math.round(g / k), b: Math.round(b / k) };
+    const gains = Study.neutralGains(patch.r, patch.g, patch.b);
+    if (!gains) {
+      toast('That spot is too dark to judge. Pick a white or light gray area.');
+      return;
+    }
+    setPicking(false);
+    state.art.gains = state.art.gains.map((v, i) => v * gains[i]);
+    updateColorFix();
+    toast(`Color cast removed: ${toHex(patch)} is now neutral`);
+    checkSoon();
+  }
+
+  els.wbPick.addEventListener('click', () => setPicking(!state.picking));
+  els.wbUndo.addEventListener('click', () => {
+    state.art.gains = [1, 1, 1];
+    updateColorFix();
+    checkSoon();
+  });
+
   els.artFile.addEventListener('change', () => {
     loadArtFile(els.artFile.files[0]);
     els.artFile.value = '';
@@ -1237,7 +1410,12 @@
     small.width = Math.round(W / 5); small.height = Math.round(H / 5);
     small.getContext('2d').drawImage(src, 0, 0, small.width, small.height);
     g.imageSmoothingQuality = 'high';
-    g.drawImage(small, 0, 0, W, H);
+    g.save();
+    g.translate(W / 2 + 8, H / 2 - 5);
+    g.rotate((2 * Math.PI) / 180);
+    g.scale(1.03, 1.03);
+    g.drawImage(small, -W / 2, -H / 2, W, H);
+    g.restore();
     const img = g.getImageData(0, 0, W, H);
     const d = img.data;
     for (let i = 0; i < d.length; i += 4) {

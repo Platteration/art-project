@@ -180,6 +180,41 @@
           </div>
         </div>
 
+        <details class="align" id="alignPanel" hidden>
+          <summary>Line up and color-correct your photo <span class="align-state" id="alignState"></span></summary>
+          <div class="align-body">
+            <div class="align-grid">
+              <div class="field">
+                <div class="field-head"><label for="onion">Show reference on top</label><output id="onionOut" for="onion"></output></div>
+                <input type="range" id="onion" min="0" max="100" step="5" value="0">
+                <p class="hint">Fade the reference over your painting and move it until they line up.</p>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="alignX">Move left / right</label><output id="alignXOut" for="alignX"></output></div>
+                <input type="range" id="alignX" min="-20" max="20" step="0.2" value="0">
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="alignY">Move up / down</label><output id="alignYOut" for="alignY"></output></div>
+                <input type="range" id="alignY" min="-20" max="20" step="0.2" value="0">
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="alignScale">Size</label><output id="alignScaleOut" for="alignScale"></output></div>
+                <input type="range" id="alignScale" min="80" max="125" step="0.5" value="100">
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="alignRot">Rotate</label><output id="alignRotOut" for="alignRot"></output></div>
+                <input type="range" id="alignRot" min="-15" max="15" step="0.25" value="0">
+              </div>
+            </div>
+            <div class="align-actions">
+              <button type="button" class="btn btn-small" id="alignReset">Reset position</button>
+              <button type="button" class="btn btn-small" id="wbPick">Fix color cast</button>
+              <button type="button" class="btn btn-small" id="wbUndo" hidden>Remove color fix</button>
+              <p class="hint" id="wbStatus">Photos taken under warm or cool light shift every color. Click <strong>Fix color cast</strong>, then click a spot on your painting that should be white or neutral gray, such as the paper edge.</p>
+            </div>
+          </div>
+        </details>
+
         <div class="check-empty" id="checkEmpty">
           <h3>No painting loaded yet</h3>
           <p>Load a photo of your finished painting or drawing. You can also drop or paste it while this tab is open.</p>
