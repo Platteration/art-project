@@ -91,7 +91,7 @@
         <div class="field">
           <div class="field-head"><label for="colors">Colors per value</label><output id="colorsOut" for="colors"></output></div>
           <input type="range" id="colors" min="1" max="6" step="1" value="3">
-          <p class="hint">How many averaged colors each of the three values is split into.</p>
+          <p class="hint">How many color groups each of the three values is split into. Each group is painted with its most prominent color, not a mix.</p>
         </div>
         <label class="check" for="outlines"><input type="checkbox" id="outlines"> Outline shapes on both studies</label>
         <button type="button" class="btn" id="addBlocks">Add block colors to palette</button>
@@ -237,7 +237,7 @@
                 <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
               </div>
             </dl>
-            <p class="hint">Color accuracy compares every shape in the reference's color blocks with the average color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
+            <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
           </div>
           <div class="fixes">
             <h3>Biggest differences</h3>

@@ -3,7 +3,7 @@
 A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original:
 
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
-- **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with the average color of the photo's pixels in that group.
+- **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it.
 
 Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to add that color to the palette. You can sort the palette dark to light, copy it as hex codes, or save it as a PNG. The palette is kept in your browser between visits.
 
@@ -21,7 +21,7 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 The second tab scores a photo of your finished piece against the reference.
 
 1. Load, drop or paste a photo of your painting. Shoot it straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
-2. Each shape in the reference's color-block map is compared with the average color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
+2. For each shape in the reference's color-block map, the most prominent reference color is compared with the most prominent color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
 3. You get:
    - **Color accuracy** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
    - **Value accuracy** (0–100): the same idea using lightness only, `100 − 5 × |ΔL*|`. Half a value step off scores 75.
@@ -67,7 +67,7 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 2. Lightness and color are blurred with three box-blur passes, which approximate a gaussian (`Simplify`).
 3. Each pixel goes into shadow, middle or light by its blurred L\*. Small connected shapes are then merged away.
 4. Within each value mass, k-means clusters the blurred colors, weighting chroma a little more than lightness. Small shapes are merged again, but only into shapes of the same value, so blocks never cross value boundaries.
-5. Each color group is filled with the mean of the original pixels in it, averaged in linear light.
+5. Each color group is filled with its most prominent color. The group's original pixels are sorted into Lab bins about 4 L\* by 6 a\*/b\* wide. The fullest bin wins, and only its pixels are averaged, so the result is a color that is really in the photo. The painting check measures each shape the same way.
 
 ## Files
 

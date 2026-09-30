@@ -314,6 +314,70 @@
     return best;
   }
 
+  // ---- Most prominent color ------------------------------------------------
+
+  // Lab bins about 4 L* by 6 a*/b* wide: close enough that colors in one bin read as
+  // the same paint, far enough that ordinary photo noise stays in one bin.
+  const BIN_L = 4, BIN_AB = 6, AB_BINS = 44;
+
+  function binKeys(prep) {
+    if (!prep.binKeys) {
+      const n = prep.L.length;
+      const keys = new Int32Array(n);
+      for (let i = 0; i < n; i++) {
+        const l = Math.min(25, Math.max(0, Math.floor(prep.L[i] / BIN_L)));
+        const a = Math.min(AB_BINS - 1, Math.max(0, Math.floor((prep.A[i] + 132) / BIN_AB)));
+        const b = Math.min(AB_BINS - 1, Math.max(0, Math.floor((prep.B[i] + 132) / BIN_AB)));
+        keys[i] = (l * AB_BINS + a) * AB_BINS + b;
+      }
+      prep.binKeys = keys;
+    }
+    return prep.binKeys;
+  }
+
+  /*
+   * For each label, the color that covers the most pixels, rather than a mix of all of
+   * them: the busiest Lab bin wins, and its own pixels are averaged (in linear light)
+   * so the result is a color that is really there. Returns linear RGB per label
+   * (lin[l * 3 ...]) and how many pixels each label has.
+   */
+  function dominantColors(prep, labels, nLabels, mask) {
+    const keys = binKeys(prep);
+    const rgba = prep.rgba;
+    const n = labels.length;
+    const SPAN = 65536; // larger than the number of bins
+    const counts = new Map();
+    const total = new Float64Array(nLabels);
+    for (let i = 0; i < n; i++) {
+      if (mask && !mask[i]) continue;
+      const k = labels[i] * SPAN + keys[i];
+      counts.set(k, (counts.get(k) || 0) + 1);
+      total[labels[i]]++;
+    }
+    const best = new Int32Array(nLabels).fill(-1);
+    const bestCount = new Float64Array(nLabels);
+    counts.forEach((c, k) => {
+      const l = Math.floor(k / SPAN);
+      if (c > bestCount[l]) { bestCount[l] = c; best[l] = k % SPAN; }
+    });
+    const lin = new Float64Array(nLabels * 3);
+    const m = new Float64Array(nLabels);
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      if (mask && !mask[i]) continue;
+      const l = labels[i];
+      if (keys[i] !== best[l]) continue;
+      lin[l * 3] += SRGB_TO_LIN[rgba[p]];
+      lin[l * 3 + 1] += SRGB_TO_LIN[rgba[p + 1]];
+      lin[l * 3 + 2] += SRGB_TO_LIN[rgba[p + 2]];
+      m[l]++;
+    }
+    for (let l = 0; l < nLabels; l++) {
+      if (!m[l]) continue;
+      lin[l * 3] /= m[l]; lin[l * 3 + 1] /= m[l]; lin[l * 3 + 2] /= m[l];
+    }
+    return { lin, total };
+  }
+
   // ---- Main pass ----------------------------------------------------------
 
   const CHROMA_WEIGHT = 1.4; // hue/saturation differences count a bit more than lightness inside a zone
@@ -382,24 +446,17 @@
     }
     mergeSmallRegions(block, w, h, opts.minSize, 3 * K, K);
 
-    // 3. Each block group gets the average of the original photo's colors
-    //    (averaged in linear light so mixes stay true)
+    // 3. Each block group is painted with its most prominent photo color, not a mix
     const nb = 3 * K;
-    const sr = new Float64Array(nb), sg = new Float64Array(nb), sb = new Float64Array(nb), sc = new Float64Array(nb);
-    for (let i = 0, p = 0; i < n; i++, p += 4) {
-      const b = block[i];
-      sr[b] += SRGB_TO_LIN[rgba[p]];
-      sg[b] += SRGB_TO_LIN[rgba[p + 1]];
-      sb[b] += SRGB_TO_LIN[rgba[p + 2]];
-      sc[b]++;
-    }
+    const dom = dominantColors(prep, block, nb, null);
+    const sc = dom.total;
     const blockRGB = new Uint8Array(nb * 3);
     const blockColors = [];
     for (let b = 0; b < nb; b++) {
       if (!sc[b]) continue;
-      const r = linToSrgb(sr[b] / sc[b]);
-      const g = linToSrgb(sg[b] / sc[b]);
-      const bb = linToSrgb(sb[b] / sc[b]);
+      const r = linToSrgb(dom.lin[b * 3]);
+      const g = linToSrgb(dom.lin[b * 3 + 1]);
+      const bb = linToSrgb(dom.lin[b * 3 + 2]);
       blockRGB[b * 3] = r; blockRGB[b * 3 + 1] = g; blockRGB[b * 3 + 2] = bb;
       blockColors.push({ r, g, b: bb, zone: Math.floor(b / K), share: sc[b] / n });
     }
@@ -542,21 +599,21 @@
     }
     covered = covered || 1;
 
+    // Each shape's most prominent color in the reference and in the painting
     const { comp, count } = components(refRes.block, w, h);
-    const rr = new Float64Array(count), rg = new Float64Array(count), rb = new Float64Array(count);
-    const ar = new Float64Array(count), ag = new Float64Array(count), ab = new Float64Array(count);
+    const refDom = dominantColors(ref, comp, count, mask).lin;
+    const artDom = dominantColors(art, comp, count, mask).lin;
     const cnt = new Float64Array(count), sx = new Float64Array(count), sy = new Float64Array(count);
     const first = new Int32Array(count);
-    for (let i = 0, p = 0; i < n; i++, p += 4) {
+    for (let i = 0; i < n; i++) {
       if (mask && !mask[i]) continue;
       const c = comp[i];
       if (!cnt[c]) first[c] = i;
-      rr[c] += SRGB_TO_LIN[ref.rgba[p]]; rg[c] += SRGB_TO_LIN[ref.rgba[p + 1]]; rb[c] += SRGB_TO_LIN[ref.rgba[p + 2]];
-      ar[c] += SRGB_TO_LIN[art.rgba[p]]; ag[c] += SRGB_TO_LIN[art.rgba[p + 1]]; ab[c] += SRGB_TO_LIN[art.rgba[p + 2]];
       cnt[c]++;
       sx[c] += i % w;
       sy[c] += (i / w) | 0;
     }
+    const srgbOf = (lin, c) => ({ r: linToSrgb(lin[c * 3]), g: linToSrgb(lin[c * 3 + 1]), b: linToSrgb(lin[c * 3 + 2]) });
 
     const regions = new Array(count);
     let colorScore = 0, valueScore = 0;
@@ -566,8 +623,8 @@
         regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0 };
         continue;
       }
-      const refLab = linToLab(rr[c] / k, rg[c] / k, rb[c] / k);
-      const artLab = linToLab(ar[c] / k, ag[c] / k, ab[c] / k);
+      const refLab = linToLab(refDom[c * 3], refDom[c * 3 + 1], refDom[c * 3 + 2]);
+      const artLab = linToLab(artDom[c * 3], artDom[c * 3 + 1], artDom[c * 3 + 2]);
       const dE = deltaE2000(refLab[0], refLab[1], refLab[2], artLab[0], artLab[1], artLab[2]);
       const share = k / covered;
       const dL = artLab[0] - refLab[0];
@@ -580,8 +637,8 @@
         dL,
         dC: Math.hypot(artLab[1], artLab[2]) - Math.hypot(refLab[1], refLab[2]),
         dWarm: (artLab[1] - refLab[1]) * Math.cos(WARM_HUE) + (artLab[2] - refLab[2]) * Math.sin(WARM_HUE),
-        ref: { r: linToSrgb(rr[c] / k), g: linToSrgb(rg[c] / k), b: linToSrgb(rb[c] / k) },
-        art: { r: linToSrgb(ar[c] / k), g: linToSrgb(ag[c] / k), b: linToSrgb(ab[c] / k) },
+        ref: srgbOf(refDom, c),
+        art: srgbOf(artDom, c),
         cx: sx[c] / k,
         cy: sy[c] / k,
         bin: binFor(dE),
