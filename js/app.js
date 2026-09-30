@@ -22,7 +22,29 @@
     zones: $('zones'),
     panels: $('panels'),
     busy: $('busy'),
-    canvases: { orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block') },
+    canvases: {
+      orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
+      refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
+    },
+    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn') },
+    tabPanels: { study: $('tab-study'), check: $('tab-check') },
+    toolHint: $('toolHint'),
+    lineUndo: $('lineUndo'),
+    lineClear: $('lineClear'),
+    artFile: $('artFile'),
+    artFit: $('artFit'),
+    artSource: $('artSource'),
+    checkEmpty: $('checkEmpty'),
+    checkBody: $('checkBody'),
+    checkPanels: $('checkPanels'),
+    scoreColor: $('scoreColor'),
+    scoreGrade: $('scoreGrade'),
+    scoreValue: $('scoreValue'),
+    scoreShapes: $('scoreShapes'),
+    meterValue: $('meterValue'),
+    meterShapes: $('meterShapes'),
+    fixList: $('fixList'),
+    diffLegend: $('diffLegend'),
     swatches: $('swatches'),
     palCount: $('palCount'),
     palEmpty: $('palEmpty'),
@@ -51,6 +73,22 @@
     pixels: {},        // view id -> RGBA array, used by the loupe
     palette: loadPalette(),
     hover: null,       // last sampled { r, g, b }
+    tab: 'study',
+    grid: 0,           // 0, 3 or 4 divisions
+    tool: 'sample',    // 'sample' or 'line'
+    lineColor: '#e5322d',
+    lines: [],         // reference lines in 0-1 image coordinates
+    drawing: null,     // line being dragged out
+    art: {             // the painting being checked
+      source: null,
+      name: '',
+      isExample: false,
+      key: '',
+      prep: null,
+      result: null,
+      cmp: null,
+      dirty: true,
+    },
   };
 
   // ---- Helpers ------------------------------------------------------------
@@ -137,6 +175,8 @@
     state.pixels.block = r.blockImage;
     renderZones();
     drawHistogram();
+    state.art.dirty = true;
+    if (state.tab === 'check') runCheck();
     els.busy.hidden = true;
   }
 
@@ -144,6 +184,7 @@
     canvas.width = w;
     canvas.height = h;
     canvas.getContext('2d').putImageData(new ImageData(rgba, w, h), 0, 0);
+    syncOverlay(canvas);
   }
 
   function prepareAndRun(resetSplit) {
@@ -212,7 +253,7 @@
 
   // ---- Loading photos -----------------------------------------------------
 
-  function loadFile(file) {
+  function readImage(file, done) {
     if (!file) return;
     if (file.type && !file.type.startsWith('image/')) {
       toast('That file is not an image. Choose a JPG, PNG or WebP photo.');
@@ -222,10 +263,7 @@
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      state.source = img;
-      state.baseName = (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait';
-      setSourceLabel(file.name || 'Pasted image', img.naturalWidth, img.naturalHeight, false);
-      prepareAndRun(true);
+      done(img);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -233,6 +271,31 @@
     };
     img.src = url;
   }
+
+  function loadFile(file) {
+    readImage(file, (img) => {
+      state.source = img;
+      state.baseName = (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait';
+      setSourceLabel(file.name || 'Pasted image', img.naturalWidth, img.naturalHeight, false);
+      if (state.lines.length) {
+        state.lines = [];
+        updateLineButtons();
+        toast('Reference lines cleared for the new photo');
+      }
+      if (state.art.isExample) setArt(null);
+      prepareAndRun(true);
+    });
+  }
+
+  function loadArtFile(file) {
+    readImage(file, (img) => {
+      setArt(img, file.name || 'Pasted painting', false);
+      runSoon(0);
+    });
+  }
+
+  // Loads whichever image the open tab is about
+  const loadForTab = (file) => (state.tab === 'check' ? loadArtFile(file) : loadFile(file));
 
   function setSourceLabel(name, w, h, isSample) {
     els.source.textContent = '';
@@ -257,6 +320,8 @@
     if (!hasFiles(e)) return;
     e.preventDefault();
     dragDepth++;
+    els.dropHint.firstElementChild.textContent =
+      state.tab === 'check' ? 'Drop your painting to check it' : 'Drop the portrait to load it';
     els.dropHint.hidden = false;
   });
   window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
@@ -269,11 +334,11 @@
     e.preventDefault();
     dragDepth = 0;
     els.dropHint.hidden = true;
-    loadFile(e.dataTransfer.files[0]);
+    loadForTab(e.dataTransfer.files[0]);
   });
   window.addEventListener('paste', (e) => {
     const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith('image/'));
-    if (item) loadFile(item.getAsFile());
+    if (item) loadForTab(item.getAsFile());
   });
 
   // ---- Control events -----------------------------------------------------
@@ -311,8 +376,11 @@
   document.querySelectorAll('[data-save]').forEach((btn) =>
     btn.addEventListener('click', () => {
       const id = btn.dataset.save;
-      const suffix = { orig: 'original', value: 'three-value', block: 'color-blocks' }[id];
-      els.canvases[id].toBlob((blob) => blob && downloadBlob(blob, `${state.baseName}-${suffix}.png`), 'image/png');
+      const suffix = {
+        orig: 'original', value: 'three-value', block: 'color-blocks',
+        artblock: 'my-painting-blocks', diff: 'accuracy-map',
+      }[id];
+      withOverlay(els.canvases[id]).toBlob((blob) => blob && downloadBlob(blob, `${state.baseName}-${suffix}.png`), 'image/png');
     })
   );
 
@@ -383,9 +451,19 @@
     g.strokeRect(x0 + dpr, x0 + dpr, w0 - 2 * dpr, w0 - 2 * dpr);
 
     const hex = toHex(s);
-    els.loupeChip.style.background = hex;
-    els.loupeHex.textContent = hex;
-    els.loupeVal.textContent = 'V ' + valueLabel(Study.lightnessOf(s.r, s.g, s.b));
+    const cmp = state.art.cmp;
+    if (s.id === 'diff' && cmp) {
+      // on the accuracy map, show the reference color against yours for the shape
+      const region = cmp.regions[cmp.comp[s.y * s.w + s.x]];
+      els.loupeChip.style.background = `linear-gradient(90deg, ${toHex(region.ref)} 50%, ${toHex(region.art)} 50%)`;
+      els.loupeHex.textContent = Study.DIFF_BINS[region.bin].label;
+      els.loupeVal.textContent = 'ΔE ' + region.dE.toFixed(1);
+    } else {
+      els.loupeChip.style.background = hex;
+      els.loupeHex.textContent = hex;
+      els.loupeVal.textContent = 'V ' + valueLabel(Study.lightnessOf(s.r, s.g, s.b));
+    }
+    if (state.drawing) els.loupeVal.textContent = 'Tilt ' + lineAngle(state.drawing, s.w, s.h) + '°';
   }
 
   function placeLoupe(clientX, clientY, touch) {
@@ -422,32 +500,94 @@
     return s;
   }
 
-  Object.values(els.canvases).forEach((canvas) => {
+  // Image position under the pointer in 0-1 coordinates, kept inside the image
+  function pointOn(canvas, e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  }
+
+  // Shift snaps the line to 15° steps
+  function snapLine(line, w, h) {
+    const dx = (line.x2 - line.x1) * w, dy = (line.y2 - line.y1) * h;
+    const len = Math.hypot(dx, dy);
+    const step = Math.PI / 12;
+    const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+    line.x2 = Math.max(0, Math.min(1, line.x1 + (Math.cos(ang) * len) / w));
+    line.y2 = Math.max(0, Math.min(1, line.y1 + (Math.sin(ang) * len) / h));
+  }
+
+  // Tilt from horizontal in degrees (-89 to 90, positive rises to the right), measured on the image
+  function lineAngle(line, w, h) {
+    let deg = (Math.atan2(-(line.y2 - line.y1) * h, (line.x2 - line.x1) * w) * 180) / Math.PI;
+    if (deg > 90) deg -= 180;
+    if (deg <= -90) deg += 180;
+    return Math.round(deg);
+  }
+
+  document.querySelectorAll('canvas.view').forEach((canvas) => {
     let down = null;
     canvas.addEventListener('pointermove', (e) => {
+      const d = state.drawing;
+      if (d && d.canvas === canvas) {
+        const pt = pointOn(canvas, e);
+        d.x2 = pt.x;
+        d.y2 = pt.y;
+        if (e.shiftKey) snapLine(d, canvas.width, canvas.height);
+        drawAllOverlays();
+        const rect = canvas.getBoundingClientRect();
+        showLoupeFor(canvas, { clientX: rect.left + d.x2 * rect.width, clientY: rect.top + d.y2 * rect.height, pointerType: e.pointerType });
+        return;
+      }
       if (e.pointerType === 'touch' && !down) return;
       showLoupeFor(canvas, e);
     });
     canvas.addEventListener('pointerleave', (e) => {
-      if (e.pointerType === 'touch') return;
+      if (e.pointerType === 'touch' || state.drawing) return;
       els.loupe.hidden = true;
       state.hover = null;
     });
     canvas.addEventListener('pointerdown', (e) => {
+      if (e.button > 0) return;
       down = { x: e.clientX, y: e.clientY };
+      if (state.tool === 'line') {
+        if (!canvas.width) return;
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        const pt = pointOn(canvas, e);
+        state.drawing = { canvas, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, color: state.lineColor };
+        showLoupeFor(canvas, e);
+        return;
+      }
       if (e.pointerType === 'touch') showLoupeFor(canvas, e);
     });
     canvas.addEventListener('pointercancel', () => {
       down = null;
+      if (state.drawing) { state.drawing = null; drawAllOverlays(); }
       els.loupe.hidden = true;
     });
     canvas.addEventListener('pointerup', (e) => {
       const start = down;
       down = null;
+      const d = state.drawing;
+      if (d && d.canvas === canvas) {
+        state.drawing = null;
+        const len = Math.hypot((d.x2 - d.x1) * canvas.width, (d.y2 - d.y1) * canvas.height);
+        if (len >= 4) {
+          state.lines.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, color: d.color });
+          updateLineButtons();
+        }
+        drawAllOverlays();
+        if (e.pointerType === 'touch') els.loupe.hidden = true;
+        return;
+      }
       if (!start || e.button > 0) return;
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
       const s = showLoupeFor(canvas, e);
-      if (s && moved < 10) addColor(s);
+      // the accuracy map's tints are not colors worth keeping
+      if (s && moved < 10 && s.id !== 'diff') addColor(s);
       if (e.pointerType === 'touch') {
         hideTimer = setTimeout(() => { els.loupe.hidden = true; }, 1100);
       }
@@ -757,14 +897,370 @@
     return out;
   }
 
+  // ---- Grid and reference lines --------------------------------------------
+
+  const overlayOf = (canvas) => canvas.nextElementSibling;
+
+  // Draws the grid and lines into a context of size W x H. `unit` is one line-width step in pixels.
+  function drawOverlayContent(g, W, H, unit) {
+    g.clearRect(0, 0, W, H);
+    g.lineCap = 'round';
+    if (state.grid) {
+      const n = state.grid;
+      g.beginPath();
+      for (let k = 1; k < n; k++) {
+        const x = Math.round((k * W) / n) + 0.5, y = Math.round((k * H) / n) + 0.5;
+        g.moveTo(x, 0); g.lineTo(x, H);
+        g.moveTo(0, y); g.lineTo(W, y);
+      }
+      g.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      g.lineWidth = 3 * unit;
+      g.stroke();
+      g.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      g.lineWidth = 1.25 * unit;
+      g.stroke();
+    }
+    const lines = state.drawing ? state.lines.concat(state.drawing) : state.lines;
+    lines.forEach((l) => {
+      const x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
+      g.beginPath();
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+      g.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      g.lineWidth = 4.5 * unit;
+      g.stroke();
+      g.strokeStyle = l.color;
+      g.lineWidth = 2.5 * unit;
+      g.stroke();
+      g.fillStyle = l.color;
+      [[x1, y1], [x2, y2]].forEach(([x, y]) => {
+        g.beginPath();
+        g.arc(x, y, 3.2 * unit, 0, Math.PI * 2);
+        g.fill();
+      });
+    });
+  }
+
+  // Keeps the overlay canvas exactly on top of its image and redraws it
+  function syncOverlay(canvas) {
+    const o = overlayOf(canvas);
+    if (!o) return;
+    const w = canvas.offsetWidth, h = canvas.offsetHeight;
+    o.style.left = canvas.offsetLeft + 'px';
+    o.style.top = canvas.offsetTop + 'px';
+    o.style.width = w + 'px';
+    o.style.height = h + 'px';
+    if (!w || !h || !canvas.width) {
+      o.width = o.height = 0;
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const W = Math.round(w * dpr), H = Math.round(h * dpr);
+    if (o.width !== W || o.height !== H) { o.width = W; o.height = H; }
+    drawOverlayContent(o.getContext('2d'), W, H, dpr);
+  }
+
+  function drawAllOverlays() {
+    Object.values(els.canvases).forEach(syncOverlay);
+  }
+
+  // A copy of an image with the grid and lines burned in, for saving
+  function withOverlay(canvas) {
+    if (!state.grid && !state.lines.length) return canvas;
+    const out = document.createElement('canvas');
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const g = out.getContext('2d');
+    const layer = document.createElement('canvas');
+    layer.width = canvas.width;
+    layer.height = canvas.height;
+    drawOverlayContent(layer.getContext('2d'), layer.width, layer.height, Math.max(1, Math.max(canvas.width, canvas.height) / 500));
+    g.drawImage(canvas, 0, 0);
+    g.drawImage(layer, 0, 0);
+    return out;
+  }
+
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver((entries) => {
+      entries.forEach((en) => {
+        const canvas = en.target.classList.contains('view') ? en.target : en.target.querySelector('canvas.view');
+        if (canvas) syncOverlay(canvas);
+      });
+    });
+    document.querySelectorAll('canvas.view, .matte').forEach((el) => ro.observe(el));
+  } else {
+    window.addEventListener('resize', drawAllOverlays);
+  }
+
+  function updateLineButtons() {
+    els.lineUndo.disabled = els.lineClear.disabled = state.lines.length === 0;
+  }
+
+  document.querySelectorAll('input[name="grid"]').forEach((el) =>
+    el.addEventListener('change', () => { state.grid = +el.value; drawAllOverlays(); })
+  );
+  document.querySelectorAll('input[name="tool"]').forEach((el) =>
+    el.addEventListener('change', () => {
+      state.tool = el.value;
+      document.body.classList.toggle('tool-line', state.tool === 'line');
+      els.toolHint.textContent = state.tool === 'line'
+        ? 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.'
+        : 'Hover to sample a color. Click to add it to the palette.';
+    })
+  );
+  document.querySelectorAll('input[name="lineColor"]').forEach((el) =>
+    el.addEventListener('change', () => { state.lineColor = el.value; })
+  );
+  els.lineUndo.addEventListener('click', () => {
+    state.lines.pop();
+    updateLineButtons();
+    drawAllOverlays();
+  });
+  els.lineClear.addEventListener('click', () => {
+    state.lines = [];
+    updateLineButtons();
+    drawAllOverlays();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.drawing) {
+      state.drawing = null;
+      els.loupe.hidden = true;
+      drawAllOverlays();
+    }
+    const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) &&
+      document.activeElement.type !== 'radio' && document.activeElement.type !== 'range';
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.lines.length && !typing) {
+      e.preventDefault();
+      els.lineUndo.click();
+    }
+  });
+
+  // ---- Tabs ---------------------------------------------------------------
+
+  function switchTab(name, focus) {
+    state.tab = name;
+    Object.entries(els.tabs).forEach(([key, btn]) => {
+      const on = key === name;
+      btn.setAttribute('aria-selected', on);
+      btn.tabIndex = on ? 0 : -1;
+      els.tabPanels[key].hidden = !on;
+      if (on && focus) btn.focus();
+    });
+    if (name === 'check' && state.art.dirty) runCheck();
+    drawAllOverlays();
+  }
+
+  Object.entries(els.tabs).forEach(([key, btn]) => {
+    btn.addEventListener('click', () => switchTab(key));
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      e.preventDefault();
+      switchTab(key === 'study' ? 'check' : 'study', true);
+    });
+  });
+
+  // ---- Check my painting --------------------------------------------------
+
+  function setArt(img, name, isExample) {
+    Object.assign(state.art, { source: img, name: name || '', isExample: !!isExample, key: '', prep: null, cmp: null, dirty: true });
+    els.artSource.textContent = '';
+    if (!img) {
+      els.artSource.textContent = 'Load a photo of your finished painting to score it against the reference.';
+      return;
+    }
+    const strong = document.createElement('strong');
+    strong.textContent = isExample ? 'Example painting' : name;
+    els.artSource.append(strong, isExample
+      ? ' · a made-up attempt at the sample with lifted shadows and warmer skin, to show how scoring works. Load your own to replace it.'
+      : ` · ${img.naturalWidth || img.width} × ${img.naturalHeight || img.height} px`);
+  }
+
+  // Crops (or stretches) the painting to the reference's exact size
+  function alignArt() {
+    const { w, h } = state.prep;
+    const src = state.art.source;
+    const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    if (els.artFit.value === 'stretch') {
+      g.drawImage(src, 0, 0, w, h);
+    } else {
+      const scale = Math.max(w / sw, h / sh);
+      const cw = w / scale, ch = h / scale;
+      g.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, w, h);
+    }
+    return Study.prepare(c, Math.max(w, h));
+  }
+
+  function runCheck() {
+    state.art.dirty = false;
+    const ready = !!(state.art.source && state.result);
+    els.checkEmpty.hidden = ready;
+    els.checkBody.hidden = !ready;
+    els.checkPanels.hidden = !ready;
+    if (!ready) return;
+
+    const key = `${state.prep.w}x${state.prep.h}:${els.artFit.value}:${state.prep.rgba.length}`;
+    if (state.art.key !== key || state.art.prepFor !== state.prep) {
+      state.art.prep = alignArt();
+      state.art.key = key;
+      state.art.prepFor = state.prep;
+    }
+    const artRes = Study.process(state.art.prep, settings());
+    const cmp = Study.compare(state.prep, state.result, state.art.prep, artRes);
+    state.art.result = artRes;
+    state.art.cmp = cmp;
+
+    const { w, h } = state.prep;
+    paint(els.canvases.refblock, state.result.blockImage, w, h);
+    paint(els.canvases.art, state.art.prep.rgba, w, h);
+    paint(els.canvases.artblock, artRes.blockImage, w, h);
+    paint(els.canvases.diff, cmp.diffImage, w, h);
+    drawMarkers(els.canvases.diff, cmp.top);
+    state.pixels.refblock = state.result.blockImage;
+    state.pixels.art = state.art.prep.rgba;
+    state.pixels.artblock = artRes.blockImage;
+    state.pixels.diff = cmp.diffImage;
+    renderScore(cmp);
+  }
+
+  // Numbered circles on the accuracy map, matching the list of differences
+  function drawMarkers(canvas, top) {
+    const g = canvas.getContext('2d');
+    const r = Math.max(10, Math.max(canvas.width, canvas.height) / 30);
+    top.forEach((reg, i) => {
+      g.beginPath();
+      g.arc(reg.mx + 0.5, reg.my + 0.5, r, 0, Math.PI * 2);
+      g.fillStyle = '#1c1d20';
+      g.fill();
+      g.lineWidth = Math.max(2, r / 5);
+      g.strokeStyle = '#ffffff';
+      g.stroke();
+      g.fillStyle = '#ffffff';
+      g.font = `600 ${Math.round(r * 1.15)}px "IBM Plex Mono", monospace`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(String(i + 1), reg.mx + 0.5, reg.my + 1.5);
+    });
+  }
+
+  function describe(reg) {
+    const parts = [];
+    if (Math.abs(reg.dL) >= 3) parts.push(`${reg.dL > 0 ? 'too light' : 'too dark'} by ${Math.abs(reg.dL / 10).toFixed(1)} value`);
+    if (Math.abs(reg.dWarm) >= 4) parts.push(reg.dWarm > 0 ? 'too warm' : 'too cool');
+    if (Math.abs(reg.dC) >= 5) parts.push(reg.dC > 0 ? 'too saturated' : 'too gray');
+    if (!parts.length) parts.push('hue is off');
+    const text = parts.join(', ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function renderScore(cmp) {
+    els.scoreColor.textContent = cmp.colorScore;
+    els.scoreGrade.textContent =
+      cmp.colorScore >= 90 ? 'Very close to the reference'
+        : cmp.colorScore >= 75 ? 'Close, with a few shapes off'
+          : cmp.colorScore >= 60 ? 'Several shapes are off'
+            : 'Far from the reference';
+    els.scoreValue.textContent = cmp.valueScore;
+    els.meterValue.style.width = cmp.valueScore + '%';
+    els.scoreShapes.textContent = cmp.shapeMatch + '%';
+    els.meterShapes.style.width = cmp.shapeMatch + '%';
+
+    els.fixList.innerHTML = '';
+    if (!cmp.top.length) {
+      const li = document.createElement('li');
+      li.className = 'fix-none';
+      li.textContent = 'Every large shape is within ΔE 5 of the reference.';
+      els.fixList.append(li);
+      return;
+    }
+    cmp.top.forEach((reg, i) => {
+      const li = document.createElement('li');
+      li.className = 'fix';
+      const num = document.createElement('span');
+      num.className = 'fix-num';
+      num.textContent = i + 1;
+      const sw = document.createElement('span');
+      sw.className = 'fix-swatches';
+      const a = document.createElement('span');
+      a.style.background = toHex(reg.ref);
+      a.title = `Reference ${toHex(reg.ref)}`;
+      const b = document.createElement('span');
+      b.style.background = toHex(reg.art);
+      b.title = `Yours ${toHex(reg.art)}`;
+      sw.append(a, b);
+      const text = document.createElement('span');
+      text.className = 'fix-text';
+      const strong = document.createElement('strong');
+      strong.textContent = describe(reg);
+      const small = document.createElement('small');
+      small.textContent = `${ZONE_NAMES[reg.zone]} shape · ${(reg.share * 100).toFixed(1)}% of picture · ΔE ${reg.dE.toFixed(1)} · ${toHex(reg.ref)} → ${toHex(reg.art)}`;
+      text.append(strong, small);
+      li.append(num, sw, text);
+      els.fixList.append(li);
+    });
+  }
+
+  function renderLegend() {
+    const ranges = ['under 5', '5–10', '10–20', '20+'];
+    Study.DIFF_BINS.forEach((bin, i) => {
+      const li = document.createElement('li');
+      const key = document.createElement('span');
+      key.className = 'key';
+      key.style.background = bin.fill ? `rgb(${bin.fill.join(',')})` : 'rgb(214, 214, 212)';
+      const label = document.createElement('span');
+      label.textContent = bin.label;
+      const range = document.createElement('span');
+      range.className = 'range';
+      range.textContent = 'ΔE ' + ranges[i];
+      li.append(key, label, range);
+      els.diffLegend.append(li);
+    });
+  }
+
+  els.artFile.addEventListener('change', () => {
+    loadArtFile(els.artFile.files[0]);
+    els.artFile.value = '';
+  });
+  els.artFit.addEventListener('change', () => { state.art.key = ''; if (state.tab === 'check') runSoon(0); });
+
+  // A plausible student attempt at the sample: shadows lifted, colors warmer, edges softened
+  function makeExamplePainting(src) {
+    const W = src.width, H = src.height;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const small = document.createElement('canvas');
+    small.width = Math.round(W / 5); small.height = Math.round(H / 5);
+    small.getContext('2d').drawImage(src, 0, 0, small.width, small.height);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(small, 0, 0, W, H);
+    const img = g.getImageData(0, 0, W, H);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = d[i] * 0.9 + 30;
+      d[i + 1] = d[i + 1] * 0.88 + 18;
+      d[i + 2] = d[i + 2] * 0.84 + 12;
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
   // ---- Start --------------------------------------------------------------
 
   function start() {
     updateOutputs();
     renderPalette();
+    renderLegend();
+    updateLineButtons();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
+    setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true);
+    if (location.hash === '#check') switchTab('check');
   }
 
   const redrawHist = () => drawHistogram();

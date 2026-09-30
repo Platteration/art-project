@@ -40,7 +40,10 @@
   }
 
   function rgbToLab(r, g, b) {
-    const lr = SRGB_TO_LIN[r], lg = SRGB_TO_LIN[g], lb = SRGB_TO_LIN[b];
+    return linToLab(SRGB_TO_LIN[r], SRGB_TO_LIN[g], SRGB_TO_LIN[b]);
+  }
+
+  function linToLab(lr, lg, lb) {
     const x = (0.4124564 * lr + 0.3575761 * lg + 0.1804375 * lb) / 0.95047;
     const y = 0.2126729 * lr + 0.7151522 * lg + 0.072175 * lb;
     const z = (0.0193339 * lr + 0.119192 * lg + 0.9503041 * lb) / 1.08883;
@@ -422,6 +425,9 @@
       zoneL: outL.slice(),
       zoneGray,
       blockColors,
+      zone,    // value zone (0-2) per pixel
+      block,   // color group per pixel: zone * K + cluster
+      K,
     };
   }
 
@@ -439,6 +445,185 @@
     }
   }
 
+  // ---- Comparing a finished painting with the reference ---------------------
+
+  // CIEDE2000 color difference. About 2 is barely visible, 10 is clearly different.
+  function deltaE2000(l1, a1, b1, l2, a2, b2) {
+    const rad = Math.PI / 180;
+    const p7 = (v) => Math.pow(v, 7);
+    const C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2);
+    const Cb = (C1 + C2) / 2;
+    const G = 0.5 * (1 - Math.sqrt(p7(Cb) / (p7(Cb) + p7(25))));
+    const a1p = a1 * (1 + G), a2p = a2 * (1 + G);
+    const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
+    const h1p = C1p === 0 ? 0 : (Math.atan2(b1, a1p) / rad + 360) % 360;
+    const h2p = C2p === 0 ? 0 : (Math.atan2(b2, a2p) / rad + 360) % 360;
+    const dLp = l2 - l1;
+    const dCp = C2p - C1p;
+    let dhp = 0;
+    if (C1p * C2p !== 0) {
+      dhp = h2p - h1p;
+      if (dhp > 180) dhp -= 360;
+      else if (dhp < -180) dhp += 360;
+    }
+    const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin((dhp * rad) / 2);
+    const Lbp = (l1 + l2) / 2;
+    const Cbp = (C1p + C2p) / 2;
+    let hbp = h1p + h2p;
+    if (C1p * C2p !== 0) {
+      if (Math.abs(h1p - h2p) > 180) hbp = hbp < 360 ? (hbp + 360) / 2 : (hbp - 360) / 2;
+      else hbp /= 2;
+    }
+    const T = 1 - 0.17 * Math.cos((hbp - 30) * rad) + 0.24 * Math.cos(2 * hbp * rad)
+      + 0.32 * Math.cos((3 * hbp + 6) * rad) - 0.2 * Math.cos((4 * hbp - 63) * rad);
+    const dTheta = 30 * Math.exp(-Math.pow((hbp - 275) / 25, 2));
+    const Rc = 2 * Math.sqrt(p7(Cbp) / (p7(Cbp) + p7(25)));
+    const Sl = 1 + (0.015 * Math.pow(Lbp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbp - 50, 2));
+    const Sc = 1 + 0.045 * Cbp;
+    const Sh = 1 + 0.015 * Cbp * T;
+    const Rt = -Math.sin(2 * dTheta * rad) * Rc;
+    return Math.sqrt(
+      Math.pow(dLp / Sl, 2) + Math.pow(dCp / Sc, 2) + Math.pow(dHp / Sh, 2) + Rt * (dCp / Sc) * (dHp / Sh)
+    );
+  }
+
+  // Connected shapes of a label map. Returns a component id per pixel.
+  function components(lab, w, h) {
+    const n = w * h;
+    const comp = new Int32Array(n).fill(-1);
+    const stack = new Int32Array(n);
+    let count = 0;
+    for (let s = 0; s < n; s++) {
+      if (comp[s] !== -1) continue;
+      const label = lab[s];
+      let sp = 0;
+      stack[sp++] = s;
+      comp[s] = count;
+      while (sp) {
+        const p = stack[--sp];
+        const x = p % w;
+        if (x > 0 && comp[p - 1] === -1 && lab[p - 1] === label) { comp[p - 1] = count; stack[sp++] = p - 1; }
+        if (x < w - 1 && comp[p + 1] === -1 && lab[p + 1] === label) { comp[p + 1] = count; stack[sp++] = p + 1; }
+        if (p >= w && comp[p - w] === -1 && lab[p - w] === label) { comp[p - w] = count; stack[sp++] = p - w; }
+        if (p < n - w && comp[p + w] === -1 && lab[p + w] === label) { comp[p + w] = count; stack[sp++] = p + w; }
+      }
+      count++;
+    }
+    return { comp, count };
+  }
+
+  // Accuracy map bins, by CIEDE2000 difference. Fills are an ordinal blue ramp.
+  const DIFF_BINS = [
+    { max: 5, label: 'Close', fill: null },
+    { max: 10, label: 'Noticeable', fill: [134, 182, 239] },
+    { max: 20, label: 'Off', fill: [42, 120, 214] },
+    { max: Infinity, label: 'Far off', fill: [16, 66, 129] },
+  ];
+  const binFor = (dE) => DIFF_BINS.findIndex((b) => dE < b.max);
+
+  const WARM_HUE = 50 * (Math.PI / 180); // orange-red direction in the a*b* plane
+
+  /*
+   * Scores a painting against the reference. Both preps must be the same size.
+   * Every shape in the reference's color-block map is compared with the average
+   * color the painting has over the same pixels.
+   */
+  function compare(ref, refRes, art, artRes) {
+    const { w, h } = ref;
+    const n = w * h;
+
+    let sameZone = 0;
+    for (let i = 0; i < n; i++) if (refRes.zone[i] === artRes.zone[i]) sameZone++;
+
+    const { comp, count } = components(refRes.block, w, h);
+    const rr = new Float64Array(count), rg = new Float64Array(count), rb = new Float64Array(count);
+    const ar = new Float64Array(count), ag = new Float64Array(count), ab = new Float64Array(count);
+    const cnt = new Float64Array(count), sx = new Float64Array(count), sy = new Float64Array(count);
+    const first = new Int32Array(count);
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      const c = comp[i];
+      if (!cnt[c]) first[c] = i;
+      rr[c] += SRGB_TO_LIN[ref.rgba[p]]; rg[c] += SRGB_TO_LIN[ref.rgba[p + 1]]; rb[c] += SRGB_TO_LIN[ref.rgba[p + 2]];
+      ar[c] += SRGB_TO_LIN[art.rgba[p]]; ag[c] += SRGB_TO_LIN[art.rgba[p + 1]]; ab[c] += SRGB_TO_LIN[art.rgba[p + 2]];
+      cnt[c]++;
+      sx[c] += i % w;
+      sy[c] += (i / w) | 0;
+    }
+
+    const regions = new Array(count);
+    let colorScore = 0, valueScore = 0;
+    for (let c = 0; c < count; c++) {
+      const k = cnt[c];
+      const refLab = linToLab(rr[c] / k, rg[c] / k, rb[c] / k);
+      const artLab = linToLab(ar[c] / k, ag[c] / k, ab[c] / k);
+      const dE = deltaE2000(refLab[0], refLab[1], refLab[2], artLab[0], artLab[1], artLab[2]);
+      const share = k / n;
+      const dL = artLab[0] - refLab[0];
+      colorScore += share * Math.max(0, 100 - 2.5 * dE);
+      valueScore += share * Math.max(0, 100 - 5 * Math.abs(dL));
+      regions[c] = {
+        id: c,
+        share,
+        dE,
+        dL,
+        dC: Math.hypot(artLab[1], artLab[2]) - Math.hypot(refLab[1], refLab[2]),
+        dWarm: (artLab[1] - refLab[1]) * Math.cos(WARM_HUE) + (artLab[2] - refLab[2]) * Math.sin(WARM_HUE),
+        ref: { r: linToSrgb(rr[c] / k), g: linToSrgb(rg[c] / k), b: linToSrgb(rb[c] / k) },
+        art: { r: linToSrgb(ar[c] / k), g: linToSrgb(ag[c] / k), b: linToSrgb(ab[c] / k) },
+        cx: sx[c] / k,
+        cy: sy[c] / k,
+        bin: binFor(dE),
+        zone: Math.floor(refRes.block[first[c]] / refRes.K),
+      };
+    }
+
+    // The shapes that cost the most: big and far off. Slivers are skipped.
+    const top = regions
+      .filter((r) => r.share >= 0.003 && r.dE >= 5)
+      .sort((a, b) => b.share * b.dE - a.share * a.dE)
+      .slice(0, 5);
+
+    // Put each marker on a pixel inside its shape, nearest the shape's centre
+    const best = new Map(top.map((r) => [r.id, { d: Infinity, x: r.cx, y: r.cy }]));
+    for (let i = 0; i < n; i++) {
+      const b = best.get(comp[i]);
+      if (!b) continue;
+      const x = i % w, y = (i / w) | 0;
+      const r = regions[comp[i]];
+      const d = (x - r.cx) * (x - r.cx) + (y - r.cy) * (y - r.cy);
+      if (d < b.d) { b.d = d; b.x = x; b.y = y; }
+    }
+    top.forEach((r) => { const b = best.get(r.id); r.mx = b.x; r.my = b.y; });
+
+    // Accuracy map: the reference in light gray, shapes filled by how far off they are
+    const diffImage = new Uint8ClampedArray(n * 4);
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      const c = comp[i];
+      const x = i % w;
+      const edge = (x < w - 1 && comp[i + 1] !== c) || (i < n - w && comp[i + w] !== c);
+      const base = 150 + 0.9 * grayForL(ref.L[i]) * 0.4;
+      const fill = DIFF_BINS[regions[c].bin].fill;
+      let r = base, g = base, b = base;
+      if (fill) {
+        r = fill[0] * 0.85 + base * 0.15;
+        g = fill[1] * 0.85 + base * 0.15;
+        b = fill[2] * 0.85 + base * 0.15;
+      }
+      if (edge) { r *= 0.55; g *= 0.55; b *= 0.55; }
+      diffImage[p] = r; diffImage[p + 1] = g; diffImage[p + 2] = b; diffImage[p + 3] = 255;
+    }
+
+    return {
+      colorScore: Math.round(colorScore),
+      valueScore: Math.round(valueScore),
+      shapeMatch: Math.round((sameZone / n) * 100),
+      regions,
+      top,
+      comp,
+      diffImage,
+    };
+  }
+
   window.Study = {
     prepare,
     process,
@@ -447,5 +632,8 @@
     histogram,
     lightnessOf,
     grayForL,
+    compare,
+    deltaE2000,
+    DIFF_BINS,
   };
 })();

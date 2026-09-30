@@ -99,31 +99,137 @@
     </aside>
 
     <main class="work">
-      <div class="work-bar">
-        <p class="source" id="source"></p>
-        <div class="seg" role="radiogroup" aria-label="Show">
-          <input type="radio" name="view" id="vAll" value="all" checked><label for="vAll">All three</label>
-          <input type="radio" name="view" id="vOrig" value="orig"><label for="vOrig">Original</label>
-          <input type="radio" name="view" id="vValue" value="value"><label for="vValue">Values</label>
-          <input type="radio" name="view" id="vBlock" value="block"><label for="vBlock">Blocks</label>
-        </div>
+      <div class="tabs" role="tablist" aria-label="Mode">
+        <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
+        <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
       </div>
 
-      <div class="panels" id="panels" data-view="all">
-        <figure class="panel" data-panel="orig">
-          <figcaption><span>Original</span><button type="button" class="btn btn-ghost" data-save="orig">Save PNG</button></figcaption>
-          <div class="matte"><canvas id="cv-orig" class="view" aria-label="Original photo"></canvas></div>
-        </figure>
-        <figure class="panel" data-panel="value">
-          <figcaption><span>Three values</span><button type="button" class="btn btn-ghost" data-save="value">Save PNG</button></figcaption>
-          <div class="matte"><canvas id="cv-value" class="view" aria-label="Three-value study"></canvas></div>
-        </figure>
-        <figure class="panel" data-panel="block">
-          <figcaption><span>Color blocks</span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
-          <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas></div>
-        </figure>
-        <div class="busy" id="busy" hidden>Updating…</div>
+      <div class="toolbar" role="group" aria-label="Overlays">
+        <div class="tool-group">
+          <span class="tool-label" id="gridLabel">Grid</span>
+          <div class="seg" role="radiogroup" aria-labelledby="gridLabel">
+            <input type="radio" name="grid" id="gridOff" value="0" checked><label for="gridOff">Off</label>
+            <input type="radio" name="grid" id="grid3" value="3"><label for="grid3">3 × 3</label>
+            <input type="radio" name="grid" id="grid4" value="4"><label for="grid4">4 × 4</label>
+          </div>
+        </div>
+        <div class="tool-group">
+          <span class="tool-label" id="toolLabel">Pointer</span>
+          <div class="seg" role="radiogroup" aria-labelledby="toolLabel">
+            <input type="radio" name="tool" id="toolSample" value="sample" checked><label for="toolSample">Pick colors</label>
+            <input type="radio" name="tool" id="toolLine" value="line"><label for="toolLine">Draw lines</label>
+          </div>
+        </div>
+        <div class="tool-group line-tools">
+          <span class="tool-label" id="lineColorLabel">Line color</span>
+          <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
+            <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" style="--c:#e5322d" title="Red"><span class="visually-hidden">Red</span></label>
+            <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" style="--c:#1ec8ec" title="Cyan"><span class="visually-hidden">Cyan</span></label>
+            <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" style="--c:#ffd21f" title="Yellow"><span class="visually-hidden">Yellow</span></label>
+            <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" style="--c:#ffffff" title="White"><span class="visually-hidden">White</span></label>
+            <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" style="--c:#111111" title="Black"><span class="visually-hidden">Black</span></label>
+          </div>
+          <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
+          <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
+        </div>
+        <p class="tool-hint" id="toolHint">Hover to sample a color. Click to add it to the palette.</p>
       </div>
+
+      <section class="tabpanel" id="tab-study" role="tabpanel" aria-labelledby="tabStudyBtn">
+        <div class="work-bar">
+          <p class="source" id="source"></p>
+          <div class="seg" role="radiogroup" aria-label="Show">
+            <input type="radio" name="view" id="vAll" value="all" checked><label for="vAll">All three</label>
+            <input type="radio" name="view" id="vOrig" value="orig"><label for="vOrig">Original</label>
+            <input type="radio" name="view" id="vValue" value="value"><label for="vValue">Values</label>
+            <input type="radio" name="view" id="vBlock" value="block"><label for="vBlock">Blocks</label>
+          </div>
+        </div>
+
+        <div class="panels" id="panels" data-view="all">
+          <figure class="panel" data-panel="orig">
+            <figcaption><span>Original</span><button type="button" class="btn btn-ghost" data-save="orig">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-orig" class="view" aria-label="Original photo"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel" data-panel="value">
+            <figcaption><span>Three values</span><button type="button" class="btn btn-ghost" data-save="value">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-value" class="view" aria-label="Three-value study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel" data-panel="block">
+            <figcaption><span>Color blocks</span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-check" role="tabpanel" aria-labelledby="tabCheckBtn" hidden>
+        <div class="check-head">
+          <div class="check-intro">
+            <p class="source" id="artSource"></p>
+            <p class="hint">Photograph your finished piece straight on, in even daylight, framed the same way as the reference. It is broken into color blocks with the same settings and compared shape by shape.</p>
+          </div>
+          <div class="check-actions">
+            <input type="file" id="artFile" accept="image/*" class="visually-hidden">
+            <label for="artFile" class="btn btn-primary">Load my painting</label>
+            <label class="inline-field" for="artFit">Fit
+              <select id="artFit">
+                <option value="crop" selected>Crop to match</option>
+                <option value="stretch">Stretch to match</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="check-empty" id="checkEmpty">
+          <h3>No painting loaded yet</h3>
+          <p>Load a photo of your finished painting or drawing. You can also drop or paste it while this tab is open.</p>
+        </div>
+
+        <div class="check-body" id="checkBody" hidden>
+          <div class="scorecard">
+            <div class="score-main">
+              <span class="score-label">Color accuracy</span>
+              <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
+              <span class="score-grade" id="scoreGrade"></span>
+            </div>
+            <dl class="score-sub">
+              <div>
+                <dt>Value accuracy</dt>
+                <dd><span id="scoreValue">0</span><span class="meter"><span id="meterValue"></span></span></dd>
+              </div>
+              <div>
+                <dt>Value shapes match</dt>
+                <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
+              </div>
+            </dl>
+            <p class="hint">Color accuracy compares every shape in the reference's color blocks with the average color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
+          </div>
+          <div class="fixes">
+            <h3>Biggest differences</h3>
+            <ol class="fix-list" id="fixList"></ol>
+          </div>
+        </div>
+
+        <div class="panels panels-check" id="checkPanels" hidden>
+          <figure class="panel">
+            <figcaption><span>Reference blocks</span></figcaption>
+            <div class="matte"><canvas id="cv-refblock" class="view" aria-label="Reference color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel">
+            <figcaption><span>Your painting</span></figcaption>
+            <div class="matte"><canvas id="cv-art" class="view" aria-label="Your painting, aligned to the reference"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel">
+            <figcaption><span>Your blocks</span><button type="button" class="btn btn-ghost" data-save="artblock">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-artblock" class="view" aria-label="Your painting as color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel">
+            <figcaption><span>Accuracy map</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-diff" class="view" aria-label="Accuracy map: shapes shaded by how far your color is from the reference"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            <ul class="legend" id="diffLegend" aria-label="Color difference (ΔE)"></ul>
+          </figure>
+        </div>
+      </section>
 
       <section class="palette" aria-labelledby="palTitle">
         <div class="palette-head">
@@ -136,13 +242,14 @@
           </div>
         </div>
         <ul class="swatches" id="swatches"></ul>
-        <p class="empty" id="palEmpty">Hover any of the three images to sample a color, then click to add it here.</p>
+        <p class="empty" id="palEmpty">Hover any image to sample a color, then click to add it here.</p>
         <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
       </section>
     </main>
   </div>
 </div>
 
+<div class="busy" id="busy" hidden>Updating…</div>
 <div class="loupe" id="loupe" hidden aria-hidden="true">
   <canvas id="loupeCanvas"></canvas>
   <div class="loupe-info">

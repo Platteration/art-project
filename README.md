@@ -7,6 +7,30 @@ A browser tool for drawing and painting from reference portraits. Load a photo a
 
 Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to add that color to the palette. You can sort the palette dark to light, copy it as hex codes, or save it as a PNG. The palette is kept in your browser between visits.
 
+### Grid and reference lines
+
+The toolbar above the images adds drawing aids that appear on every image at once:
+
+- **Grid**: a 3 × 3 or 4 × 4 grid for transferring proportions to your paper.
+- **Draw lines**: switch the pointer to *Draw lines* and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
+
+**Save PNG** includes the grid and lines when they are showing.
+
+### Check my painting
+
+The second tab scores a photo of your finished piece against the reference.
+
+1. Load, drop or paste a photo of your painting. Shoot it straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
+2. Each shape in the reference's color-block map is compared with the average color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
+3. You get:
+   - **Color accuracy** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
+   - **Value accuracy** (0–100): the same idea using lightness only, `100 − 5 × |ΔL*|`. Half a value step off scores 75.
+   - **Value shapes match**: the share of the picture that lands in the same shadow, middle or light mass.
+   - **Biggest differences**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm".
+   - **Accuracy map**: the reference shapes shaded by ΔE (close under 5, noticeable 5–10, off 10–20, far off 20+), numbered to match the list. Hover it to see ΔE for each shape.
+
+With the built-in sample, the tab opens with a made-up example painting so you can see how the scoring works.
+
 ## Running it
 
 No build step or install. Open `index.html` in a browser, or serve the folder:
