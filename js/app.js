@@ -1219,14 +1219,16 @@
     return d && d.kind === 'measure' ? d : null;
   }
 
-  // The nearest whole number, half, third or quarter, written the way an artist would say it,
-  // or '' if none is within 0.03, and within 4% for short lengths (0.36 U is not ⅓)
+  // The nearest whole number, half, third or quarter, written the way an artist would say it, or ''
+  // if the length as shown (to two places) is not within 0.03 of one, nor within 4% of one that
+  // small: 0.48 and 0.52 U are both ½, 0.24 and 0.26 U both ¼, and 0.36 U is not ⅓
   const FRACTIONS = { '1/2': '½', '1/3': '⅓', '2/3': '⅔', '1/4': '¼', '3/4': '¾' };
   function nearestFraction(r) {
-    const near = Math.min(0.03, 0.04 * r);
+    const shown = Math.round(r * 100) / 100;
     for (let d = 1; d <= 4; d++) {
-      const n = Math.round(r * d);
-      if (!n || Math.abs(n / d - r) > near) continue;
+      const n = Math.round(shown * d);
+      // (the 1e-9 absorbs floating-point error, so 1.97 counts as within 0.03 of 2, as 2.03 does)
+      if (!n || Math.abs(n / d - shown) > Math.min(0.03, 0.04 * n / d) + 1e-9) continue;
       const whole = Math.floor(n / d), rest = n % d;
       return (whole || !rest ? String(whole) : '') + (rest ? FRACTIONS[rest + '/' + d] : '');
     }
@@ -1347,8 +1349,9 @@
         ],
       };
     });
-    // the unit goes on last, so a later measure from the same landmark can't hide it
-    marks.filter((k) => !k.isUnit).concat(marks.filter((k) => k.isUnit)).forEach((k) => {
+    const font = Math.round(Math.min(13, Math.max(11, Math.min(W, H) / unit / 30)) * unit);
+    const placed = labelsFor(g, marks, W, H, unit, avoid, font);
+    const strokeMark = (k) => {
       g.beginPath();
       k.segs.forEach(([ax, ay, bx, by]) => { g.moveTo(ax, ay); g.lineTo(bx, by); });
       g.strokeStyle = 'rgba(0, 0, 0, 0.5)';
@@ -1357,39 +1360,10 @@
       g.strokeStyle = k.isUnit ? UNIT_COLOR : MEASURE_COLOR;
       g.lineWidth = (k.isUnit ? 3.5 : 2) * unit;
       g.stroke();
-    });
-    labelMeasures(g, marks, W, H, unit, avoid);
-  }
-
-  // Labels go on after every line, the unit's first, then the rest in the order they were made.
-  // Each tries spots beside its line, sliding along it from the middle, on either side, and
-  // stepping away from it, then just past either end. A spot must keep clear of the labels
-  // already placed (the accuracy map's percentages among them) and of its own line and ticks.
-  // Of those, the spot nearest the middle of the line wins, plus a penalty for what it would hide
-  // of the other lines: a little for each length of line under it, a lot for an end tick, where a
-  // length is read. A label away from its line, or nearer another measure than its own, gets a
-  // thin leader back to it, which costs a little more and must not run along another line. When
-  // nothing near the line is clear, or every spot there hides part of another line, spots across
-  // the whole picture are tried too. A label with nowhere clear to go tries again with the length
-  // in units alone. Lines too short to show between their ticks go without, as do labels that
-  // still find no room or are too big for the picture; the loupe still reads them while drawing.
-  let labelLayout = { key: '', placed: [] };
-  function labelMeasures(g, marks, W, H, unit, avoid) {
-    const font = Math.round(Math.min(13, Math.max(11, Math.min(W, H) / unit / 30)) * unit);
-    // the reference lines count too, with their end dots
-    const d = state.drawing;
-    const lines = (d && d.kind === 'line' ? state.lines.concat(d) : state.lines).map((l) => {
-      const x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
-      return { x1, y1, x2, y2, len: Math.hypot(x2 - x1, y2 - y1), halo: 6.4 * unit, segs: [[x1, y1, x2, y2]] };
-    });
-    const texts = marks.map((k) => [measureText(k.m, k.isUnit), measureText(k.m, k.isUnit, true)]);
-    // the images in a view share a size, so all but the first reuse the layout (unless the
-    // label font has loaded in between and changed the labels' widths)
-    const widths = texts.map((t) => t.map((text) => pillSize(g, text, font).w));
-    const key = JSON.stringify([W, H, unit, avoid, texts, widths, marks.map((k) => k.segs[0]), lines.map((l) => l.segs[0])]);
-    if (labelLayout.key !== key) labelLayout = { key, placed: layOutLabels(g, marks, texts, lines, W, H, unit, avoid, font) };
-    const placed = labelLayout.placed;
-
+    };
+    // The leaders go over the other lines but under the unit, which goes on last: neither a later
+    // measure along its path nor a leader ending there can hide its yellow. The labels go on top.
+    marks.filter((k) => !k.isUnit).forEach(strokeMark);
     placed.forEach(({ i, leader }) => {
       if (!leader) return;
       const color = marks[i].isUnit ? UNIT_COLOR : MEASURE_COLOR;
@@ -1407,17 +1381,82 @@
       g.fillStyle = color;
       g.fill();
     });
+    marks.filter((k) => k.isUnit).forEach(strokeMark);
     placed.forEach(({ i, text, b }) => {
       drawPill(g, text, b.x + b.w / 2, b.y + b.h / 2, font, marks[i].isUnit ? 'unit' : 'dark', W, H);
     });
   }
 
-  // Where each measure's label goes, as above: [{ i (its measure), text, b (its box), leader }]
-  function layOutLabels(g, marks, texts, lines, W, H, unit, avoid, font) {
+  // Where the labels go, the unit's first, then the rest in the order the measures were made.
+  // Each tries spots beside its line, sliding along it from the middle, on either side, and
+  // stepping away from it, then just past either end. A spot must keep clear of the labels and
+  // leaders already placed, of the accuracy map's percentages, and of its own line and ticks. Of
+  // those, the spot nearest the middle of the line wins, plus a penalty for each length of another
+  // line it would hide. A label set out from its line, or with another measure as near to it as its
+  // own, gets a thin leader back to its line and costs more, more again when the other measure is
+  // nearer. A leader never passes behind a label, and where it can it neither runs along another
+  // line nor crosses a percentage. When no spot near the line is good, spots across the whole
+  // picture are tried too. Covering another measure's end tick, where a length is read, or crossing
+  // another leader is a foul, made only when there is no other way, not even with the length in
+  // units alone in place of the whole reading. While a label is left out or fouls, it gets an
+  // earlier turn and the layout is tried again, up to twice. Lines too short to show between their
+  // ticks go without, as do labels that still find no room or are too big for the picture; the
+  // loupe still reads them while drawing.
+  // While a measure is dragged out, the other labels stay put and only its own is placed, near its
+  // line, so a drag stays quick however many measures there are. All are placed afresh when it lands.
+  const labelLayouts = new Map(); // recent layouts by what they depend on: the images in a view share one
+  function labelsFor(g, marks, W, H, unit, avoid, font) {
+    // the reference lines count too, with their end dots (one being drawn once it is let go)
+    const lines = state.lines.map((l) => {
+      const x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
+      return { x1, y1, x2, y2, len: Math.hypot(x2 - x1, y2 - y1), halo: 6.4 * unit, segs: [[x1, y1, x2, y2]] };
+    });
+    const texts = marks.map((k) => [measureText(k.m, k.isUnit), measureText(k.m, k.isUnit, true)]);
+    // the label widths count too, as the label font may load between two draws
+    const widths = texts.map((t) => t.map((text) => pillSize(g, text, font).w));
+    const keyOf = (n, dragging) => JSON.stringify([W, H, unit, avoid, texts.slice(0, n), widths.slice(0, n),
+      marks.slice(0, n).map((k) => k.segs[0]), lines.map((l) => l.segs[0]), dragging]);
+    const d = state.drawing;
+    const settled = marks.length - (d && d.kind === 'measure' ? 1 : 0);
+    let placed = layoutFor(keyOf(settled, false), () => layOutLabels(g, marks.slice(0, settled), texts, lines, W, H, unit, avoid, font));
+    if (settled < marks.length) {
+      const base = placed;
+      placed = layoutFor(keyOf(marks.length, true), () => layOutLabels(g, marks, texts, lines, W, H, unit, avoid, font, base));
+    }
+    return placed;
+  }
+
+  // A layout made before for the same key, or a new one; the dozen used last are kept
+  function layoutFor(key, make) {
+    let placed = labelLayouts.get(key);
+    if (placed) labelLayouts.delete(key);
+    else placed = make();
+    labelLayouts.set(key, placed);
+    if (labelLayouts.size > 12) labelLayouts.delete(labelLayouts.keys().next().value);
+    return placed;
+  }
+
+  // Where each measure's label goes, as above: [{ i (its measure), text, b (its box), leader, fouls }].
+  // Given `base`, the layout of all but the last measure, it keeps that and places the last label.
+  function layOutLabels(g, marks, texts, lines, W, H, unit, avoid, font, base) {
     const gap = 2 * unit;
-    const taken = (avoid || []).map((b) => ({ x: b.x * W, y: b.y * H, w: b.w * W, h: b.h * H }));
-    const clash = (b) => taken.some((t) =>
-      b.x < t.x + t.w + gap && t.x < b.x + b.w + gap && b.y < t.y + t.h + gap && t.y < b.y + b.h + gap);
+    const reach = 2.5 * unit; // how far a leader, with the dot at its end, reaches either side
+    // the cost of a foul, an end tick covered or a leader crossed, so one is made only when there is
+    // no other way: a spot's cost is its fouls times this, plus the rest
+    const FOUL = 1e6;
+    const grow = (b, r) => ({ x: b.x - r, y: b.y - r, w: b.w + 2 * r, h: b.h + 2 * r });
+    let labels = [], leaders = []; // those placed so far
+    // the accuracy map's percentages are part of the picture: lines and leaders go over them
+    const percents = (avoid || []).map((b) => ({ x: b.x * W, y: b.y * H, w: b.w * W, h: b.h * H }));
+    // Does a leader pass under a box, or close enough to seem to run into it? Most are ruled out at a glance.
+    const under = (l, b) => {
+      const r = gap + reach;
+      if (Math.max(l.qx, l.px) < b.x - r || Math.min(l.qx, l.px) > b.x + b.w + r ||
+        Math.max(l.qy, l.py) < b.y - r || Math.min(l.qy, l.py) > b.y + b.h + r) return false;
+      return !!clipToBox(l.qx, l.qy, l.px, l.py, grow(b, r));
+    };
+    const touch = (b, t) => b.x < t.x + t.w + gap && t.x < b.x + b.w + gap && b.y < t.y + t.h + gap && t.y < b.y + b.h + gap;
+    const crowded = (b) => labels.some((t) => touch(b, t)) || percents.some((t) => touch(b, t));
     // every line with the reach of its dark edge and ticks, so most can be ruled out at a glance
     const strokes = marks.concat(lines).map((o) => {
       const r = o.halo / 2 + (o.tick || 0);
@@ -1427,17 +1466,23 @@
       });
     });
     const apart = (o, b) => Math.hypot(Math.max(o.left - b.x - b.w, 0, b.x - o.right), Math.max(o.top - b.y - b.h, 0, b.y - o.bottom));
-    const hidden = (o, b, h) => {
+    // What a label in box b hides of another line: a little for each length of line under it, and a
+    // foul for each end tick
+    const hidden = (o, b) => {
       if (apart(o, b) > 0) return 0;
-      const r = o.halo / 2, big = { x: b.x - r, y: b.y - r, w: b.w + 2 * r, h: b.h + 2 * r };
-      return o.segs.reduce((sum, [ax, ay, bx, by], n) => {
+      const big = grow(b, o.halo / 2);
+      let sum = 0;
+      for (let n = 0; n < o.segs.length; n++) {
+        const [ax, ay, bx, by] = o.segs[n];
         const part = clipToBox(ax, ay, bx, by, big);
-        return part ? sum + (part[1] - part[0]) * (n ? 2.5 * h : o.len / 2) : sum;
-      }, 0);
+        if (part) sum += n ? FOUL : (part[1] - part[0]) * o.len / 2;
+      }
+      return sum;
     };
 
-    // The best clear spot for a label of that size on measure i, as { b (its box), leader }, or null
-    const findSpot = (i, size) => {
+    // The best clear spot for a label of that size on measure i, as { cost, b (its box), leader }, or
+    // null. Quick, it only looks near the line.
+    const findSpot = (i, size, quick) => {
       const k = marks[i], own = strokes[i];
       const { x1, y1, x2, y2, len, ux, uy } = k;
       const others = strokes.filter((o) => o !== own);
@@ -1453,54 +1498,66 @@
       const onOther = (x, y) => others.some((o) =>
         x > o.left - gap && x < o.right + gap && y > o.top - gap && y < o.bottom + gap &&
         pointToLine(x, y, o.x1, o.y1, o.x2, o.y2) < o.halo / 2 + gap);
-      // The leader from a label to the middle half of its line, by the shortest way that doesn't
-      // run along another line, and its cost: its length, plus a penalty for any part that would
-      // pass for part of another line
-      const leaderTo = (b) => {
+      // The leader from a label to the middle half of its line by the best way that passes behind
+      // no label, and its cost: its length, plus a penalty for any part (its dot included) that
+      // would pass for part of another line and for each percentage it crosses, and a foul for each
+      // leader it crosses. Null if there is no way, or none that costs less than `limit`.
+      const leaderTo = (b, limit) => {
         const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
         const s0 = Math.max(len / 4, Math.min(len * 3 / 4, (cx - x1) * ux + (cy - y1) * uy));
         let best = null;
-        [s0, len / 2, len / 4, len * 3 / 4].forEach((s) => {
+        [s0].concat([0.5, 0.375, 0.625, 0.25, 0.75].map((t) => t * len)).forEach((s) => {
           const px = x1 + ux * s, py = y1 + uy * s, dx = px - cx, dy = py - cy;
           const f = Math.min(1, b.w / 2 / (Math.abs(dx) || 1e-6), b.h / 2 / (Math.abs(dy) || 1e-6));
-          const qx = cx + dx * f, qy = cy + dy * f;
+          const l = { px, py, qx: cx + dx * f, qy: cy + dy * f };
+          const length = Math.hypot(px - l.qx, py - l.qy);
+          if (length >= (best ? best.cost : limit) || labels.some((t) => under(l, t))) return;
           let lost = 0;
-          for (let n = 1; n <= 5; n++) if (onOther(qx + (px - qx) * n / 6, qy + (py - qy) * n / 6)) lost++;
-          const cost = Math.hypot(px - qx, py - qy) + (lost / 5) * 4 * size.h;
-          if (!best || cost < best.cost) best = { cost, px, py, qx, qy };
+          for (let n = 1; n <= 6; n++) if (onOther(l.qx + (px - l.qx) * n / 6, l.qy + (py - l.qy) * n / 6)) lost++;
+          const crossed = leaders.filter((o) => linesCross(l.qx, l.qy, px, py, o.qx, o.qy, o.px, o.py)).length;
+          const over = percents.filter((t) => under(l, t)).length;
+          const cost = length + (lost / 6 * 4 + over) * size.h + crossed * FOUL;
+          if (cost < (best ? best.cost : limit)) best = Object.assign(l, { cost });
         });
         return best;
       };
 
       let best = null;
+      const beats = (cost) => cost < (best ? best.cost : Infinity);
       const consider = (cx, cy, bias) => {
         const b = pillBox(size, cx, cy, W, H);
-        if (clash(b)) return;
+        if (crowded(b)) return;
         const away = gapToBox(x1, y1, x2, y2, b);
         if (away < clear - 0.5) return;
         const drift = Math.abs((b.x + b.w / 2 - x1) * ux + (b.y + b.h / 2 - y1) * uy - len / 2);
         let cost = away + drift / 4 + bias;
-        if (best && cost >= best.cost) return;
-        others.forEach((o) => { cost += hidden(o, b, size.h); });
-        if (best && cost >= best.cost) return;
+        const out = away > clear + step + 0.5; // set out from its line, so a leader adds at least size.h
+        if (!beats(out ? cost + size.h : cost) || leaders.some((l) => under(l, b))) return;
+        for (let n = 0; n < others.length && beats(cost); n++) cost += hidden(others[n], b);
+        if (!beats(cost)) return;
+        // It needs a leader when set out from its line, or when another measure is as near. Nearer
+        // another measure than its own, it costs more again: at a glance it reads as that one's.
+        let near = Infinity; // the nearest other measure, looked for only as far as its own line
+        others.some((o) => {
+          if (o.m && apart(o, b) <= Math.min(away, near)) near = Math.min(near, gapToBox(o.x1, o.y1, o.x2, o.y2, b));
+          return near < away;
+        });
         let leader = null;
-        if (away > clear + step + 0.5 || others.some((o) => {
-          if (!o.m || apart(o, b) >= away) return false; // only the other measures
-          const near = gapToBox(o.x1, o.y1, o.x2, o.y2, b);
-          return near > 0 && near < away;
-        })) {
-          if (best && cost + size.h >= best.cost) return;
-          leader = leaderTo(b);
-          cost += size.h + leader.cost - away;
+        if (out || near <= away) {
+          const extra = near < away ? 2 * size.h : size.h;
+          if (!beats(cost + extra)) return;
+          leader = leaderTo(b, best ? best.cost - cost - extra + away : Infinity);
+          if (!leader) return;
+          cost += extra + leader.cost - away;
         }
-        if (!best || cost < best.cost) best = { cost, b, leader };
+        if (beats(cost)) best = { cost, b, leader };
       };
-      const reach = len / 2 + along / 2; // a label may slide until a quarter of it is past the end
-      const slide = Math.max(size.h, reach / 4);
+      const slideTo = len / 2 + along / 2; // a label may slide until a quarter of it is past the end
+      const slide = Math.max(size.h, slideTo / 4);
       // further along or further out only costs more, once a spot has been found
-      for (let a = 0; a <= reach && !(best && clear + a / 4 >= best.cost); a += slide) {
+      for (let a = 0; a <= slideTo && beats(clear + a / 4); a += slide) {
         (a ? [a, -a] : [0]).forEach((da) => [1, -1].forEach((side) => {
-          for (let j = 0; j <= 12 && !(best && clear + j * step + a / 4 >= best.cost); j++) {
+          for (let j = 0; j <= 12 && beats(clear + j * step + a / 4); j++) {
             const off = (clear + across + j * step) * side;
             const cx = x1 + ux * (len / 2 + da) + nx * off, cy = y1 + uy * (len / 2 + da) + ny * off;
             if (cx < 0 || cx > W || cy < 0 || cy > H) break;
@@ -1510,31 +1567,69 @@
       }
       consider(x1 - ux * (clear + along), y1 - uy * (clear + along), 0);
       consider(x2 + ux * (clear + along), y2 + uy * (clear + along), 0);
-      if (!best || best.cost > clear + size.h) {
+      if (!quick && !(best && best.cost <= 2 * (clear + size.h))) {
+        // across the whole picture, nearest the line first, until no spot left can do better: none
+        // costs less than its distance from the line, plus size.h once that calls for a leader, so
+        // those further than the best so far are skipped
+        const far = (best ? best.cost : Infinity) + Math.hypot(size.w, size.h) / 2;
+        const spots = [];
         for (let cy = size.h / 2; cy < H; cy += size.h) {
-          for (let cx = size.w / 2; cx < W; cx += size.h) consider(cx, cy, 0);
+          for (let cx = size.w / 2; cx < W; cx += size.h) {
+            const b = pillBox(size, cx, cy, W, H), mx = b.x + b.w / 2, my = b.y + b.h / 2;
+            if (mx < Math.min(x1, x2) - far || mx > Math.max(x1, x2) + far || my < Math.min(y1, y2) - far || my > Math.max(y1, y2) + far) continue;
+            const low = pointToLine(mx, my, x1, y1, x2, y2) - Math.hypot(b.w, b.h) / 2;
+            spots.push({ cx, cy, low: low > clear + step + 0.5 ? low + size.h : low });
+          }
         }
+        spots.sort((p, q) => p.low - q.low);
+        for (let n = 0; n < spots.length && beats(spots[n].low); n++) consider(spots[n].cx, spots[n].cy, 0);
       }
       return best;
     };
 
-    const order = marks.map((k, i) => i).sort((a, b) => marks[b].isUnit - marks[a].isUnit);
-    const placed = [];
-    order.forEach((i) => {
-      if (marks[i].len < 12 * unit) return;
-      const tries = texts[i][0] === texts[i][1] ? [texts[i][0]] : texts[i];
-      tries.some((text) => {
-        const size = pillSize(g, text, font);
-        if (size.w + 2 * PILL_PAD > W || size.h + 2 * PILL_PAD > H) return false;
-        const spot = findSpot(i, size);
-        if (spot) {
-          taken.push(spot.b);
-          placed.push({ i, text, b: spot.b, leader: spot.leader });
-        }
-        return spot;
+    // Places the labels in that order after those in `base`, each in the best spot left to it
+    const run = (order) => {
+      const placed = base ? base.slice() : [];
+      labels = placed.map((p) => p.b);
+      leaders = placed.filter((p) => p.leader).map((p) => p.leader);
+      order.forEach((i) => {
+        const tries = texts[i][0] === texts[i][1] ? [texts[i][0]] : texts[i];
+        // the whole reading, or else the length alone, where it fouls nothing; failing both, the one
+        // with the fewest fouls
+        let pick = null;
+        tries.some((text) => {
+          const size = pillSize(g, text, font);
+          if (size.w + 2 * PILL_PAD > W || size.h + 2 * PILL_PAD > H) return false;
+          const spot = findSpot(i, size, !!base);
+          if (spot && (!pick || spot.cost < Math.floor(pick.cost / FOUL) * FOUL)) pick = Object.assign(spot, { text });
+          return pick && pick.cost < FOUL;
+        });
+        if (!pick) return;
+        labels.push(pick.b);
+        if (pick.leader) leaders.push(pick.leader);
+        placed.push({ i, text: pick.text, b: pick.b, leader: pick.leader, fouls: Math.floor(pick.cost / FOUL) });
       });
-    });
-    return placed;
+      return placed;
+    };
+    const unitFirst = (a, b) => marks[b].isUnit - marks[a].isUnit;
+    const order = marks.map((k, i) => i).filter((i) => marks[i].len >= 12 * unit).sort(unitFirst);
+    if (base) return run(order.filter((i) => i === marks.length - 1));
+    // How badly a label fared: left out, over an end tick or across a leader, or cut to the length alone
+    const trouble = (placed, i) => {
+      const p = placed.find((q) => q.i === i);
+      return !p ? 100 : 10 * p.fouls + (p.text !== texts[i][0] ? 1 : 0);
+    };
+    const total = (placed) => order.reduce((sum, i) => sum + trouble(placed, i), 0);
+    // While a label is left out or fouls, those that fared badly get an earlier turn, the worst
+    // first, as those placed before them may have crowded them out. The layout that fares best stays.
+    let turn = order, placed = run(turn), best = placed;
+    for (let n = 0; n < 2 && turn.some((i) => trouble(placed, i) >= 10); n++) {
+      const last = placed;
+      turn = turn.slice().sort((a, b) => trouble(last, b) - trouble(last, a)).sort(unitFirst);
+      placed = run(turn);
+      if (total(placed) < total(best)) best = placed;
+    }
+    return best;
   }
 
   // The part of a line from (x1, y1) to (x2, y2) inside a box, as fractions [t0, t1] of the way
@@ -1561,6 +1656,13 @@
     const dx = x2 - x1, dy = y2 - y1;
     const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy || 1)));
     return Math.hypot(x1 + dx * t - x, y1 + dy * t - y);
+  }
+
+  // Whether the line from (ax, ay) to (bx, by) crosses the one from (cx, cy) to (dx, dy)
+  function linesCross(ax, ay, bx, by, cx, cy, dx, dy) {
+    const side = (px, py, qx, qy, x, y) => Math.sign((qx - px) * (y - py) - (qy - py) * (x - px));
+    return side(ax, ay, bx, by, cx, cy) * side(ax, ay, bx, by, dx, dy) < 0 &&
+      side(cx, cy, dx, dy, ax, ay) * side(cx, cy, dx, dy, bx, by) < 0;
   }
 
   // Shortest distance between a line from (x1, y1) to (x2, y2) and a box: 0 where they touch,
