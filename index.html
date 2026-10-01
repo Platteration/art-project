@@ -94,7 +94,10 @@
           <p class="hint">How many color groups each of the three values is split into. Each group is painted with its most prominent color, not a mix.</p>
         </div>
         <label class="check" for="outlines"><input type="checkbox" id="outlines"> Outline shapes on both studies</label>
-        <button type="button" class="btn" id="addBlocks">Add block colors to palette</button>
+        <div class="btn-row">
+          <button type="button" class="btn" id="addBlocks">Add block colors to palette</button>
+          <button type="button" class="btn" id="sheetOpen" aria-controls="mixSheet">Show mixing sheet</button>
+        </div>
       </section>
     </aside>
 
@@ -270,15 +273,76 @@
         <div class="palette-head">
           <h2 id="palTitle" tabindex="-1">Palette <span class="count" id="palCount"></span></h2>
           <div class="palette-actions">
+            <label class="check check-small" for="showRecipes"><input type="checkbox" id="showRecipes"> Show recipes</label>
             <button type="button" class="btn btn-small" id="palSort">Sort dark to light</button>
             <button type="button" class="btn btn-small" id="palCopy">Copy hex codes</button>
             <button type="button" class="btn btn-small" id="palSave">Save palette PNG</button>
             <button type="button" class="btn btn-small btn-danger" id="palClear">Clear</button>
           </div>
         </div>
+        <details class="paints" id="myPaints">
+          <summary><span class="paints-title">My paints</span><span class="paint-dots" id="paintDots" aria-hidden="true"></span><span class="paints-state" id="paintsState"></span></summary>
+          <div class="paints-body">
+            <p class="hint">Recipes use only these paints. Pick the palette closest to yours, then change it to match your tubes. Every recipe is a starting mix, predicted from typical paints' colors: adjust it by eye.</p>
+            <div class="paints-preset">
+              <label class="inline-field" for="paintPreset">Palette
+                <select id="paintPreset"></select>
+              </label>
+              <button type="button" class="btn btn-small" id="paintReset" hidden></button>
+            </div>
+            <ul class="paint-list" id="paintList" aria-label="Paints"></ul>
+            <p class="hint" id="paintWarn" hidden></p>
+            <form class="paint-add" id="paintAdd">
+              <h3>Add a paint</h3>
+              <div class="paint-add-grid">
+                <div class="field">
+                  <label for="paintName">Name</label>
+                  <input type="text" id="paintName" maxlength="40" autocomplete="off" placeholder="Burnt Umber">
+                </div>
+                <div class="field">
+                  <label for="paintCode">Short name</label>
+                  <input type="text" id="paintCode" maxlength="3" autocomplete="off" placeholder="BU">
+                </div>
+                <div class="field">
+                  <label for="paintHex">Tube color</label>
+                  <input type="color" id="paintHex" value="#5c3f2c">
+                </div>
+                <div class="field">
+                  <label class="check" for="paintTintOn"><input type="checkbox" id="paintTintOn"> 1 : 4 tint with white</label>
+                  <input type="color" id="paintTint" value="#c9b4a4" disabled aria-label="Tint of 1 part paint to 4 parts white">
+                </div>
+                <div class="field">
+                  <label for="paintStrength">Tinting strength</label>
+                  <select id="paintStrength">
+                    <option value="weak">Weak</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="strong">Strong</option>
+                  </select>
+                </div>
+              </div>
+              <div class="paint-add-actions">
+                <button type="submit" class="btn" id="paintAddBtn">Add paint</button>
+                <p class="hint">For the closest predictions, paint a thick swatch and a swatch of 1 part paint to 4 parts white, photograph them in daylight, and match the two colors to the photo. The tint tells the tool how far a little of the paint goes.</p>
+              </div>
+            </form>
+          </div>
+        </details>
         <ul class="swatches" id="swatches"></ul>
-        <p class="empty" id="palEmpty">Hover any image to sample a color, then click to add it here.</p>
-        <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
+        <p class="empty" id="palEmpty">Hover any image to sample a color, then click to add it here. Turn on <strong>Show recipes</strong> to see how to mix each one from your own paints.</p>
+        <div class="mix-card" id="mixCard" aria-live="polite" hidden></div>
+        <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Text to copy"></textarea>
+      </section>
+
+      <section class="mix-sheet" id="mixSheet" aria-labelledby="sheetTitle" hidden>
+        <div class="palette-head">
+          <h2 id="sheetTitle" tabindex="-1">Mixing sheet <span class="count" id="sheetCount"></span></h2>
+          <div class="palette-actions">
+            <button type="button" class="btn btn-small" id="sheetCopy">Copy mixing sheet</button>
+            <button type="button" class="btn btn-small" id="sheetClose">Close</button>
+          </div>
+        </div>
+        <p class="hint" id="sheetIntro"></p>
+        <div class="sheet-groups" id="sheetGroups"></div>
       </section>
     </main>
   </div>
@@ -306,6 +370,7 @@
 </dialog>
 
 <script src="js/processing.js"></script>
+<script src="js/mixing.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

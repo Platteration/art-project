@@ -64,6 +64,31 @@
     palSave: $('palSave'),
     palClear: $('palClear'),
     copyFallback: $('copyFallback'),
+    showRecipes: $('showRecipes'),
+    myPaints: $('myPaints'),
+    paintDots: $('paintDots'),
+    paintsState: $('paintsState'),
+    paintPreset: $('paintPreset'),
+    paintReset: $('paintReset'),
+    paintList: $('paintList'),
+    paintWarn: $('paintWarn'),
+    paintAdd: $('paintAdd'),
+    paintAddBtn: $('paintAddBtn'),
+    paintName: $('paintName'),
+    paintCode: $('paintCode'),
+    paintHex: $('paintHex'),
+    paintTintOn: $('paintTintOn'),
+    paintTint: $('paintTint'),
+    paintStrength: $('paintStrength'),
+    mixCard: $('mixCard'),
+    sheet: $('mixSheet'),
+    sheetOpen: $('sheetOpen'),
+    sheetTitle: $('sheetTitle'),
+    sheetCount: $('sheetCount'),
+    sheetIntro: $('sheetIntro'),
+    sheetGroups: $('sheetGroups'),
+    sheetCopy: $('sheetCopy'),
+    sheetClose: $('sheetClose'),
     loupe: $('loupe'),
     loupeCanvas: $('loupeCanvas'),
     loupeChip: $('loupeChip'),
@@ -218,6 +243,7 @@
     state.pixels.block = r.blockImage;
     renderZones();
     drawHistogram();
+    renderSheet();
     state.art.dirty = true;
     if (state.tab === 'check') runCheck();
     els.busy.hidden = true;
@@ -759,11 +785,19 @@
       });
 
       li.append(chip, meta, remove);
+      if (state.mixing.show) li.append(recipeButton(c));
       els.swatches.append(li);
     });
     const n = list.length;
     els.palCount.textContent = n ? `${n} color${n === 1 ? '' : 's'}` : '';
     els.palEmpty.hidden = n > 0;
+    els.swatches.classList.toggle('has-recipes', state.mixing.show);
+    els.palCopy.textContent = state.mixing.show ? 'Copy hex codes and recipes' : 'Copy hex codes';
+    // the How-to-mix card follows its swatch's new recipe line, or closes when the line is gone
+    if (state.mixing.card && !els.sheetGroups.contains(els.mixCard)) {
+      const again = els.swatches.querySelector(`[data-recipe="${state.mixing.card}"]`);
+      if (again) { state.mixing.cardFrom = again; syncExpanded(); } else closeMixCard();
+    }
     [els.palSort, els.palCopy, els.palSave, els.palClear].forEach((b) => { b.disabled = n === 0; });
     if (!n) els.copyFallback.hidden = true;
   }
@@ -788,26 +822,40 @@
   });
 
   els.palCopy.addEventListener('click', () => {
-    const text = state.palette.map(toHex).join('\n');
-    copyText(text, `Copied ${state.palette.length} hex code${state.palette.length === 1 ? '' : 's'}`);
+    const n = state.palette.length;
+    if (state.mixing.show && state.mixing.paints.length) {
+      const lines = state.palette.map((c) => recipeLine(c, recipeNow(c)));
+      copyText([paintsLegend(), ''].concat(lines).join('\n'), `Copied ${n} color${n === 1 ? '' : 's'} with recipes`);
+      return;
+    }
+    copyText(state.palette.map(toHex).join('\n'), `Copied ${n} hex code${n === 1 ? '' : 's'}`);
   });
 
   els.palSave.addEventListener('click', () => {
     const list = state.palette;
+    const withRecipes = state.mixing.show && state.mixing.paints.length > 0;
     const cols = Math.min(6, list.length);
     const rows = Math.ceil(list.length / cols);
-    const sw = 180, lab = 54, pad = 24, gap = 16;
+    const sw = 180, lab = withRecipes ? 142 : 54, pad = 24, gap = 16;
     const c = document.createElement('canvas');
-    c.width = pad * 2 + cols * sw + (cols - 1) * gap;
-    c.height = pad * 2 + rows * (sw + lab) + (rows - 1) * gap;
     const g = c.getContext('2d');
+    const width = pad * 2 + cols * sw + (cols - 1) * gap;
+    g.font = '15px "IBM Plex Mono", monospace';
+    const legend = withRecipes ? wrapText(g, paintsLegend() + ' The band along the bottom of each swatch is the predicted mix.', width - pad * 2) : [];
+    c.width = width;
+    c.height = pad * 2 + rows * (sw + lab) + (rows - 1) * gap + (legend.length ? 12 + legend.length * 21 : 0);
     g.fillStyle = '#f3f3f1';
     g.fillRect(0, 0, c.width, c.height);
     list.forEach((col, i) => {
       const x = pad + (i % cols) * (sw + gap);
       const y = pad + Math.floor(i / cols) * (sw + lab + gap);
+      const res = withRecipes ? recipeNow(col) : null;
       g.fillStyle = toHex(col);
       g.fillRect(x, y, sw, sw);
+      if (res) {
+        g.fillStyle = toHex(res.mix);
+        g.fillRect(x, y + sw * 0.75, sw, sw * 0.25);
+      }
       g.strokeStyle = 'rgba(0,0,0,0.15)';
       g.strokeRect(x + 0.5, y + 0.5, sw - 1, sw - 1);
       g.fillStyle = '#1c1d20';
@@ -816,9 +864,32 @@
       g.fillStyle = '#5b5e64';
       g.font = '16px "IBM Plex Mono", monospace';
       g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47);
+      if (!res) return;
+      g.fillStyle = res.status === 'far' && !res.limit ? '#a3322a' : '#5b5e64';
+      g.font = '600 14px "IBM Plex Mono", monospace';
+      g.fillText(`${statusText(res)} · ΔE ${res.dE.toFixed(1)}`, x, y + sw + 70);
+      g.fillStyle = '#1c1d20';
+      g.font = '15px "IBM Plex Mono", monospace';
+      wrapText(g, partsText(res), sw, ' · ').slice(0, 3).forEach((line, k) => g.fillText(line, x, y + sw + 92 + k * 19));
     });
+    g.fillStyle = '#5b5e64';
+    g.font = '15px "IBM Plex Mono", monospace';
+    legend.forEach((line, k) => g.fillText(line, pad, c.height - pad - (legend.length - 1 - k) * 21));
     savePng(c, `${state.baseName}-palette.png`);
   });
+
+  // Splits text into lines that fit `width` on a canvas, breaking at spaces (or at sep)
+  function wrapText(g, text, width, sep = ' ') {
+    const lines = [];
+    let line = '';
+    text.split(sep).forEach((word) => {
+      const next = line ? line + sep + word : word;
+      if (line && g.measureText(next).width > width) { lines.push(line); line = word; }
+      else line = next;
+    });
+    if (line) lines.push(line);
+    return lines;
+  }
 
   let clearArmed = 0;
   els.palClear.addEventListener('click', () => {
@@ -835,6 +906,676 @@
     renderPalette();
     toast('Palette cleared');
   });
+
+  // ---- Mixing recipes -------------------------------------------------------
+
+  /*
+   * Recipes from the artist's own paints (js/mixing.js does the color science). The paints
+   * are one of the preset palettes, each of which can be edited, or "My own paints". Recipes
+   * are worked out a few milliseconds at a time, so the page never stalls, and kept per color
+   * and paint set.
+   */
+  const PAINTS_KEY = 'portrait-value-studio.paints';
+  const MAX_PAINTS = 12; // the search slows down past this
+  const OWN = 'own';
+  const PALETTES = Mixing.PRESETS.concat({ id: OWN, name: 'My own paints', paints: Mixing.PRESETS[0].paints.slice(0, 1) });
+  const STATUS_LABEL = { close: 'close', near: 'near', far: 'out of reach' };
+  const LIMIT_LABEL = { dark: 'darkest mix', light: 'lightest mix' };
+  const statusText = (res) => (res.limit ? LIMIT_LABEL[res.limit] : STATUS_LABEL[res.status]);
+  const STRENGTH_LABEL = { weak: 'Weak', normal: 'Normal', strong: 'Strong' };
+
+  const paletteById = (id) => PALETTES.find((p) => p.id === id) || PALETTES[0];
+  const copyDefs = (defs) => defs.map((d) => ({ name: d.name, code: d.code, hex: d.hex, tint: d.tint || '', strength: d.strength || 'normal' }));
+  const defsKey = (defs) => JSON.stringify(copyDefs(defs));
+  const presetDefs = (id) => copyDefs(paletteById(id).paints);
+  const paintDefs = () => copyDefs(state.mixing.lists[state.mixing.active] || paletteById(state.mixing.active).paints);
+  const isChanged = (id) => !!state.mixing.lists[id] && defsKey(state.mixing.lists[id]) !== defsKey(presetDefs(id));
+
+  // A saved paint, cleaned up; null if it can't be used
+  function cleanPaint(d) {
+    if (!d || typeof d.name !== 'string' || !Mixing.hexToRgb(d.hex)) return null;
+    const name = d.name.trim().slice(0, 40) || 'Paint';
+    return {
+      name,
+      code: (typeof d.code === 'string' && d.code.trim().slice(0, 3)) || initials(name),
+      hex: Mixing.rgbToHex(Mixing.hexToRgb(d.hex)),
+      tint: Mixing.hexToRgb(d.tint) ? Mixing.rgbToHex(Mixing.hexToRgb(d.tint)) : '',
+      strength: Mixing.STRENGTHS[d.strength] ? d.strength : 'normal',
+    };
+  }
+
+  // The saved paint settings, or null if storage can't be read
+  function readMixing() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PAINTS_KEY) || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function loadMixing(saved) {
+    const lists = {};
+    Object.entries((saved && saved.lists) || {}).forEach(([id, defs]) => {
+      if (PALETTES.some((p) => p.id === id) && Array.isArray(defs)) lists[id] = defs.map(cleanPaint).filter(Boolean).slice(0, MAX_PAINTS);
+    });
+    return {
+      active: saved && PALETTES.some((p) => p.id === saved.active) ? saved.active : PALETTES[0].id,
+      lists,                                // edited palettes; the rest are as shipped
+      show: !!(saved && saved.show === true), // recipe lines under the swatches
+      paints: [],                           // Mixing.makePaint() for each paint in use
+      key: '',                              // changes with anything that changes a recipe
+      card: null,                           // hex of the color in the How-to-mix card
+      cardFrom: null,                       // the button that opened it
+      sheet: false,                         // mixing sheet open
+    };
+  }
+
+  function saveMixing() {
+    const m = state.mixing;
+    try {
+      localStorage.setItem(PAINTS_KEY, JSON.stringify({ active: m.active, lists: m.lists, show: m.show }));
+    } catch (err) {
+      /* storage unavailable: the paints still work for this visit */
+    }
+  }
+
+  state.mixing = loadMixing(readMixing());
+
+  window.addEventListener('storage', (e) => {
+    if (e.key !== PAINTS_KEY && e.key !== null) return;
+    const saved = readMixing();
+    if (!saved) return;
+    const m = state.mixing;
+    state.mixing = Object.assign(loadMixing(saved), { card: m.card, cardFrom: m.cardFrom, sheet: m.sheet });
+    els.showRecipes.checked = state.mixing.show;
+    paintsChanged(false);
+  });
+
+  // "Burnt Umber" -> "BU", "Viridian" -> "VI": letters and digits only
+  function initials(name) {
+    const words = name.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean);
+    const code = words.length > 1 ? words.map((w) => w[0]).join('') : (words[0] || 'P').slice(0, 2);
+    return code.slice(0, 3).toUpperCase();
+  }
+
+  function uniqueCode(code, defs) {
+    const taken = (c) => defs.some((d) => d.code.toUpperCase() === c.toUpperCase());
+    if (!taken(code)) return code;
+    for (let k = 2; k < 100; k++) {
+      const c = code.slice(0, k < 10 ? 2 : 1) + k;
+      if (!taken(c)) return c;
+    }
+    return code;
+  }
+
+  // ---- Working out recipes, a little at a time ----
+
+  const recipes = { cache: new Map(), queue: [], job: null, timer: 0 };
+  const recipeKey = (hex) => hex + '|' + state.mixing.key;
+
+  function usePaints() {
+    const m = state.mixing;
+    m.paints = paintDefs().map(Mixing.makePaint);
+    m.key = Mixing.paintsKey(m.paints);
+    recipes.queue = [];
+    recipes.job = null;
+  }
+
+  // The recipe for a color if it is ready; otherwise it is queued and recipeReady() follows
+  function recipeOf(c) {
+    if (!state.mixing.paints.length) return null;
+    const hex = toHex(c);
+    const key = recipeKey(hex);
+    if (recipes.cache.has(key)) return recipes.cache.get(key);
+    if (!recipes.queue.some((q) => q.key === key) && !(recipes.job && recipes.job.key === key)) {
+      recipes.queue.push({ key, hex, rgb: { r: c.r, g: c.g, b: c.b } });
+    }
+    if (!recipes.timer) recipes.timer = setTimeout(pumpRecipes, 0);
+    return null;
+  }
+
+  // The recipe right away, for copying and saving
+  function recipeNow(c) {
+    const key = recipeKey(toHex(c));
+    if (!recipes.cache.has(key)) recipes.cache.set(key, Mixing.recipe(c, state.mixing.paints));
+    return recipes.cache.get(key);
+  }
+
+  // Works on the queue for about 12 ms, then lets the page breathe
+  function pumpRecipes() {
+    recipes.timer = 0;
+    const end = performance.now() + 12;
+    while (performance.now() < end) {
+      if (!recipes.job) {
+        const next = recipes.queue.shift();
+        if (!next) break;
+        if (recipes.cache.has(next.key)) continue;
+        recipes.job = Object.assign(next, { task: Mixing.recipeTask(next.rgb, state.mixing.paints) });
+      }
+      const job = recipes.job;
+      if (!job.task.step(Math.max(1, end - performance.now()))) break;
+      recipes.job = null;
+      recipes.cache.set(job.key, job.task.result);
+      recipeReady(job.hex);
+    }
+    if (recipes.job || recipes.queue.length) recipes.timer = setTimeout(pumpRecipes, 0);
+  }
+
+  function recipeReady(hex) {
+    document.querySelectorAll(`[data-recipe="${hex}"]`).forEach((btn) => fillRecipe(btn, recipeOf(Mixing.hexToRgb(hex))));
+    if (state.mixing.card === hex) renderMixCard();
+  }
+
+  // ---- Recipe text ----
+
+  const paintOf = (it) => state.mixing.paints[it.paint];
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+  // "W 9 · YO 3 · CR 2 · IB touch". With one main paint, its number says nothing, so it has none.
+  function itemText(res, it) {
+    const main = res.items.filter((x) => !x.touch).length;
+    return it.touch ? `${paintOf(it).code} touch` : main > 1 ? `${paintOf(it).code} ${it.parts}` : paintOf(it).code;
+  }
+  const partsText = (res) => res.items.map((it) => itemText(res, it)).join(' · ');
+
+  // ['grayer', 'cooler', 'lighter'] -> "grayer, cooler and lighter"
+  function andList(words) {
+    return words.length > 1 ? words.slice(0, -1).join(', ') + ' and ' + words[words.length - 1] : words.join('');
+  }
+  const noteText = (res) => (res.diff.length ? `nearest mix is ${andList(res.diff)}` : '');
+
+  // What to do about a color the paints can't reach: suggest it by its neighbours
+  function lesson(res) {
+    if (res.limit === 'dark') return 'A photo’s darkest darks go further than paint can. Use this mix, and keep the values next to it a step lighter than the photo so the dark still reads.';
+    if (res.limit === 'light') return 'A photo’s lightest lights go further than white paint. Use this mix, and keep what is around it a step darker so it still reads as the light.';
+    const [, a, b] = res.targetLab;
+    const hue = (Math.atan2(b, a) * 180) / Math.PI;
+    const h = hue < 0 ? hue + 360 : hue;
+    const cool = Math.hypot(a, b) >= 8 && h >= 150 && h <= 330;
+    if (cool && res.diff.includes('grayer')) return 'Use a nearby gray. Next to warm skin, black and white read as blue.';
+    if (res.diff.includes('darker')) return 'It is lighter than these paints go. Use the nearest mix, and keep what is around it a little darker.';
+    if (res.diff.includes('lighter')) return 'It is darker than these paints go. Use the nearest mix, and keep what is around it a little lighter.';
+    if (res.diff.includes('grayer')) return 'Use the nearest mix and keep the colors around it duller: a color looks stronger next to grays.';
+    return 'Use the nearest mix and judge it next to its neighbours, not on its own.';
+  }
+
+  // One line for copying: "#DDA480  V 7.2  W 13 · YO 4 · CR 3 · IB touch  (close, ΔE 0.3)"
+  function recipeLine(c, res) {
+    const head = `${toHex(c)}  V ${valueLabel(Study.lightnessOf(c.r, c.g, c.b))}`;
+    if (!res) return head;
+    const note = res.status !== 'close' && res.diff.length ? `, ${noteText(res)}` : '';
+    return `${head}  ${partsText(res)}  (${statusText(res)}, ΔE ${res.dE.toFixed(1)}${note})`;
+  }
+
+  function paintsLegend() {
+    const m = state.mixing;
+    return `Starting mixes from ${paletteById(m.active).name}${isChanged(m.active) ? ' (changed)' : ''}: ` +
+      m.paints.map((p) => `${p.code} ${p.name}`).join(', ') + '. Adjust by eye.';
+  }
+
+  function dot(hex) {
+    const d = document.createElement('span');
+    d.className = 'paint-dot';
+    d.style.setProperty('--c', hex);
+    return d;
+  }
+
+  function badge(res) {
+    const b = document.createElement('span');
+    b.className = 'mix-badge';
+    b.dataset.status = res.limit ? 'limit' : res.status;
+    b.textContent = `${statusText(res)} · ΔE ${res.dE.toFixed(1)}`;
+    return b;
+  }
+
+  // target | predicted mix
+  function mixChips(res) {
+    const chips = document.createElement('span');
+    chips.className = 'mix-chips';
+    chips.setAttribute('aria-hidden', 'true');
+    [res.target, res.mix].forEach((c, i) => {
+      const s = document.createElement('span');
+      s.style.background = toHex(c);
+      s.title = (i ? 'Predicted mix ' : 'Target ') + toHex(c);
+      chips.append(s);
+    });
+    return chips;
+  }
+
+  function partsLine(res) {
+    const line = document.createElement('span');
+    line.className = 'recipe-line';
+    res.items.forEach((it, i) => {
+      const span = document.createElement('span');
+      span.append(dot(paintOf(it).hex), itemText(res, it));
+      if (i < res.items.length - 1) {
+        const sep = document.createElement('span');
+        sep.className = 'visually-hidden';
+        sep.textContent = ' · ';
+        span.append(sep);
+      }
+      line.append(span);
+    });
+    return line;
+  }
+
+  // ---- Recipe lines (under swatches and on the mixing sheet) ----
+
+  function recipeButton(c, sheet) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'swatch-recipe';
+    btn.dataset.recipe = toHex(c);
+    if (sheet) btn.dataset.sheet = JSON.stringify(sheet);
+    btn.setAttribute('aria-controls', 'mixCard');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.addEventListener('click', () => toggleMixCard(btn));
+    fillRecipe(btn, recipeOf(c));
+    return btn;
+  }
+
+  function fillRecipe(btn, res) {
+    const hex = btn.dataset.recipe;
+    const sheet = btn.dataset.sheet ? JSON.parse(btn.dataset.sheet) : null;
+    btn.textContent = '';
+    const label = document.createElement('span');
+    label.className = 'visually-hidden';
+    label.textContent = `How to mix ${hex}: `;
+    btn.append(label);
+    if (sheet) {
+      const chip = document.createElement('span');
+      chip.className = 'sheet-chip';
+      chip.style.background = hex;
+      const meta = document.createElement('span');
+      meta.className = 'sheet-meta';
+      meta.textContent = `${hex} · V ${sheet.v} · ${sheet.share}% of picture`;
+      btn.append(chip, meta);
+    }
+    if (!state.mixing.paints.length) {
+      const none = document.createElement('span');
+      none.className = 'recipe-note';
+      none.textContent = 'Add paints under My paints to get a recipe';
+      btn.append(none);
+      return;
+    }
+    if (!res) {
+      const wait = document.createElement('span');
+      wait.className = 'recipe-wait';
+      wait.textContent = 'Working out a mix…';
+      btn.append(wait);
+      return;
+    }
+    const top = document.createElement('span');
+    top.className = 'recipe-top';
+    top.append(mixChips(res), badge(res));
+    btn.append(top, partsLine(res));
+    if (res.status !== 'close' && res.diff.length) {
+      const note = document.createElement('span');
+      note.className = 'recipe-note';
+      note.textContent = noteText(res);
+      btn.append(note);
+    }
+  }
+
+  els.showRecipes.checked = state.mixing.show;
+  els.showRecipes.addEventListener('change', () => {
+    state.mixing.show = els.showRecipes.checked;
+    saveMixing();
+    renderPalette();
+  });
+
+  // ---- How-to-mix card ----
+
+  function syncExpanded() {
+    document.querySelectorAll('[data-recipe]').forEach((b) =>
+      b.setAttribute('aria-expanded', String(b === state.mixing.cardFrom && !els.mixCard.hidden)));
+  }
+
+  // Opens the card under the list the button is in (the swatches or a group of the mixing sheet)
+  function toggleMixCard(btn) {
+    const m = state.mixing;
+    if (m.cardFrom === btn && !els.mixCard.hidden) { closeMixCard(); return; }
+    m.card = btn.dataset.recipe;
+    m.cardFrom = btn;
+    btn.closest('ul, ol').after(els.mixCard);
+    renderMixCard();
+    els.mixCard.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+  }
+
+  function closeMixCard() {
+    const from = state.mixing.cardFrom;
+    const hadFocus = els.mixCard.contains(document.activeElement);
+    state.mixing.card = null;
+    state.mixing.cardFrom = null;
+    renderMixCard();
+    els.swatches.after(els.mixCard); // home again, so the sheet can be rebuilt without it
+    if (hadFocus && from && from.isConnected) from.focus();
+  }
+
+  const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // 1/N of the pile, rounded to a fraction a painter can picture
+  function niceFraction(n) {
+    const steps = [15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200];
+    return steps.reduce((a, b) => (Math.abs(Math.log(b / n)) < Math.abs(Math.log(a / n)) ? b : a));
+  }
+
+  // Ordered steps: biggest pile first, then the rest; the addition that moves the pile most goes
+  // in a little at a time, and touches go last
+  function mixSteps(res) {
+    const paints = state.mixing.paints;
+    const main = res.items.filter((it) => !it.touch);
+    const steps = [];
+    const pile = paints.map(() => 0);
+    let slow = -1, most = 3;
+    main.forEach((it, j) => {
+      if (j) {
+        const before = Mixing.mix(paints, pile);
+        const after = Mixing.mix(paints, pile.map((v, i) => v + (i === it.paint ? 1 : 0)));
+        const dE = Study.deltaE2000(...before.lab, ...after.lab);
+        if (dE > most) { most = dE; slow = j; }
+      }
+      pile[it.paint] += it.parts;
+    });
+    main.forEach((it, j) => {
+      const p = paintOf(it);
+      if (res.items.length === 1) steps.push([p.hex, `Use ${p.name} straight from the tube.`]);
+      else if (!j) steps.push([p.hex, main.length === 1 ? `Start with a pile of ${p.name}.` : `Start with ${plural(it.parts, 'part')} ${p.name}.`]);
+      else steps.push([p.hex, `Add ${plural(it.parts, 'part')} ${p.name}${j === slow ? ', a little at a time' : ''}.`]);
+    });
+    res.items.filter((it) => it.touch).forEach((it) => {
+      const n = niceFraction(res.total / it.parts);
+      steps.push([paintOf(it).hex, `Add a touch of ${paintOf(it).name}: about 1/${n} of the pile${n >= 80 ? ', a speck on the tip of the knife' : ''}.`]);
+    });
+    steps.push([null, `Check the value: it should read V ${valueLabel(res.targetLab[0])} in the loupe.`]);
+    return steps;
+  }
+
+  function renderMixCard() {
+    const m = state.mixing;
+    const card = els.mixCard;
+    card.textContent = '';
+    card.hidden = !m.card;
+    syncExpanded();
+    if (!m.card) return;
+    const c = Mixing.hexToRgb(m.card);
+    const res = recipeOf(c);
+
+    const head = document.createElement('div');
+    head.className = 'mix-card-head';
+    const h = document.createElement('h3');
+    h.textContent = `How to mix ${m.card}`;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'btn btn-small';
+    close.textContent = 'Close';
+    close.addEventListener('click', closeMixCard);
+    head.append(h, close);
+    card.append(head);
+
+    const say = (text, cls) => {
+      const p = document.createElement('p');
+      p.className = cls || 'hint';
+      p.textContent = text;
+      card.append(p);
+      return p;
+    };
+    if (!m.paints.length) { say('Add paints under My paints to get a recipe.'); return; }
+    if (!res) { say('Working out a mix…', 'recipe-wait'); return; }
+
+    const compare = document.createElement('div');
+    compare.className = 'mix-compare';
+    const pair = document.createElement('div');
+    pair.className = 'mix-pair';
+    [['Target', res.target, res.targetLab], ['Predicted mix', res.mix, res.mixLab]].forEach(([name, col, lab]) => {
+      const fig = document.createElement('figure');
+      const chip = document.createElement('div');
+      chip.className = 'chip-big';
+      chip.style.background = toHex(col);
+      const cap = document.createElement('figcaption');
+      cap.textContent = `${name}\n${toHex(col)} · V ${valueLabel(lab[0])}`;
+      cap.style.whiteSpace = 'pre-line';
+      fig.append(chip, cap);
+      pair.append(fig);
+    });
+    const verdict = document.createElement('div');
+    verdict.className = 'mix-verdict';
+    const line = document.createElement('p');
+    line.append(badge(res));
+    const words = res.limit ? (res.limit === 'dark' ? ' As dark as these paints go.' : ' As light as these paints go.') : {
+      close: ' The difference should be hard to see.',
+      near: ' A small difference you can correct by eye.',
+      far: ' These paints can’t make this color.',
+    }[res.status];
+    line.append(words);
+    verdict.append(line);
+    if (res.status !== 'close' && res.diff.length) {
+      const note = document.createElement('p');
+      note.textContent = `The ${noteText(res)}.`;
+      verdict.append(note);
+    }
+    if (res.status === 'far' || res.limit) {
+      const tip = document.createElement('p');
+      tip.textContent = lesson(res);
+      verdict.append(tip);
+    }
+    compare.append(pair, verdict);
+    card.append(compare);
+
+    const bar = document.createElement('div');
+    bar.className = 'mix-bar';
+    bar.setAttribute('aria-hidden', 'true');
+    res.items.forEach((it) => {
+      const seg = document.createElement('span');
+      seg.style.setProperty('--c', paintOf(it).hex);
+      seg.style.flex = `${it.parts} 1 0`;
+      seg.title = `${paintOf(it).name}: ${it.touch ? 'a touch' : plural(it.parts, 'part')}`;
+      bar.append(seg);
+    });
+    card.append(bar);
+
+    const ol = document.createElement('ol');
+    ol.className = 'mix-steps';
+    mixSteps(res).forEach(([hex, text]) => {
+      const li = document.createElement('li');
+      if (hex) li.append(dot(hex));
+      li.append(text);
+      ol.append(li);
+    });
+    card.append(ol);
+    say('Starting mix, adjust by eye. It is predicted from typical paints’ colors with a pigment-mixing model; your tubes, medium and light will differ, so mix it, then compare it with the reference.');
+  }
+
+  // ---- My paints ----
+
+  function renderPaints() {
+    const m = state.mixing;
+    const pal = paletteById(m.active);
+    const n = m.paints.length;
+    if (!els.paintPreset.options.length) {
+      PALETTES.forEach((p) => {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.id === OWN ? p.name : `${p.name} (${plural(p.paints.length, 'paint')})`;
+        els.paintPreset.append(o);
+      });
+    }
+    els.paintPreset.value = m.active;
+    const changed = isChanged(m.active);
+    els.paintReset.hidden = !changed;
+    els.paintReset.textContent = m.active === OWN ? 'Start over with white only' : `Restore the ${pal.name} paints`;
+
+    els.paintDots.textContent = '';
+    m.paints.forEach((p) => els.paintDots.append(dot(p.hex)));
+    els.paintsState.textContent = `${pal.name}${changed && m.active !== OWN ? ', changed' : ''} · ${plural(n, 'paint')}`;
+
+    els.paintList.textContent = '';
+    m.paints.forEach((p, index) => {
+      const li = document.createElement('li');
+      li.className = 'paint-row';
+      const chip = document.createElement('span');
+      chip.className = 'paint-chip';
+      chip.style.setProperty('--c', p.hex);
+      if (p.tint) chip.style.setProperty('--t', p.tint);
+      chip.title = p.tint ? `Tube ${p.hex}, 1 : 4 tint ${p.tint}` : `Tube ${p.hex}`;
+      const name = document.createElement('span');
+      name.className = 'paint-name';
+      const strong = document.createElement('strong');
+      strong.textContent = p.name;
+      const small = document.createElement('small');
+      small.textContent = p.white ? `${p.code} · white` : `${p.code} · ${p.tint ? 'tint fitted' : 'no tint swatch'}`;
+      name.append(strong, small);
+
+      const sel = document.createElement('select');
+      sel.setAttribute('aria-label', `Tinting strength of ${p.name}`);
+      sel.title = 'Tinting strength: how far a little of this paint goes in white';
+      Object.keys(Mixing.STRENGTHS).forEach((k) => {
+        const o = document.createElement('option');
+        o.value = k;
+        o.textContent = STRENGTH_LABEL[k];
+        sel.append(o);
+      });
+      sel.value = p.strength;
+      sel.addEventListener('change', () => {
+        editPaints((defs) => { defs[index].strength = sel.value; });
+        const again = els.paintList.querySelectorAll('select')[index];
+        if (again) again.focus();
+      });
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-small btn-ghost';
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', `Remove ${p.name}`);
+      remove.addEventListener('click', () => {
+        editPaints((defs) => { defs.splice(index, 1); });
+        const rest = els.paintList.querySelectorAll('.btn-ghost');
+        (rest[Math.min(index, rest.length - 1)] || els.paintPreset).focus();
+        toast(`Removed ${p.name}`);
+      });
+      li.append(chip, name, sel, remove);
+      els.paintList.append(li);
+    });
+
+    const warn = !n ? 'No paints yet. Add the paints you own below.'
+      : !m.paints.some((p) => p.white) ? 'There is no white, so recipes can’t be lightened. Add a white with a tube color close to #F3F1EA.'
+        : n >= MAX_PAINTS ? `That is ${MAX_PAINTS} paints, the most a palette can hold here. Remove one to add another.` : '';
+    els.paintWarn.textContent = warn;
+    els.paintWarn.hidden = !warn;
+    els.paintAddBtn.disabled = n >= MAX_PAINTS;
+  }
+
+  // Applies a change to the paints in use, saving them as that palette's own version
+  function editPaints(change) {
+    const defs = paintDefs();
+    change(defs);
+    state.mixing.lists[state.mixing.active] = defs;
+    paintsChanged(true);
+  }
+
+  function paintsChanged(save) {
+    if (save) saveMixing();
+    usePaints();
+    renderPaints();
+    renderPalette();
+    renderMixCard();
+    renderSheet();
+  }
+
+  els.paintPreset.addEventListener('change', () => {
+    state.mixing.active = els.paintPreset.value;
+    paintsChanged(true);
+    toast(`Recipes now use ${paletteById(state.mixing.active).name}`);
+  });
+  els.paintReset.addEventListener('click', () => {
+    delete state.mixing.lists[state.mixing.active];
+    paintsChanged(true);
+    els.paintPreset.focus();
+  });
+  els.paintTintOn.addEventListener('change', () => { els.paintTint.disabled = !els.paintTintOn.checked; });
+  els.paintAdd.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const defs = paintDefs();
+    if (defs.length >= MAX_PAINTS) return;
+    const name = els.paintName.value.trim().slice(0, 40) || `Paint ${defs.length + 1}`;
+    const code = uniqueCode((els.paintCode.value.trim() || initials(name)).slice(0, 3).toUpperCase(), defs);
+    editPaints((list) => {
+      list.push({ name, code, hex: els.paintHex.value, tint: els.paintTintOn.checked ? els.paintTint.value : '', strength: els.paintStrength.value });
+    });
+    els.paintName.value = '';
+    els.paintCode.value = '';
+    toast(`Added ${name} as ${code}`);
+  });
+
+  // ---- Mixing sheet ----
+
+  function renderSheet() {
+    const m = state.mixing;
+    els.sheet.hidden = !m.sheet;
+    const cardHere = els.sheetGroups.contains(els.mixCard);
+    if (cardHere) els.swatches.after(els.mixCard);
+    if (!m.sheet || !state.result) { if (cardHere) closeMixCard(); return; }
+    const r = state.result;
+    els.sheetCount.textContent = `${paletteById(m.active).name} · ${plural(r.blockColors.length, 'color')}`;
+    els.sheetIntro.textContent = 'Every color in the color-block study, by value mass and darkest first, as a starting mix from your paints. Premix them before you paint, then adjust by eye. Tap a recipe for the steps.';
+    els.sheetGroups.textContent = '';
+    let reopen = null;
+    ZONE_NAMES.forEach((zoneName, z) => {
+      const colors = r.blockColors.filter((c) => c.zone === z)
+        .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
+      if (!colors.length) return;
+      const group = document.createElement('section');
+      group.className = 'sheet-group';
+      const h = document.createElement('h3');
+      h.textContent = `${zoneName} · ${Math.round(r.zoneShare[z] * 100)}% of picture`;
+      const ol = document.createElement('ol');
+      ol.className = 'sheet-list';
+      colors.forEach((c) => {
+        const li = document.createElement('li');
+        li.className = 'sheet-row';
+        const btn = recipeButton(c, { v: valueLabel(Study.lightnessOf(c.r, c.g, c.b)), share: (c.share * 100).toFixed(c.share < 0.01 ? 1 : 0) });
+        if (cardHere && btn.dataset.recipe === m.card && !reopen) reopen = btn;
+        li.append(btn);
+        ol.append(li);
+      });
+      group.append(h, ol);
+      els.sheetGroups.append(group);
+    });
+    if (reopen) {
+      m.cardFrom = reopen;
+      reopen.closest('ol').after(els.mixCard);
+      renderMixCard();
+    } else if (cardHere) closeMixCard();
+  }
+
+  els.sheetOpen.addEventListener('click', () => {
+    state.mixing.sheet = true;
+    renderSheet();
+    els.sheet.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    els.sheetTitle.focus({ preventScroll: true });
+  });
+  els.sheetClose.addEventListener('click', () => {
+    state.mixing.sheet = false;
+    renderSheet();
+    els.sheetOpen.focus();
+  });
+  els.sheetCopy.addEventListener('click', () => {
+    const r = state.result;
+    if (!r || !state.mixing.paints.length) return;
+    const lines = ['Mixing sheet', paintsLegend()];
+    ZONE_NAMES.forEach((zoneName, z) => {
+      const colors = r.blockColors.filter((c) => c.zone === z)
+        .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
+      if (!colors.length) return;
+      lines.push('', `${zoneName} (${Math.round(r.zoneShare[z] * 100)}% of picture)`);
+      colors.forEach((c) => lines.push(recipeLine(c, recipeNow(c))));
+    });
+    copyText(lines.join('\n'), 'Copied the mixing sheet');
+  });
+
+  usePaints();
+  renderPaints();
 
   // ---- Sample portrait ----------------------------------------------------
 
