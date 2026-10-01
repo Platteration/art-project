@@ -63,7 +63,7 @@
     warmer: {
       unit: 'Pair', next: 'Next pair',
       prompt: 'Which spot is warmer, A or B?',
-      help: 'Warmer means nearer orange on the color wheel. Judge the hue, not how light the spot is. Tap a ring, or press A or B.',
+      help: 'Warmer means nearer orange on the color wheel, and of two warm colors close in hue, the grayer reads cooler. Judge the color, not how light the spot is. Tap a ring, or press A or B.',
     },
   };
 
@@ -283,12 +283,13 @@
     return s.zone;
   }
 
-  // Mass drill: the spot's own value sits clearly inside its mass, not on a split
+  // Mass drill: the spot's own value sits clearly inside its mass, half a value step or more
+  // from a split (less when the middle mass is narrow, so it still has spots)
   function clearOfSplits(s) {
     const z = zoneOf(s);
     if (z < 0) return false;
     const [t1, t2] = app.splits();
-    const m = 1.5;
+    const m = Math.min(5, (t2 - t1) / 4);
     return z === 0 ? s.L <= t1 - m : z === 1 ? s.L >= t1 + m && s.L <= t2 - m : s.L >= t2 + m;
   }
 
@@ -355,28 +356,43 @@
 
   /*
    * Which is warmer: two spots of about the same value, 5 or more apart along the
-   * warm (orange) direction. A painter reads temperature from hue, so when both
-   * have color the warmer one must also sit nearer orange on the color wheel, or a
-   * strong pink would count as warmer than a soft orange. In a trap the cooler spot
-   * is the more colorful or the lighter one. Two colors beat a color against a gray.
+   * warm (orange) direction. A pair is only asked when a painter can say why, and
+   * the reason goes with it:
+   *   hue     both have color, and the warmer sits clearly nearer orange on the wheel
+   *   grayer  both are close in a warm hue (pink to yellow), and the cooler is grayer
+   *   gray    the cooler is close to gray, and the warmer leans warm
+   *   cool    the warmer is close to gray, and the cooler leans blue
+   * Two blues that differ only in strength are left out: the stronger is the cooler,
+   * which teaches nothing about hue. A strong pink against a soft orange is left out
+   * too. In a trap the cooler spot is the more colorful or the lighter one. Two
+   * colors beat a color against a gray.
    */
+  const WARM_SIDE = 60, COOL_SIDE = 100; // degrees from orange: hues that clearly lean warm, and cool
   function judgeWarmer(a, b) {
     const dL = Math.abs(a.L - b.L);
     if (dL >= 8 || Math.abs(a.warm - b.warm) < 5) return null;
     const [warm, cool] = a.warm > b.warm ? [a, b] : [b, a];
+    const fromW = hueGap(warm.hue, WARM_DEG), fromC = hueGap(cool.hue, WARM_DEG);
     const colored = warm.C >= 8 && cool.C >= 8;
-    if (colored && hueGap(warm.hue, WARM_DEG) > hueGap(cool.hue, WARM_DEG) + 10) return null;
+    let why = null;
+    if (colored && fromC - fromW >= 15) why = 'hue';
+    else if (colored && hueGap(warm.hue, cool.hue) <= 20 && fromW <= fromC + 5 && fromW <= WARM_SIDE && fromC <= WARM_SIDE &&
+      warm.C - cool.C >= 5) why = 'grayer';
+    else if (!colored && cool.C < 8 && warm.C >= 8 && fromW <= WARM_SIDE) why = 'gray';
+    else if (!colored && warm.C < 8 && cool.C >= 8 && fromC >= COOL_SIDE) why = 'cool';
+    if (!why) return null;
     const lure = Math.max(0, cool.C - warm.C) + Math.max(0, cool.L - warm.L);
-    const kind = dL >= 5 ? 'easy' : lure >= 4 ? 'trap' : 'plain';
+    const kind = dL >= 5 ? 'easy' : cool.C - warm.C >= 4 || cool.L - warm.L >= 3 ? 'trap' : 'plain';
     // a real difference in hue makes a better question than one color against a grayer one
-    const hueSplit = colored && hueGap(cool.hue, WARM_DEG) - hueGap(warm.hue, WARM_DEG) >= 15;
-    return { kind, score: (colored ? 20 : 0) + (hueSplit ? 10 : 0) + lure - Math.min(15, Math.abs(a.warm - b.warm)) / 3 };
+    return { kind, why, score: (colored ? 20 : 0) + (why === 'hue' ? 10 : 0) + lure - Math.min(15, Math.abs(a.warm - b.warm)) / 3 };
   }
 
   function pairQuestion(round) {
     const judge = round.mode === 'lighter' ? judgeLighter : judgeWarmer;
-    // near black and near white, small differences are noise and the screen's, not the subject's
-    const all = t.found.spots.filter((s) => s.L >= 10 && s.L <= 95);
+    // near black and near white, small differences are noise and the screen's, not the subject's.
+    // Color goes first in the dark, so temperature is only asked from V 2 up.
+    const floor = round.mode === 'warmer' ? 20 : 10;
+    const all = t.found.spots.filter((s) => s.L >= floor && s.L <= 95);
     if (all.length < 2 || t.noPairs[round.mode]) return null;
     const spots = unused(all, round);
     const long = t.found.long, minApart = 0.1 * long;
@@ -411,7 +427,7 @@
         ? 'This photo has few pairs close in value, so these two are further apart.'
         : 'This photo has few pairs of the same value, so these two differ a little in value too.';
     }
-    return { spots: spotsAB, truth, kind: best.j.kind, note, picked: null };
+    return { spots: spotsAB, truth, kind: best.j.kind, why: best.j.why, note, picked: null };
   }
 
   // What most likely fooled the eye when a pair was answered wrong
@@ -541,11 +557,25 @@
 
     const next = els.feedback.querySelector('[data-next]');
     if (next && hadFocus) next.focus({ preventScroll: true });
-    // on a phone the card can land below the fold
+    // on a phone the card can land below the fold: bring it up, but not so far that the rings
+    // and their labels leave the top of the screen, since the answer is read off the photo
     const card = els.feedback.firstElementChild;
-    if (card && card.getBoundingClientRect().bottom > window.innerHeight) {
-      card.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    const below = card ? card.getBoundingClientRect().bottom + 8 - window.innerHeight : 0;
+    if (below > 0) {
+      const room = ringsTop() - 8;
+      const by = room > 0 ? Math.min(below, room) : below;
+      if (by > 0) window.scrollBy({ top: by, behavior: reducedMotion() ? 'auto' : 'smooth' });
     }
+  }
+
+  // Top of the highest ring with its label (drawn above it by tag()), in viewport px
+  function ringsTop() {
+    const q = t.round && t.round.q;
+    const c = els.canvas, rect = c.getBoundingClientRect();
+    if (!q || !c.width) return rect.top;
+    const k = rect.width / c.width;
+    const tops = q.spots.map((s) => (s.y + 0.5) * k - (Math.max(RING_MIN, s.r * k) + 3) - 24);
+    return rect.top + Math.max(0, Math.min(...tops));
   }
 
   function next(fromKey) {
@@ -847,13 +877,20 @@
       : `${Lt} sits among lighter tones, which make it look darker.`;
   }
 
-  // How the warmer spot differs from the cooler one, in words
-  function whyWarmer(warm, cool, W, C) {
-    if (cool.C < 8) return `${W} has more ${hueName(warm.hue)} in it; ${C} is close to gray.`;
-    if (warm.C < 8) return `${C} leans ${hueName(cool.hue)}, which reads cooler than ${W}'s near gray.`;
+  // How the warmer spot differs from the cooler one, in words, for the reason judgeWarmer found
+  function whyWarmer(why, warm, cool, W, C) {
     const wn = hueName(warm.hue), cn = hueName(cool.hue);
-    if (wn !== cn && hueGap(cool.hue, WARM_DEG) - hueGap(warm.hue, WARM_DEG) >= 15) return `${W} leans ${wn}, ${C} leans ${cn}.`;
-    return `They are close in hue, but ${C} is grayer, and a grayer color reads cooler.`;
+    if (why === 'gray') return `${W} has more ${wn} in it; ${C} is close to gray.`;
+    if (why === 'cool') return `${C} leans ${cn}, which reads cooler than ${W}'s near gray.`;
+    if (why === 'grayer') return `They are close in hue, but ${C} is grayer, and a grayer ${wn} reads cooler.`;
+    if (wn !== cn) return `${W} leans ${wn}, ${C} leans ${cn}.`;
+    // the same name for both: name the hue the cooler one turns toward, away from orange
+    const dir = ((cool.hue - WARM_DEG + 540) % 360) - 180 > 0 ? 1 : -1;
+    for (let d = 5; hueGap(cool.hue + dir * d, WARM_DEG) > hueGap(cool.hue, WARM_DEG); d += 5) {
+      const toward = hueName((cool.hue + dir * d + 360) % 360);
+      if (toward !== cn) return `Both are ${wn}, but ${C} leans further toward ${toward}.`;
+    }
+    return `Both are ${wn}, but ${W} sits nearer orange on the color wheel.`;
   }
 
   function renderFeedback() {
@@ -898,11 +935,12 @@
         else if (!right && q.lure === 'around') notes.push(surroundings(ls, ws, P, W));
         else if (!right) notes.push(`They are ${(valueLabel(ws.L) - valueLabel(ls.L)).toFixed(1)} apart on the value scale. Squint: color fades and the difference in value shows.`);
         else if (q.kind === 'trap' && ls.C - ws.C >= 8) notes.push(`Well seen: ${LETTERS[lose]} is more colorful, which makes it look lighter than it is.`);
-        else if (q.kind === 'trap') notes.push('Well seen: ' + surroundings(ls, ws, LETTERS[lose], W).replace(/^./, (c) => c.toLowerCase()));
+        else if (q.kind === 'trap') notes.push('Well seen: ' + surroundings(ls, ws, LETTERS[lose], W));
         q.spots.forEach((p, i) => swatches.append(swatch(p, `${LETTERS[i]} · ${V(p.L)}`, true)));
       } else {
-        line = `${W} is warmer. ${whyWarmer(ws, ls, W, LETTERS[lose])}`;
-        if (!right && q.lure === 'color') notes.push(`${P} is more colorful, but ${W} sits nearer orange on the color wheel.`);
+        line = `${W} is warmer. ${whyWarmer(q.why, ws, ls, W, LETTERS[lose])}`;
+        const cooler = q.why === 'cool' ? `${hueName(ls.hue)} is a cool color` : `${W} sits nearer orange on the color wheel`;
+        if (!right && q.lure === 'color') notes.push(`${P} is more colorful, but ${cooler}.`);
         else if (!right && q.lure === 'light') notes.push(`${P} is lighter, but lighter isn't warmer.`);
         else if (right && q.kind === 'trap' && ls.C - ws.C >= 4) notes.push(`Well seen: ${LETTERS[lose]} is more colorful, but not warmer.`);
         else if (right && q.kind === 'trap') notes.push(`Well seen: ${LETTERS[lose]} is lighter, but not warmer.`);
@@ -964,7 +1002,7 @@
     const history = stats().filter((a) => a.mode === r.mode);
     const figure = el('div', 'eye-score');
     const lines = [];
-    let list = null, advice = '', longRun = '', drill = -1;
+    let list = null, advice = '', longRun = '', longRunAdvice = false, drill = -1;
 
     if (r.mode === 'value') {
       const miss = mean(ans.map((a) => Math.abs(a.signedErr)));
@@ -980,13 +1018,16 @@
       const masses = biasByMass(ans);
       list = el('ul', 'eye-bias');
       masses.forEach((b) => list.append(biasRow(b, biasText(b.bias), true)));
-      // advice comes from the long run once there is enough of it, so one odd round doesn't decide it
-      const basis = history.length >= 3 * ROUND ? biasByMass(history) : masses;
+      // advice comes from the long run once there is enough of it, so one odd round doesn't decide it.
+      // It then follows the long-run line and says so, since its number can differ from this round's rows.
+      longRunAdvice = history.length >= 3 * ROUND;
+      const basis = longRunAdvice ? biasByMass(history) : masses;
       const worst = basis.filter((b) => b.n >= 2).sort((a, b) => Math.abs(b.bias) - Math.abs(a.bias))[0];
       if (worst && Math.abs(worst.bias) >= 0.4) {
         const light = worst.bias > 0;
-        advice = `Your ${MASSES[worst.zone]} read ${Math.abs(worst.bias).toFixed(1)} ${light ? 'lighter' : 'darker'} to you than they are` +
-          `${basis === masses ? ' this round' : ''}. When you paint, take them ${light ? 'darker' : 'lighter'} than they look.`;
+        const reads = `${MASSES[worst.zone]} read ${Math.abs(worst.bias).toFixed(1)} ${light ? 'lighter' : 'darker'} to you than they are`;
+        advice = (longRunAdvice ? `Over those ${history.length} answers, your ${reads}.` : `Your ${reads} this round.`) +
+          ` When you paint, take them ${light ? 'darker' : 'lighter'} than they look.`;
         if (r.focus !== worst.zone) drill = worst.zone;
       }
       if (history.length > ans.length) {
@@ -1014,8 +1055,17 @@
           const called = Array.from(new Set(wrong)).map((name) => `${wrong.filter((w) => w === name).length} called ${name}`);
           list.append(biasRow({ zone: z, n: own.length }, [`${ok} of ${own.length} right`].concat(called).join(', ')));
         });
+        // shadows and lights both called middle squeeze the values together, middles called both
+        // shadow and light spread them apart: neither is a lean one way
+        const squeeze = misses.filter((a) => a.zone !== 1 && a.zone + a.signedErr === 1);
+        const spread = misses.filter((a) => a.zone === 1);
+        const bothWays = (group) => group.some((a) => a.signedErr > 0) && group.some((a) => a.signedErr < 0);
         const up = misses.filter((a) => a.signedErr > 0).length, down = misses.length - up;
-        if (misses.length >= 2 && up !== down) {
+        if (bothWays(squeeze) && 2 * squeeze.length > misses.length) {
+          advice = 'You tend to call shadows and lights middle, which squeezes the values together. Squint: the shadows merge into one dark shape and the lights into one light shape, further apart than they seem.';
+        } else if (bothWays(spread) && 2 * spread.length > misses.length) {
+          advice = 'You tend to push middle tones out into the shadows and the lights. Squint and compare each spot with the darkest and lightest parts of the photo.';
+        } else if (misses.length >= 2 && up !== down) {
           advice = up > down
             ? 'You tend to put spots in a lighter mass than your splits do. Squint and compare each spot with the darkest and lightest parts of the photo.'
             : 'You tend to put spots in a darker mass than your splits do. Squint and compare each spot with the darkest and lightest parts of the photo.';
@@ -1035,7 +1085,7 @@
         } else if (color && color >= other) {
           advice = 'A strong color isn\'t always a warm one: ask which spot leans toward orange, and which toward pink, yellow, green, blue or gray.';
         } else if (other) {
-          advice = 'Lighter isn\'t warmer: compare the hue of the two spots, not their value.';
+          advice = 'Lighter isn\'t warmer: compare the color of the two spots, not their value.';
         }
         if (history.length > ans.length) {
           const ok = history.filter((a) => a.signedErr === 0).length;
@@ -1047,8 +1097,10 @@
     box.append(figure);
     lines.forEach((l, i) => box.append(el('p', i ? 'hint' : null, l)));
     if (list) box.append(list);
+    // advice from the long run follows the long-run figures it is based on
+    if (longRun && longRunAdvice) box.append(el('p', 'hint', longRun));
     if (advice) box.append(el('p', 'eye-advice', advice));
-    if (longRun) box.append(el('p', 'hint', longRun));
+    if (longRun && !longRunAdvice) box.append(el('p', 'hint', longRun));
 
     const actions = el('div', 'eye-card-actions');
     const again = el('button', 'btn btn-primary', 'Start a new round');

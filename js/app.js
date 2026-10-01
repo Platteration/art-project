@@ -1135,8 +1135,10 @@
     }
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) &&
       document.activeElement.type !== 'radio' && document.activeElement.type !== 'range';
-    // Ctrl/⌘+Z only: with Shift (or Alt) it is redo, which has nothing to redo here
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && state.lines.length && !typing) {
+    // Ctrl/⌘+Z only: with Shift (or Alt) it is redo, which has nothing to redo here.
+    // Not while the toolbar is hidden (Train your eye): the lines can't be seen there.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && state.lines.length && !typing &&
+      !els.toolbar.hidden) {
       e.preventDefault();
       els.lineUndo.click();
     }

@@ -444,7 +444,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 
 .eye-side { grid-area: side; display: grid; gap: 14px; min-width: 0; align-content: start; }
 .eye-answers { container-type: inline-size; }
-.eye-answers:focus { outline: none; } /* takes focus only to hand it to the answers inside */
+/* it takes focus to hand it to the answers inside; from the keyboard it shows the global outline */
+.eye-answers:focus:not(:focus-visible) { outline: none; }
+.eye-answers:focus-visible { outline-offset: 4px; border-radius: 4px; }
 /* the value scale: one row of eleven grays, six and five on narrow screens */
 .eye-steps { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 5px; }
 @container (max-width: 359px) { .eye-steps { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
