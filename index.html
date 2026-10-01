@@ -101,7 +101,7 @@
     <main class="work">
       <div class="tabs" role="tablist" aria-label="Mode">
         <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
-        <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
+        <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting <span class="tab-new">New<span class="tab-new-more">: overall shift</span></span></button>
       </div>
 
       <div class="toolbar" role="group" aria-label="Overlays">
@@ -212,6 +212,10 @@
               <button type="button" class="btn btn-small" id="wbUndo" hidden>Remove color fix</button>
               <p class="hint" id="wbStatus">Photos taken under warm or cool light shift every color. Click <strong>Fix color cast</strong>, then click a spot on your painting that should be white or neutral gray, such as the paper edge.</p>
             </div>
+            <div class="align-glare">
+              <label class="check" for="glare"><input type="checkbox" id="glare" checked> Ignore glare (shiny white spots)</label>
+              <p class="hint" id="glareStatus"></p>
+            </div>
           </div>
         </details>
 
@@ -222,11 +226,19 @@
 
         <div class="check-body" id="checkBody" hidden>
           <div class="scorecard">
-            <div class="score-main">
-              <span class="score-label">Color accuracy</span>
-              <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
-              <span class="score-grade" id="scoreGrade"></span>
+            <div class="score-pair">
+              <div class="score-main">
+                <span class="score-label">Color accuracy</span>
+                <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
+                <span class="score-grade" id="scoreGrade"></span>
+              </div>
+              <div class="score-main score-rel">
+                <span class="score-label">Relationships</span>
+                <div class="score-figure"><span class="score-num" id="scoreRel">0</span><span class="score-of">/ 100</span></div>
+                <span class="score-grade" id="scoreRelNote"></span>
+              </div>
             </div>
+            <p class="hint"><strong>Relationships</strong> is how well your colors relate to each other once one overall shift is set aside. Trust it when your photo's light or exposure differs from the reference. Color accuracy always counts the shift.</p>
             <dl class="score-sub">
               <div>
                 <dt>Value accuracy</dt>
@@ -239,8 +251,30 @@
             </dl>
             <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
           </div>
+          <section class="overall" id="overall" aria-labelledby="overallTitle">
+            <div class="overall-head">
+              <h3 id="overallTitle">Overall</h3>
+              <span class="tab-new">New</span>
+            </div>
+            <p class="hint">Value range, key and temperature across the whole picture. One overall shift here shows up as the same note on many shapes below.</p>
+            <div class="ov-scales" id="ovScales" role="img"></div>
+            <dl class="ov-masses" id="ovMasses" aria-label="Middle value of each mass, reference to yours"></dl>
+            <p class="hint">Bars run from the darkest dark to the lightest light. Ticks mark the middle value of the shadow, middle and light masses, read over the reference's masses in both pictures.</p>
+            <div class="ov-nudge" id="ovNudge" hidden>
+              <p>Your photo doesn't line up with the reference yet, so each mass mixes light and shadow at its edges. Line it up first for a fair reading.</p>
+              <button type="button" class="btn btn-small" id="ovLineUp">Open the line-up controls</button>
+            </div>
+            <ol class="ov-findings" id="ovFindings"></ol>
+          </section>
           <div class="fixes">
-            <h3>Biggest differences</h3>
+            <div class="fixes-head">
+              <h3>Biggest differences</h3>
+              <div class="seg" role="radiogroup" aria-label="Compare shapes">
+                <input type="radio" name="shiftMode" id="modeRaw" value="raw" checked><label for="modeRaw">As photographed</label>
+                <input type="radio" name="shiftMode" id="modeRel" value="rel"><label for="modeRel">After overall shift</label>
+              </div>
+            </div>
+            <p class="hint" id="fixHint"></p>
             <ol class="fix-list" id="fixList"></ol>
           </div>
         </div>
@@ -259,9 +293,9 @@
             <div class="matte"><canvas id="cv-artblock" class="view" aria-label="Your painting as color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
           </figure>
           <figure class="panel">
-            <figcaption><span>Accuracy by shape</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
+            <figcaption><span>Accuracy by shape <span class="cap-note" id="diffNote"></span></span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
             <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-            <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
+            <p class="hint" id="diffHint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
           </figure>
         </div>
       </section>
