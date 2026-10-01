@@ -31,6 +31,13 @@
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
+    measureUnit: $('measureUnit'),
+    measureUndo: $('measureUndo'),
+    measureClear: $('measureClear'),
+    canvasSize: $('canvasSize'),
+    canvasSys: $('canvasSys'),
+    plumbUndo: $('plumbUndo'),
+    plumbClear: $('plumbClear'),
     artFile: $('artFile'),
     artFit: $('artFit'),
     artSource: $('artSource'),
@@ -79,10 +86,12 @@
 
   const ZONE_NAMES = ['Shadow', 'Middle', 'Light'];
   const PALETTE_KEY = 'portrait-value-studio.palette';
+  const CANVAS_KEY = 'portrait-value-studio.canvasUnit';
 
   const state = {
     source: null,      // HTMLImageElement or canvas
     baseName: 'sample-study',
+    isSample: true,    // the built-in sample is showing
     prep: null,        // Study.prepare() output
     result: null,      // Study.process() output
     pixels: {},        // view id -> RGBA array, used by the loupe
@@ -90,10 +99,15 @@
     hover: null,       // last sampled { r, g, b }
     tab: 'study',
     grid: 0,           // 0, 3 or 4 divisions
-    tool: 'sample',    // 'sample' or 'line'
+    tool: 'sample',    // 'sample', 'line', 'measure' or 'plumb'
     lineColor: '#e5322d',
     lines: [],         // reference lines in 0-1 image coordinates
-    drawing: null,     // line being dragged out
+    measures: [],      // measured lengths, same coordinates
+    unitIndex: 0,      // which measure is the unit (1 U)
+    plumbs: [],        // plumb line and level crossing points, same coordinates
+    history: [],       // undo steps for lines, measures and plumbs, oldest first
+    drawing: null,     // line or measure being dragged out
+    dragging: null,    // plumb point being dropped or moved
     art: {             // the painting being checked
       source: null,
       name: '',
@@ -320,10 +334,13 @@
       state.source = img;
       state.baseName = (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait';
       setSourceLabel(file.name || 'Pasted image', img.naturalWidth, img.naturalHeight, false);
-      if (state.lines.length) {
-        state.lines = [];
-        updateLineButtons();
-        toast('Reference lines cleared for the new photo');
+      const marks = [
+        state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
+      ].filter(Boolean);
+      clearMarks();
+      if (marks.length) {
+        const list = marks.length > 1 ? marks.slice(0, -1).join(', ') + ' and ' + marks[marks.length - 1] : marks[0];
+        toast(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo`);
       }
       if (state.art.isExample) setArt(null);
       prepareAndRun(true);
@@ -341,6 +358,8 @@
   const loadForTab = (file) => (state.tab === 'check' ? loadArtFile(file) : loadFile(file));
 
   function setSourceLabel(name, w, h, isSample) {
+    state.isSample = isSample;
+    updateToolHint();
     els.source.textContent = '';
     const strong = document.createElement('strong');
     strong.textContent = name;
@@ -514,7 +533,9 @@
       els.loupeHex.textContent = hex;
       els.loupeVal.textContent = 'V ' + valueLabel(Study.lightnessOf(s.r, s.g, s.b));
     }
-    if (state.drawing) els.loupeVal.textContent = 'Tilt ' + lineAngle(state.drawing, s.w, s.h) + '°';
+    const d = state.drawing;
+    if (d) els.loupeVal.textContent = 'Tilt ' + lineAngle(d, s.w, s.h) + '°';
+    if (d && d.kind === 'measure') els.loupeHex.textContent = measureText(d, d === unitMeasure());
   }
 
   function placeLoupe(clientX, clientY, touch) {
@@ -551,6 +572,14 @@
     return s;
   }
 
+  // The loupe on a point given in 0-1 image coordinates, such as a line's end. At the right or
+  // bottom edge that is the last pixel, not one past it.
+  function loupeAt(canvas, x, y, pointerType) {
+    const rect = canvas.getBoundingClientRect();
+    const fx = Math.min(x, 1 - 0.5 / canvas.width), fy = Math.min(y, 1 - 0.5 / canvas.height);
+    showLoupeFor(canvas, { clientX: rect.left + fx * rect.width, clientY: rect.top + fy * rect.height, pointerType });
+  }
+
   // Image position under the pointer in 0-1 coordinates, kept inside the image
   function pointOn(canvas, e) {
     const rect = canvas.getBoundingClientRect();
@@ -583,6 +612,17 @@
     return Math.round(deg);
   }
 
+  // How far (css px) a press can wander and still count as a tap: fingers wobble more than a mouse
+  const tapSlop = (e) => (e.pointerType === 'touch' ? 10 : 4);
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+  // Drawing on an image cancels the press's default, which would also have taken focus off a
+  // field such as the canvas length. Do that here, or Ctrl/⌘+Z would undo the typing, not the drawing.
+  function releaseFocus() {
+    const el = document.activeElement;
+    if (el && el !== document.body && el.blur) el.blur();
+  }
+
   document.querySelectorAll('canvas.view').forEach((canvas) => {
     let down = null;
     canvas.addEventListener('pointermove', (e) => {
@@ -593,17 +633,30 @@
         d.y2 = pt.y;
         if (e.shiftKey) snapLine(d, canvas.width, canvas.height);
         drawAllOverlays();
-        // the loupe follows the line's end; at the right or bottom edge that is the last pixel, not one past it
-        const rect = canvas.getBoundingClientRect();
-        const fx = Math.min(d.x2, 1 - 0.5 / canvas.width), fy = Math.min(d.y2, 1 - 0.5 / canvas.height);
-        showLoupeFor(canvas, { clientX: rect.left + fx * rect.width, clientY: rect.top + fy * rect.height, pointerType: e.pointerType });
+        loupeAt(canvas, d.x2, d.y2, e.pointerType); // the loupe follows the line's end
         return;
       }
+      const p = state.dragging;
+      if (p && p.canvas === canvas) {
+        const pt = pointOn(canvas, e);
+        p.far = p.far || Math.hypot(e.clientX - p.downX, e.clientY - p.downY) >= tapSlop(e);
+        // a new point follows the pointer at once; a placed one stays put until it is clearly dragged
+        if (p.index < 0 || p.far) {
+          p.x = clamp01(pt.x + p.dx);
+          p.y = clamp01(pt.y + p.dy);
+          if (p.index >= 0) state.plumbs[p.index] = { x: p.x, y: p.y };
+          drawAllOverlays();
+        }
+        loupeAt(canvas, p.x, p.y, e.pointerType);
+        return;
+      }
+      if (state.tool === 'plumb') canvas.classList.toggle('on-ring', plumbAt(canvas, e) >= 0);
       if (e.pointerType === 'touch' && !down) return;
       showLoupeFor(canvas, e);
     });
     canvas.addEventListener('pointerleave', (e) => {
-      if (e.pointerType === 'touch' || state.drawing) return;
+      canvas.classList.remove('on-ring');
+      if (e.pointerType === 'touch' || state.drawing || state.dragging) return;
       els.loupe.hidden = true;
       state.hover = null;
     });
@@ -611,13 +664,32 @@
       if (e.button > 0) return;
       down = { x: e.clientX, y: e.clientY };
       if (state.picking) return;
-      if (state.tool === 'line') {
+      if (state.tool === 'line' || state.tool === 'measure') {
         if (!canvas.width) return;
         e.preventDefault();
+        releaseFocus();
         canvas.setPointerCapture(e.pointerId);
         const pt = pointOn(canvas, e);
-        state.drawing = { canvas, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, color: state.lineColor };
+        state.drawing = { canvas, kind: state.tool, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, color: state.lineColor };
         showLoupeFor(canvas, e);
+        return;
+      }
+      if (state.tool === 'plumb') {
+        if (!canvas.width) return;
+        e.preventDefault();
+        releaseFocus();
+        canvas.setPointerCapture(e.pointerId);
+        // press on a ring to move or remove that point; anywhere else drops a new one
+        const pt = pointOn(canvas, e);
+        const index = plumbAt(canvas, e);
+        const at = index >= 0 ? state.plumbs[index] : pt;
+        state.dragging = {
+          canvas, index, from: { x: at.x, y: at.y }, x: at.x, y: at.y,
+          dx: at.x - pt.x, dy: at.y - pt.y, downX: e.clientX, downY: e.clientY, far: false,
+        };
+        if (index >= 0) canvas.classList.add('is-dragging');
+        drawAllOverlays();
+        loupeAt(canvas, at.x, at.y, e.pointerType);
         return;
       }
       if (e.pointerType === 'touch') showLoupeFor(canvas, e);
@@ -625,6 +697,7 @@
     canvas.addEventListener('pointercancel', () => {
       down = null;
       if (state.drawing) { state.drawing = null; drawAllOverlays(); }
+      cancelDrag();
       els.loupe.hidden = true;
     });
     canvas.addEventListener('pointerup', (e) => {
@@ -634,11 +707,38 @@
       if (d && d.canvas === canvas) {
         state.drawing = null;
         const len = Math.hypot((d.x2 - d.x1) * canvas.width, (d.y2 - d.y1) * canvas.height);
-        if (len >= 4) {
+        const rect = canvas.getBoundingClientRect();
+        const cssLen = Math.hypot((d.x2 - d.x1) * rect.width, (d.y2 - d.y1) * rect.height);
+        if (d.kind === 'measure') {
+          // a tap or a slip would make a near-zero unit and blow every other length up
+          if (len >= 4 && cssLen >= 10) {
+            state.measures.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2 });
+            record({ kind: 'measure', op: 'add' });
+          } else {
+            toast('Drag from one point to another to measure the length between them');
+          }
+        } else if (len >= 4) {
           state.lines.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, color: d.color });
-          updateLineButtons();
+          record({ kind: 'line', op: 'add' });
         }
         drawAllOverlays();
+        if (e.pointerType === 'touch') els.loupe.hidden = true;
+        return;
+      }
+      const p = state.dragging;
+      if (p && p.canvas === canvas) {
+        state.dragging = null;
+        canvas.classList.remove('is-dragging');
+        if (p.index < 0) {
+          // a tap drops the point where the finger came down, not where it wobbled to
+          state.plumbs.push(p.far ? { x: p.x, y: p.y } : p.from);
+          record({ kind: 'plumb', op: 'add' });
+        } else if (p.far) {
+          record({ kind: 'plumb', op: 'move', index: p.index, from: p.from });
+        } else {
+          state.plumbs.splice(p.index, 1);
+          record({ kind: 'plumb', op: 'remove', index: p.index, plumb: p.from });
+        }
         if (e.pointerType === 'touch') els.loupe.hidden = true;
         return;
       }
@@ -653,7 +753,7 @@
         else if (moved < 10) toast('Click a white or gray spot on Your painting');
         return;
       }
-      // the accuracy map's tints are not colors worth keeping; a line drag cancelled with Esc ends here too
+      // the accuracy map's tints are not colors worth keeping; a drag cancelled with Esc ends here too
       if (s && moved < 10 && s.id !== 'diff' && state.tool === 'sample') addColor(s);
     });
   });
@@ -999,8 +1099,9 @@
 
   const overlayOf = (canvas) => canvas.nextElementSibling;
 
-  // Draws the grid and lines into a context of size W x H. `unit` is one line-width step in pixels.
-  function drawOverlayContent(g, W, H, unit) {
+  // Draws the grid, plumb lines, reference lines and measures into a context of size W x H.
+  // `unit` is one line-width step in pixels; `avoid` lists labels already on the image (0-1 boxes).
+  function drawOverlayContent(g, W, H, unit, avoid) {
     g.clearRect(0, 0, W, H);
     g.lineCap = 'round';
     if (state.grid) {
@@ -1018,7 +1119,9 @@
       g.lineWidth = 1.25 * unit;
       g.stroke();
     }
-    const lines = state.drawing ? state.lines.concat(state.drawing) : state.lines;
+    drawPlumbs(g, W, H, unit);
+    const d = state.drawing;
+    const lines = d && d.kind === 'line' ? state.lines.concat(d) : state.lines;
     lines.forEach((l) => {
       const x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
       g.beginPath();
@@ -1037,7 +1140,11 @@
         g.fill();
       });
     });
+    drawMeasures(g, W, H, unit, avoid);
   }
+
+  // The accuracy map has its percentages burned in: measure labels keep off them
+  const labelsOn = (canvas) => (canvas === els.canvases.diff && state.art.cmp && state.art.cmp.labelBoxes) || null;
 
   // Keeps the overlay canvas exactly on top of its image and redraws it
   function syncOverlay(canvas) {
@@ -1055,16 +1162,16 @@
     const dpr = window.devicePixelRatio || 1;
     const W = Math.round(w * dpr), H = Math.round(h * dpr);
     if (o.width !== W || o.height !== H) { o.width = W; o.height = H; }
-    drawOverlayContent(o.getContext('2d'), W, H, dpr);
+    drawOverlayContent(o.getContext('2d'), W, H, dpr, labelsOn(canvas));
   }
 
   function drawAllOverlays() {
     Object.values(els.canvases).forEach(syncOverlay);
   }
 
-  // A copy of an image with the grid and lines burned in, for saving
+  // A copy of an image with the grid, lines, measures and plumb lines burned in, for saving
   function withOverlay(canvas) {
-    if (!state.grid && !state.lines.length) return canvas;
+    if (!state.grid && !state.lines.length && !state.measures.length && !state.plumbs.length) return canvas;
     const out = document.createElement('canvas');
     out.width = canvas.width;
     out.height = canvas.height;
@@ -1072,7 +1179,7 @@
     const layer = document.createElement('canvas');
     layer.width = canvas.width;
     layer.height = canvas.height;
-    drawOverlayContent(layer.getContext('2d'), layer.width, layer.height, Math.max(1, Math.max(canvas.width, canvas.height) / 500));
+    drawOverlayContent(layer.getContext('2d'), layer.width, layer.height, Math.max(1, Math.max(canvas.width, canvas.height) / 500), labelsOn(canvas));
     g.drawImage(canvas, 0, 0);
     g.drawImage(layer, 0, 0);
     return out;
@@ -1090,50 +1197,408 @@
     window.addEventListener('resize', drawAllOverlays);
   }
 
-  function updateLineButtons() {
-    els.lineUndo.disabled = els.lineClear.disabled = state.lines.length === 0;
+  // ---- Measures and plumb lines --------------------------------------------
+
+  const UNIT_COLOR = '#ffd21f';
+  const MEASURE_COLOR = '#ffffff';
+  const RING = 7;       // css px: radius of the ring on a plumb point
+  const RING_HIT = 12;  // css px: how near a press must land to grab a ring (a finger gets 18)
+
+  // A measure's length on the reference's pixel grid, so every image and working size agrees
+  function lengthOf(m) {
+    return Math.hypot((m.x2 - m.x1) * state.prep.w, (m.y2 - m.y1) * state.prep.h);
+  }
+
+  // The unit (1 U): the first measure, or the one made the unit since. While the first measure
+  // is still being dragged out, that one.
+  function unitMeasure() {
+    if (state.measures.length) return state.measures[state.unitIndex];
+    const d = state.drawing;
+    return d && d.kind === 'measure' ? d : null;
+  }
+
+  // The nearest whole number, half, third or quarter, written the way an artist would say it,
+  // or '' if none is within 0.03
+  const FRACTIONS = { '1/2': '½', '1/3': '⅓', '2/3': '⅔', '1/4': '¼', '3/4': '¾' };
+  function nearestFraction(r) {
+    for (let d = 1; d <= 4; d++) {
+      const n = Math.round(r * d);
+      if (!n || Math.abs(n / d - r) > 0.03) continue;
+      const whole = Math.floor(n / d), rest = n % d;
+      return (whole || !rest ? String(whole) : '') + (rest ? FRACTIONS[rest + '/' + d] : '');
+    }
+    return '';
+  }
+
+  // Centimeters to a tenth; inches to the nearest eighth, as on a ruler
+  const EIGHTHS = ['', '⅛', '¼', '⅜', '½', '⅝', '¾', '⅞'];
+  function formatSize(v, sys) {
+    if (sys === 'in') {
+      const e = Math.round(v * 8);
+      const whole = Math.floor(e / 8), rest = e % 8;
+      return (whole || !rest ? whole : '') + EIGHTHS[rest] + ' in';
+    }
+    return Math.round(v * 10) / 10 + ' cm';
+  }
+
+  // The unit's length on the student's canvas, or null while it isn't set
+  function canvasSize() {
+    const v = parseFloat(els.canvasSize.value);
+    return v > 0 && v < 10000 ? { value: v, sys: els.canvasSys.value } : null;
+  }
+
+  function loadCanvasSize() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CANVAS_KEY) || 'null');
+      if (saved && +saved.value > 0) els.canvasSize.value = +saved.value;
+      if (saved && (saved.sys === 'cm' || saved.sys === 'in')) els.canvasSys.value = saved.sys;
+    } catch (err) {
+      /* nothing saved, or storage unavailable: start empty */
+    }
+  }
+
+  function saveCanvasSize() {
+    try {
+      localStorage.setItem(CANVAS_KEY, JSON.stringify({ value: els.canvasSize.value, sys: els.canvasSys.value }));
+    } catch (err) {
+      /* storage unavailable: the size still works for this visit */
+    }
+  }
+
+  // "1.48 U ≈ 1½ · 13.3 cm": the length in units, the nearest simple fraction, and how long to
+  // make it on the canvas once the unit's length there is set
+  function measureText(m, isUnit) {
+    const r = isUnit ? 1 : lengthOf(m) / lengthOf(unitMeasure());
+    const f = isUnit ? '' : nearestFraction(r);
+    let text = isUnit ? '1 U' : r.toFixed(2) + ' U' + (f ? ' ≈ ' + f : '');
+    const size = canvasSize();
+    if (size) text += ' · ' + formatSize(r * size.value, size.sys);
+    return text;
+  }
+
+  // Label pills, shared by the measures and the accuracy map's percentages
+  const PILLS = {
+    dark: { fill: 'rgba(20, 21, 24, 0.78)', ink: '#ffffff' },
+    light: { fill: '#ffffff', ink: '#1c1d20', ring: '#1c1d20' },
+    unit: { fill: UNIT_COLOR, ink: '#1c1d20', ring: '#1c1d20' },
+  };
+
+  function pillSize(g, text, font) {
+    g.font = `600 ${font}px "IBM Plex Mono", ui-monospace, monospace`;
+    return { w: g.measureText(text).width + font * 0.9, h: font * 1.45 };
+  }
+
+  // Where a pill of that size goes when centred on (cx, cy): the whole label stays inside the picture
+  function pillBox(size, cx, cy, W, H) {
+    const pad = 3;
+    return {
+      x: Math.max(pad, Math.min(W - size.w - pad, cx - size.w / 2)),
+      y: Math.max(pad, Math.min(H - size.h - pad, cy - size.h / 2)),
+      w: size.w,
+      h: size.h,
+    };
+  }
+
+  // Draws a label centred on (cx, cy) in a W x H picture and returns the box it took
+  function drawPill(g, text, cx, cy, font, look, W, H) {
+    const b = pillBox(pillSize(g, text, font), cx, cy, W, H);
+    const style = PILLS[look];
+    g.beginPath();
+    if (g.roundRect) g.roundRect(b.x, b.y, b.w, b.h, b.h / 2);
+    else g.rect(b.x, b.y, b.w, b.h);
+    g.fillStyle = style.fill;
+    g.fill();
+    if (style.ring) {
+      g.lineWidth = Math.max(1.5, font / 7);
+      g.strokeStyle = style.ring;
+      g.stroke();
+    }
+    g.fillStyle = style.ink;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, b.x + b.w / 2, b.y + b.h / 2 + font * 0.05);
+    return b;
+  }
+
+  // Measures read like dimension lines: a tick across each end, the unit thicker and yellow
+  function drawMeasures(g, W, H, unit, avoid) {
+    const d = state.drawing;
+    const list = d && d.kind === 'measure' ? state.measures.concat(d) : state.measures;
+    if (!list.length) return;
+    const unitLine = unitMeasure();
+    list.forEach((m) => {
+      const isUnit = m === unitLine;
+      const x1 = m.x1 * W, y1 = m.y1 * H, x2 = m.x2 * W, y2 = m.y2 * H;
+      const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+      const tick = (isUnit ? 6 : 5) * unit;
+      const tx = ((y1 - y2) / len) * tick, ty = ((x2 - x1) / len) * tick;
+      g.beginPath();
+      g.moveTo(x1, y1); g.lineTo(x2, y2);
+      g.moveTo(x1 - tx, y1 - ty); g.lineTo(x1 + tx, y1 + ty);
+      g.moveTo(x2 - tx, y2 - ty); g.lineTo(x2 + tx, y2 + ty);
+      g.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      g.lineWidth = (isUnit ? 6 : 4.5) * unit;
+      g.stroke();
+      g.strokeStyle = isUnit ? UNIT_COLOR : MEASURE_COLOR;
+      g.lineWidth = (isUnit ? 3.5 : 2) * unit;
+      g.stroke();
+    });
+
+    // Labels go over every line, the unit's first. Each tries spots beside its line (at the
+    // middle, then a third of the way from either end, on either side) and takes the first that
+    // is clear of the labels already placed, then of being pushed back over its own line by the
+    // picture's edge, then of covering another measure. Lines too short to hold a label go
+    // without; the loupe still reads them while drawing.
+    const font = Math.round(Math.min(13, Math.max(11, Math.min(W, H) / unit / 30)) * unit);
+    const gap = 2 * unit;
+    const taken = (avoid || []).map((b) => ({ x: b.x * W, y: b.y * H, w: b.w * W, h: b.h * H }));
+    const clash = (b) => taken.some((t) =>
+      b.x < t.x + t.w + gap && t.x < b.x + b.w + gap && b.y < t.y + t.h + gap && t.y < b.y + b.h + gap);
+    const covers = (b, own) => list.some((m) => m !== own && crossesBox(m.x1 * W, m.y1 * H, m.x2 * W, m.y2 * H, b));
+    const order = unitLine ? [unitLine].concat(list.filter((m) => m !== unitLine)) : list;
+    order.forEach((m) => {
+      const x1 = m.x1 * W, y1 = m.y1 * H, x2 = m.x2 * W, y2 = m.y2 * H;
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      if (len < 28 * unit) return;
+      const isUnit = m === unitLine;
+      const text = measureText(m, isUnit);
+      const size = pillSize(g, text, font);
+      // first choice: above a level line, right of an upright one
+      let nx = (y2 - y1) / len, ny = (x1 - x2) / len;
+      if (Math.abs(ny) >= Math.abs(nx) ? ny > 0 : nx < 0) { nx = -nx; ny = -ny; }
+      const off = 6 * unit + (Math.abs(nx) * size.w + Math.abs(ny) * size.h) / 2;
+      let best = null;
+      [0.5, 0.3, 0.7].forEach((t) => [1, -1].forEach((side) => {
+        const cx = x1 + (x2 - x1) * t + nx * off * side, cy = y1 + (y2 - y1) * t + ny * off * side;
+        const b = pillBox(size, cx, cy, W, H);
+        const pushed = Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy) > 4 * unit;
+        const score = (clash(b) ? 4 : 0) + (pushed ? 2 : 0) + (covers(b, m) ? 1 : 0);
+        if (!best || score < best.score) best = { score, cx, cy };
+      }));
+      taken.push(drawPill(g, text, best.cx, best.cy, font, isUnit ? 'unit' : 'dark', W, H));
+    });
+  }
+
+  // Whether a line from (x1, y1) to (x2, y2) passes through a box (Liang-Barsky clipping)
+  function crossesBox(x1, y1, x2, y2, b) {
+    const p = [x1 - x2, x2 - x1, y1 - y2, y2 - y1];
+    const q = [x1 - b.x, b.x + b.w - x1, y1 - b.y, b.y + b.h - y1];
+    let t0 = 0, t1 = 1;
+    for (let i = 0; i < 4; i++) {
+      if (!p[i]) {
+        if (q[i] < 0) return false;
+        continue;
+      }
+      const t = q[i] / p[i];
+      if (p[i] < 0) t0 = Math.max(t0, t);
+      else t1 = Math.min(t1, t);
+      if (t0 > t1) return false;
+    }
+    return true;
+  }
+
+  // Each plumb point drops a dashed plumb line and level across the whole picture, ringed where they cross
+  function drawPlumbs(g, W, H, unit) {
+    const p = state.dragging;
+    const list = (p && p.index < 0 ? state.plumbs.concat(p) : state.plumbs).map((pt) => ({
+      x: Math.min(Math.round(pt.x * W), W - 1) + 0.5,
+      y: Math.min(Math.round(pt.y * H), H - 1) + 0.5,
+    }));
+    if (!list.length) return;
+    g.save();
+    g.lineCap = 'butt';
+    g.setLineDash([6 * unit, 5 * unit]);
+    g.beginPath();
+    list.forEach(({ x, y }) => {
+      g.moveTo(x, 0); g.lineTo(x, H);
+      g.moveTo(0, y); g.lineTo(W, y);
+    });
+    g.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    g.lineWidth = 3 * unit;
+    g.stroke();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1.25 * unit;
+    g.stroke();
+    g.setLineDash([]);
+    g.beginPath();
+    list.forEach(({ x, y }) => {
+      g.moveTo(x + RING * unit, y);
+      g.arc(x, y, RING * unit, 0, Math.PI * 2);
+    });
+    g.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+    g.lineWidth = 3.5 * unit;
+    g.stroke();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1.5 * unit;
+    g.stroke();
+    g.restore();
+  }
+
+  // Index of the plumb point whose ring is under the pointer (the nearest one in reach), or -1
+  function plumbAt(canvas, e) {
+    const rect = canvas.getBoundingClientRect();
+    let found = -1, nearest = e.pointerType === 'touch' ? 18 : RING_HIT;
+    state.plumbs.forEach((p, i) => {
+      const dist = Math.hypot(rect.left + p.x * rect.width - e.clientX, rect.top + p.y * rect.height - e.clientY);
+      if (dist <= nearest) { found = i; nearest = dist; }
+    });
+    return found;
+  }
+
+  // Esc or a cancelled touch puts a dragged point back where it was
+  function cancelDrag() {
+    const p = state.dragging;
+    if (!p) return;
+    if (p.index >= 0) state.plumbs[p.index] = p.from;
+    p.canvas.classList.remove('is-dragging');
+    state.dragging = null;
+    drawAllOverlays();
+  }
+
+  // How big a grid cell is in units (and on the canvas), for the hint
+  function gridNote() {
+    const u = state.measures.length && state.prep ? lengthOf(unitMeasure()) : 0;
+    if (!u || !state.grid) return '';
+    const cw = state.prep.w / state.grid / u, ch = state.prep.h / state.grid / u;
+    const size = canvasSize();
+    const on = size ? ` (${formatSize(cw * size.value, size.sys)} × ${formatSize(ch * size.value, size.sys)} on your canvas)` : '';
+    return `A grid cell is ${cw.toFixed(2)} U wide and ${ch.toFixed(2)} U tall${on}.`;
+  }
+
+  const TOOL_HINTS = {
+    sample: 'Hover to sample a color. Click to add it to the palette. To check proportions, switch the pointer to Measure.',
+    line: 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.',
+    measure: 'Choose a unit you can see on the sitter, such as eye line to chin, and drag across it first: it becomes 1 U. Then drag across any other length to compare it with the unit. Hold Shift to snap to 15°.',
+    plumb: 'Click an image to drop a plumb line and a level through that point, on every image, and see what lines up with it. Drag a ring to move it; click a ring to remove it.',
+  };
+
+  function updateToolHint() {
+    const parts = [TOOL_HINTS[state.tool]];
+    if (state.tool === 'measure') {
+      parts.push(gridNote(), state.isSample
+        ? 'On the sample, try eye line to chin, then the width of the face at the cheekbones.'
+        : 'Lengths are true to the photo, not the sitter: a phone held close enlarges the nose, so measure photos taken from 1.5 m or more, zoomed in.');
+    }
+    els.toolHint.textContent = parts.filter(Boolean).join(' ');
+  }
+
+  // ---- Undo ---------------------------------------------------------------
+
+  // Lines, measures and plumb points share one undo list, oldest step first. Ctrl/⌘+Z undoes the
+  // newest step of any kind, and each tool's Undo button the newest step of its own kind. A step
+  // only changes its own kind's list, so undoing one kind out of turn leaves the others intact.
+  const UNDONE = {
+    'line:add': 'Line removed',
+    'measure:add': 'Measure removed',
+    'measure:unit': 'Unit set back',
+    'plumb:add': 'Plumb line removed',
+    'plumb:move': 'Plumb line moved back',
+    'plumb:remove': 'Plumb line put back',
+  };
+
+  function record(step) {
+    state.history.push(step);
+    updateToolButtons();
+    drawAllOverlays();
+  }
+
+  // Undoes the newest step (of one kind, if given) and says what changed, or '' if nothing did
+  function undo(kind) {
+    const h = state.history;
+    let i = h.length - 1;
+    while (i >= 0 && kind && h[i].kind !== kind) i--;
+    if (i < 0) return '';
+    const step = h.splice(i, 1)[0];
+    const what = step.kind + ':' + step.op;
+    if (what === 'line:add') state.lines.pop();
+    else if (what === 'measure:add') state.measures.pop();
+    else if (what === 'measure:unit') state.unitIndex = step.prev;
+    else if (what === 'plumb:add') state.plumbs.pop();
+    else if (what === 'plumb:move') state.plumbs[step.index] = step.from;
+    else if (what === 'plumb:remove') state.plumbs.splice(step.index, 0, step.plumb);
+    if (state.unitIndex >= state.measures.length) state.unitIndex = 0;
+    updateToolButtons();
+    drawAllOverlays();
+    return UNDONE[what];
+  }
+
+  function clearKind(kind) {
+    state.history = state.history.filter((step) => step.kind !== kind);
+    if (kind === 'line') state.lines = [];
+    if (kind === 'measure') { state.measures = []; state.unitIndex = 0; }
+    if (kind === 'plumb') state.plumbs = [];
+    updateToolButtons();
+    drawAllOverlays();
+  }
+
+  // A new photo starts clean: the old lines, measures and plumb points were placed on another face
+  function clearMarks() {
+    Object.assign(state, { lines: [], measures: [], unitIndex: 0, plumbs: [], history: [] });
+    updateToolButtons();
+    drawAllOverlays();
+  }
+
+  function updateToolButtons() {
+    const has = (kind) => state.history.some((step) => step.kind === kind);
+    const last = state.measures.length - 1;
+    els.lineUndo.disabled = !has('line');
+    els.lineClear.disabled = !state.lines.length;
+    els.measureUnit.disabled = last < 1 || state.unitIndex === last;
+    els.measureUndo.disabled = !has('measure');
+    els.measureClear.disabled = !state.measures.length;
+    els.plumbUndo.disabled = !has('plumb');
+    els.plumbClear.disabled = !state.plumbs.length;
+    updateToolHint();
   }
 
   document.querySelectorAll('input[name="grid"]').forEach((el) =>
-    el.addEventListener('change', () => { state.grid = +el.value; drawAllOverlays(); })
+    el.addEventListener('change', () => { state.grid = +el.value; drawAllOverlays(); updateToolHint(); })
   );
   document.querySelectorAll('input[name="tool"]').forEach((el) =>
     el.addEventListener('change', () => {
       state.tool = el.value;
-      document.body.classList.toggle('tool-line', state.tool === 'line');
-      els.toolHint.textContent = state.tool === 'line'
-        ? 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.'
-        : 'Hover to sample a color. Click to add it to the palette.';
+      ['line', 'measure', 'plumb'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
+      updateToolHint();
     })
   );
   document.querySelectorAll('input[name="lineColor"]').forEach((el) =>
     el.addEventListener('change', () => { state.lineColor = el.value; })
   );
-  els.lineUndo.addEventListener('click', () => {
-    state.lines.pop();
-    updateLineButtons();
-    drawAllOverlays();
+  els.lineUndo.addEventListener('click', () => undo('line'));
+  els.lineClear.addEventListener('click', () => clearKind('line'));
+  els.measureUndo.addEventListener('click', () => undo('measure'));
+  els.measureClear.addEventListener('click', () => clearKind('measure'));
+  els.plumbUndo.addEventListener('click', () => undo('plumb'));
+  els.plumbClear.addEventListener('click', () => clearKind('plumb'));
+  els.measureUnit.addEventListener('click', () => {
+    const last = state.measures.length - 1;
+    if (last < 1 || state.unitIndex === last) return;
+    const prev = state.unitIndex;
+    state.unitIndex = last;
+    record({ kind: 'measure', op: 'unit', prev });
   });
-  els.lineClear.addEventListener('click', () => {
-    state.lines = [];
-    updateLineButtons();
-    drawAllOverlays();
-  });
+  const canvasSizeChanged = () => { saveCanvasSize(); updateToolHint(); drawAllOverlays(); };
+  els.canvasSize.addEventListener('input', canvasSizeChanged);
+  els.canvasSys.addEventListener('change', canvasSizeChanged);
+
   window.addEventListener('keydown', (e) => {
     // the save dialog is modal: Esc only closes it, and nothing behind it should change
     if (els.saveDialog.open) return;
     if (e.key === 'Escape' && state.picking) setPicking(false);
-    if (e.key === 'Escape' && state.drawing) {
+    if (e.key === 'Escape' && (state.drawing || state.dragging)) {
       state.drawing = null;
+      cancelDrag();
       els.loupe.hidden = true;
       drawAllOverlays();
     }
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) &&
       document.activeElement.type !== 'radio' && document.activeElement.type !== 'range';
-    // Ctrl/⌘+Z only: with Shift (or Alt) it is redo, which has nothing to redo here
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && state.lines.length && !typing) {
+    // Ctrl/⌘+Z only: with Shift (or Alt) it is redo, which has nothing to redo here. Not while a
+    // plumb point is held, since undoing could renumber the points under it.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' &&
+      state.history.length && !typing && !state.dragging) {
       e.preventDefault();
-      els.lineUndo.click();
+      toast(undo());
     }
   });
 
@@ -1300,6 +1765,7 @@
     paint(els.canvases.artblock, artRes.blockImage, w, h);
     paint(els.canvases.diff, cmp.diffImage, w, h);
     drawLabels(els.canvases.diff, cmp);
+    syncOverlay(els.canvases.diff); // again, now its measure labels can keep off the percentages
     state.pixels.refblock = state.result.blockImage;
     state.pixels.art = state.art.prep.rgba;
     state.pixels.artblock = artRes.blockImage;
@@ -1309,45 +1775,28 @@
 
   // Match percentage on each shape of the accuracy map. The biggest differences get a
   // white label with their number from the list; shapes too small for a label stay bare.
+  // Where the labels went is kept in 0-1 coordinates, so measure labels can keep off them.
   function drawLabels(canvas, cmp) {
     const g = canvas.getContext('2d');
-    const long = Math.max(canvas.width, canvas.height);
+    const W = canvas.width, H = canvas.height;
+    const long = Math.max(W, H);
     const minFont = Math.round(long / 60);
     const maxFont = Math.round(long / 26);
     const rank = new Set(cmp.top.map((r) => r.id));
-
-    const pill = (reg, text, font, strong) => {
-      g.font = `600 ${font}px "IBM Plex Mono", ui-monospace, monospace`;
-      const pw = g.measureText(text).width + font * 0.9;
-      const ph = font * 1.45;
-      // keep the whole label inside the picture
-      const pad = 3;
-      const x = Math.max(pad, Math.min(canvas.width - pw - pad, reg.lx + 0.5 - pw / 2));
-      const y = Math.max(pad, Math.min(canvas.height - ph - pad, reg.ly + 0.5 - ph / 2));
-      g.beginPath();
-      if (g.roundRect) g.roundRect(x, y, pw, ph, ph / 2);
-      else g.rect(x, y, pw, ph);
-      g.fillStyle = strong ? '#ffffff' : 'rgba(20, 21, 24, 0.78)';
-      g.fill();
-      if (strong) {
-        g.lineWidth = Math.max(1.5, font / 7);
-        g.strokeStyle = '#1c1d20';
-        g.stroke();
-      }
-      g.fillStyle = strong ? '#1c1d20' : '#ffffff';
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.fillText(text, x + pw / 2, y + ph / 2 + font * 0.05);
+    cmp.labelBoxes = [];
+    const pill = (reg, text, font, look) => {
+      const b = drawPill(g, text, reg.lx + 0.5, reg.ly + 0.5, font, look, W, H);
+      cmp.labelBoxes.push({ x: b.x / W, y: b.y / H, w: b.w / W, h: b.h / H });
     };
 
     cmp.regions.forEach((reg) => {
       if (!reg.ref || rank.has(reg.id)) return;
       const font = Math.min(maxFont, Math.floor(reg.room / 1.5));
-      if (font >= minFont) pill(reg, reg.pct + '%', font, false);
+      if (font >= minFont) pill(reg, reg.pct + '%', font, 'dark');
     });
     cmp.top.forEach((reg, i) => {
       const font = Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
-      pill(reg, `${i + 1} · ${reg.pct}%`, font, true);
+      pill(reg, `${i + 1} · ${reg.pct}%`, font, 'light');
     });
   }
 
@@ -1541,7 +1990,13 @@
   function start() {
     updateOutputs();
     renderPalette();
-    updateLineButtons();
+    loadCanvasSize();
+    // a browser that restores form state on reload may bring back another grid or pointer
+    ['grid', 'tool'].forEach((name) => {
+      const el = document.querySelector(`input[name="${name}"]:checked`);
+      if (el && !el.defaultChecked) el.dispatchEvent(new Event('change'));
+    });
+    updateToolButtons();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);

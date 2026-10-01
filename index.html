@@ -118,6 +118,8 @@
           <div class="seg" role="radiogroup" aria-labelledby="toolLabel">
             <input type="radio" name="tool" id="toolSample" value="sample" checked><label for="toolSample">Pick colors</label>
             <input type="radio" name="tool" id="toolLine" value="line"><label for="toolLine">Draw lines</label>
+            <input type="radio" name="tool" id="toolMeasure" value="measure"><label for="toolMeasure">Measure</label>
+            <input type="radio" name="tool" id="toolPlumb" value="plumb"><label for="toolPlumb">Plumb</label>
           </div>
         </div>
         <div class="tool-group line-tools">
@@ -132,7 +134,24 @@
           <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
           <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
         </div>
-        <p class="tool-hint" id="toolHint">Hover to sample a color. Click to add it to the palette.</p>
+        <div class="tool-group measure-tools">
+          <button type="button" class="btn btn-small" id="measureUnit">Make last line the unit</button>
+          <button type="button" class="btn btn-small" id="measureUndo">Undo measure</button>
+          <button type="button" class="btn btn-small" id="measureClear">Clear measures</button>
+          <span class="canvas-unit">
+            <label class="tool-label" for="canvasSize">Unit on my canvas</label>
+            <input type="number" id="canvasSize" inputmode="decimal" min="0" step="0.1">
+            <select id="canvasSys" aria-label="Centimeters or inches">
+              <option value="cm" selected>cm</option>
+              <option value="in">in</option>
+            </select>
+          </span>
+        </div>
+        <div class="tool-group plumb-tools">
+          <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
+          <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
+        </div>
+        <p class="tool-hint" id="toolHint">Hover to sample a color. Click to add it to the palette. To check proportions, switch the pointer to Measure.</p>
       </div>
 
       <section class="tabpanel" id="tab-study" role="tabpanel" aria-labelledby="tabStudyBtn">

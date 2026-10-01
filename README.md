@@ -13,8 +13,23 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 
 - **Grid**: a 3 × 3 or 4 × 4 grid for transferring proportions to your paper.
 - **Draw lines**: switch the pointer to *Draw lines* and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
+- **Measure** and **Plumb**: compare lengths against a unit, and see what lines up. See below.
 
-**Save PNG** includes the grid and lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and **Save palette PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
+**Save PNG** includes the grid, lines, measures and plumb lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and **Save palette PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
+
+### Measure in units: plumb lines and levels
+
+Proportion mistakes, such as eyes set too high, a head too narrow or a mouth off the center line, are the most common ones in a portrait. Atelier painters catch them by comparative measuring: choose one length you can see on the sitter as the unit, such as eye line to chin, and check every other length against it. Two more settings of the toolbar's **Pointer** do this. Like the lines, everything they draw shows on every image at once, including the panels on the **Check my painting** tab, so the reference's measurements lie over your painting.
+
+- **Measure**: drag from one landmark to another. The first length you drag is the unit: it is drawn thicker, in yellow, and labelled **1 U**. Every later length is labelled with how many units long it is, plus the nearest whole number, half, third or quarter when it is within 0.03 of one, such as `1.48 U ≈ 1½`. While you drag, the loupe shows the pixels under the end of the line, its length in units and its tilt; hold Shift to snap to 15°. Lengths are measured on the reference's pixels, so every image and every working size gives the same answer. On the sample, with eye line to chin as the unit, the face's width at the cheekbones reads 1.40 U (250 px over 178 px).
+  - **Make last line the unit** turns the newest measure into the unit and relabels the rest.
+  - **Unit on my canvas**: type how long you made the unit on your canvas or paper, in cm or inches, and every label adds the length to draw there, such as `1.40 U · 12.6 cm`. Inches are rounded to the nearest eighth, as on a ruler. The length is kept in your browser between visits. With the grid on, the hint also gives a grid cell's width and height in units and on the canvas.
+  - Labels sit beside their lines and move along or across them to keep clear of each other and of the accuracy map's percentages. Lines too short to hold a label go without one.
+- **Plumb**: click an image to drop a plumb line and a level, dashed lines straight down and straight across the whole picture, through that point. They show what sits over what: the inner corner of an eye over the wing of the nose, the top of the ear level with the brow. Drag a point's ring to move it; click the ring again to remove it.
+
+**Undo measure** and **Undo plumb line** take back the last step of their own tool, as **Undo line** does for lines. Ctrl/⌘+Z takes back whichever step came last, from any of the three, including moving or removing a plumb point or changing the unit. Loading a new photo clears all three.
+
+Measurements are true to the photo, not to the sitter. A phone held close to a face enlarges the nose and shrinks the ears, so measure photos taken from 1.5 m or more, zoomed in. While you measure or drop plumb points, touching an image draws instead of scrolling the page, as with **Draw lines**.
 
 ### Check my painting
 

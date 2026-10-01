@@ -256,7 +256,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   top: 0;
   pointer-events: none;
 }
-.tool-line .view { cursor: crosshair; touch-action: none; }
+.tool-line .view, .tool-measure .view, .tool-plumb .view { cursor: crosshair; touch-action: none; }
+.tool-plumb .view.on-ring { cursor: grab; }
+.tool-plumb .view.is-dragging { cursor: grabbing; }
 
 /* ---- Tabs ---- */
 .tabs {
@@ -291,8 +293,19 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tool-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tool-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .tool-hint { margin: 0; font-size: 0.8rem; color: var(--muted); flex-basis: 100%; }
-.line-tools { display: none; }
-.tool-line .line-tools { display: flex; }
+.line-tools, .measure-tools, .plumb-tools { display: none; }
+.tool-line .line-tools, .tool-measure .measure-tools, .tool-plumb .plumb-tools { display: flex; }
+.canvas-unit { display: flex; align-items: center; gap: 6px; }
+.canvas-unit input {
+  width: 5.5em;
+  font: 500 0.85rem var(--mono);
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 5px 8px;
+}
+.canvas-unit select { width: auto; font-size: 0.85rem; padding: 5px 6px; }
 .line-colors { display: flex; gap: 6px; }
 .line-colors input { position: absolute; opacity: 0; pointer-events: none; }
 .line-colors label {
