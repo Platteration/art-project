@@ -45,6 +45,7 @@ The second tab scores a photo of your finished piece against the reference.
    - **Color accuracy** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
    - **Value accuracy** (0–100): the same idea using lightness only, `100 − 5 × |ΔL*|`. Half a value step off scores 75.
    - **Value shapes match**: the share of the picture that lands in the same shadow, middle or light mass.
+   - **Temperature direction match**: for every pair of neighbouring shapes in the reference whose colors differ in warmth by 2 or more, whether your painting also turns warmer (or cooler) from one to the other, read as on the Warm / cool map; each pair counts by the length of the border the two share. Only these steps count, not the colors themselves, so the camera's white balance hardly affects it. A painting mixed from one flesh color lightened and darkened scores low here even when its values are right.
    - **Biggest differences**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm".
    - **Accuracy by shape**: the reference's color zones, each labelled with its match percentage (`100 − 2.5 × ΔE`, the same per-shape score the color accuracy averages). The biggest differences get white labels numbered as in the list. Zones too small to hold a label stay unlabelled. Hover any zone to see the reference color next to yours.
 

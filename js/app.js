@@ -57,8 +57,10 @@
     scoreGrade: $('scoreGrade'),
     scoreValue: $('scoreValue'),
     scoreShapes: $('scoreShapes'),
+    scoreTemp: $('scoreTemp'),
     meterValue: $('meterValue'),
     meterShapes: $('meterShapes'),
+    meterTemp: $('meterTemp'),
     fixList: $('fixList'),
     alignPanel: $('alignPanel'),
     alignState: $('alignState'),
@@ -1473,6 +1475,10 @@
       fixed ? 'color cast fixed' : '',
     ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
+    // a reference with no clear warm / cool steps between its shapes has nothing to match
+    const temp = cmp.tempMatch;
+    els.scoreTemp.textContent = temp == null ? 'None to match' : temp + '%';
+    els.meterTemp.style.width = (temp || 0) + '%';
 
     els.fixList.innerHTML = '';
     if (!cmp.top.length) {

@@ -675,6 +675,7 @@
     const srgbOf = (lin, c) => ({ r: linToSrgb(lin[c * 3]), g: linToSrgb(lin[c * 3 + 1]), b: linToSrgb(lin[c * 3 + 2]) });
 
     const regions = new Array(count);
+    const refLabs = new Array(count), artLabs = new Array(count);
     let colorScore = 0, valueScore = 0;
     for (let c = 0; c < count; c++) {
       const k = cnt[c];
@@ -684,6 +685,8 @@
       }
       const refLab = linToLab(refDom[c * 3], refDom[c * 3 + 1], refDom[c * 3 + 2]);
       const artLab = linToLab(artDom[c * 3], artDom[c * 3 + 1], artDom[c * 3 + 2]);
+      refLabs[c] = refLab;
+      artLabs[c] = artLab;
       const dE = deltaE2000(refLab[0], refLab[1], refLab[2], artLab[0], artLab[1], artLab[2]);
       const share = k / covered;
       const dL = artLab[0] - refLab[0];
@@ -705,6 +708,33 @@
         zone: Math.floor(refRes.block[first[c]] / refRes.K),
       };
     }
+
+    // Temperature direction: for each pair of neighbouring shapes, whether the painting steps
+    // warmer or cooler from one to the other the same way the reference does, measured as on the
+    // warm / cool map (see shift()). Only the steps matter, so the camera's white balance hardly
+    // does. Each pair counts by the length of the border the two share; a pair the reference
+    // keeps within 2 of each other has no direction to match and is left out.
+    const border = new Map();
+    const touch = (i, j) => {
+      if (mask && (!mask[i] || !mask[j])) return;
+      const a = comp[i], b = comp[j];
+      if (a === b) return;
+      const key = a < b ? a * count + b : b * count + a;
+      border.set(key, (border.get(key) || 0) + 1);
+    };
+    for (let i = 0; i < n; i++) {
+      if (i % w < w - 1) touch(i, i + 1);
+      if (i < n - w) touch(i, i + w);
+    }
+    let stepAll = 0, stepSame = 0;
+    border.forEach((len, key) => {
+      const a = Math.floor(key / count), b = key % count;
+      if (!refLabs[a] || !refLabs[b]) return;
+      const ref = shift(refLabs[a], refLabs[b]).warm;
+      if (Math.abs(ref) < 2) return;
+      stepAll += len;
+      if (shift(artLabs[a], artLabs[b]).warm * Math.sign(ref) > 0.5) stepSame += len;
+    });
 
     // The shapes that cost the most: big and far off. Slivers are skipped.
     const top = regions
@@ -768,6 +798,7 @@
       colorScore: Math.round(colorScore),
       valueScore: Math.round(valueScore),
       shapeMatch: Math.round((sameZone / covered) * 100),
+      tempMatch: stepAll ? Math.round((stepSame / stepAll) * 100) : null, // null: no warm / cool steps to match
       coverage: covered / n,
       regions,
       top,
