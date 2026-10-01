@@ -1267,13 +1267,14 @@
 
     const prep = Study.prepare(c, Math.max(w, h));
     const glare = els.glare.checked ? Study.glareMask(prep, state.prep, mask) : null;
-    if (glare) {
+    if (glare && glare.mask) {
       if (!mask) mask = new Uint8Array(w * h).fill(1);
       for (let i = 0; i < mask.length; i++) if (glare.mask[i]) mask[i] = 0;
     }
     prep.mask = mask;
     prep.glare = glare && glare.mask;
     prep.glareShare = glare ? glare.count / (w * h) : 0;
+    prep.glareCrowded = !!(glare && glare.crowded);
     // the photo before the color fix, where a neutral spot is picked (a channel the fix pushed
     // past white can't be undone from the fixed pixels)
     prep.photo = photo || prep.rgba;
@@ -1348,17 +1349,16 @@
   function showShiftMode() {
     const cmp = state.art.cmp;
     if (!cmp) return;
-    if (!cmp.global && els.modeRel.checked) {
-      // no overall shift to set aside: fall back to the shapes as photographed
-      els.modeRaw.checked = true;
-      state.shiftMode = 'raw';
-    }
+    // with no overall shift to set aside, show the shapes as photographed, but keep the choice
+    // for when there is one again
     const rel = relMode(cmp);
+    els.modeRel.disabled = !cmp.global;
+    els.modeRel.checked = rel;
+    els.modeRaw.checked = !rel;
     const { w, h } = state.prep;
     paint(els.canvases.diff, cmp.diffImage, w, h);
     drawLabels(els.canvases.diff, cmp, rel);
     renderFixes(cmp, rel);
-    els.modeRel.disabled = !cmp.global;
     els.diffNote.textContent = rel ? '· after overall shift' : '';
     els.diffHint.textContent = rel
       ? 'Each color zone shows how closely your painting matches it once your overall shift is set aside, so a low number is a local mistake. White labels are the biggest of them, numbered as in the list. Hover a zone to compare the color the shift predicts with yours.'
@@ -1417,11 +1417,13 @@
     const dL = residual ? reg.dLrel : reg.dL;
     const dWarm = residual ? reg.dWarmRel : reg.dWarm;
     const dC = residual ? reg.dCrel : reg.dC;
+    const dTint = residual ? reg.dTintRel : reg.dTint;
     const parts = [];
     if (Math.abs(dL) >= 3) parts.push(`${dL > 0 ? 'too light' : 'too dark'} by ${Math.abs(dL / 10).toFixed(1)} value`);
     if (Math.abs(dWarm) >= 4) parts.push(dWarm > 0 ? 'too warm' : 'too cool');
     if (Math.abs(dC) >= 5) parts.push(dC > 0 ? 'too saturated' : 'too gray');
-    if (!parts.length) parts.push('hue is off');
+    // neither warmer nor cooler, but off toward green or magenta
+    if (!parts.length) parts.push(Math.abs(dTint) >= 4 ? (dTint > 0 ? 'too magenta' : 'too green') : 'hue is off');
     const text = parts.join(', ') + (residual ? ' for the rest of your painting' : '');
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
@@ -1441,7 +1443,7 @@
     const cost = g ? g.relScore - cmp.colorScore : 0;
     els.scoreRelNote.textContent = !g
       ? (cmp.fitProblem === 'unrelated' ? 'Your values don’t follow the reference’s pattern yet' : 'Needs 8 or more shapes to measure')
-      : cost >= 2 ? `The overall shift costs ${cost} points`
+      : cost >= SHIFT_WORTH ? `The overall shift costs ${cost} points`
         : 'Hardly any overall shift to set aside';
     els.scoreValue.textContent = cmp.valueScore;
     els.meterValue.style.width = cmp.valueScore + '%';
@@ -1457,8 +1459,9 @@
     ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
     els.glareStatus.textContent = !els.glare.checked ? 'Glare is scored like paint.'
-      : glare ? `${sharePct(glare)} of the picture ignored as glare. It shows hatched on the accuracy map.`
-        : 'No glare found.';
+      : glare ? `${sharePct(glare)} of the picture ignored as glare, hatched on the accuracy map. Small spots seldom change a score, as each shape is judged by its most prominent color.`
+        : state.art.prep.glareCrowded ? 'The white spots cover too much of the picture to be glare, so they are scored like paint.'
+          : 'No glare found.';
   }
 
   // The biggest differences, as photographed or after the overall shift. After the shift the
@@ -1523,6 +1526,8 @@
     darker: 'Judge each value against its neighbours, not against the paint on your palette. If the painting looks right in person, the photo is too dark: shoot it again in even light.',
     warmer: 'Hold each mix up next to the reference to compare temperature. If the painting looks right in person, the light in your photo is warm: try Fix color cast above.',
     cooler: 'Hold each mix up next to the reference to compare temperature. If the painting looks right in person, the light in your photo is cool: try Fix color cast above.',
+    green: 'Hold each mix up next to the reference: a touch of red or orange takes the green out of it. If the painting looks right in person, the light in your photo is green, as under fluorescent tubes: try Fix color cast above.',
+    magenta: 'Hold each mix up next to the reference: a touch of yellow or green takes the pink out of it. If the painting looks right in person, your photo has a magenta tint: try Fix color cast above.',
     cast: 'Check the painting in daylight first. If it looks right there, click Fix color cast above and then a white or gray spot on the painting.',
     saturated: 'Skin is grayer than it looks. Knock strong mixes down with a gray of the same value, or a touch of the complement.',
     grayer: 'White and black dull a color as they lighten or darken it. Reach for a lighter or darker pigment of the same hue instead.',
@@ -1532,80 +1537,143 @@
     temperature: 'Keep the temperature change at the shadow line: under warm light the shadows turn cooler, under cool light warmer. Compare a light note and a shadow note side by side.',
   };
   const MIN_POINTS = 1.5;   // findings worth fewer points are noise
+  const SHIFT_WORTH = 2;    // an overall shift costing fewer points is hardly worth setting aside
   const LINEUP_GAIN = 0.02; // a nudge that fits this much better means the photo isn't lined up
 
-  const steps = (dL) => Math.abs(dL / 10).toFixed(1);
   const capital = (t) => t.charAt(0).toUpperCase() + t.slice(1);
   const joinAnd = (parts) => (parts.length < 2 ? parts.join('') : parts.slice(0, -1).join(', ') + ', and ' + parts[parts.length - 1]);
+  // Values as the rulers' labels round them, and differences of those, so that every number in
+  // the words is one a student can read off the rulers
+  const vDiff = (a, b) => Math.round((valueLabel(a) - valueLabel(b)) * 10) / 10;
+  const spanOf = (s) => vDiff(s.p98, s.p2);
+  const by = (d) => Math.abs(d).toFixed(1);
+
+  /*
+   * The value part of the overall shift in words: the range, read off the ends of the bars,
+   * when it grew or shrank; otherwise the key, read off the ticks of the three masses. ref and
+   * art are Study.valueStats() of the two pictures. Null when the rulers show no change.
+   */
+  function valueFinding(g, ref, art) {
+    const spanRef = spanOf(ref), spanArt = spanOf(art);
+    const dark = vDiff(art.p2, ref.p2), light = vDiff(art.p98, ref.p98);
+    // each mass's move, and the whole picture's as their average over the reference's masses
+    const masses = [[0, 'darks'], [1, 'middle values'], [2, 'lights']]
+      .filter(([z]) => ref.median[z] != null && art.median[z] != null)
+      .map(([z, name]) => ({ name, d: vDiff(art.median[z], ref.median[z]), share: ref.share[z] }));
+    const key = Math.round(masses.reduce((sum, m) => sum + m.d * m.share, 0) * 10) / 10;
+    // darkest dark and lightest light moved the same way: the key (or the photo's exposure)
+    const together = Math.min(Math.abs(dark), Math.abs(light)) >= 0.3 && Math.sign(dark) === Math.sign(light) && Math.sign(dark) === Math.sign(key);
+    const rangeOff = Math.abs(spanArt - spanRef);
+    // The slope of the fitted value line says whether the range changed (a local mistake can
+    // move the ends of a bar on its own), and the bars say by how much
+    const kind = together ? 'key'
+      : Math.abs(g.range - 1) >= 0.1 && rangeOff >= 0.3 ? 'range'
+        : key ? 'key'
+          : rangeOff ? 'range' : '';
+    if (kind === 'range') {
+      const end = (d, name) => (!d ? `your ${name} matches`
+        : Math.abs(d) < 0.3 ? `your ${name} is within ${by(d)}`
+          : `your ${name} is ${by(d)} too ${d > 0 ? 'light' : 'dark'}`);
+      const darkOff = dark >= 0.3, lightOff = light <= -0.3;
+      return {
+        title: `Your values span ${spanArt.toFixed(1)} steps; the reference spans ${spanRef.toFixed(1)}.`,
+        detail: capital(end(dark, 'darkest dark')) + ', and ' + end(light, 'lightest light') + '.',
+        tip: spanArt > spanRef
+          ? (light >= 0.3 && dark > -0.3 ? TIPS.lightsHigh : dark <= -0.3 && light < 0.3 ? TIPS.darksLow : TIPS.expanded)
+          : darkOff && !lightOff ? TIPS.anchorDark : lightOff && !darkOff ? TIPS.anchorLight : TIPS.anchorBoth,
+        points: g.points.value,
+      };
+    }
+    if (kind === 'key') {
+      const move = (m) => (m.d ? `your ${m.name} are ${by(m.d)} too ${m.d > 0 ? 'light' : 'dark'}` : `your ${m.name} match`);
+      return {
+        title: `Your whole picture is ${by(key)} value ${key > 0 ? 'lighter' : 'darker'} than the reference.`,
+        detail: capital(joinAnd(masses.map(move))) + '.',
+        tip: key > 0 ? TIPS.lighter : TIPS.darker,
+        points: g.points.value,
+      };
+    }
+    return null;
+  }
+
+  // A move of every color, named by the way it points: warm and cool along the orange-blue
+  // axis, green and magenta at right angles to it, and the four between. Sectors of 45° by the
+  // angle from warm, from -180° round through magenta, warm and green to 180° (cool at both
+  // ends), each with the key of its tip.
+  const MOVES = [
+    ['cooler', 'cooler'], ['cooler and more violet', 'cooler'], ['more magenta', 'magenta'], ['warmer and redder', 'warmer'],
+    ['warmer', 'warmer'], ['warmer and yellower', 'warmer'], ['greener', 'green'], ['cooler and greener', 'green'], ['cooler', 'cooler'],
+  ];
+  const moveName = (warm, tint) => MOVES[Math.round(Math.atan2(-tint, warm) / (Math.PI / 4)) + 4];
+
+  /*
+   * The color part of the overall shift in words: warmer, cooler, greener, more magenta or
+   * a mix of two (see MOVES), more saturated or grayer, and hues turned, as far as most shapes
+   * share them. When no part is big enough to mention, the biggest is still named as
+   * "slightly", so a shift that costs points always has words. A monochrome study gets a note
+   * instead: its color is set aside.
+   */
+  function colorFinding(g) {
+    if (g.mono) {
+      return {
+        title: 'Your study is monochrome, so its color is set aside.',
+        detail: 'Color accuracy counts the color it doesn’t have. Relationships and After overall shift take the color out of the reference too, so they compare your values only.',
+        tip: '',
+        points: g.points.color,
+        always: true,
+      };
+    }
+    // each part, sized against the change worth a mention
+    const [moveWords, moveTip] = moveName(g.warmShift, g.tint);
+    const parts = [
+      { key: moveTip, size: Math.hypot(g.warmShift, g.tint) / 3, move: true },
+      { key: g.sat > 1 ? 'saturated' : 'grayer', size: Math.abs(g.sat - 1) / 0.12 },
+      { key: 'hue', size: Math.abs(g.hueRot) / 8 },
+    ];
+    let named = parts.filter((q) => q.size >= 1);
+    // under a color cast, the turn and scale that come with it are part of the cast, not news
+    if (g.cast && named.some((q) => q.move)) named = named.filter((q) => q.move);
+    const slight = !named.length;
+    if (slight) named = [parts.reduce((a, b) => (b.size > a.size ? b : a))];
+    if (!named[0].size) return null;
+    const lead = named.reduce((a, b) => (b.size > a.size ? b : a));
+
+    const soft = slight ? 'slightly ' : '';
+    const words = named.map((q) => {
+      if (q.move) return soft + moveWords;
+      if (q.key === 'hue') return `hues turned ${soft}toward ${g.hueRot > 0 ? 'yellow' : 'red'}`;
+      const amount = slight ? 'slightly' : g.sat <= Study.SAT_RANGE[0] || g.sat >= Study.SAT_RANGE[1] ? 'much' : `about ${Math.round(Math.abs(g.sat - 1) * 20) * 5}%`;
+      return `${amount} ${g.sat > 1 ? 'more saturated' : 'grayer'}`;
+    });
+    words[0] += ' overall';
+    return {
+      title: capital(joinAnd(words)) + '.',
+      detail: g.cast
+        ? 'Light colors moved more than dark ones, the way they do in a photo taken under colored light. It runs through most of your shapes, so the list below repeats it.'
+        : 'It runs through most of your shapes, so the list below repeats it shape after shape until you switch to After overall shift.',
+      tip: g.cast && lead.move ? TIPS.cast : TIPS[lead.key],
+      points: g.points.color,
+    };
+  }
 
   /*
    * Up to three findings about the picture as a whole, ranked by the points of color accuracy
    * each one costs (from compare()). ref and art are Study.valueStats() of the two pictures:
-   * they supply the numbers in the words, so the words match the rulers.
+   * they supply the numbers in the words, so the words match the rulers. cost is what the
+   * whole overall shift costs (Relationships less Color accuracy).
    */
-  function overallFindings(g, ref, art, misaligned) {
+  function overallFindings(g, ref, art, misaligned, cost) {
     if (!g) return [];
     const p = g.points;
     const out = [];
     const known = (...v) => v.every((x) => x != null);
 
-    // Values: the range from darkest dark to lightest light, or the key if the range holds
-    if (known(ref.p2, art.p2) && p.value >= MIN_POINTS) {
-      const spanRef = (ref.p98 - ref.p2) / 10, spanArt = (art.p98 - art.p2) / 10;
-      const d = [0, 1, 2].map((z) => (known(ref.median[z], art.median[z]) ? art.median[z] - ref.median[z] : 0));
-      const end = (dz, name) => (Math.abs(dz) < 3 ? `your ${name} are within ${steps(Math.max(1, Math.abs(dz)))}` : `your ${name} are ${steps(dz)} too ${dz > 0 ? 'light' : 'dark'}`);
-      // darks and lights both moved the same way: the key (or the photo's exposure), not the range
-      const together = Math.min(Math.abs(d[0]), Math.abs(d[2])) >= 3 && Math.sign(d[0]) === Math.sign(d[2]) && Math.sign(d[0]) === Math.sign(g.keyShift);
-      if (Math.abs(spanArt - spanRef) >= 0.5 && !together) {
-        const darkOff = d[0] >= 3, lightOff = d[2] <= -3;
-        out.push({
-          title: `Your values span ${spanArt.toFixed(1)} steps; the reference spans ${spanRef.toFixed(1)}.`,
-          detail: capital(end(d[0], 'darks')) + ', and ' + end(d[2], 'lights') + '.',
-          tip: spanArt > spanRef
-            ? (d[2] >= 3 && d[0] > -3 ? TIPS.lightsHigh : d[0] <= -3 && d[2] < 3 ? TIPS.darksLow : TIPS.expanded)
-            : darkOff && !lightOff ? TIPS.anchorDark : lightOff && !darkOff ? TIPS.anchorLight : TIPS.anchorBoth,
-          points: p.value,
-        });
-      } else if (Math.abs(g.keyShift) >= 3 || together) {
-        out.push({
-          title: `Your whole picture is ${steps(g.keyShift)} value ${g.keyShift > 0 ? 'lighter' : 'darker'} than the reference.`,
-          detail: capital(joinAnd([end(d[0], 'darks'), end(d[1], 'middle values'), end(d[2], 'lights')])) + '.',
-          tip: g.keyShift > 0 ? TIPS.lighter : TIPS.darker,
-          points: p.value,
-        });
-      }
-    }
-
-    // Color: temperature, saturation and hue, as far as they are shared by most shapes
-    if (p.color >= MIN_POINTS) {
-      const parts = [], weight = {};
-      if (Math.abs(g.warmShift) >= 3) {
-        parts.push(g.warmShift > 0 ? 'warmer overall' : 'cooler overall');
-        weight[g.warmShift > 0 ? 'warmer' : 'cooler'] = Math.abs(g.warmShift) / 3;
-      }
-      // under a color cast, the turn and scale that come with it are part of the cast, not news
-      const castOnly = g.cast && parts.length > 0;
-      if (Math.abs(g.sat - 1) >= 0.12 && !castOnly) {
-        parts.push(`about ${Math.round(Math.abs(g.sat - 1) * 20) * 5}% ${g.sat > 1 ? 'more saturated' : 'grayer'}`);
-        weight[g.sat > 1 ? 'saturated' : 'grayer'] = Math.abs(g.sat - 1) / 0.12;
-      }
-      if (Math.abs(g.hueRot) >= 8 && !castOnly) {
-        parts.push(`hues turned toward ${g.hueRot > 0 ? 'yellow' : 'red'}`);
-        weight.hue = Math.abs(g.hueRot) / 8;
-      }
-      if (parts.length) {
-        if (!/overall/.test(parts[0])) parts[0] += ' overall';
-        const lead = Object.keys(weight).sort((a, b) => weight[b] - weight[a])[0];
-        out.push({
-          title: capital(joinAnd(parts)) + '.',
-          detail: g.cast
-            ? 'Light colors moved more than dark ones, the way they do in a photo taken under colored light. It runs through most of your shapes, so the list below repeats it.'
-            : 'It runs through most of your shapes, so the list below repeats it shape after shape until you switch to After overall shift.',
-          tip: g.cast && (lead === 'warmer' || lead === 'cooler') ? TIPS.cast : TIPS[lead],
-          points: p.color,
-        });
-      }
-    }
+    // The shift itself, in value and in color. Each is named when it costs enough. When the note
+    // under Relationships names a cost but neither part does on its own, the bigger is named
+    // anyway, so the card always says what the shift is.
+    const shift = [known(ref.p2, art.p2) ? valueFinding(g, ref, art) : null, colorFinding(g)].filter(Boolean);
+    shift.forEach((f) => { if (f.points >= MIN_POINTS || f.always) out.push(f); });
+    if (!out.length && cost >= SHIFT_WORTH && shift.length) out.push(shift.reduce((a, b) => (b.points > a.points ? b : a)));
 
     // Light and shadow: the gap between the two families, beyond what the overall value line explains
     // (a photo that isn't lined up mixes the families at every edge, so this waits until it is)
@@ -1657,7 +1725,7 @@
     title.textContent = name;
     const span = document.createElement('span');
     span.className = 'ov-span';
-    span.textContent = `V ${valueLabel(s.p2)} to ${valueLabel(s.p98)} · ${((s.p98 - s.p2) / 10).toFixed(1)} steps`;
+    span.textContent = `V ${valueLabel(s.p2)} to ${valueLabel(s.p98)} · ${spanOf(s).toFixed(1)} steps`;
     label.append(title, span);
 
     const ruler = document.createElement('div');
@@ -1742,12 +1810,15 @@
     els.ovNudge.hidden = !misaligned;
 
     els.ovFindings.innerHTML = '';
-    const list = overallFindings(cmp.global, ref, art, misaligned);
+    const shiftCost = cmp.global ? cmp.global.relScore - cmp.colorScore : 0;
+    const list = overallFindings(cmp.global, ref, art, misaligned, shiftCost);
     if (!list.length) {
       const li = document.createElement('li');
       li.className = 'ov-none';
       li.textContent = cmp.global
-        ? 'No overall shift worth fixing: your range, key and temperature follow the reference, so the differences below are local.'
+        ? (shiftCost >= SHIFT_WORTH
+          ? `The overall shift costs ${shiftCost} points, spread too thinly over value and color to name one change.`
+          : 'No overall shift worth fixing: your range, key and temperature follow the reference, so the differences below are local.')
         : cmp.fitProblem === 'unrelated'
           ? 'Your lights and darks don’t follow the reference’s pattern yet, so there is no one overall shift to measure. Block in the big shadow shapes first, or check that you loaded the right photo.'
           : 'Too few shapes to measure an overall shift: it needs 8 or more of a useful size. Raise Colors per value or lower Merge small shapes.';
@@ -1768,12 +1839,15 @@
       head.append(strong, cost);
       const detail = document.createElement('p');
       detail.textContent = f.detail;
-      const tip = document.createElement('p');
-      tip.className = 'ov-tip';
-      const tryIt = document.createElement('b');
-      tryIt.textContent = 'Try: ';
-      tip.append(tryIt, f.tip);
-      li.append(head, detail, tip);
+      li.append(head, detail);
+      if (f.tip) {
+        const tip = document.createElement('p');
+        tip.className = 'ov-tip';
+        const tryIt = document.createElement('b');
+        tryIt.textContent = 'Try: ';
+        tip.append(tryIt, f.tip);
+        li.append(tip);
+      }
       els.ovFindings.append(li);
     });
   }
@@ -1801,8 +1875,10 @@
   els.onion.addEventListener('input', () => { updateAlignOutputs(); repaintArt(); });
   els.glare.addEventListener('change', checkSoon);
 
+  // click rather than change: picking As photographed while it is only showing as a fallback
+  // (already checked) still counts as a choice
   document.querySelectorAll('input[name="shiftMode"]').forEach((el) =>
-    el.addEventListener('change', () => { state.shiftMode = el.value; showShiftMode(); })
+    el.addEventListener('click', () => { state.shiftMode = el.value; showShiftMode(); })
   );
   els.ovLineUp.addEventListener('click', () => {
     els.alignPanel.open = true;

@@ -126,23 +126,29 @@
     }
   }
 
+  // Down the columns, but a row at a time with a running sum per column, so memory is read
+  // in order
   function boxV(src, dst, w, h, r) {
     const d = 2 * r + 1;
-    for (let x = 0; x < w; x++) {
-      let sum = 0;
-      for (let k = -r; k <= r; k++) sum += src[Math.min(h - 1, Math.max(0, k)) * w + x];
-      for (let y = 0; y < h; y++) {
-        dst[y * w + x] = sum / d;
-        sum += src[Math.min(h - 1, y + r + 1) * w + x] - src[Math.max(0, y - r) * w + x];
+    const sum = new Float64Array(w);
+    for (let k = -r; k <= r; k++) {
+      const row = Math.min(h - 1, Math.max(0, k)) * w;
+      for (let x = 0; x < w; x++) sum[x] += src[row + x];
+    }
+    for (let y = 0; y < h; y++) {
+      const row = y * w, add = Math.min(h - 1, y + r + 1) * w, drop = Math.max(0, y - r) * w;
+      for (let x = 0; x < w; x++) {
+        dst[row + x] = sum[x] / d;
+        sum[x] += src[add + x] - src[drop + x];
       }
     }
   }
 
-  function blur(src, w, h, r) {
+  function blur(src, w, h, r, passes = 3) {
     if (r < 1) return src;
     const a = new Float32Array(src);
     const b = new Float32Array(src.length);
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < passes; pass++) {
       boxH(a, b, w, h, r);
       boxV(b, a, w, h, r);
     }
@@ -631,6 +637,8 @@
 
   const WARM_HUE = 50 * (Math.PI / 180); // orange-red direction in the a*b* plane
   const warmthOf = (a, b) => a * Math.cos(WARM_HUE) + b * Math.sin(WARM_HUE);
+  // At right angles to warm and cool: positive toward magenta, negative toward green
+  const tintOf = (a, b) => a * Math.sin(WARM_HUE) - b * Math.cos(WARM_HUE);
 
   // ---- Value range ----------------------------------------------------------
 
@@ -638,41 +646,45 @@
 
   /*
    * Where a picture's values sit, read over the reference's three masses so the reference
-   * and the painting are measured on the same pixels. Lightness is blurred a little so single
-   * noisy pixels can't set the darkest dark. All results are L*: p2 and p98 (the darkest dark
-   * and the lightest light, ignoring the last 2% at each end), the median of each mass, the
-   * lightest note of the shadow family (90th percentile of the shadow mass) and the darkest
-   * note of the light family (10th percentile of the middle and light masses together).
-   * `family` holds both families' quantiles and their shares of the covered picture.
+   * and the painting are measured on the same pixels. Lightness is averaged over 3 x 3 pixels
+   * so noise in the photo can't set the darkest dark. All results are L*: p2 and p98 (the
+   * darkest dark and the lightest light, ignoring the last 2% at each end), the median of each
+   * mass, the lightest note of the shadow family (90th percentile of the shadow mass) and the
+   * darkest note of the light family (10th percentile of the middle and light masses together).
+   * `share` is each mass's share of the covered picture, and `family` holds both families'
+   * quantiles and their shares. The blurred lightness is kept on the prep, so the reference's
+   * is worked out once rather than on every check.
    */
   function valueStats(prep, zone, mask) {
-    const L = blur(prep.L, prep.w, prep.h, 1);
+    if (!prep.valueL) prep.valueL = blur(prep.L, prep.w, prep.h, 1, 1);
+    const L = prep.valueL;
     const BINS = 200; // half an L* each
-    const all = new Float64Array(BINS);
-    const per = [new Float64Array(BINS), new Float64Array(BINS), new Float64Array(BINS)];
-    let covered = 0;
+    // one histogram per mass, end to end
+    const hist = new Uint32Array(3 * BINS);
     for (let i = 0; i < L.length; i++) {
       if (mask && !mask[i]) continue;
-      const b = Math.min(BINS - 1, Math.max(0, Math.floor(L[i] * 2)));
-      all[b]++;
-      per[zone[i]][b]++;
-      covered++;
+      const b = (L[i] * 2) | 0;
+      hist[zone[i] * BINS + (b < BINS ? b : BINS - 1)]++;
     }
+    const per = [0, 1, 2].map((z) => hist.subarray(z * BINS, (z + 1) * BINS));
     const lit = per[1].map((c, b) => c + per[2][b]);
-    const count = (hist) => hist.reduce((s, c) => s + c, 0);
+    const all = lit.map((c, b) => c + per[0][b]);
+    const count = (h) => h.reduce((s, c) => s + c, 0);
+    const covered = count(all);
     // L* below which a share p of the histogram lies, read linearly inside the bin; null if empty
-    const pct = (hist, p) => {
-      const total = count(hist);
+    const pct = (h, p) => {
+      const total = count(h);
       if (!total) return null;
       let goal = p * total, b = 0;
-      while (b < BINS - 1 && goal > hist[b]) goal -= hist[b++];
-      return (b + Math.min(1, goal / (hist[b] || 1))) / 2;
+      while (b < BINS - 1 && goal > h[b]) goal -= h[b++];
+      return (b + Math.min(1, goal / (h[b] || 1))) / 2;
     };
-    const quantiles = (hist) => (count(hist) ? Array.from({ length: QUANTILES + 1 }, (_, k) => pct(hist, k / QUANTILES)) : null);
+    const quantiles = (h) => (count(h) ? Array.from({ length: QUANTILES + 1 }, (_, k) => pct(h, k / QUANTILES)) : null);
     return {
       p2: pct(all, 0.02),
       p98: pct(all, 0.98),
       median: per.map((h) => pct(h, 0.5)),
+      share: per.map((h) => count(h) / (covered || 1)),
       shadowP90: pct(per[0], 0.9),
       lightP10: pct(lit, 0.1),
       family: {
@@ -686,6 +698,11 @@
 
   // Shapes smaller than this don't steer the fit, and below this many shapes it isn't trusted
   const FIT_MIN_SHARE = 0.003, FIT_MIN_SHAPES = 8;
+  // The fit keeps saturation within these, so a noisy fit can't explain away every color
+  const SAT_RANGE = [0.6, 1.6];
+  // A painting is monochrome when one tone explains its colors to within this a*b* distance,
+  // and the reference's colors spread at least this far
+  const MONO_MISFIT = 3, MONO_REF_SPREAD = 6;
   const huber = (r, delta) => (Math.abs(r) <= delta ? 1 : delta / Math.abs(r));
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const family = (r) => (r.zone ? 1 : 0); // 0: the shadow family, 1: the light family (middle and light)
@@ -730,6 +747,9 @@
 
   const evenMove = () => 1;
   const castMove = (r) => (r.refLab[0] + 16) / 66; // 1 at L* 50
+  // no change of value, and no change of color
+  const SAME_VALUES = { range: 1, offset: 0 };
+  const SAME_COLORS = { sat: 1, hueRot: 0, ta: 0, tb: 0, move: evenMove };
 
   // Solves a small linear system (Gaussian elimination with pivoting); null if it is singular
   function solve(A, b) {
@@ -754,14 +774,22 @@
     return x;
   }
 
-  function fitColors(pts, move) {
-    let sat = 1, hueRot = 0, ta = 0, tb = 0;
+  // How far the shapes' colors (key: 'refLab' or 'artLab') spread in a*b* about their
+  // area-weighted mean: the root mean square distance
+  function abSpread(pts, key) {
+    let sw = 0, ma = 0, mb = 0, spread = 0;
+    pts.forEach((r) => { sw += r.share; ma += r.share * r[key][1]; mb += r.share * r[key][2]; });
+    pts.forEach((r) => { spread += r.share * ((r[key][1] - ma / sw) ** 2 + (r[key][2] - mb / sw) ** 2); });
+    return Math.sqrt(spread / sw);
+  }
+
+  // `mono` fits a picture with no color of its own: every color loses all its chroma and
+  // takes on one tone (the move), as in a graphite drawing or a sepia study
+  function fitColors(pts, move, mono) {
+    let sat = mono ? 0 : 1, hueRot = 0, ta = 0, tb = 0;
     let wt = pts.map((r) => r.share);
     // a reference that is nearly one color (or gray) can't show a turn or a scale, only a move
-    let sw = 0, ma = 0, mb = 0, spread = 0;
-    pts.forEach((r) => { sw += r.share; ma += r.share * r.refLab[1]; mb += r.share * r.refLab[2]; });
-    pts.forEach((r) => { spread += r.share * ((r.refLab[1] - ma / sw) ** 2 + (r.refLab[2] - mb / sw) ** 2); });
-    const turns = spread / sw > 9;
+    const turns = !mono && abSpread(pts, 'refLab') > 3;
     for (let round = 0; round < 4; round++) {
       // u = c a - s b + ta k,  v = s a + c b + tb k: linear in (c, s, ta, tb)
       if (turns) {
@@ -777,7 +805,7 @@
         });
         const x = solve(A, B);
         if (x) {
-          sat = clamp(Math.hypot(x[0], x[1]), 0.6, 1.6);
+          sat = clamp(Math.hypot(x[0], x[1]), SAT_RANGE[0], SAT_RANGE[1]);
           hueRot = clamp(Math.atan2(x[1], x[0]), -Math.PI / 9, Math.PI / 9);
         }
       }
@@ -837,55 +865,71 @@
    *   value, color:  what fixing the value part (or the color part) of the shift would win.
    *                  Each is averaged over both orders of fixing, so the two add up to the
    *                  whole shift (relScore - colorScore).
-   *   temperature:   what a temperature step between the light and shadow families would win
-   *                  on top of the shift.
+   *   temperature:   what fixing a temperature step between the light and shadow families
+   *                  would win on top of the shift.
    *   separation:    the shadow creeping into the light, from the pixels at the edge of each
    *                  family (see separationCost).
    * The color part is fitted twice, moving every color alike and moving light colors more
-   * (a photo's color cast), and the closer fit is kept. A temperature step between light and
-   * shadow can still pass for one overall change: lights are more saturated than shadows, so
-   * "grayer, turned and warmer" moves shadows more than lights. When moving each family on its
-   * own fits the colors much better than either, the step is taken to be the painter's (a
-   * relationship to fix, which the Relationships score keeps), and the overall color shift is
-   * only the average move of the two families. With too few shapes to trust, or a painting
-   * whose values don't follow the reference's pattern at all (a blank canvas, another picture),
-   * there is no one shift to set aside: it returns { problem: 'few' | 'unrelated' }.
+   * (a photo's color cast), and the closer fit is kept. A painting with next to no color of
+   * its own (mono: a graphite drawing, a grisaille, a sepia study) is fitted as one tone
+   * instead, so what is left to compare is its values.
+   * A temperature step between light and shadow can still pass for one overall change: lights
+   * are more saturated than shadows, so "grayer, turned and warmer" moves shadows more than
+   * lights. When moving each family on its own fits the colors much better than either, the
+   * step is taken to be the painter's (a relationship to fix, which the Relationships score
+   * keeps), and the overall color shift is only a plain move: the shadows', the lights' or the
+   * average of the two.
+   * The shift is whichever of these color moves, with the value line or with the values left
+   * as they are, scores best. Leaving the shift out altogether is one of the choices, so the
+   * Relationships score never falls below Color accuracy.
+   * With too few shapes to trust, or a painting whose values don't follow the reference's
+   * pattern at all (a blank canvas, another picture), there is no one shift to set aside: it
+   * returns { problem: 'few' | 'unrelated' }.
    */
   function overallShift(regions, colorScore, values) {
     const pts = regions.filter((r) => r.ref && r.share >= FIT_MIN_SHARE);
     if (pts.length < FIT_MIN_SHAPES) return { problem: 'few' };
-    const { range, offset, follows } = fitValues(pts);
-    if (follows < 0.5) return { problem: 'unrelated' };
+    const fitted = fitValues(pts);
+    if (fitted.follows < 0.5) return { problem: 'unrelated' };
     const fam = fitFamilies(pts);
 
     const w = [0, 0];
     pts.forEach((r) => { w[family(r)] += r.share; });
+    const sw = w[0] + w[1];
     const both = w[0] > 0 && w[1] > 0;
     const step = both ? warmthOf(fam[0][0], fam[0][1]) - warmthOf(fam[1][0], fam[1][1]) : 0;
-    const misfit = (move) => {
-      let sum = 0, sw = 0;
+    // average a*b* distance between the painting's colors and the ones predicted for them
+    const misfit = (predict) => {
+      let sum = 0;
       pts.forEach((r) => {
-        const p = move(r);
+        const p = predict(r);
         sum += r.share * Math.hypot(r.artLab[1] - p[0], r.artLab[2] - p[1]);
-        sw += r.share;
       });
       return sum / sw;
     };
-    const even = fitColors(pts, evenMove), cast = fitColors(pts, castMove);
-    const evenAB = colorMove(even), castAB = colorMove(cast);
-    const evenMisfit = misfit((r) => evenAB(r.refLab)), castMisfit = misfit((r) => castAB(r.refLab));
-    const col = castMisfit < 0.9 * evenMisfit ? cast : even;
+    const misfitOf = (fit) => {
+      const ab = colorMove(fit);
+      return misfit((r) => ab(r.refLab));
+    };
+    const closer = (mono) => {
+      const even = fitColors(pts, evenMove, mono), cast = fitColors(pts, castMove, mono);
+      const e = misfitOf(even), c = misfitOf(cast);
+      return { fit: c < 0.9 * e ? cast : even, misfit: Math.min(e, c) };
+    };
+    const gray = closer(true);
+    const mono = gray.misfit < MONO_MISFIT && abSpread(pts, 'refLab') >= MONO_REF_SPREAD;
+    const color = mono ? gray : closer(false);
     const famAB = (r) => [r.refLab[1] + fam[family(r)][0], r.refLab[2] + fam[family(r)][1]];
-    const tempStep = both && Math.abs(step) >= 6 && misfit(famAB) <= 0.65 * Math.min(evenMisfit, castMisfit);
-    const mean = both
-      ? [0, 1].map((k) => (w[0] * fam[0][k] + w[1] * fam[1][k]) / (w[0] + w[1]))
-      : fam[w[0] ? 0 : 1];
-    const shift = tempStep ? { sat: 1, hueRot: 0, ta: mean[0], tb: mean[1], move: evenMove } : col;
-    const moveAB = colorMove(shift);
+    const tempStep = !mono && both && Math.abs(step) >= 6 && misfit(famAB) <= 0.65 * color.misfit;
+    const plain = (t) => ({ sat: 1, hueRot: 0, ta: t[0], tb: t[1], move: evenMove });
+    const mean = [0, 1].map((k) => (w[0] * fam[0][k] + w[1] * fam[1][k]) / sw);
+    const colors = (tempStep ? [plain(mean), plain(fam[0]), plain(fam[1])] : [color.fit]).concat(SAME_COLORS);
+    const lines = [fitted, SAME_VALUES];
 
-    const mapL = (lab) => [clamp(range * lab[0] + offset, 0, 100), lab[1], lab[2]];
-    const mapAB = (lab) => [lab[0], ...moveAB(lab)];
-    const map = (lab) => [clamp(range * lab[0] + offset, 0, 100), ...moveAB(lab)];
+    const mapWith = (line, col) => {
+      const ab = colorMove(col);
+      return (lab) => [clamp(line.range * lab[0] + line.offset, 0, 100), ...ab(lab)];
+    };
     const scoreWith = (f) => {
       let sum = 0;
       regions.forEach((r) => {
@@ -895,42 +939,55 @@
       });
       return sum;
     };
-    const sL = scoreWith(mapL), sAB = scoreWith(mapAB), relScore = scoreWith(map);
+    // the fits come first, so they win a tie
+    let best = null;
+    lines.forEach((line) => colors.forEach((col) => {
+      const score = scoreWith(mapWith(line, col));
+      if (!best || score > best.score) best = { line, col, score };
+    }));
+    const { line, col, score: relScore } = best;
+    const map = mapWith(line, col);
+    const sL = scoreWith(mapWith(line, SAME_COLORS)), sAB = scoreWith(mapWith(SAME_VALUES, col));
 
-    // the temperature step: each family moved by its own leftover warmth less the picture's
+    // The temperature step: each family's warmth left over once the shift is set aside. Fixing
+    // the step brings one family's leftover level with the other's, or both to meet halfway;
+    // whichever wins most is what the step costs.
     const left = [0, 0];
-    let keyShift = 0, warmShift = 0, sw = 0;
     pts.forEach((r) => {
       const p = map(r.refLab);
       left[family(r)] += r.share * (warmthOf(r.artLab[1], r.artLab[2]) - warmthOf(p[1], p[2]));
-      keyShift += r.share * (p[0] - r.refLab[0]);
-      warmShift += r.share * (warmthOf(p[1], p[2]) - warmthOf(r.refLab[1], r.refLab[2]));
-      sw += r.share;
     });
     let temperature = 0;
     if (both) {
-      const lm = (left[0] + left[1]) / (w[0] + w[1]);
-      const k = [left[0] / w[0] - lm, left[1] / w[1] - lm];
-      temperature = Math.max(0, scoreWith((lab, r) => {
-        const p = map(lab), d = k[family(r)];
-        return [p[0], p[1] + d * Math.cos(WARM_HUE), p[2] + d * Math.sin(WARM_HUE)];
-      }) - relScore);
+      const k = [left[0] / w[0], left[1] / w[1]];
+      [k[0], k[1], (left[0] + left[1]) / sw].forEach((level) => {
+        temperature = Math.max(temperature, scoreWith((lab, r) => {
+          const p = map(lab), d = k[family(r)] - level;
+          return [p[0], p[1] + d * Math.cos(WARM_HUE), p[2] + d * Math.sin(WARM_HUE)];
+        }) - relScore);
+      });
     }
     const warmth = (f, key) => {
       let s = 0;
       pts.forEach((r) => { if (family(r) === f) s += r.share * warmthOf(r[key][1], r[key][2]); });
       return s / w[f];
     };
-    const sep = separationCost(values, range, offset);
+    // Warmer, cooler, greener or more magenta are read off the move alone: the change of
+    // saturation and the turn of hue are about neutral gray, so they don't pass for a move
+    let reach = 0;
+    pts.forEach((r) => { reach += r.share * col.move(r); });
+    reach /= sw;
+    const sep = separationCost(values, line.range, line.offset);
 
     return {
       n: pts.length,
-      range, offset,
-      keyShift: keyShift / sw,
-      sat: shift.sat,
-      hueRot: (shift.hueRot * 180) / Math.PI,
-      warmShift: warmShift / sw,
-      cast: shift.move === castMove, // light colors moved more than dark ones, as under colored light
+      range: line.range, offset: line.offset,
+      sat: col.sat,
+      hueRot: (col.hueRot * 180) / Math.PI,
+      warmShift: warmthOf(col.ta, col.tb) * reach,
+      tint: tintOf(col.ta, col.tb) * reach,
+      cast: col.move === castMove, // light colors moved more than dark ones, as under colored light
+      mono,                        // no color of its own: only values are left to compare
       // shadow-family warmth less light-family warmth, in the reference and in the painting
       tempContrast: both ? [warmth(0, 'refLab') - warmth(1, 'refLab'), warmth(0, 'artLab') - warmth(1, 'artLab')] : null,
       tempStep: tempStep ? step : 0,  // set when the temperature step, not one overall change, explains the colors
@@ -1011,7 +1068,7 @@
     for (let c = 0; c < count; c++) {
       const k = cnt[c];
       if (!k) {
-        regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0 };
+        regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, dTint: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0 };
         continue;
       }
       const refLab = linToLab(refDom[c * 3], refDom[c * 3 + 1], refDom[c * 3 + 2]);
@@ -1028,6 +1085,7 @@
         dL,
         dC: Math.hypot(artLab[1], artLab[2]) - Math.hypot(refLab[1], refLab[2]),
         dWarm: (artLab[1] - refLab[1]) * Math.cos(WARM_HUE) + (artLab[2] - refLab[2]) * Math.sin(WARM_HUE),
+        dTint: tintOf(artLab[1], artLab[2]) - tintOf(refLab[1], refLab[2]),
         ref: srgbOf(refDom, c),
         art: srgbOf(artDom, c),
         cx: sx[c] / k,
@@ -1066,6 +1124,7 @@
         r.pctRel = Math.round(Math.max(0, 100 - 2.5 * r.dErel));
         r.dLrel = a[0] - p[0];
         r.dWarmRel = warmthOf(a[1], a[2]) - warmthOf(p[1], p[2]);
+        r.dTintRel = tintOf(a[1], a[2]) - tintOf(p[1], p[2]);
         r.dCrel = Math.hypot(a[1], a[2]) - Math.hypot(p[1], p[2]);
       });
       topRel = costliest('dErel');
@@ -1151,21 +1210,27 @@
     const { w, h } = ref;
     const cell = Math.max(2, Math.round(Math.max(w, h) / 150));
     const gw = Math.floor(w / cell), gh = Math.floor(h / cell);
-    const shrink = (L) => {
-      const out = new Float32Array(gw * gh), cnt = new Float32Array(gw * gh);
-      for (let y = 0; y < gh * cell; y++) {
-        for (let x = 0; x < gw * cell; x++) {
-          const i = y * w + x;
-          if (mask && !mask[i]) continue;
-          const g = ((y / cell) | 0) * gw + ((x / cell) | 0);
-          out[g] += L[i];
-          cnt[g]++;
-        }
+    // both pictures' lightness averaged over each cell, in one pass; cells the mask cuts into
+    // are left out
+    const R = new Float32Array(gw * gh), A = new Float32Array(gw * gh), cnt = new Float32Array(gw * gh);
+    const RL = ref.L, AL = art.L;
+    const col = new Int32Array(gw * cell);
+    for (let x = 0; x < col.length; x++) col[x] = (x / cell) | 0;
+    for (let y = 0; y < gh * cell; y++) {
+      const row = ((y / cell) | 0) * gw;
+      for (let x = 0, i = y * w; x < col.length; x++, i++) {
+        if (mask && !mask[i]) continue;
+        const g = row + col[x];
+        R[g] += RL[i];
+        A[g] += AL[i];
+        cnt[g]++;
       }
-      for (let g = 0; g < out.length; g++) out[g] = cnt[g] > cell * cell * 0.9 ? out[g] / cnt[g] : NaN;
-      return out;
-    };
-    const R = shrink(ref.L), A = shrink(art.L);
+    }
+    for (let g = 0; g < R.length; g++) {
+      const full = cnt[g] > cell * cell * 0.9;
+      R[g] = full ? R[g] / cnt[g] : NaN;
+      A[g] = full ? A[g] / cnt[g] : NaN;
+    }
     const corr = (dx, dy) => {
       let k = 0, sr = 0, sa = 0, srr = 0, saa = 0, sra = 0;
       const m = 3; // leave a margin so every shift compares the same cells
@@ -1193,13 +1258,16 @@
   /*
    * Shiny white spots where the light bounced off wet paint or varnish into the camera.
    * Candidates are near-white and colorless (L* over 85, C* under 10) or clipped (a channel at
-   * 250 or more). They count as glare only as small spots, each under 0.5% of the picture, that
-   * stand out from what's around them (on average 12 L* lighter than their blurred
-   * surroundings), and only where the reference is clearly darker (by 15 L* or more). So a
-   * white collar is too big, and a catchlight or white teeth that the reference has too are
-   * kept. The spots grow by 2 px (at the 900 px working size) to take in their soft edges.
-   * `cover` limits the search to the part of the picture the painting covers. Returns
-   * { mask, count } (1 = glare) or null.
+   * 250 or more). They count as glare only as small spots, each under 0.5% of the picture but
+   * more than a speck (3 px across at the 900 px working size), that stand out from what's
+   * around them (on average 12 L* lighter than the average of their surroundings), and only
+   * where the reference is clearly darker (by 15 L* or more). So a white collar is too big, a
+   * catchlight or white teeth that the reference has too are kept, and the grain of the paper
+   * or canvas is too fine. The spots grow by 2 px (at the 900 px working size) to take in their
+   * soft edges. Spots covering more than 5% of the picture in all are not glare but something
+   * in the paint or the photo, so none are kept and `crowded` is set. `cover` limits the search
+   * to the part of the picture the painting covers. Returns { mask, count } (1 = glare), or
+   * null when there is none.
    */
   function glareMask(prep, ref, cover) {
     const { w, h, L, A, B, rgba } = prep;
@@ -1212,7 +1280,7 @@
       if (clipped || (L[i] > 85 && A[i] * A[i] + B[i] * B[i] < 100)) { bright[i] = 1; any = true; }
     }
     if (!any) return null;
-    const around = blur(L, w, h, Math.max(2, Math.round(Math.max(w, h) / 150)));
+    const around = blur(L, w, h, Math.max(2, Math.round(Math.max(w, h) / 150)), 1);
     const { comp, count } = components(bright, w, h);
     const size = new Float64Array(count), lift = new Float64Array(count), above = new Float64Array(count);
     for (let i = 0; i < n; i++) {
@@ -1222,13 +1290,14 @@
       lift[c] += L[i] - around[i];
       above[c] += L[i] - ref.L[i];
     }
-    const maxSize = 0.005 * n;
+    const maxSize = 0.005 * n, minSize = Math.max(4, (Math.max(w, h) / 300) ** 2);
     const keep = new Uint8Array(count);
-    let kept = false;
+    let kept = 0;
     for (let c = 0; c < count; c++) {
-      if (size[c] && size[c] <= maxSize && lift[c] / size[c] > 12 && above[c] / size[c] >= 15) { keep[c] = 1; kept = true; }
+      if (size[c] >= minSize && size[c] <= maxSize && lift[c] / size[c] > 12 && above[c] / size[c] >= 15) { keep[c] = 1; kept += size[c]; }
     }
     if (!kept) return null;
+    if (kept > 0.05 * n) return { mask: null, count: 0, crowded: true };
     const mask = new Uint8Array(n);
     const grow = Math.max(1, Math.round(Math.max(w, h) / 450));
     let total = 0;
@@ -1289,5 +1358,6 @@
     deltaE2000,
     DIFF_BINS,
     WARM_HUE,
+    SAT_RANGE,
   };
 })();

@@ -101,7 +101,7 @@
     <main class="work">
       <div class="tabs" role="tablist" aria-label="Mode">
         <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
-        <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting <span class="tab-new">New<span class="tab-new-more">: overall shift</span></span></button>
+        <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
       </div>
 
       <div class="toolbar" role="group" aria-label="Overlays">
@@ -252,10 +252,7 @@
             <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
           </div>
           <section class="overall" id="overall" aria-labelledby="overallTitle">
-            <div class="overall-head">
-              <h3 id="overallTitle">Overall</h3>
-              <span class="tab-new">New</span>
-            </div>
+            <h3 id="overallTitle">Overall</h3>
             <p class="hint">Value range, key and temperature across the whole picture. One overall shift here shows up as the same note on many shapes below.</p>
             <div class="ov-scales" id="ovScales" role="img"></div>
             <dl class="ov-masses" id="ovMasses" aria-label="Middle value of each mass, reference to yours"></dl>
