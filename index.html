@@ -102,9 +102,10 @@
       <div class="tabs" role="tablist" aria-label="Mode">
         <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
         <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
+        <button type="button" role="tab" class="tab" id="tabEyeBtn" aria-selected="false" aria-controls="tab-eye" tabindex="-1">Train your eye</button>
       </div>
 
-      <div class="toolbar" role="group" aria-label="Overlays">
+      <div class="toolbar" id="toolbar" role="group" aria-label="Overlays">
         <div class="tool-group">
           <span class="tool-label" id="gridLabel">Grid</span>
           <div class="seg" role="radiogroup" aria-labelledby="gridLabel">
@@ -238,6 +239,10 @@
               </div>
             </dl>
             <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
+            <div class="eye-tip" id="eyeTip" hidden>
+              <p id="eyeTipText"></p>
+              <button type="button" class="btn btn-small" id="eyeTipBtn">Practice judging shadows</button>
+            </div>
           </div>
           <div class="fixes">
             <h3>Biggest differences</h3>
@@ -263,6 +268,46 @@
             <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
             <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
           </figure>
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-eye" role="tabpanel" aria-labelledby="tabEyeBtn" hidden>
+        <p class="source">Ten quick spots on your own reference: guess, see the answer, and learn which way your eye leans. The loupe is off here, so nothing gives the answer away.</p>
+        <div class="eye-bar">
+          <div class="seg" role="radiogroup" aria-label="Drill">
+            <input type="radio" name="eyeMode" id="eyeValue" value="value" checked><label for="eyeValue">What value?</label>
+            <input type="radio" name="eyeMode" id="eyeLighter" value="lighter"><label for="eyeLighter">Which is lighter?</label>
+            <input type="radio" name="eyeMode" id="eyeMass" value="mass"><label for="eyeMass">Shadow, middle or light?</label>
+            <input type="radio" name="eyeMode" id="eyeWarmer" value="warmer"><label for="eyeWarmer">Which is warmer?</label>
+          </div>
+          <label class="inline-field" for="eyeFocus" id="eyeFocusField">Spots from
+            <select id="eyeFocus">
+              <option value="-1" selected>All masses</option>
+              <option value="0">Shadows only</option>
+              <option value="1">Middles only</option>
+              <option value="2">Lights only</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="eye-layout" id="eyeLayout">
+          <div class="eye-head" id="eyeHead">
+            <div class="eye-progress" id="eyeProgress">
+              <span class="eye-count" id="eyeCount"></span>
+              <ol class="eye-pips" id="eyePips" aria-hidden="true"></ol>
+            </div>
+            <h3 class="eye-prompt" id="eyePrompt"></h3>
+            <p class="hint" id="eyeHelp"></p>
+            <p class="eye-note" id="eyeNote" hidden></p>
+          </div>
+          <div class="matte eye-matte"><canvas id="cv-eye" class="eye-canvas" aria-label="Reference photo with the spots to judge ringed"></canvas><canvas class="overlay" id="eyeRings" aria-hidden="true"></canvas></div>
+          <div class="eye-side">
+            <div class="eye-answers" id="eyeAnswers" role="group" aria-labelledby="eyePrompt" tabindex="-1"></div>
+            <div id="eyeFeedback" aria-live="polite"></div>
+            <div class="eye-summary" id="eyeSummary" hidden></div>
+            <div class="eye-empty" id="eyeEmpty" hidden><h3></h3><p></p></div>
+            <p class="hint">Each answer is the value in this photo, measured from its pixels, so it depends on the photo's exposure and on your screen.</p>
+          </div>
         </div>
       </section>
 
@@ -306,6 +351,7 @@
 </dialog>
 
 <script src="js/processing.js"></script>
+<script src="js/eye-trainer.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

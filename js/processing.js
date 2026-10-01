@@ -794,5 +794,6 @@
     neutralGains,
     deltaE2000,
     DIFF_BINS,
+    WARM_HUE,
   };
 })();

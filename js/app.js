@@ -26,8 +26,9 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn') },
-    tabPanels: { study: $('tab-study'), check: $('tab-check') },
+    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn'), eye: $('tabEyeBtn') },
+    tabPanels: { study: $('tab-study'), check: $('tab-check'), eye: $('tab-eye') },
+    toolbar: $('toolbar'),
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -44,6 +45,9 @@
     meterValue: $('meterValue'),
     meterShapes: $('meterShapes'),
     fixList: $('fixList'),
+    eyeTip: $('eyeTip'),
+    eyeTipText: $('eyeTipText'),
+    eyeTipBtn: $('eyeTipBtn'),
     alignPanel: $('alignPanel'),
     alignState: $('alignState'),
     onion: $('onion'), onionOut: $('onionOut'),
@@ -220,6 +224,7 @@
     drawHistogram();
     state.art.dirty = true;
     if (state.tab === 'check') runCheck();
+    EyeTrainer.update();
     els.busy.hidden = true;
   }
 
@@ -1149,16 +1154,28 @@
       els.tabPanels[key].hidden = !on;
       if (on && focus) btn.focus();
     });
+    // Train your eye has no loupe, grid or lines: they would give the answer away
+    els.toolbar.hidden = name === 'eye';
+    if (name === 'eye') {
+      els.loupe.hidden = true;
+      state.hover = null;
+      state.drawing = null;
+      EyeTrainer.render();
+    }
     if (name === 'check' && state.art.dirty) runCheck();
     drawAllOverlays();
   }
 
+  // Arrow keys move between tabs, wrapping around; Home and End go to the first and last
+  const tabOrder = Object.keys(els.tabs);
   Object.entries(els.tabs).forEach(([key, btn]) => {
     btn.addEventListener('click', () => switchTab(key));
     btn.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const i = tabOrder.indexOf(key), n = tabOrder.length;
+      const to = { ArrowRight: i + 1, ArrowLeft: i - 1 + n, Home: 0, End: n - 1 }[e.key];
+      if (to === undefined) return;
       e.preventDefault();
-      switchTab(key === 'study' ? 'check' : 'study', true);
+      switchTab(tabOrder[to % n], true);
     });
   });
 
@@ -1380,6 +1397,8 @@
     ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
 
+    renderEyeTip(cmp);
+
     els.fixList.innerHTML = '';
     if (!cmp.top.length) {
       const li = document.createElement('li');
@@ -1414,6 +1433,32 @@
       els.fixList.append(li);
     });
   }
+
+  // The value mass the painting got furthest off, with a way to practice judging it in Train your eye
+  let tipMass = 0;
+  function renderEyeTip(cmp) {
+    const off = [0, 1, 2].map((z) => {
+      let share = 0, dL = 0;
+      cmp.regions.forEach((r) => {
+        if (!r.ref || r.zone !== z) return;
+        share += r.share;
+        dL += r.share * r.dL;
+      });
+      return share >= 0.05 ? dL / share : 0;
+    });
+    const z = [0, 1, 2].sort((a, b) => Math.abs(off[b]) - Math.abs(off[a]))[0];
+    els.eyeTip.hidden = Math.abs(off[z]) < 3;
+    if (els.eyeTip.hidden) return;
+    tipMass = z;
+    const mass = ZONE_NAMES[z].toLowerCase();
+    els.eyeTipText.textContent = `Your ${mass} shapes came out ${valueLabel(Math.abs(off[z]))} value too ${off[z] > 0 ? 'light' : 'dark'} on average. Seeing values right comes before painting them.`;
+    els.eyeTipBtn.textContent = `Practice judging ${mass}s`;
+  }
+
+  els.eyeTipBtn.addEventListener('click', () => {
+    EyeTrainer.start('value', tipMass);
+    switchTab('eye', true);
+  });
 
   function updateAlignOutputs() {
     els.onionOut.value = els.onion.value + '%';
@@ -1545,8 +1590,10 @@
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
+    EyeTrainer.attach(state, () => [+els.t1.value, +els.t2.value]);
     prepareAndRun(true);
     if (location.hash === '#check') switchTab('check');
+    if (location.hash === '#eye') switchTab('eye');
   }
 
   const redrawHist = () => drawHistogram();

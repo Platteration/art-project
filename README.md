@@ -37,6 +37,21 @@ The second tab scores a photo of your finished piece against the reference.
 
 With the built-in sample, the tab opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
+### Train your eye
+
+The third tab turns the reference into short drills for judging value and temperature. The loupe, grid and lines are off there, so nothing gives the answer away. A round is ten questions; after each answer a card shows what the spot really is and, when the photo shows one, the likely reason you were off.
+
+- **What value?** A ring marks one spot. Pick its value from the eleven gray chips, V 0 to V 10, or press 0–9. The card puts the spot's color next to the gray of the same value and says how far off you were: within 0.5 is *spot on*, within 1 is *close*. Causes it names: saturated colors read lighter than they are, dark or light surroundings push a spot the other way, and shadows tend to look lighter and lights darker than they are. **Spots from** limits a round to the shadows, middles or lights.
+- **Which is lighter?** Two rings, A and B, 0.3 to 1.5 values apart (press A or B, or tap a ring). About six pairs in ten are traps, where the darker spot is the more colorful one or the surroundings make it look lighter; the rest differ in color the other way, so "pick the grayer one" is no shortcut. Spots near black or white are left out, where small differences are noise. A photo with few such pairs falls back to pairs of one color, then to pairs further apart in value, and says so.
+- **Shadow, middle or light?** Is the spot in the shadow, middle or light mass of your three-value study (S, M, L)? It follows your splits, and only asks about spots that sit clearly inside a mass.
+- **Which is warmer?** Two spots of about the same value. Warmer means nearer orange on the color wheel: when both spots have color, the warmer one also has the hue nearer orange, so a strong pink never counts as warmer than a soft orange.
+
+**See the photo in gray** (or G) shows the whole picture as values after an answer. The round's summary gives the average miss, or how many were right, your bias for each mass ("Shadows: 0.7 too light"), a comparison with your last round of the same drill and, for the pair drills, what fooled you most. Answers are kept in your browser (the last 300) for the long-run bias; without storage they last for the visit.
+
+Spots are only taken where the photo is even: inside the ring the lightness varies by no more than 0.6 of a value between its ninths and its pixels scatter little, and the whole ring sits in one value mass. A spot's value is the median L\* of the pixels inside the ring, divided by 10, so it is the value *in this photo*: it depends on the photo's exposure and on your screen. Skin-colored spots and spots near the middle of the picture come up more often, and pairs favour neighbouring areas. Busy, tiny or flat photos get looser limits or a plain message saying which drill can't run on them and why.
+
+On the **Check my painting** tab, when one value mass of your painting is off by 0.3 or more on average, a **Practice judging** button opens a value round on just that mass.
+
 ## Running it
 
 No build step or install. Open `index.html` in a browser, or serve the folder:
@@ -74,4 +89,5 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `index.html`: page structure
 - `styles.css`: layout and theme (light and dark)
 - `js/processing.js`: image processing (no dependencies)
+- `js/eye-trainer.js`: the Train your eye drills
 - `js/app.js`: controls, loupe, palette and the built-in sample portrait

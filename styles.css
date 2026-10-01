@@ -335,7 +335,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .btn.is-active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .picking-neutral #cv-art { cursor: copy; }
 
-.check-empty {
+.check-empty, .eye-empty {
   border: 2px dashed var(--line);
   border-radius: var(--r);
   padding: 32px 20px;
@@ -344,8 +344,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   gap: 6px;
   justify-items: center;
 }
-.check-empty h3 { margin: 0; font: 700 1.1rem var(--display); }
-.check-empty p { margin: 0; color: var(--muted); max-width: 52ch; }
+.check-empty h3, .eye-empty h3 { margin: 0; font: 700 1.1rem var(--display); }
+.check-empty p, .eye-empty p { margin: 0; color: var(--muted); max-width: 52ch; }
 
 .check-body {
   display: grid;
@@ -391,6 +391,123 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fix-text strong { font-weight: 600; }
 .fix-text small { font: 0.75rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .fix-none { color: var(--muted); margin: 0; }
+.eye-tip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.eye-tip p { margin: 0; flex: 1 1 220px; }
+
+/* ---- Train your eye ----
+   The photo on its matte with the question beside it (below it on phones, with the question on top,
+   so the ring and the answers fit on one screen). */
+#tab-eye { container: eye / inline-size; }
+.eye-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.eye-layout {
+  display: grid;
+  gap: 14px 24px;
+  align-items: start;
+  grid-template-areas: "head" "photo" "side";
+}
+@container eye (min-width: 760px) {
+  .eye-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(330px, 400px);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "photo head" "photo side";
+  }
+}
+.eye-head { grid-area: head; display: grid; gap: 6px; min-width: 0; }
+.eye-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.eye-count { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.eye-pips { list-style: none; margin: 0; padding: 0; display: flex; gap: 5px; }
+.eye-pips li {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  transition: background-color 0.2s, border-color 0.2s;
+}
+.eye-pips .is-now { border: 2px solid var(--ink); transform: scale(1.2); }
+.eye-pips .is-on { background: var(--accent); border-color: var(--accent); }
+.eye-pips .is-close { background: color-mix(in srgb, var(--accent) 35%, transparent); border-color: var(--accent); }
+.eye-pips .is-off { background: color-mix(in srgb, var(--muted) 45%, transparent); border-color: var(--muted); }
+.eye-prompt { margin: 0; font: 700 1.3rem/1.2 var(--display); text-wrap: balance; }
+.eye-note { margin: 0; font-size: 0.8rem; border-left: 3px solid var(--accent); padding-left: 8px; }
+
+.eye-matte { grid-area: photo; }
+/* on a phone the summary comes straight after the heading; the photo has nothing to show then */
+@container eye (max-width: 759px) { .eye-layout.is-done .eye-matte { display: none; } }
+.eye-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 74vh;
+  box-shadow: 0 1px 3px var(--shadow);
+  touch-action: manipulation;
+}
+/* stacked, the photo leaves room below it for the answers */
+@container eye (max-width: 759px) { .eye-canvas { max-height: 58vh; } }
+
+.eye-side { grid-area: side; display: grid; gap: 14px; min-width: 0; align-content: start; }
+.eye-answers { container-type: inline-size; }
+.eye-answers:focus { outline: none; } /* takes focus only to hand it to the answers inside */
+/* the value scale: one row of eleven grays, six and five on narrow screens */
+.eye-steps { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 5px; }
+@container (max-width: 359px) { .eye-steps { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@media (pointer: coarse) and (max-width: 699px) { .eye-steps { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.eye-step {
+  appearance: none;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--c);
+  color: var(--t);
+  font: 600 0.85rem var(--mono);
+  cursor: pointer;
+}
+.eye-step:hover:not(:disabled) { border-color: var(--ink); }
+.eye-step:disabled { cursor: default; }
+.eye-step.is-picked { outline: 2px dashed var(--ink); outline-offset: 2px; }
+.eye-step.is-truth { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.eye-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.eye-choices-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.eye-choice { min-height: 44px; padding-inline: 8px; white-space: normal; }
+.eye-choice:disabled { opacity: 1; }
+.eye-choice:disabled:not(.is-truth):not(.is-picked) { opacity: 0.55; }
+.eye-choice.is-picked { border: 2px dashed var(--ink); }
+.eye-choice.is-truth { border: 2px solid var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.eye-tone { width: 18px; height: 18px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+
+.eye-card, .eye-summary {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.eye-card { animation: eye-in 0.2s ease-out; }
+@keyframes eye-in { from { opacity: 0; transform: translateY(4px); } }
+.eye-card-top { display: grid; gap: 12px; }
+.eye-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.eye-swatch { margin: 0; display: grid; gap: 4px; justify-items: start; }
+.eye-well { display: flex; padding: 8px; background: var(--well); border-radius: 4px; }
+.eye-chip { display: block; width: 48px; height: 48px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3); } /* a gray near the matte's still shows its edge */
+.eye-chip:first-child { border-radius: 3px 0 0 3px; }
+.eye-chip:last-child { border-radius: 0 3px 3px 0; }
+.eye-chip:only-child { width: 64px; border-radius: 3px; }
+.eye-swatch figcaption { font: 500 0.75rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.eye-verdict { display: grid; gap: 4px; min-width: 0; }
+.eye-verdict p { margin: 0; }
+.eye-grade { font: 700 1.15rem/1.2 var(--display); }
+.eye-grade.is-good { color: var(--accent); }
+.eye-cause { color: var(--muted); font-size: 0.85rem; }
+.eye-card-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+
+.eye-score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.eye-summary > p { margin: 0; }
+.eye-bias { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.eye-bias li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.eye-bias strong { font-weight: 600; }
+.eye-bias small { font: 0.75rem var(--mono); color: var(--muted); }
+.eye-advice { font-weight: 600; }
 
 
 .busy {
@@ -543,5 +660,6 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .save-name { margin: 0; font: 500 0.8rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast { transition: none; }
+  .toast, .eye-pips li { transition: none; }
+  .eye-card { animation: none; }
 }
