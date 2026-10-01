@@ -722,7 +722,9 @@
           record({ kind: 'line', op: 'add' });
         }
         drawAllOverlays();
+        // the drag is over: the loupe goes back to the color under the pointer, without its length or tilt
         if (e.pointerType === 'touch') els.loupe.hidden = true;
+        else showLoupeFor(canvas, e);
         return;
       }
       const p = state.dragging;
@@ -1218,12 +1220,13 @@
   }
 
   // The nearest whole number, half, third or quarter, written the way an artist would say it,
-  // or '' if none is within 0.03
+  // or '' if none is within 0.03, and within 4% for short lengths (0.36 U is not ⅓)
   const FRACTIONS = { '1/2': '½', '1/3': '⅓', '2/3': '⅔', '1/4': '¼', '3/4': '¾' };
   function nearestFraction(r) {
+    const near = Math.min(0.03, 0.04 * r);
     for (let d = 1; d <= 4; d++) {
       const n = Math.round(r * d);
-      if (!n || Math.abs(n / d - r) > 0.03) continue;
+      if (!n || Math.abs(n / d - r) > near) continue;
       const whole = Math.floor(n / d), rest = n % d;
       return (whole || !rest ? String(whole) : '') + (rest ? FRACTIONS[rest + '/' + d] : '');
     }
@@ -1266,9 +1269,10 @@
   }
 
   // "1.48 U ≈ 1½ · 13.3 cm": the length in units, the nearest simple fraction, and how long to
-  // make it on the canvas once the unit's length there is set
-  function measureText(m, isUnit) {
+  // make it on the canvas once the unit's length there is set. Brief, just "1.48 U".
+  function measureText(m, isUnit, brief) {
     const r = isUnit ? 1 : lengthOf(m) / lengthOf(unitMeasure());
+    if (brief) return isUnit ? '1 U' : r.toFixed(2) + ' U';
     const f = isUnit ? '' : nearestFraction(r);
     let text = isUnit ? '1 U' : r.toFixed(2) + ' U' + (f ? ' ≈ ' + f : '');
     const size = canvasSize();
@@ -1289,11 +1293,11 @@
   }
 
   // Where a pill of that size goes when centred on (cx, cy): the whole label stays inside the picture
+  const PILL_PAD = 3; // px between a label and the picture's edge
   function pillBox(size, cx, cy, W, H) {
-    const pad = 3;
     return {
-      x: Math.max(pad, Math.min(W - size.w - pad, cx - size.w / 2)),
-      y: Math.max(pad, Math.min(H - size.h - pad, cy - size.h / 2)),
+      x: Math.max(PILL_PAD, Math.min(W - size.w - PILL_PAD, cx - size.w / 2)),
+      y: Math.max(PILL_PAD, Math.min(H - size.h - PILL_PAD, cy - size.h / 2)),
       w: size.w,
       h: size.h,
     };
@@ -1326,75 +1330,247 @@
     const list = d && d.kind === 'measure' ? state.measures.concat(d) : state.measures;
     if (!list.length) return;
     const unitLine = unitMeasure();
-    list.forEach((m) => {
+    const marks = list.map((m) => {
       const isUnit = m === unitLine;
       const x1 = m.x1 * W, y1 = m.y1 * H, x2 = m.x2 * W, y2 = m.y2 * H;
-      const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      const ux = (x2 - x1) / (len || 1), uy = (y2 - y1) / (len || 1);
       const tick = (isUnit ? 6 : 5) * unit;
-      const tx = ((y1 - y2) / len) * tick, ty = ((x2 - x1) / len) * tick;
+      return {
+        m, isUnit, x1, y1, x2, y2, len, ux, uy, tick,
+        halo: (isUnit ? 6 : 4.5) * unit,
+        // the line, then the tick across each end
+        segs: [
+          [x1, y1, x2, y2],
+          [x1 + uy * tick, y1 - ux * tick, x1 - uy * tick, y1 + ux * tick],
+          [x2 + uy * tick, y2 - ux * tick, x2 - uy * tick, y2 + ux * tick],
+        ],
+      };
+    });
+    // the unit goes on last, so a later measure from the same landmark can't hide it
+    marks.filter((k) => !k.isUnit).concat(marks.filter((k) => k.isUnit)).forEach((k) => {
       g.beginPath();
-      g.moveTo(x1, y1); g.lineTo(x2, y2);
-      g.moveTo(x1 - tx, y1 - ty); g.lineTo(x1 + tx, y1 + ty);
-      g.moveTo(x2 - tx, y2 - ty); g.lineTo(x2 + tx, y2 + ty);
+      k.segs.forEach(([ax, ay, bx, by]) => { g.moveTo(ax, ay); g.lineTo(bx, by); });
       g.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-      g.lineWidth = (isUnit ? 6 : 4.5) * unit;
+      g.lineWidth = k.halo;
       g.stroke();
-      g.strokeStyle = isUnit ? UNIT_COLOR : MEASURE_COLOR;
-      g.lineWidth = (isUnit ? 3.5 : 2) * unit;
+      g.strokeStyle = k.isUnit ? UNIT_COLOR : MEASURE_COLOR;
+      g.lineWidth = (k.isUnit ? 3.5 : 2) * unit;
       g.stroke();
     });
+    labelMeasures(g, marks, W, H, unit, avoid);
+  }
 
-    // Labels go over every line, the unit's first. Each tries spots beside its line (at the
-    // middle, then a third of the way from either end, on either side) and takes the first that
-    // is clear of the labels already placed, then of being pushed back over its own line by the
-    // picture's edge, then of covering another measure. Lines too short to hold a label go
-    // without; the loupe still reads them while drawing.
+  // Labels go on after every line, the unit's first, then the rest in the order they were made.
+  // Each tries spots beside its line, sliding along it from the middle, on either side, and
+  // stepping away from it, then just past either end. A spot must keep clear of the labels
+  // already placed (the accuracy map's percentages among them) and of its own line and ticks.
+  // Of those, the spot nearest the middle of the line wins, plus a penalty for what it would hide
+  // of the other lines: a little for each length of line under it, a lot for an end tick, where a
+  // length is read. A label away from its line, or nearer another measure than its own, gets a
+  // thin leader back to it, which costs a little more and must not run along another line. When
+  // nothing near the line is clear, or every spot there hides part of another line, spots across
+  // the whole picture are tried too. A label with nowhere clear to go tries again with the length
+  // in units alone. Lines too short to show between their ticks go without, as do labels that
+  // still find no room or are too big for the picture; the loupe still reads them while drawing.
+  let labelLayout = { key: '', placed: [] };
+  function labelMeasures(g, marks, W, H, unit, avoid) {
     const font = Math.round(Math.min(13, Math.max(11, Math.min(W, H) / unit / 30)) * unit);
+    // the reference lines count too, with their end dots
+    const d = state.drawing;
+    const lines = (d && d.kind === 'line' ? state.lines.concat(d) : state.lines).map((l) => {
+      const x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
+      return { x1, y1, x2, y2, len: Math.hypot(x2 - x1, y2 - y1), halo: 6.4 * unit, segs: [[x1, y1, x2, y2]] };
+    });
+    const texts = marks.map((k) => [measureText(k.m, k.isUnit), measureText(k.m, k.isUnit, true)]);
+    // the images in a view share a size, so all but the first reuse the layout (unless the
+    // label font has loaded in between and changed the labels' widths)
+    const widths = texts.map((t) => t.map((text) => pillSize(g, text, font).w));
+    const key = JSON.stringify([W, H, unit, avoid, texts, widths, marks.map((k) => k.segs[0]), lines.map((l) => l.segs[0])]);
+    if (labelLayout.key !== key) labelLayout = { key, placed: layOutLabels(g, marks, texts, lines, W, H, unit, avoid, font) };
+    const placed = labelLayout.placed;
+
+    placed.forEach(({ i, leader }) => {
+      if (!leader) return;
+      const color = marks[i].isUnit ? UNIT_COLOR : MEASURE_COLOR;
+      g.beginPath();
+      g.moveTo(leader.px, leader.py);
+      g.lineTo(leader.qx, leader.qy);
+      g.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+      g.lineWidth = 3 * unit;
+      g.stroke();
+      g.strokeStyle = color;
+      g.lineWidth = 1.25 * unit;
+      g.stroke();
+      g.beginPath();
+      g.arc(leader.px, leader.py, 2.5 * unit, 0, Math.PI * 2);
+      g.fillStyle = color;
+      g.fill();
+    });
+    placed.forEach(({ i, text, b }) => {
+      drawPill(g, text, b.x + b.w / 2, b.y + b.h / 2, font, marks[i].isUnit ? 'unit' : 'dark', W, H);
+    });
+  }
+
+  // Where each measure's label goes, as above: [{ i (its measure), text, b (its box), leader }]
+  function layOutLabels(g, marks, texts, lines, W, H, unit, avoid, font) {
     const gap = 2 * unit;
     const taken = (avoid || []).map((b) => ({ x: b.x * W, y: b.y * H, w: b.w * W, h: b.h * H }));
     const clash = (b) => taken.some((t) =>
       b.x < t.x + t.w + gap && t.x < b.x + b.w + gap && b.y < t.y + t.h + gap && t.y < b.y + b.h + gap);
-    const covers = (b, own) => list.some((m) => m !== own && crossesBox(m.x1 * W, m.y1 * H, m.x2 * W, m.y2 * H, b));
-    const order = unitLine ? [unitLine].concat(list.filter((m) => m !== unitLine)) : list;
-    order.forEach((m) => {
-      const x1 = m.x1 * W, y1 = m.y1 * H, x2 = m.x2 * W, y2 = m.y2 * H;
-      const len = Math.hypot(x2 - x1, y2 - y1);
-      if (len < 28 * unit) return;
-      const isUnit = m === unitLine;
-      const text = measureText(m, isUnit);
-      const size = pillSize(g, text, font);
-      // first choice: above a level line, right of an upright one
-      let nx = (y2 - y1) / len, ny = (x1 - x2) / len;
-      if (Math.abs(ny) >= Math.abs(nx) ? ny > 0 : nx < 0) { nx = -nx; ny = -ny; }
-      const off = 6 * unit + (Math.abs(nx) * size.w + Math.abs(ny) * size.h) / 2;
-      let best = null;
-      [0.5, 0.3, 0.7].forEach((t) => [1, -1].forEach((side) => {
-        const cx = x1 + (x2 - x1) * t + nx * off * side, cy = y1 + (y2 - y1) * t + ny * off * side;
-        const b = pillBox(size, cx, cy, W, H);
-        const pushed = Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cy) > 4 * unit;
-        const score = (clash(b) ? 4 : 0) + (pushed ? 2 : 0) + (covers(b, m) ? 1 : 0);
-        if (!best || score < best.score) best = { score, cx, cy };
-      }));
-      taken.push(drawPill(g, text, best.cx, best.cy, font, isUnit ? 'unit' : 'dark', W, H));
+    // every line with the reach of its dark edge and ticks, so most can be ruled out at a glance
+    const strokes = marks.concat(lines).map((o) => {
+      const r = o.halo / 2 + (o.tick || 0);
+      return Object.assign({}, o, {
+        left: Math.min(o.x1, o.x2) - r, right: Math.max(o.x1, o.x2) + r,
+        top: Math.min(o.y1, o.y2) - r, bottom: Math.max(o.y1, o.y2) + r,
+      });
     });
+    const apart = (o, b) => Math.hypot(Math.max(o.left - b.x - b.w, 0, b.x - o.right), Math.max(o.top - b.y - b.h, 0, b.y - o.bottom));
+    const hidden = (o, b, h) => {
+      if (apart(o, b) > 0) return 0;
+      const r = o.halo / 2, big = { x: b.x - r, y: b.y - r, w: b.w + 2 * r, h: b.h + 2 * r };
+      return o.segs.reduce((sum, [ax, ay, bx, by], n) => {
+        const part = clipToBox(ax, ay, bx, by, big);
+        return part ? sum + (part[1] - part[0]) * (n ? 2.5 * h : o.len / 2) : sum;
+      }, 0);
+    };
+
+    // The best clear spot for a label of that size on measure i, as { b (its box), leader }, or null
+    const findSpot = (i, size) => {
+      const k = marks[i], own = strokes[i];
+      const { x1, y1, x2, y2, len, ux, uy } = k;
+      const others = strokes.filter((o) => o !== own);
+      // first choice: above a level line, right of an upright one
+      let nx = uy, ny = -ux;
+      if (Math.abs(ny) >= Math.abs(nx) ? ny > 0 : nx < 0) { nx = -nx; ny = -ny; }
+      const clear = k.tick + k.halo / 2 + gap; // from the line to the near edge of its label
+      const across = (Math.abs(nx) * size.w + Math.abs(ny) * size.h) / 2;
+      const along = (Math.abs(ux) * size.w + Math.abs(uy) * size.h) / 2;
+      const step = size.h / 2;
+
+      // Is a point on another line, or close enough to pass for part of it?
+      const onOther = (x, y) => others.some((o) =>
+        x > o.left - gap && x < o.right + gap && y > o.top - gap && y < o.bottom + gap &&
+        pointToLine(x, y, o.x1, o.y1, o.x2, o.y2) < o.halo / 2 + gap);
+      // The leader from a label to the middle half of its line, by the shortest way that doesn't
+      // run along another line, and its cost: its length, plus a penalty for any part that would
+      // pass for part of another line
+      const leaderTo = (b) => {
+        const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+        const s0 = Math.max(len / 4, Math.min(len * 3 / 4, (cx - x1) * ux + (cy - y1) * uy));
+        let best = null;
+        [s0, len / 2, len / 4, len * 3 / 4].forEach((s) => {
+          const px = x1 + ux * s, py = y1 + uy * s, dx = px - cx, dy = py - cy;
+          const f = Math.min(1, b.w / 2 / (Math.abs(dx) || 1e-6), b.h / 2 / (Math.abs(dy) || 1e-6));
+          const qx = cx + dx * f, qy = cy + dy * f;
+          let lost = 0;
+          for (let n = 1; n <= 5; n++) if (onOther(qx + (px - qx) * n / 6, qy + (py - qy) * n / 6)) lost++;
+          const cost = Math.hypot(px - qx, py - qy) + (lost / 5) * 4 * size.h;
+          if (!best || cost < best.cost) best = { cost, px, py, qx, qy };
+        });
+        return best;
+      };
+
+      let best = null;
+      const consider = (cx, cy, bias) => {
+        const b = pillBox(size, cx, cy, W, H);
+        if (clash(b)) return;
+        const away = gapToBox(x1, y1, x2, y2, b);
+        if (away < clear - 0.5) return;
+        const drift = Math.abs((b.x + b.w / 2 - x1) * ux + (b.y + b.h / 2 - y1) * uy - len / 2);
+        let cost = away + drift / 4 + bias;
+        if (best && cost >= best.cost) return;
+        others.forEach((o) => { cost += hidden(o, b, size.h); });
+        if (best && cost >= best.cost) return;
+        let leader = null;
+        if (away > clear + step + 0.5 || others.some((o) => {
+          if (!o.m || apart(o, b) >= away) return false; // only the other measures
+          const near = gapToBox(o.x1, o.y1, o.x2, o.y2, b);
+          return near > 0 && near < away;
+        })) {
+          if (best && cost + size.h >= best.cost) return;
+          leader = leaderTo(b);
+          cost += size.h + leader.cost - away;
+        }
+        if (!best || cost < best.cost) best = { cost, b, leader };
+      };
+      const reach = len / 2 + along / 2; // a label may slide until a quarter of it is past the end
+      const slide = Math.max(size.h, reach / 4);
+      // further along or further out only costs more, once a spot has been found
+      for (let a = 0; a <= reach && !(best && clear + a / 4 >= best.cost); a += slide) {
+        (a ? [a, -a] : [0]).forEach((da) => [1, -1].forEach((side) => {
+          for (let j = 0; j <= 12 && !(best && clear + j * step + a / 4 >= best.cost); j++) {
+            const off = (clear + across + j * step) * side;
+            const cx = x1 + ux * (len / 2 + da) + nx * off, cy = y1 + uy * (len / 2 + da) + ny * off;
+            if (cx < 0 || cx > W || cy < 0 || cy > H) break;
+            consider(cx, cy, side < 0 ? unit : 0);
+          }
+        }));
+      }
+      consider(x1 - ux * (clear + along), y1 - uy * (clear + along), 0);
+      consider(x2 + ux * (clear + along), y2 + uy * (clear + along), 0);
+      if (!best || best.cost > clear + size.h) {
+        for (let cy = size.h / 2; cy < H; cy += size.h) {
+          for (let cx = size.w / 2; cx < W; cx += size.h) consider(cx, cy, 0);
+        }
+      }
+      return best;
+    };
+
+    const order = marks.map((k, i) => i).sort((a, b) => marks[b].isUnit - marks[a].isUnit);
+    const placed = [];
+    order.forEach((i) => {
+      if (marks[i].len < 12 * unit) return;
+      const tries = texts[i][0] === texts[i][1] ? [texts[i][0]] : texts[i];
+      tries.some((text) => {
+        const size = pillSize(g, text, font);
+        if (size.w + 2 * PILL_PAD > W || size.h + 2 * PILL_PAD > H) return false;
+        const spot = findSpot(i, size);
+        if (spot) {
+          taken.push(spot.b);
+          placed.push({ i, text, b: spot.b, leader: spot.leader });
+        }
+        return spot;
+      });
+    });
+    return placed;
   }
 
-  // Whether a line from (x1, y1) to (x2, y2) passes through a box (Liang-Barsky clipping)
-  function crossesBox(x1, y1, x2, y2, b) {
+  // The part of a line from (x1, y1) to (x2, y2) inside a box, as fractions [t0, t1] of the way
+  // along it, or null if it misses (Liang-Barsky clipping)
+  function clipToBox(x1, y1, x2, y2, b) {
     const p = [x1 - x2, x2 - x1, y1 - y2, y2 - y1];
     const q = [x1 - b.x, b.x + b.w - x1, y1 - b.y, b.y + b.h - y1];
     let t0 = 0, t1 = 1;
     for (let i = 0; i < 4; i++) {
       if (!p[i]) {
-        if (q[i] < 0) return false;
+        if (q[i] < 0) return null;
         continue;
       }
       const t = q[i] / p[i];
       if (p[i] < 0) t0 = Math.max(t0, t);
       else t1 = Math.min(t1, t);
-      if (t0 > t1) return false;
+      if (t0 > t1) return null;
     }
-    return true;
+    return [t0, t1];
+  }
+
+  // Distance from a point to the line from (x1, y1) to (x2, y2)
+  function pointToLine(x, y, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(x1 + dx * t - x, y1 + dy * t - y);
+  }
+
+  // Shortest distance between a line from (x1, y1) to (x2, y2) and a box: 0 where they touch,
+  // otherwise from an end of the line to the box or from a corner of the box to the line
+  function gapToBox(x1, y1, x2, y2, b) {
+    if (clipToBox(x1, y1, x2, y2, b)) return 0;
+    const toBox = (x, y) => Math.hypot(Math.max(b.x - x, 0, x - b.x - b.w), Math.max(b.y - y, 0, y - b.y - b.h));
+    const toLine = (x, y) => pointToLine(x, y, x1, y1, x2, y2);
+    return Math.min(toBox(x1, y1), toBox(x2, y2),
+      toLine(b.x, b.y), toLine(b.x + b.w, b.y), toLine(b.x, b.y + b.h), toLine(b.x + b.w, b.y + b.h));
   }
 
   // Each plumb point drops a dashed plumb line and level across the whole picture, ringed where they cross
