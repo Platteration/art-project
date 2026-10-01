@@ -1131,9 +1131,11 @@
     // the value matches, only not the color: at the paints' limit, a change of color costs value
     if (res.limit) return `These paints go no ${res.limit}er than this, and changing its color would make it ${res.limit === 'dark' ? 'lighter' : 'darker'}. Keep the value: use this mix, and let the colors next to it carry the color.`;
     if (isCool(res.targetLab) && res.diff.includes('grayer')) return BLUE_LESSON;
-    // The paints go this dark (or light), only not with this much color, so the nearest mix gave up value
-    if (res.diff.includes('lighter')) return 'These paints can’t make a color this strong this dark: what darkens a mix also grays it. The nearest mix keeps the color and is lighter. Where the value matters more, darken it and let the colors around it carry the color.';
-    if (res.diff.includes('darker')) return 'These paints can’t make a color this strong this light: what lightens a mix also pales it. The nearest mix keeps the color and is darker. Where the value matters more, lighten it and let the colors around it carry the color.';
+    // The paints go this dark (or light), only not with this much color, so the nearest mix gave up
+    // value. It keeps the color only when it is no grayer and no warmer or cooler.
+    const kept = res.diff.some((d) => d === 'grayer' || d === 'warmer' || d === 'cooler') ? 'keeps what color it can' : 'keeps the color';
+    if (res.diff.includes('lighter')) return `These paints can’t make a color this strong this dark: what darkens a mix also grays it. The nearest mix ${kept} and is lighter. Where the value matters more, darken it and let the colors around it carry the color.`;
+    if (res.diff.includes('darker')) return `These paints can’t make a color this strong this light: what lightens a mix also pales it. The nearest mix ${kept} and is darker. Where the value matters more, lighten it and let the colors around it carry the color.`;
     if (res.diff.includes('grayer')) return 'Use the nearest mix and keep the colors around it duller: a color looks stronger next to grays.';
     return 'Use the nearest mix and judge it next to its neighbours, not on its own.';
   }
@@ -1326,24 +1328,50 @@
       const n = niceFraction(res.total / it.parts);
       steps.push([paintOf(it).hex, `Add a touch of ${paintOf(it).name}: about 1/${n} of the pile${n >= 80 ? ', a speck on the tip of the knife' : ''}.`]);
     });
-    // The value to check: the photo's, unless the mix lands a value step away from it
+    // The value to check: the photo's, unless the mix lands a value step away from it or the paints
+    // stop short of it. Past a step, the darkest paint (or white) may take the pile to the photo's
+    // value, or part of the way, or, at the end of what the paints reach, no further.
     const off = res.mixLab[0] - res.targetLab[0];
     const photoV = valueLabel(res.targetLab[0]), mixV = valueLabel(res.mixLab[0]);
-    if (Math.abs(off) < 3) steps.push([null, `Check the value: it should read V ${photoV} in the loupe.`]);
-    else if (res.limit) {
-      steps.push([null, `Check the value: it should read about V ${mixV}, as ${res.limit} as these paints go. The loupe reads V ${photoV} on the photo.`]);
-    } else {
-      steps.push([null, `Check the value: it should read about V ${mixV}, ${off > 0 ? 'lighter' : 'darker'} than the photo’s V ${photoV} in the loupe.`]);
-      const fix = off > 0 ? darkestPaint() : paints.find((p) => p.white);
-      if (fix) {
-        steps.push([fix.hex, `To match the photo’s value instead, add ${fix.name} a little at a time. The mix ${off > 0 ? 'grays as it darkens' : 'pales as it lightens'}.`]);
-      }
+    const way = off > 0 ? 'dark' : 'light';
+    const fix = off > 0 ? darkestPaint() : paints.find((p) => p.white);
+    const far = fix ? furthest(res, fix, way) : res.mixLab[0];
+    const reaches = off > 0 ? far <= res.targetLab[0] + 1 : far >= res.targetLab[0] - 1;
+    const moves = Math.abs(far - res.mixLab[0]) >= 2;
+    const reach = Mixing.reach(paints);
+    const atEdge = way === 'dark' ? res.mixLab[0] <= reach.dark + 3 : res.mixLab[0] >= reach.light - 3;
+    const small = Math.abs(off) < 3;
+    if (small ? (res.limit || atEdge) && !reaches && mixV !== photoV : res.limit || (atEdge && !moves)) {
+      steps.push([null, `Check the value: it should read about V ${mixV}, as ${res.limit || way} as these paints go. The loupe reads V ${photoV} on the photo.`]);
+      return steps;
     }
+    if (small) {
+      steps.push([null, `Check the value: it should read V ${photoV} in the loupe.`]);
+      return steps;
+    }
+    steps.push([null, `Check the value: it should read about V ${mixV}, ${off > 0 ? 'lighter' : 'darker'} than the photo’s V ${photoV} in the loupe.`]);
+    if (!reaches && !moves) return steps;
+    const add = `add ${res.items.some((it) => paintOf(it) === fix) ? 'more ' : ''}${fix.name} a little at a time`;
+    const change = off > 0 ? 'grays as it darkens' : 'pales as it lightens';
+    steps.push([fix.hex, reaches ? `To match the photo’s value instead, ${add}. The mix ${change}.`
+      : `To bring it nearer the photo’s value, ${add}. The mix ${change} and goes no ${way}er than about V ${valueLabel(far)}.`]);
     return steps;
   }
 
   // The paint that darkens a mix the most: the darkest one besides white
   const darkestPaint = () => state.mixing.paints.reduce((a, p) => (!p.white && (!a || p.lab[0] < a.lab[0]) ? p : a), null);
+
+  // The darkest (or lightest) L* a recipe's pile gets to with more and more of one paint added,
+  // up to 40 times the pile
+  function furthest(res, paint, way) {
+    const paints = state.mixing.paints;
+    const at = paints.indexOf(paint);
+    const pile = paints.map((p, i) => res.items.reduce((s, it) => s + (it.paint === i ? it.parts : 0), 0));
+    return [0.5, 1, 2, 4, 8, 16, 40].reduce((L, k) => {
+      const m = Mixing.mix(paints, pile.map((v, i) => v + (i === at ? k * res.total : 0)));
+      return way === 'dark' ? Math.min(L, m.lab[0]) : Math.max(L, m.lab[0]);
+    }, res.mixLab[0]);
+  }
 
   function renderMixCard() {
     const m = state.mixing;
@@ -1574,13 +1602,14 @@
   // A value mass's main skin color: its biggest block with a skin-like hue (orange to yellow,
   // neither gray nor garish), or just its biggest block when nothing looks like skin. Skin sits
   // between about 40 and 80 degrees of hue in light and shadow; a red shirt, curtain or rose is
-  // redder than 40.
+  // redder than 40. The yellower skin is, the stronger it can photograph (chroma 50 at 40 degrees,
+  // 60 at 80), as in a yellowed print, while an orange that strong is a coat or a spacesuit.
   function mainColor(r, z) {
     const colors = r.blockColors.filter((c) => c.zone === z);
     const skin = colors.filter((c) => {
       const lab = Study.rgbToLab(c.r, c.g, c.b);
       const [h, chroma] = hueOf(lab);
-      return lab[0] >= 15 && chroma >= 8 && chroma <= 50 && h >= 40 && h <= 80;
+      return lab[0] >= 15 && chroma >= 8 && h >= 40 && h <= 80 && chroma <= 50 + (h - 40) / 4;
     });
     const biggest = (list) => list.reduce((a, c) => (!a || c.share > a.share ? c : a), null);
     const color = biggest(skin) || biggest(colors);
@@ -1670,9 +1699,14 @@
     const res = recipeOf(c);
     const note = document.createElement('p');
     note.className = 'hint';
+    // a pile a value step off the block is brought to its value, or, when the paints can't take it
+    // there, the string is built around the pile
+    const off = res.mixLab[0] - res.targetLab[0];
+    const side = off > 0 ? 'lighter' : 'darker';
     note.textContent = `${box.dataset.skin ? 'The biggest skin-toned block' : 'The biggest block'} in this mass. ` +
       `Pile: ${partsText(res)}.` + (vs.dark ? ` Dark: ${darkText(vs)}.` : '') +
-      (vs.held ? ` The pile comes out ${res.mixLab[0] > res.targetLab[0] ? 'lighter' : 'darker'} than the block, so the middle step brings it to the block’s value.` : '');
+      (vs.held ? ` The pile comes out ${side} than the block, so the middle step brings it to the block’s value.`
+        : Math.abs(off) >= 3 ? ` The pile comes out ${side} than the block, and these paints can’t bring it to the block’s value, so the string is built around the pile.` : '');
     box.append(ol, note);
   }
 

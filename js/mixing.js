@@ -558,8 +558,9 @@
    * steps, and for the darker ones a dark of the darkest paint with a little red, so the string
    * darkens without turning green or cold. The middle step is the recipe's pile, or, when the
    * pile lands a value step away from the color it was mixed for (the paints can't make it this
-   * strong at its value), the pile brought to the color's value. Each step says how much white
-   * or dark to add to how much of the pile, in a ratio that lands within about 0.1 of its value.
+   * strong at its value), the pile brought to the color's value, if white or the dark can take
+   * it there. Each step says how much white or dark to add to how much of the pile, in a ratio
+   * that lands within about 0.1 of its value.
    */
   function valueString(base, paints) {
     if (!base) return null;
@@ -567,8 +568,6 @@
     const pile = paints.map((p, i) => base.items.reduce((s, it) => s + (it.paint === i ? it.parts : 0), 0));
     const pileSum = pile.reduce((a, b) => a + b, 0);
     const pileL = base.mixLab[0];
-    const held = !base.limit && Math.abs(pileL - base.targetLab[0]) >= 3;
-    const baseL = held ? base.targetLab[0] : pileL;
 
     // The dark: the darkest paint, and the reds (orange-red to crimson) that may join it
     const others = paints.map((p, i) => i).filter((i) => i !== whiteIdx);
@@ -615,15 +614,16 @@
       return best.ratio;
     }
 
-    // Each candidate dark is scored on the step a value darker (kept between the darkest the paints
-    // go and half a value under the pile): how far it lands from the pile's color at that value,
-    // with chroma falling in step with value (the same color, only darker)
-    let dark = null;
-    if (darkest >= 0) {
+    // The dark for a string centred on value baseL. Each candidate is scored on the step a value
+    // darker (kept between the darkest the paints go and half a value under the pile): how far it
+    // lands from the pile's color at that value, with chroma falling in step with value (the same
+    // color, only darker).
+    function darkFor(baseL) {
+      if (darkest < 0) return null;
       const testL = Math.min(pileL - 5, Math.max(baseL - 10, reachOf(paints).dark + 2));
       const scale = testL / pileL;
       const want = [testL, base.mixLab[1] * scale, base.mixLab[2] * scale];
-      let best = Infinity;
+      let best = Infinity, dark = null;
       [[1, 0], [8, 1], [4, 1], [3, 1], [2, 1], [3, 2], [1, 1]].forEach(([a, b]) => {
         (b ? reds : [-1]).forEach((red) => {
           const unit = paints.map((p, i) => ((i === darkest ? a : 0) + (i === red ? b : 0)) / (a + b));
@@ -633,27 +633,40 @@
           if (off < best) { best = off; dark = { unit, parts: b ? [[darkest, a], [red, b]] : [[darkest, 1]] }; }
         });
       });
+      return dark;
     }
 
-    const steps = [];
-    for (let dv = -2; dv <= 2; dv++) {
-      const L = baseL + dv * 10;
-      if (dv === 0 && !held) {
-        steps.push({ dv, L, rgb: base.mix, lab: base.mixLab, add: null, ratio: null });
-        continue;
+    // The five steps around baseL; with held, the middle one is the pile brought to baseL too
+    function stringAt(baseL, held) {
+      const dark = darkFor(baseL);
+      const steps = [];
+      for (let dv = -2; dv <= 2; dv++) {
+        const L = baseL + dv * 10;
+        if (dv === 0 && !held) {
+          steps.push({ dv, L, rgb: base.mix, lab: base.mixLab, add: null, ratio: null });
+          continue;
+        }
+        const lighter = L > pileL;
+        const add = lighter ? (whiteIdx >= 0 ? paints.map((p, i) => (i === whiteIdx ? 1 : 0)) : null) : dark && dark.unit;
+        const k = add && L > 0 && L < 100 ? amountFor(add, L) : null;
+        if (k == null) {
+          steps.push({ dv, L, rgb: null, lab: null, add: lighter ? 'white' : 'dark', ratio: null });
+          continue;
+        }
+        const ratio = ratioFor(add, k, L);
+        const m = mix(paints, blend(add, ratio[1] / ratio[0]));
+        steps.push({ dv, L: m.lab[0], rgb: m.rgb, lab: m.lab, add: lighter ? 'white' : 'dark', ratio });
       }
-      const lighter = L > pileL;
-      const add = lighter ? (whiteIdx >= 0 ? paints.map((p, i) => (i === whiteIdx ? 1 : 0)) : null) : dark && dark.unit;
-      const k = add && L > 0 && L < 100 ? amountFor(add, L) : null;
-      if (k == null) {
-        steps.push({ dv, L, rgb: null, lab: null, add: lighter ? 'white' : 'dark', ratio: null });
-        continue;
-      }
-      const ratio = ratioFor(add, k, L);
-      const m = mix(paints, blend(add, ratio[1] / ratio[0]));
-      steps.push({ dv, L: m.lab[0], rgb: m.rgb, lab: m.lab, add: lighter ? 'white' : 'dark', ratio });
+      return { steps, dark: dark ? dark.parts : null, whiteIdx, held };
     }
-    return { steps, dark: dark ? dark.parts : null, whiteIdx, held };
+
+    // Centred on the color's value when the pile lands a value step away from it and can be brought
+    // there; otherwise on the pile, as with a black darker than any paint
+    if (Math.abs(pileL - base.targetLab[0]) >= 3) {
+      const held = stringAt(base.targetLab[0], true);
+      if (held.steps[2].rgb) return held;
+    }
+    return stringAt(pileL, false);
   }
 
   window.Mixing = {
@@ -665,6 +678,7 @@
     recipe,
     recipeTask,
     valueString,
+    reach: reachOf,
     isCool,
     hexToRgb,
     rgbToHex,
