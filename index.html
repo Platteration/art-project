@@ -14,7 +14,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>Portrait Value Studio</h1>
-      <p>Turn a reference portrait into a three-value study and a color-block study. Hover any image to sample it; click to keep the color.</p>
+      <p>Turn a reference portrait into a three-value study and a color-block study. Hover any image to sample it; click to keep the color. Then check your painting to see what's working and the one change worth the most.</p>
     </div>
     <div class="topbar-actions">
       <input type="file" id="file" accept="image/*" class="visually-hidden">
@@ -221,27 +221,50 @@
         </div>
 
         <div class="check-body" id="checkBody" hidden>
-          <div class="scorecard">
-            <div class="score-main">
-              <span class="score-label">Color accuracy</span>
-              <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
-              <span class="score-grade" id="scoreGrade"></span>
+          <section class="feedback" aria-labelledby="feedbackTitle">
+            <div class="feedback-head">
+              <h3 id="feedbackTitle">Feedback</h3>
+              <label class="check" for="stepOnly"><input type="checkbox" id="stepOnly"> Just my next step</label>
             </div>
-            <dl class="score-sub">
-              <div>
-                <dt>Value accuracy</dt>
-                <dd><span id="scoreValue">0</span><span class="meter"><span id="meterValue"></span></span></dd>
+            <div class="feedback-grid">
+              <div class="fb-block fb-glow">
+                <h4>What's working</h4>
+                <ul class="glow-list" id="glowList"></ul>
               </div>
-              <div>
-                <dt>Value shapes match</dt>
-                <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
+              <div class="fb-block fb-step">
+                <h4>Your next step</h4>
+                <div class="step-body" id="stepBody"></div>
               </div>
-            </dl>
-            <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
-          </div>
-          <div class="fixes">
-            <h3>Biggest differences</h3>
-            <ol class="fix-list" id="fixList"></ol>
+              <div class="fb-block fb-mass">
+                <h4>Value masses</h4>
+                <ul class="mass-strip" id="massStrip"></ul>
+                <p class="hint">Bars show how close each mass's values are to the reference. Shape is how much of the mass sits in the same place.</p>
+              </div>
+            </div>
+          </section>
+          <div class="check-detail">
+            <div class="scorecard">
+              <div class="score-main">
+                <span class="score-label">Color accuracy</span>
+                <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
+                <span class="score-grade" id="scoreGrade"></span>
+              </div>
+              <dl class="score-sub">
+                <div>
+                  <dt>Value accuracy</dt>
+                  <dd><span id="scoreValue">0</span><span class="meter"><span id="meterValue"></span></span></dd>
+                </div>
+                <div>
+                  <dt>Value shapes match</dt>
+                  <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
+                </div>
+              </dl>
+              <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
+            </div>
+            <details class="fixes" id="fixesPanel">
+              <summary><h3>Biggest differences</h3> <span class="fixes-count" id="fixesCount"></span></summary>
+              <ol class="fix-list" id="fixList"></ol>
+            </details>
           </div>
         </div>
 
@@ -261,7 +284,7 @@
           <figure class="panel">
             <figcaption><span>Accuracy by shape</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
             <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-            <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
+            <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. Green labels (A, B, C) are what's working. White labels are the biggest differences, numbered as in the list. The ringed shape is your next step. Hover a zone to compare the two colors.</p>
           </figure>
         </div>
       </section>

@@ -23,11 +23,26 @@ The second tab scores a photo of your finished piece against the reference.
 1. Load, drop or paste a photo of your painting. Shoot it straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
 2. For each shape in the reference's color-block map, the most prominent reference color is compared with the most prominent color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
 3. You get:
+   - **Feedback**: what's working, your next step and the three value masses (see below).
    - **Color accuracy** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
    - **Value accuracy** (0–100): the same idea using lightness only, `100 − 5 × |ΔL*|`. Half a value step off scores 75.
    - **Value shapes match**: the share of the picture that lands in the same shadow, middle or light mass.
-   - **Biggest differences**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm".
-   - **Accuracy by shape**: the reference's color zones, each labelled with its match percentage (`100 − 2.5 × ΔE`, the same per-shape score the color accuracy averages). The biggest differences get white labels numbered as in the list. Zones too small to hold a label stay unlabelled. Hover any zone to see the reference color next to yours.
+   - **Biggest differences**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm". The list folds away; it starts open on wide screens and closed on phones.
+   - **Accuracy by shape**: the reference's color zones, each labelled with its match percentage (`100 − 2.5 × ΔE`, the same per-shape score the color accuracy averages). The biggest differences get white labels numbered as in the list, and what's working gets green labels lettered as in the feedback. The next step's shape is ringed in white. Zones too small to hold a label stay unlabelled. Labels and ring are part of the picture, so **Save PNG** keeps them. Hover any zone to see the reference color next to yours.
+
+### Feedback: what's working, then one next step
+
+Above the score, three short blocks read your painting the way a teacher marks it: a real strength first, then one change you can make, value before color.
+
+- **What's working**: up to three of the largest shapes that match at 90% or better, named by their mass and where they sit ("The light shape at the upper left is spot on: 96% match"). They are lettered A, B and C, with green labels to match on **Accuracy by shape**. A whole mass is praised too when 90% or more of it sits in the same place as the reference's, or when its values score 90 or more. Praise is only given when it is true: if no shape reaches 90%, the block names your strongest large shape and says none is at 90% yet.
+- **Your next step**: the one shape worth the most points, with what to do with the brush ("Darken the shadow shape on the right by about 0.8 value and cool it slightly") and the reference and your color side by side. It says what matching that shape alone does to your color score, from 68 to 75 for example: the points it loses now (its share of the picture × (100 − its match)) added back. The figure is exact for that one shape at the current settings. While value accuracy is under 70, the step is always a value fix: the shape whose lightness is furthest off for its size, worded with lightness only, and its payoff is in value points. A step worth less than a point isn't given.
+- **Value masses**: for shadow, middle and light, a bar for that mass's value accuracy, which way it leans (too light or too dark when it is off by 0.3 value or more on average, on target, or some of each) and its shape match: how much of your mass overlaps the reference's, as a share of both together.
+
+Places come from a 3 × 3 grid over the picture ("at the upper left", "in the center"), taken where the shape's label sits. They are coarse on purpose: the tool knows shapes, not anatomy, so a nose shadow may be called "in the center". The letter or ring on the map shows exactly which shape is meant.
+
+**Just my next step** hides everything but the step. The choice is remembered in your browser. The grade under the color score is worded as progress, such as "Close: a few shapes to adjust". Below 60 it reads "Solid start: the big shapes are there" only when 70% or more of the value shapes match.
+
+A photo that is tilted or off-center makes shapes look wrong that aren't. When the value shapes match under 75% and the photo hasn't been moved, the next step adds a reminder to line it up first if it is. The line-up panel's "moved, N% left out" note stays in view in every mode.
 
 **Line up and color-correct your photo** (the panel above the score) makes the comparison fair:
 

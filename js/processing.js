@@ -631,10 +631,14 @@
     // Pixels the painting photo doesn't cover (after moving it) are left out
     const mask = art.mask;
     let covered = 0, sameZone = 0;
+    const refZ = [0, 0, 0], artZ = [0, 0, 0], both = [0, 0, 0]; // pixels in each value mass
     for (let i = 0; i < n; i++) {
       if (mask && !mask[i]) continue;
       covered++;
-      if (refRes.zone[i] === artRes.zone[i]) sameZone++;
+      const rz = refRes.zone[i], az = artRes.zone[i];
+      refZ[rz]++;
+      artZ[az]++;
+      if (rz === az) { sameZone++; both[rz]++; }
     }
     covered = covered || 1;
 
@@ -659,7 +663,10 @@
     for (let c = 0; c < count; c++) {
       const k = cnt[c];
       if (!k) {
-        regions[c] = { id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0 };
+        regions[c] = {
+          id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, dGreen: 0, gain: 0, valueGain: 0,
+          ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0,
+        };
         continue;
       }
       const refLab = linToLab(refDom[c * 3], refDom[c * 3 + 1], refDom[c * 3 + 2]);
@@ -667,21 +674,29 @@
       const dE = deltaE2000(refLab[0], refLab[1], refLab[2], artLab[0], artLab[1], artLab[2]);
       const share = k / covered;
       const dL = artLab[0] - refLab[0];
-      colorScore += share * Math.max(0, 100 - 2.5 * dE);
-      valueScore += share * Math.max(0, 100 - 5 * Math.abs(dL));
+      const da = artLab[1] - refLab[1], db = artLab[2] - refLab[2];
+      const colorPct = Math.max(0, 100 - 2.5 * dE);
+      const valuePct = Math.max(0, 100 - 5 * Math.abs(dL));
+      colorScore += share * colorPct;
+      valueScore += share * valuePct;
       regions[c] = {
         id: c,
         share,
         dE,
         dL,
         dC: Math.hypot(artLab[1], artLab[2]) - Math.hypot(refLab[1], refLab[2]),
-        dWarm: (artLab[1] - refLab[1]) * Math.cos(WARM_HUE) + (artLab[2] - refLab[2]) * Math.sin(WARM_HUE),
+        dWarm: da * Math.cos(WARM_HUE) + db * Math.sin(WARM_HUE),
+        dGreen: db * Math.cos(WARM_HUE) - da * Math.sin(WARM_HUE), // across warm-cool: + yellow-green, - violet
+        // Points the color and value scores would gain if this shape alone matched exactly. They come
+        // from the unrounded per-shape scores, so colorRaw + gain is the new color score.
+        gain: share * (100 - colorPct),
+        valueGain: share * (100 - valuePct),
         ref: srgbOf(refDom, c),
         art: srgbOf(artDom, c),
         cx: sx[c] / k,
         cy: sy[c] / k,
         bin: binFor(dE),
-        pct: Math.round(Math.max(0, 100 - 2.5 * dE)), // same per-shape score the color accuracy averages
+        pct: Math.round(colorPct), // same per-shape score the color accuracy averages
         zone: Math.floor(refRes.block[first[c]] / refRes.K),
       };
     }
@@ -692,6 +707,22 @@
       .sort((a, b) => b.share * b.dE - a.share * a.dE)
       .slice(0, 5);
 
+    // Each value mass as a whole: its value accuracy (the value score over its own shapes), the
+    // share-weighted mean lightness difference, and how well the painting's mass covers the
+    // reference's (intersection over union). Null for a mass the reference doesn't have.
+    const zones = [0, 1, 2].map((z) => {
+      let s = 0, value = 0, dL = 0;
+      regions.forEach((r) => {
+        if (!r.share || r.zone !== z) return;
+        s += r.share;
+        value += r.share * Math.max(0, 100 - 5 * Math.abs(r.dL));
+        dL += r.share * r.dL;
+      });
+      if (!s) return null;
+      const union = refZ[z] + artZ[z] - both[z];
+      return { value: value / s, dL: dL / s, shape: union ? both[z] / union : 0, share: s };
+    });
+
     // Label spot for each shape: its most interior pixel (largest inscribed circle),
     // found with a two-pass chamfer distance to the shape's edge.
     const dist = new Float32Array(n);
@@ -701,21 +732,7 @@
         comp[i - 1] !== c || comp[i + 1] !== c || comp[i - w] !== c || comp[i + w] !== c;
       dist[i] = edge ? 0 : 1e9;
     }
-    const D = Math.SQRT2;
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        if (!dist[i]) continue;
-        dist[i] = Math.min(dist[i], dist[i - 1] + 1, dist[i - w] + 1, dist[i - w - 1] + D, dist[i - w + 1] + D);
-      }
-    }
-    for (let y = h - 2; y > 0; y--) {
-      for (let x = w - 2; x > 0; x--) {
-        const i = y * w + x;
-        if (!dist[i]) continue;
-        dist[i] = Math.min(dist[i], dist[i + 1] + 1, dist[i + w] + 1, dist[i + w + 1] + D, dist[i + w - 1] + D);
-      }
-    }
+    chamfer(dist, w, h);
     regions.forEach((r) => { r.lx = r.cx; r.ly = r.cy; r.room = -1; });
     for (let i = 0; i < n; i++) {
       if (mask && !mask[i]) continue;
@@ -747,13 +764,62 @@
     return {
       colorScore: Math.round(colorScore),
       valueScore: Math.round(valueScore),
+      colorRaw: colorScore, // unrounded, for projecting what one fix is worth
+      valueRaw: valueScore,
       shapeMatch: Math.round((sameZone / covered) * 100),
       coverage: covered / n,
       regions,
       top,
+      zones,
       comp,
       diffImage,
     };
+  }
+
+  // Two-pass chamfer distance, in place: each nonzero pixel becomes its distance to the nearest
+  // zero pixel. The outermost row and column are left as they are.
+  function chamfer(dist, w, h) {
+    const D = Math.SQRT2;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (!dist[i]) continue;
+        dist[i] = Math.min(dist[i], dist[i - 1] + 1, dist[i - w] + 1, dist[i - w - 1] + D, dist[i - w + 1] + D);
+      }
+    }
+    for (let y = h - 2; y > 0; y--) {
+      for (let x = w - 2; x > 0; x--) {
+        const i = y * w + x;
+        if (!dist[i]) continue;
+        dist[i] = Math.min(dist[i], dist[i + 1] + 1, dist[i + w] + 1, dist[i + w + 1] + D, dist[i + w - 1] + D);
+      }
+    }
+  }
+
+  /*
+   * A ring around one shape of a component map, to point it out on any background. Per pixel:
+   * 0 untouched, 1 the light band just outside the shape's edge (`width` px wide), 2 the dark
+   * bands on either side of it. Only the part the mask covers counts, and the picture's own
+   * border is not ringed.
+   */
+  function shapeRing(comp, id, w, h, width, mask) {
+    const n = w * h;
+    const out = new Float32Array(n);
+    const inside = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const on = comp[i] === id && (!mask || mask[i]);
+      out[i] = on ? 0 : 1e9;
+      inside[i] = on ? 1e9 : 0;
+    }
+    chamfer(out, w, h);
+    chamfer(inside, w, h);
+    const dark = Math.max(1, width / 2);
+    const ring = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (out[i] > 0 && out[i] <= width) ring[i] = 1;
+      else if ((out[i] > width && out[i] <= width + dark) || (inside[i] > 0 && inside[i] <= dark)) ring[i] = 2;
+    }
+    return ring;
   }
 
   // ---- White balance -------------------------------------------------------
@@ -790,6 +856,7 @@
     chromaOf,
     grayForL,
     compare,
+    shapeRing,
     applyGains,
     neutralGains,
     deltaE2000,

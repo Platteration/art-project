@@ -44,6 +44,12 @@
     meterValue: $('meterValue'),
     meterShapes: $('meterShapes'),
     fixList: $('fixList'),
+    fixesPanel: $('fixesPanel'),
+    fixesCount: $('fixesCount'),
+    stepOnly: $('stepOnly'),
+    glowList: $('glowList'),
+    stepBody: $('stepBody'),
+    massStrip: $('massStrip'),
     alignPanel: $('alignPanel'),
     alignState: $('alignState'),
     onion: $('onion'), onionOut: $('onionOut'),
@@ -78,7 +84,9 @@
   };
 
   const ZONE_NAMES = ['Shadow', 'Middle', 'Light'];
+  const SHAPE_WORDS = ['shadow', 'middle-value', 'light']; // "the shadow shape", "your light shapes"
   const PALETTE_KEY = 'portrait-value-studio.palette';
+  const STEP_ONLY_KEY = 'portrait-value-studio.next-step-only';
 
   const state = {
     source: null,      // HTMLImageElement or canvas
@@ -1290,6 +1298,7 @@
     }
     const artRes = Study.process(state.art.prep, settings());
     const cmp = Study.compare(state.prep, state.result, state.art.prep, artRes);
+    cmp.feedback = feedbackFor(cmp);
     state.art.result = artRes;
     state.art.cmp = cmp;
 
@@ -1298,7 +1307,7 @@
     paint(els.canvases.art, state.art.prep.rgba, w, h);
     repaintArt();
     paint(els.canvases.artblock, artRes.blockImage, w, h);
-    paint(els.canvases.diff, cmp.diffImage, w, h);
+    paint(els.canvases.diff, withRing(cmp), w, h);
     drawLabels(els.canvases.diff, cmp);
     state.pixels.refblock = state.result.blockImage;
     state.pixels.art = state.art.prep.rgba;
@@ -1308,17 +1317,23 @@
   }
 
   // Match percentage on each shape of the accuracy map. The biggest differences get a
-  // white label with their number from the list; shapes too small for a label stay bare.
+  // white label with their number from the list, and what's working gets a green label lettered
+  // as in the feedback; shapes too small for a label stay bare.
   function drawLabels(canvas, cmp) {
     const g = canvas.getContext('2d');
     const long = Math.max(canvas.width, canvas.height);
     const minFont = Math.round(long / 60);
     const maxFont = Math.round(long / 26);
+    const fb = cmp.feedback;
     const rank = new Set(cmp.top.map((r) => r.id));
+    const glows = new Set(fb.glows.map((r) => r.id));
 
-    const pill = (reg, text, font, strong) => {
+    // style: 'plain' (gray), 'strong' (white, a biggest difference) or 'glow' (green, what's working)
+    const pill = (reg, text, font, style) => {
       g.font = `600 ${font}px "IBM Plex Mono", ui-monospace, monospace`;
-      const pw = g.measureText(text).width + font * 0.9;
+      const tick = style === 'glow' && fb.spotOn ? font * 1.1 : 0; // room for a check mark
+      const tw = g.measureText(text).width;
+      const pw = tw + tick + font * 0.9;
       const ph = font * 1.45;
       // keep the whole label inside the picture
       const pad = 3;
@@ -1327,28 +1342,62 @@
       g.beginPath();
       if (g.roundRect) g.roundRect(x, y, pw, ph, ph / 2);
       else g.rect(x, y, pw, ph);
-      g.fillStyle = strong ? '#ffffff' : 'rgba(20, 21, 24, 0.78)';
+      g.fillStyle = style === 'strong' ? '#ffffff' : style === 'glow' ? '#1f7a45' : 'rgba(20, 21, 24, 0.78)';
       g.fill();
-      if (strong) {
+      if (style !== 'plain') {
         g.lineWidth = Math.max(1.5, font / 7);
-        g.strokeStyle = '#1c1d20';
+        g.strokeStyle = style === 'strong' ? '#1c1d20' : '#ffffff';
         g.stroke();
       }
-      g.fillStyle = strong ? '#1c1d20' : '#ffffff';
+      if (tick) {
+        const cx = x + font * 0.5, cy = y + ph / 2;
+        g.beginPath();
+        g.moveTo(cx, cy);
+        g.lineTo(cx + font * 0.26, cy + font * 0.26);
+        g.lineTo(cx + font * 0.7, cy - font * 0.3);
+        g.lineWidth = Math.max(1.5, font / 6);
+        g.lineCap = 'round';
+        g.lineJoin = 'round';
+        g.strokeStyle = '#ffffff';
+        g.stroke();
+      }
+      g.fillStyle = style === 'strong' ? '#1c1d20' : '#ffffff';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(text, x + pw / 2, y + ph / 2 + font * 0.05);
+      g.fillText(text, x + font * 0.45 + tick + tw / 2, y + ph / 2 + font * 0.05);
     };
 
     cmp.regions.forEach((reg) => {
-      if (!reg.ref || rank.has(reg.id)) return;
+      if (!reg.ref || rank.has(reg.id) || glows.has(reg.id)) return;
       const font = Math.min(maxFont, Math.floor(reg.room / 1.5));
-      if (font >= minFont) pill(reg, reg.pct + '%', font, false);
+      if (font >= minFont) pill(reg, reg.pct + '%', font, 'plain');
+    });
+    // praise is worth seeing: its labels never go below a readable size, even on a small shape
+    fb.glows.forEach((reg, i) => {
+      if (rank.has(reg.id)) return; // a strongest area that is also a biggest difference keeps its number
+      const font = Math.max(Math.round(long / 42), Math.min(maxFont, Math.floor(reg.room / 1.9)));
+      pill(reg, `${'ABC'[i]} · ${reg.pct}%`, font, 'glow');
     });
     cmp.top.forEach((reg, i) => {
       const font = Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
-      pill(reg, `${i + 1} · ${reg.pct}%`, font, true);
+      pill(reg, `${i + 1} · ${reg.pct}%`, font, 'strong');
     });
+  }
+
+  // The accuracy map with the next step's shape ringed: a white band framed in near-black, so it
+  // shows on any color. It is part of the picture, so a saved PNG keeps it; the loupe still reads
+  // the map without it.
+  function withRing(cmp) {
+    const step = cmp.feedback.step;
+    if (!step) return cmp.diffImage;
+    const { w, h } = state.prep;
+    const band = Math.max(2, Math.round(Math.max(w, h) / 220));
+    const ring = Study.shapeRing(cmp.comp, step.id, w, h, band, state.art.prep.mask);
+    const d = new Uint8ClampedArray(cmp.diffImage);
+    for (let i = 0, p = 0; i < ring.length; i++, p += 4) {
+      if (ring[i]) d[p] = d[p + 1] = d[p + 2] = ring[i] === 1 ? 255 : 28;
+    }
+    return d;
   }
 
   function describe(reg) {
@@ -1361,13 +1410,295 @@
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
+  // ---- Feedback: what's working first, then one next step ------------------
+
+  const GLOW_PCT = 90;    // a shape must match at least this well to be praised
+  const MASS_GOOD = 0.9;  // and a whole mass must overlap or match its values this well
+
+  /*
+   * What a teacher would say, in order. Praise goes only to shapes at 90% or better: up to three
+   * of the largest. If none get there, the closest large shape is named as the strongest area,
+   * without a check mark. Whole masses are praised when they sit in the right place or have the
+   * right values. The next step is the shape worth the most color points, except while value
+   * accuracy is under 70: then it is the shape whose value is furthest off for its size, because
+   * value comes before color. A step worth less than a point isn't given.
+   */
+  function feedbackFor(cmp) {
+    const shapes = cmp.regions.filter((r) => r.ref);
+    let glows = shapes
+      .filter((r) => r.share >= 0.01 && r.pct >= GLOW_PCT)
+      .sort((a, b) => b.share - a.share)
+      .slice(0, 3);
+    const spotOn = glows.length > 0;
+    if (!spotOn) {
+      // the strongest area: highest match among the large shapes, not one of the biggest differences
+      const worst = new Set(cmp.top.map((r) => r.id));
+      const best = (list) => list.reduce((a, r) => (!a || r.pct > a.pct || (r.pct === a.pct && r.share > a.share) ? r : a), null);
+      const large = shapes.filter((r) => r.share >= 0.02);
+      const pick = best(large.filter((r) => !worst.has(r.id))) || best(large) || best(shapes);
+      glows = pick ? [pick] : [];
+    }
+
+    const masses = (test) => [0, 1, 2].filter((z) => cmp.zones[z] && cmp.zones[z].share >= 0.03 && test(cmp.zones[z]));
+    const placed = masses((z) => z.shape >= MASS_GOOD);
+    const valued = masses((z) => z.value >= MASS_GOOD * 100);
+
+    const valueFirst = cmp.valueScore < 70;
+    const praised = new Set(glows.map((r) => r.id));
+    let step = null, most = 0;
+    shapes.forEach((r) => {
+      if (praised.has(r.id)) return;
+      const worth = valueFirst ? r.share * Math.abs(r.dL) : r.gain;
+      if (worth > most) { most = worth; step = r; }
+    });
+    if (step && (valueFirst ? step.valueGain : step.gain) < 1) step = null;
+    return { glows, spotOn, placed, valued, step, valueFirst };
+  }
+
+  // Where a point sits on a 3 x 3 grid over the picture. Coarse on purpose: it says where to
+  // look, not which feature it is. Used with a shape's label spot, where its letter is drawn.
+  const PLACES = [
+    ['at the upper left', 'at the top', 'at the upper right'],
+    ['on the left', 'in the center', 'on the right'],
+    ['at the lower left', 'at the bottom', 'at the lower right'],
+  ];
+  function locationName(x, y, w, h) {
+    const col = Math.max(0, Math.min(2, Math.floor((x / w) * 3)));
+    const row = Math.max(0, Math.min(2, Math.floor((y / h) * 3)));
+    return PLACES[row][col];
+  }
+
+  const shapeName = (reg) =>
+    `the ${reg.share >= 0.15 ? 'large ' : ''}${SHAPE_WORDS[reg.zone]} shape ${locationName(reg.lx, reg.ly, state.prep.w, state.prep.h)}`;
+
+  const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+  const listOf = (items) => (items.length > 1 ? items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1] : items[0]);
+
+  // What to do with the brush to bring a shape to the reference, from the differences and
+  // thresholds describe() uses. Each step names its object, so the first can name the shape
+  // and the rest say "it". valueOnly keeps to lightness, for when value comes first.
+  function painterAction(reg, valueOnly) {
+    const acts = [];
+    const v = Math.max(0.1, Math.abs(reg.dL) / 10).toFixed(1);
+    if (valueOnly || Math.abs(reg.dL) >= 3) acts.push((it) => `${reg.dL > 0 ? 'darken' : 'lighten'} ${it} by about ${v} value`);
+    if (valueOnly) return acts;
+    if (Math.abs(reg.dWarm) >= 4) {
+      acts.push((it) => `${reg.dWarm > 0 ? 'cool' : 'warm'} ${it}${Math.abs(reg.dWarm) < 8 ? ' slightly' : ''}`);
+    }
+    if (Math.abs(reg.dC) >= 5) {
+      acts.push((it) => (reg.dC > 0 ? `gray ${it} down` : `give ${it} more color`) + (Math.abs(reg.dC) < 10 ? ' a little' : ''));
+    }
+    if (!acts.length) {
+      acts.push((it) => (Math.abs(reg.dGreen) >= 2
+        ? `make ${it} ${reg.dGreen > 0 ? 'less green' : 'less purple'}`
+        : `mix ${it} closer to the reference color`));
+    }
+    return acts;
+  }
+
+  // Small line icons, drawn in the text color
+  const ICONS = {
+    check: 'M3 8.5l3.2 3.2L13 5',
+    up: 'M8 13.5v-11M4 6.5l4-4 4 4',
+    down: 'M8 2.5v11M4 9.5l4 4 4-4',
+    both: 'M8 2v12M5 5l3-3 3 3M5 11l3 3 3-3',
+  };
+  function icon(name) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', ICONS[name]);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+  }
+
+  function para(className, text) {
+    const p = document.createElement('p');
+    if (className) p.className = className;
+    if (text) p.textContent = text;
+    return p;
+  }
+
+  // Which way a whole mass leans. Its value accuracy is 85 or more exactly when its lightness is
+  // off by 0.3 value or less on average, so a small mean with a lower score means shapes off both ways.
+  function massDirection(z) {
+    const by = (Math.abs(z.dL) / 10).toFixed(1);
+    if (z.dL >= 3) return { icon: 'up', text: `too light by ${by}` };
+    if (z.dL <= -3) return { icon: 'down', text: `too dark by ${by}` };
+    if (z.value >= 85) return { icon: 'check', text: 'on target', on: true };
+    return { icon: 'both', text: 'some too light, some too dark' };
+  }
+
+  function renderFeedback(cmp) {
+    const fb = cmp.feedback;
+
+    // 1. What's working
+    els.glowList.innerHTML = '';
+    const glow = (badge, text) => {
+      const li = document.createElement('li');
+      li.className = 'glow';
+      li.append(badge, typeof text === 'string' ? para('', text) : text);
+      els.glowList.append(li);
+    };
+    const badge = (content, plain) => {
+      const b = document.createElement('span');
+      b.className = 'glow-badge' + (plain ? ' is-plain' : '');
+      b.append(content);
+      return b;
+    };
+    const named = new Set();
+    fb.glows.forEach((reg, i) => {
+      const letter = 'ABC'[i];
+      if (fb.spotOn) {
+        // two shapes can share a mass and a place; the letters on the map tell them apart
+        let name = shapeName(reg);
+        if (named.has(name)) name = name.replace(/^the /, 'another ');
+        else named.add(name);
+        glow(badge(letter), `${capital(name)} is ${reg.pct >= 95 ? 'spot on' : 'very close'}: ${reg.pct}% match.`);
+      } else {
+        const p = para('');
+        const number = cmp.top.indexOf(reg);
+        p.append(
+          `Your strongest area is ${shapeName(reg)}: ${reg.pct}% match${number >= 0 ? `, number ${number + 1} on the map` : ''}. `,
+          Object.assign(document.createElement('span'), { className: 'glow-note', textContent: `No large shape is at ${GLOW_PCT}% yet.` })
+        );
+        glow(badge(number >= 0 ? String(number + 1) : letter, true), p);
+      }
+    });
+    if (fb.placed.length) {
+      const z = fb.placed;
+      glow(badge(icon('check')), `Your ${listOf(z.map((i) => SHAPE_WORDS[i]))} shapes are in the right place: ` +
+        `${listOf(z.map((i) => Math.round(cmp.zones[i].shape * 100) + '%'))} match.`);
+    }
+    if (fb.valued.length) {
+      const z = fb.valued;
+      glow(badge(icon('check')), `Your ${listOf(z.map((i) => ZONE_NAMES[i].toLowerCase()))} values are on target: ` +
+        `${listOf(z.map((i) => Math.round(cmp.zones[i].value)))} out of 100.`);
+    }
+    if (!els.glowList.children.length) {
+      glow(badge(icon('both'), true), 'Your photo no longer covers the reference. Click Reset position in the line-up panel.');
+    }
+
+    // 2. Your next step
+    const body = els.stepBody;
+    body.innerHTML = '';
+    const step = fb.step;
+    if (!step) {
+      body.append(
+        para('step-action', 'No single shape is worth a full point now.'),
+        para('hint', 'For a closer check, raise Colors per value so the reference is split into more shapes.')
+      );
+    } else {
+      if (fb.valueFirst) body.append(para('step-first', 'Get the value right first; the color will follow.'));
+      const acts = painterAction(step, fb.valueFirst);
+      const said = acts.map((act, i) => act(i ? 'it' : shapeName(step)));
+      body.append(para('step-action', capital(listOf(said)) + '.'));
+
+      const compare = document.createElement('div');
+      compare.className = 'step-compare';
+      const sw = document.createElement('span');
+      sw.className = 'fix-swatches';
+      const a = document.createElement('span');
+      a.style.background = toHex(step.ref);
+      a.title = `Reference ${toHex(step.ref)}`;
+      const b = document.createElement('span');
+      b.style.background = toHex(step.art);
+      b.title = `Yours ${toHex(step.art)}`;
+      sw.append(a, b);
+      const vOf = (c) => valueLabel(Study.lightnessOf(c.r, c.g, c.b));
+      const lines = document.createElement('span');
+      lines.append(`Reference ${toHex(step.ref)} · V ${vOf(step.ref)}`, document.createElement('br'),
+        `Yours ${toHex(step.art)} · V ${vOf(step.art)}`);
+      compare.append(sw, lines);
+      body.append(compare);
+
+      const now = fb.valueFirst ? cmp.valueScore : cmp.colorScore;
+      const then = Math.round((fb.valueFirst ? cmp.valueRaw + step.valueGain : cmp.colorRaw + step.gain));
+      const payoff = para('step-payoff');
+      const nums = document.createElement('strong');
+      nums.textContent = `from ${now} to ${then}`;
+      payoff.append(fb.valueFirst ? 'Matching its value alone takes your value score ' : 'Matching this shape alone takes your color score ', nums, '.');
+      body.append(payoff, para('hint', 'It is ringed on Accuracy by shape.'));
+      if (cmp.shapeMatch < 75 && isIdentity(align())) {
+        body.append(para('hint', 'If your photo is tilted or off-center, line it up first in the panel above: every shape is compared in place.'));
+      }
+    }
+
+    // 3. The three value masses
+    els.massStrip.innerHTML = '';
+    cmp.zones.forEach((z, i) => {
+      const li = document.createElement('li');
+      li.className = 'mass';
+      const tone = document.createElement('span');
+      tone.className = 'mass-tone';
+      const gray = state.result.zoneGray[i];
+      tone.style.background = `rgb(${gray},${gray},${gray})`;
+      const name = document.createElement('span');
+      name.className = 'mass-name';
+      name.textContent = ZONE_NAMES[i];
+      const dir = document.createElement('span');
+      dir.className = 'mass-dir';
+      li.append(tone, name, dir);
+      if (!z) {
+        dir.textContent = 'not in the reference';
+        els.massStrip.append(li);
+        return;
+      }
+      const d = massDirection(z);
+      if (d.on) dir.classList.add('is-on');
+      dir.append(icon(d.icon), d.text);
+      const meter = document.createElement('span');
+      meter.className = 'meter';
+      const fill = document.createElement('span');
+      fill.style.width = Math.round(z.value) + '%';
+      meter.append(fill);
+      const nums = document.createElement('span');
+      nums.className = 'mass-nums';
+      nums.textContent = `Values ${Math.round(z.value)} / 100 · shape ${Math.round(z.shape * 100)}%`;
+      li.append(meter, nums);
+      els.massStrip.append(li);
+    });
+  }
+
+  // The grade in growth wording: where the painting is on the way, not only what is wrong
+  function gradeLine(cmp) {
+    if (cmp.colorScore >= 90) return 'Very close: only fine adjustments left';
+    if (cmp.colorScore >= 75) return 'Close: a few shapes to adjust';
+    if (cmp.colorScore >= 60) return 'On the way: several shapes to adjust';
+    return cmp.shapeMatch >= 70 ? 'Solid start: the big shapes are there' : 'Starting out: get the big value shapes in place first';
+  }
+
+  // "Just my next step" hides everything but the step. It is remembered when storage allows.
+  function setStepOnly(on, remember) {
+    els.stepOnly.checked = on;
+    els.checkBody.classList.toggle('step-only', on);
+    if (!remember) return;
+    try {
+      localStorage.setItem(STEP_ONLY_KEY, on ? '1' : '0');
+    } catch (err) {
+      /* storage unavailable: the choice holds for this visit */
+    }
+  }
+  function readStepOnly() {
+    try {
+      return localStorage.getItem(STEP_ONLY_KEY) === '1';
+    } catch (err) {
+      return false;
+    }
+  }
+  els.stepOnly.addEventListener('change', () => setStepOnly(els.stepOnly.checked, true));
+
+  let fixesOpenSet = false;
   function renderScore(cmp) {
     els.scoreColor.textContent = cmp.colorScore;
-    els.scoreGrade.textContent =
-      cmp.colorScore >= 90 ? 'Very close to the reference'
-        : cmp.colorScore >= 75 ? 'Close, with a few shapes off'
-          : cmp.colorScore >= 60 ? 'Several shapes are off'
-            : 'Far from the reference';
+    els.scoreGrade.textContent = gradeLine(cmp);
     els.scoreValue.textContent = cmp.valueScore;
     els.meterValue.style.width = cmp.valueScore + '%';
     els.scoreShapes.textContent = cmp.shapeMatch + '%';
@@ -1380,13 +1711,19 @@
     ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
 
+    // the full list is open to begin with where there is room for it
+    if (!fixesOpenSet) {
+      fixesOpenSet = true;
+      els.fixesPanel.open = !!(window.matchMedia && window.matchMedia('(min-width: 960px)').matches);
+    }
+    const nTop = cmp.top.length;
+    els.fixesCount.textContent = nTop ? `${nTop} shape${nTop === 1 ? '' : 's'}` : 'none';
     els.fixList.innerHTML = '';
-    if (!cmp.top.length) {
+    if (!nTop) {
       const li = document.createElement('li');
       li.className = 'fix-none';
       li.textContent = 'Every large shape is within ΔE 5 of the reference.';
       els.fixList.append(li);
-      return;
     }
     cmp.top.forEach((reg, i) => {
       const li = document.createElement('li');
@@ -1413,6 +1750,7 @@
       li.append(num, sw, text);
       els.fixList.append(li);
     });
+    renderFeedback(cmp);
   }
 
   function updateAlignOutputs() {
@@ -1542,6 +1880,7 @@
     updateOutputs();
     renderPalette();
     updateLineButtons();
+    setStepOnly(readStepOnly(), false);
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
