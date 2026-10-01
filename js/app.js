@@ -79,6 +79,7 @@
 
   const ZONE_NAMES = ['Shadow', 'Middle', 'Light'];
   const PALETTE_KEY = 'portrait-value-studio.palette';
+  const SMOOTHING_KEY = 'portrait-value-studio.smoothing';
 
   const state = {
     source: null,      // HTMLImageElement or canvas
@@ -172,6 +173,7 @@
     const merge = +els.merge.value;
     return {
       blurRadius: Math.round((simplify * long) / 450),
+      smoothing: document.querySelector('input[name="smoothing"]:checked').value,
       minSize: Math.round(w * h * 0.012 * Math.pow(merge / 10, 2)),
       t1: +els.t1.value,
       t2: +els.t2.value,
@@ -180,6 +182,13 @@
       colorsPerZone: +els.colors.value,
       outlines: els.outlines.checked,
     };
+  }
+
+  // The smoothing chosen on an earlier visit, if storage can be read
+  function restoreSmoothing() {
+    let saved = null;
+    try { saved = localStorage.getItem(SMOOTHING_KEY); } catch (err) { /* storage unavailable: keep the default */ }
+    if (saved === 'soft' || saved === 'edge') document.querySelector(`input[name="smoothing"][value="${saved}"]`).checked = true;
   }
 
   function updateOutputs() {
@@ -192,8 +201,8 @@
   }
 
   function autoSplit() {
-    const blurRadius = settings().blurRadius;
-    const [t1, t2] = Study.autoThresholds(state.prep, blurRadius);
+    const { blurRadius, smoothing } = settings();
+    const [t1, t2] = Study.autoThresholds(state.prep, blurRadius, smoothing);
     els.t1.value = Math.max(1, Math.min(t1, 97));
     els.t2.value = Math.max(+els.t1.value + 2, Math.min(t2, 99));
     updateOutputs();
@@ -411,6 +420,13 @@
     })
   );
   els.g.forEach((el) => el.addEventListener('input', () => { updateOutputs(); runSoon(); }));
+
+  document.querySelectorAll('input[name="smoothing"]').forEach((el) =>
+    el.addEventListener('change', () => {
+      try { localStorage.setItem(SMOOTHING_KEY, el.value); } catch (err) { /* kept for this visit only */ }
+      runSoon(0);
+    })
+  );
 
   document.querySelectorAll('input[name="view"]').forEach((el) =>
     el.addEventListener('change', () => { els.panels.dataset.view = el.value; })
@@ -1539,6 +1555,7 @@
   // ---- Start --------------------------------------------------------------
 
   function start() {
+    restoreSmoothing();
     updateOutputs();
     renderPalette();
     updateLineButtons();

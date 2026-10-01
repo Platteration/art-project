@@ -6,7 +6,8 @@
  *
  * Pipeline:
  *   prepare()  - scale the photo to the working size, convert to Lab
- *   process()  - blur (simplify), split into three value zones, merge small
+ *   process()  - smooth (simplify: a soft blur or edge-aware), split into three
+ *                value zones, clear the gray bands along hard edges, merge small
  *                shapes, then cluster colors inside each zone into blocks
  */
 (function () {
@@ -137,16 +138,117 @@
     return a;
   }
 
-  function blurred(prep, r) {
-    if (!prep.blurCache || prep.blurCache.r !== r) {
-      prep.blurCache = {
-        r,
-        L: blur(prep.L, prep.w, prep.h, r),
-        A: blur(prep.A, prep.w, prep.h, r),
-        B: blur(prep.B, prep.w, prep.h, r),
-      };
+  // The spread (sigma) of blur(r): three box passes of width 2r + 1
+  const blurSigma = (r) => Math.sqrt(r * r + r);
+
+  // ---- Edge-aware smoothing --------------------------------------------------
+
+  // How far apart a color step puts two pixels, per L*, as a share of the picture's long side:
+  // a 30 L* step, most of the way from shadow to light, is as far as 1% of the picture.
+  const EDGE_STEP = 1 / 3000;
+  const EDGE_CHROMA = 1;   // how much a*/b* steps count next to L* steps
+  const EDGE_ROUNDS = 2;   // guide refinements, see edgeAwareBlur()
+
+  /*
+   * Domain transform recursive filter (Gastal and Oliveira 2011). Smooths L, a and b
+   * together with a recursive blur along rows, then columns, in which the distance from one
+   * pixel to the next is 1 plus k times the guide's color step between them. A flat area is
+   * smoothed as much as by blur(), while a step from dark to light is far away, so little
+   * crosses it. Three passes, each with half the spread of the last, add up to sigmaS.
+   */
+  function domainTransform(src, guide, w, h, sigmaS, k) {
+    const n = w * h;
+    const [gL, gA, gB] = guide;
+    const [L, A, B] = src.map((c) => new Float32Array(c));
+    const N = 3;
+    // Feedback a = exp(-sqrt(2) / sigma), raised to the distance. sigma halves each pass, so
+    // each pass's weights are the last pass's squared.
+    const lnA = -Math.SQRT2 / ((sigmaS * Math.sqrt(3) * Math.pow(2, N - 1)) / Math.sqrt(Math.pow(4, N) - 1));
+    const wx = new Float32Array(n); // weight from the pixel on the left
+    const wy = new Float32Array(n); // weight from the pixel above
+    for (let i = 0; i < n; i++) {
+      if (i % w) {
+        const j = i - 1;
+        wx[i] = Math.exp(lnA * (1 + k * (Math.abs(gL[i] - gL[j]) + EDGE_CHROMA * (Math.abs(gA[i] - gA[j]) + Math.abs(gB[i] - gB[j])))));
+      }
+      if (i >= w) {
+        const j = i - w;
+        wy[i] = Math.exp(lnA * (1 + k * (Math.abs(gL[i] - gL[j]) + EDGE_CHROMA * (Math.abs(gA[i] - gA[j]) + Math.abs(gB[i] - gB[j])))));
+      }
+    }
+    for (let pass = 0; pass < N; pass++) {
+      if (pass) {
+        for (let i = 0; i < n; i++) { wx[i] *= wx[i]; wy[i] *= wy[i]; }
+      }
+      // rows, left to right and back
+      for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let i = row + 1; i < row + w; i++) {
+          const a = wx[i];
+          L[i] += a * (L[i - 1] - L[i]);
+          A[i] += a * (A[i - 1] - A[i]);
+          B[i] += a * (B[i - 1] - B[i]);
+        }
+        for (let i = row + w - 2; i >= row; i--) {
+          const a = wx[i + 1];
+          L[i] += a * (L[i + 1] - L[i]);
+          A[i] += a * (A[i + 1] - A[i]);
+          B[i] += a * (B[i + 1] - B[i]);
+        }
+      }
+      // columns, top to bottom and back, a whole row at a time
+      for (let i = w; i < n; i++) {
+        const a = wy[i];
+        L[i] += a * (L[i - w] - L[i]);
+        A[i] += a * (A[i - w] - A[i]);
+        B[i] += a * (B[i - w] - B[i]);
+      }
+      for (let i = n - w - 1; i >= 0; i--) {
+        const a = wy[i + w];
+        L[i] += a * (L[i + w] - L[i]);
+        A[i] += a * (A[i + w] - A[i]);
+        B[i] += a * (B[i + w] - B[i]);
+      }
+    }
+    return [L, A, B];
+  }
+
+  /*
+   * Flattens detail as much as blur(r) but keeps edges where the photo has them. The guide
+   * that tells the filter where the edges are starts as the plain blur, so fine texture the
+   * blur removes, such as hair strands, pores and noise, doesn't stop it. Each round filters
+   * the photo with the last result as the guide, and the big edges the blur only softened
+   * come back sharp (a rolling guidance filter, Zhang et al. 2014).
+   */
+  function edgeAwareBlur(L, A, B, w, h, r) {
+    if (r < 1) return [L, A, B];
+    const sigmaS = blurSigma(r);
+    // A step costs the same share of the picture at every Simplify, so the more Simplify spreads
+    // the smoothing, the bigger a step has to be to hold it back.
+    const k = Math.max(w, h) * EDGE_STEP;
+    let guide = [blur(L, w, h, r), blur(A, w, h, r), blur(B, w, h, r)];
+    for (let round = 0; round < EDGE_ROUNDS; round++) guide = domainTransform([L, A, B], guide, w, h, sigmaS, k);
+    return guide;
+  }
+
+  // mode: 'soft' (blur) or 'edge' (edgeAwareBlur). The last result is kept on the prep.
+  function blurred(prep, r, mode) {
+    mode = mode === 'edge' ? 'edge' : 'soft';
+    const c = prep.blurCache;
+    if (!c || c.r !== r || c.mode !== mode) {
+      const { w, h } = prep;
+      const [L, A, B] = mode === 'edge'
+        ? edgeAwareBlur(prep.L, prep.A, prep.B, w, h, r)
+        : [blur(prep.L, w, h, r), blur(prep.A, w, h, r), blur(prep.B, w, h, r)];
+      prep.blurCache = { r, mode, L, A, B };
     }
     return prep.blurCache;
+  }
+
+  // Lightness with only pixel noise smoothed out, for deciding which side of an edge a pixel is on
+  function sharpL(prep) {
+    if (!prep.sharpL) prep.sharpL = blur(prep.L, prep.w, prep.h, 1);
+    return prep.sharpL;
   }
 
   // ---- Thresholds ---------------------------------------------------------
@@ -195,6 +297,90 @@
   }
 
   // ---- Region cleanup -----------------------------------------------------
+
+  // Two-pass chamfer distance, in place: every nonzero entry becomes the distance in pixels
+  // (diagonal steps count sqrt 2) to the nearest zero entry.
+  function chamfer(dist, w, h) {
+    const D = Math.SQRT2;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0, i = y * w; x < w; x++, i++) {
+        let d = dist[i], v;
+        if (!d) continue;
+        if (x > 0 && (v = dist[i - 1] + 1) < d) d = v;
+        if (y > 0) {
+          const u = i - w;
+          if ((v = dist[u] + 1) < d) d = v;
+          if (x > 0 && (v = dist[u - 1] + D) < d) d = v;
+          if (x < w - 1 && (v = dist[u + 1] + D) < d) d = v;
+        }
+        dist[i] = d;
+      }
+    }
+    for (let y = h - 1; y >= 0; y--) {
+      for (let x = w - 1, i = y * w + x; x >= 0; x--, i--) {
+        let d = dist[i], v;
+        if (!d) continue;
+        if (x < w - 1 && (v = dist[i + 1] + 1) < d) d = v;
+        if (y < h - 1) {
+          const u = i + w;
+          if ((v = dist[u] + 1) < d) d = v;
+          if (x < w - 1 && (v = dist[u + 1] + D) < d) d = v;
+          if (x > 0 && (v = dist[u - 1] + D) < d) d = v;
+        }
+        dist[i] = d;
+      }
+    }
+  }
+
+  /*
+   * Smoothing turns a hard step from shadow straight to light into a ramp, and the split
+   * draws the ramp's in-between values as a thin middle band along the edge: a gray outline
+   * the photo doesn't have. This finds the thin parts of the middle zone, those no disk of
+   * `radius` inside it reaches, that lie between shadow and light, and splits them between
+   * the two at the smoothed value halfway between the splits. A pixel whose own lightness
+   * (sharpL) is a middle value is a real narrow halftone, such as reflected light along the
+   * jaw, and stays, unless shadow and light are both within 2 pixels: then it is the edge.
+   */
+  function clearEdgeBands(zone, prep, smoothL, t1, t2, radius) {
+    const { w, h } = prep;
+    const n = w * h;
+    const toShadow = new Float32Array(n);
+    const toLight = new Float32Array(n);
+    const inside = new Float32Array(n); // how deep in the middle zone
+    for (let i = 0; i < n; i++) {
+      toShadow[i] = zone[i] === 0 ? 0 : 1e9;
+      toLight[i] = zone[i] === 2 ? 0 : 1e9;
+      inside[i] = zone[i] === 1 ? 1e9 : 0;
+    }
+    chamfer(toShadow, w, h);
+    chamfer(toLight, w, h);
+    chamfer(inside, w, h);
+    // the thick parts: within `radius` of a pixel deeper than `radius`
+    const toCore = inside;
+    for (let i = 0; i < n; i++) toCore[i] = inside[i] > radius ? 0 : 1e9;
+    chamfer(toCore, w, h);
+
+    const sl = sharpL(prep);
+    const mid = (t1 + t2) / 2;
+    const near = 2 * radius + 2;
+    for (let i = 0; i < n; i++) {
+      if (zone[i] !== 1 || toCore[i] <= radius || toShadow[i] > near || toLight[i] > near) continue;
+      const l = sl[i];
+      if (l >= t1 && l < t2) {
+        const x = i % w, y = (i / w) | 0;
+        let lo = l, hi = l;
+        for (let yy = Math.max(0, y - 2); yy <= Math.min(h - 1, y + 2); yy++) {
+          for (let xx = Math.max(0, x - 2); xx <= Math.min(w - 1, x + 2); xx++) {
+            const v = sl[yy * w + xx];
+            if (v < lo) lo = v;
+            else if (v > hi) hi = v;
+          }
+        }
+        if (lo >= t1 || hi < t2) continue;
+      }
+      zone[i] = smoothL[i] < mid ? 0 : 2;
+    }
+  }
 
   /*
    * Merges connected shapes smaller than minSize pixels into the neighbouring
@@ -421,10 +607,12 @@
 
   const CHROMA_WEIGHT = 1.4; // hue/saturation differences count a bit more than lightness inside a zone
   const MAX_SAMPLES = 12000;
+  const EDGE_BAND = 1;      // middle bands thinner than twice this many blur sigmas (+2 px) can be cleared
 
   /*
    * opts: {
-   *   blurRadius, minSize, t1, t2,              // shape + value settings (L*)
+   *   blurRadius, smoothing: 'soft' | 'edge',   // how values are simplified
+   *   minSize, t1, t2,                          // shape + value settings (L*)
    *   grayMode: 'average' | 'custom', customL: [L, L, L],
    *   colorsPerZone, outlines
    * }
@@ -432,13 +620,17 @@
   function process(prep, opts) {
     const { w, h, rgba } = prep;
     const n = w * h;
-    const bl = blurred(prep, opts.blurRadius);
+    const bl = blurred(prep, opts.blurRadius, opts.smoothing);
 
     // 1. Three value zones from the simplified lightness
     const zone = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const l = bl.L[i];
       zone[i] = l < opts.t1 ? 0 : l < opts.t2 ? 1 : 2;
+    }
+    // With Simplify off every pixel is split as it is
+    if (opts.blurRadius >= 1) {
+      clearEdgeBands(zone, prep, bl.L, opts.t1, opts.t2, EDGE_BAND * blurSigma(opts.blurRadius) + 1);
     }
     mergeSmallRegions(zone, w, h, opts.minSize, 3, 0);
 
@@ -701,21 +893,7 @@
         comp[i - 1] !== c || comp[i + 1] !== c || comp[i - w] !== c || comp[i + w] !== c;
       dist[i] = edge ? 0 : 1e9;
     }
-    const D = Math.SQRT2;
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        if (!dist[i]) continue;
-        dist[i] = Math.min(dist[i], dist[i - 1] + 1, dist[i - w] + 1, dist[i - w - 1] + D, dist[i - w + 1] + D);
-      }
-    }
-    for (let y = h - 2; y > 0; y--) {
-      for (let x = w - 2; x > 0; x--) {
-        const i = y * w + x;
-        if (!dist[i]) continue;
-        dist[i] = Math.min(dist[i], dist[i + 1] + 1, dist[i + w] + 1, dist[i + w + 1] + D, dist[i + w - 1] + D);
-      }
-    }
+    chamfer(dist, w, h);
     regions.forEach((r) => { r.lx = r.cx; r.ly = r.cy; r.room = -1; });
     for (let i = 0; i < n; i++) {
       if (mask && !mask[i]) continue;
@@ -784,7 +962,7 @@
     prepare,
     process,
     // Thresholds are found on the simplified image so they match what gets split
-    autoThresholds: (prep, blurRadius) => autoThresholds(blurred(prep, blurRadius).L),
+    autoThresholds: (prep, blurRadius, smoothing) => autoThresholds(blurred(prep, blurRadius, smoothing).L),
     histogram,
     lightnessOf,
     chromaOf,
