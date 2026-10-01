@@ -535,22 +535,20 @@
       return (lo + hi) / 2;
     }
 
+    // Each candidate dark is scored on the step a value darker: how far it lands from the base
+    // color at that value, with chroma falling in step with value (the same color, only darker)
     let dark = null;
     if (darkest >= 0) {
-      let bestH = Infinity;
-      [[1, 0]].concat(reds.length ? [[12, 1], [8, 1], [6, 1], [4, 1], [3, 1]] : []).forEach(([a, b]) => {
-        reds.slice(0, b ? reds.length : 1).forEach((red) => {
-          const add = paints.map((p, i) => (i === darkest ? a : 0) + (b && i === red ? b : 0));
-          const s = a + b;
-          const unit = add.map((v) => v / s);
+      const scale = (baseL - 10) / baseL;
+      const want = [baseL - 10, base.mixLab[1] * scale, base.mixLab[2] * scale];
+      let best = Infinity;
+      [[1, 0], [8, 1], [4, 1], [3, 1], [2, 1], [3, 2], [1, 1]].forEach(([a, b]) => {
+        (b ? reds : [-1]).forEach((red) => {
+          const unit = paints.map((p, i) => ((i === darkest ? a : 0) + (i === red ? b : 0)) / (a + b));
           const k = amountFor(unit, baseL - 10);
           if (k == null) return;
-          const lab = mix(paints, blend(unit, k)).lab;
-          // stay on the base's hue: distance in a*b* from the base, scaled to the step's chroma
-          const cB = Math.hypot(base.mixLab[1], base.mixLab[2]) || 1;
-          const scale = Math.hypot(lab[1], lab[2]) / cB;
-          const off = Math.hypot(lab[1] - base.mixLab[1] * scale, lab[2] - base.mixLab[2] * scale) + 0.4 * b;
-          if (off < bestH) { bestH = off; dark = { unit, parts: b ? [[darkest, a], [red, b]] : [[darkest, 1]] }; }
+          const off = deltaE(mix(paints, blend(unit, k)).lab, want) + 0.3 * (b > 0);
+          if (off < best) { best = off; dark = { unit, parts: b ? [[darkest, a], [red, b]] : [[darkest, 1]] }; }
         });
       });
     }

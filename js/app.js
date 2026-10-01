@@ -17,6 +17,8 @@
     gOut: [$('g0Out'), $('g1Out'), $('g2Out')],
     colors: $('colors'), colorsOut: $('colorsOut'),
     outlines: $('outlines'),
+    hatchFar: $('hatchFar'),
+    hatchHint: $('hatchHint'),
     addBlocks: $('addBlocks'),
     hist: $('hist'),
     zones: $('zones'),
@@ -238,7 +240,7 @@
     const r = Study.process(state.prep, settings());
     state.result = r;
     paint(els.canvases.value, r.valueImage, r.w, r.h);
-    paint(els.canvases.block, r.blockImage, r.w, r.h);
+    paintBlocks(true);
     state.pixels.value = r.valueImage;
     state.pixels.block = r.blockImage;
     renderZones();
@@ -965,6 +967,7 @@
       show: !!(saved && saved.show === true), // recipe lines under the swatches
       paints: [],                           // Mixing.makePaint() for each paint in use
       key: '',                              // changes with anything that changes a recipe
+      hatch: false,                         // hatch blocks the paints can't reach
       card: null,                           // hex of the color in the How-to-mix card
       cardFrom: null,                       // the button that opened it
       sheet: false,                         // mixing sheet open
@@ -987,7 +990,7 @@
     const saved = readMixing();
     if (!saved) return;
     const m = state.mixing;
-    state.mixing = Object.assign(loadMixing(saved), { card: m.card, cardFrom: m.cardFrom, sheet: m.sheet });
+    state.mixing = Object.assign(loadMixing(saved), { card: m.card, cardFrom: m.cardFrom, sheet: m.sheet, hatch: m.hatch });
     els.showRecipes.checked = state.mixing.show;
     paintsChanged(false);
   });
@@ -1064,7 +1067,9 @@
 
   function recipeReady(hex) {
     document.querySelectorAll(`[data-recipe="${hex}"]`).forEach((btn) => fillRecipe(btn, recipeOf(Mixing.hexToRgb(hex))));
+    document.querySelectorAll(`[data-string="${hex}"]`).forEach(fillValueString);
     if (state.mixing.card === hex) renderMixCard();
+    if (state.mixing.hatch) paintBlocks(false);
   }
 
   // ---- Recipe text ----
@@ -1085,15 +1090,20 @@
   }
   const noteText = (res) => (res.diff.length ? `nearest mix is ${andList(res.diff)}` : '');
 
+  // Lab hue in degrees (0-360) and chroma
+  function hueOf(lab) {
+    const h = (Math.atan2(lab[2], lab[1]) * 180) / Math.PI;
+    return [h < 0 ? h + 360 : h, Math.hypot(lab[1], lab[2])];
+  }
+  // Blues, cyans and greens that a gray next to warm skin can stand in for
+  const isCool = (lab) => { const [h, c] = hueOf(lab); return c >= 8 && h >= 150 && h <= 330; };
+  const BLUE_LESSON = 'Use a nearby gray. Next to warm skin, black and white read as blue.';
+
   // What to do about a color the paints can't reach: suggest it by its neighbours
   function lesson(res) {
     if (res.limit === 'dark') return 'A photo’s darkest darks go further than paint can. Use this mix, and keep the values next to it a step lighter than the photo so the dark still reads.';
     if (res.limit === 'light') return 'A photo’s lightest lights go further than white paint. Use this mix, and keep what is around it a step darker so it still reads as the light.';
-    const [, a, b] = res.targetLab;
-    const hue = (Math.atan2(b, a) * 180) / Math.PI;
-    const h = hue < 0 ? hue + 360 : hue;
-    const cool = Math.hypot(a, b) >= 8 && h >= 150 && h <= 330;
-    if (cool && res.diff.includes('grayer')) return 'Use a nearby gray. Next to warm skin, black and white read as blue.';
+    if (isCool(res.targetLab) && res.diff.includes('grayer')) return BLUE_LESSON;
     if (res.diff.includes('darker')) return 'It is lighter than these paints go. Use the nearest mix, and keep what is around it a little darker.';
     if (res.diff.includes('lighter')) return 'It is darker than these paints go. Use the nearest mix, and keep what is around it a little lighter.';
     if (res.diff.includes('grayer')) return 'Use the nearest mix and keep the colors around it duller: a color looks stronger next to grays.';
@@ -1481,6 +1491,7 @@
     renderPalette();
     renderMixCard();
     renderSheet();
+    paintBlocks(false);
   }
 
   els.paintPreset.addEventListener('change', () => {
@@ -1510,6 +1521,94 @@
 
   // ---- Mixing sheet ----
 
+  // A value mass's block colors, darkest first
+  const zoneColors = (r, z) => r.blockColors.filter((c) => c.zone === z)
+    .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
+
+  // A value mass's main skin color: its biggest block with a skin-like hue (orange-red to yellow,
+  // neither gray nor garish), or just its biggest block when nothing looks like skin
+  function mainColor(r, z) {
+    const colors = r.blockColors.filter((c) => c.zone === z);
+    const skin = colors.filter((c) => {
+      const lab = Study.rgbToLab(c.r, c.g, c.b);
+      const [h, chroma] = hueOf(lab);
+      return lab[0] >= 15 && chroma >= 8 && chroma <= 60 && h >= 20 && h <= 85;
+    });
+    const biggest = (list) => list.reduce((a, c) => (!a || c.share > a.share ? c : a), null);
+    const color = biggest(skin) || biggest(colors);
+    return color && { color, skin: skin.includes(color) };
+  }
+
+  // ---- Value strings ----
+
+  const strings = new Map(); // by recipe key
+  function valueStringOf(c) {
+    const res = recipeOf(c);
+    if (!res) return null;
+    const key = recipeKey(toHex(c));
+    if (!strings.has(key)) strings.set(key, Mixing.valueString(res, state.mixing.paints));
+    return strings.get(key);
+  }
+
+  const darkText = (vs) => vs.dark.map(([i, n]) => (vs.dark.length > 1 ? `${state.mixing.paints[i].code} ${n}` : state.mixing.paints[i].code)).join(' · ');
+
+  // What goes into one step: "the pile", "pile 3 · W 1", "pile 4 · dark 1"
+  function stepText(s) {
+    if (!s.add) return 'the pile';
+    if (!s.ratio) return s.dv > 0 ? 'too light to mix' : 'too dark to mix';
+    return `pile ${s.ratio[0]} · ${s.add === 'white' ? 'W' : 'dark'} ${s.ratio[1]}`;
+  }
+
+  function valueStringBlock(main) {
+    const box = document.createElement('div');
+    box.className = 'value-string';
+    box.dataset.string = toHex(main.color);
+    box.dataset.skin = main.skin ? '1' : '';
+    fillValueString(box);
+    return box;
+  }
+
+  function fillValueString(box) {
+    const hex = box.dataset.string;
+    const c = Mixing.hexToRgb(hex);
+    box.textContent = '';
+    const h = document.createElement('h4');
+    h.textContent = `Value string around ${hex}`;
+    box.append(h);
+    if (!state.mixing.paints.length) return;
+    const vs = valueStringOf(c);
+    if (!vs) {
+      const wait = document.createElement('p');
+      wait.className = 'recipe-wait hint';
+      wait.textContent = 'Working out a mix…';
+      box.append(wait);
+      return;
+    }
+    const ol = document.createElement('ol');
+    ol.className = 'value-steps';
+    vs.steps.forEach((s) => {
+      const li = document.createElement('li');
+      const tone = document.createElement('span');
+      tone.className = 'tone' + (s.dv ? '' : ' is-base') + (s.rgb ? '' : ' is-none');
+      if (s.rgb) tone.style.background = toHex(s.rgb);
+      const v = document.createElement('strong');
+      v.textContent = 'V ' + valueLabel(Math.max(0, Math.min(100, s.L)));
+      const t = document.createElement('span');
+      t.textContent = stepText(s);
+      li.append(tone, v, t);
+      ol.append(li);
+    });
+    const res = recipeOf(c);
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = `${box.dataset.skin ? 'The biggest skin-toned block' : 'The biggest block'} in this mass. ` +
+      `Pile: ${partsText(res)}.` + (vs.dark ? ` Dark: ${darkText(vs)}.` : '');
+    box.append(ol, note);
+  }
+
+  const valueStringText = (vs) => vs.steps.map((s) => `V ${valueLabel(Math.max(0, Math.min(100, s.L)))} ${stepText(s)}`).join('; ') +
+    (vs.dark ? `; dark = ${darkText(vs)}` : '');
+
   function renderSheet() {
     const m = state.mixing;
     els.sheet.hidden = !m.sheet;
@@ -1518,12 +1617,12 @@
     if (!m.sheet || !state.result) { if (cardHere) closeMixCard(); return; }
     const r = state.result;
     els.sheetCount.textContent = `${paletteById(m.active).name} · ${plural(r.blockColors.length, 'color')}`;
-    els.sheetIntro.textContent = 'Every color in the color-block study, by value mass and darkest first, as a starting mix from your paints. Premix them before you paint, then adjust by eye. Tap a recipe for the steps.';
+    els.sheetIntro.textContent = 'Every color in the color-block study, by value mass and darkest first, as a starting mix from your paints. Premix them before you paint, then adjust by eye. Tap a recipe for the steps. ' +
+      'Each mass ends with a value string: mix a pile of its main color, then split it into five premixes a value apart, lightened with white and darkened with a dark of your darkest paint and a little red, so the string stays warm instead of going green. White cools and chalks a mix too, so the lightest steps look paler.';
     els.sheetGroups.textContent = '';
     let reopen = null;
     ZONE_NAMES.forEach((zoneName, z) => {
-      const colors = r.blockColors.filter((c) => c.zone === z)
-        .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
+      const colors = zoneColors(r, z);
       if (!colors.length) return;
       const group = document.createElement('section');
       group.className = 'sheet-group';
@@ -1540,6 +1639,7 @@
         ol.append(li);
       });
       group.append(h, ol);
+      if (m.paints.length) group.append(valueStringBlock(mainColor(r, z)));
       els.sheetGroups.append(group);
     });
     if (reopen) {
@@ -1565,13 +1665,77 @@
     if (!r || !state.mixing.paints.length) return;
     const lines = ['Mixing sheet', paintsLegend()];
     ZONE_NAMES.forEach((zoneName, z) => {
-      const colors = r.blockColors.filter((c) => c.zone === z)
-        .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
+      const colors = zoneColors(r, z);
       if (!colors.length) return;
       lines.push('', `${zoneName} (${Math.round(r.zoneShare[z] * 100)}% of picture)`);
       colors.forEach((c) => lines.push(recipeLine(c, recipeNow(c))));
+      const main = mainColor(r, z).color;
+      recipeNow(main);
+      lines.push(`Value string around ${toHex(main)}: ${valueStringText(valueStringOf(main))}`);
     });
     copyText(lines.join('\n'), 'Copied the mixing sheet');
+  });
+
+  // ---- Hatching blocks the paints can't reach ----
+
+  // Labels of the block colors out of reach, or null while their recipes are being worked out
+  function farBlocks(r) {
+    const far = new Set();
+    let pending = false;
+    if (!state.mixing.paints.length) return far;
+    r.blockColors.forEach((c) => {
+      const res = recipeOf(c);
+      if (!res) pending = true;
+      else if (res.status === 'far' && !res.limit) far.add(c.label);
+    });
+    return pending ? null : far;
+  }
+
+  // Light and dark diagonal stripes over those blocks, so they show on any color
+  function hatched(r, far) {
+    const { w, h, block } = r;
+    const img = new Uint8ClampedArray(r.blockImage);
+    const period = Math.max(8, Math.round(Math.max(w, h) / 70));
+    for (let i = 0, p = 0; i < w * h; i++, p += 4) {
+      if (!far.has(block[i])) continue;
+      const t = ((i % w) + ((i / w) | 0)) % period;
+      if (t < period / 4) {
+        img[p] += (255 - img[p]) * 0.6; img[p + 1] += (255 - img[p + 1]) * 0.6; img[p + 2] += (255 - img[p + 2]) * 0.6;
+      } else if (t >= period / 2 && t < (3 * period) / 4) {
+        img[p] *= 0.45; img[p + 1] *= 0.45; img[p + 2] *= 0.45;
+      }
+    }
+    return img;
+  }
+
+  // The color-block study, hatched where that is on. The loupe keeps reading the plain blocks.
+  let blocksDrawn = null; // which blocks the canvas shows hatched
+  function paintBlocks(force) {
+    const r = state.result;
+    if (!r) return;
+    const far = state.mixing.hatch ? farBlocks(r) : null;
+    const drawn = far ? Array.from(far).join(',') : '';
+    if (force || drawn !== blocksDrawn) {
+      blocksDrawn = drawn;
+      paint(els.canvases.block, drawn ? hatched(r, far) : r.blockImage, r.w, r.h);
+    }
+    const m = state.mixing;
+    els.hatchHint.hidden = !m.hatch;
+    if (!m.hatch) return;
+    const name = paletteById(m.active).name;
+    const n = r.blockColors.length;
+    els.hatchHint.textContent = !m.paints.length ? 'Add paints under My paints to see which colors they can reach.'
+      : !far ? 'Working out the recipes…'
+        : !far.size ? `Every block color is within reach of ${name}.`
+          : `${far.size} of ${n} block colors ${far.size === 1 ? 'is' : 'are'} out of reach of ${name}. ` +
+            (r.blockColors.some((c) => far.has(c.label) && isCool(Study.rgbToLab(c.r, c.g, c.b))) ? BLUE_LESSON
+              : 'Use the nearest mix: next to its neighbours it reads closer than it looks alone.');
+  }
+
+  els.hatchFar.checked = state.mixing.hatch; // a browser may restore the box on reload
+  els.hatchFar.addEventListener('change', () => {
+    state.mixing.hatch = els.hatchFar.checked;
+    paintBlocks(false);
   });
 
   usePaints();
