@@ -795,7 +795,7 @@
     els.palEmpty.hidden = n > 0;
     if (!n) emptyHint();
     els.swatches.classList.toggle('has-recipes', state.mixing.show);
-    els.palCopy.textContent = state.mixing.show ? 'Copy hex codes and recipes' : 'Copy hex codes';
+    els.palCopy.textContent = state.mixing.show && canMix() ? 'Copy hex codes and recipes' : 'Copy hex codes';
     // the How-to-mix card follows its swatch's new recipe line, or closes when the line is gone
     if (state.mixing.card && !els.sheetGroups.contains(els.mixCard)) {
       const again = els.swatches.querySelector(`[data-recipe="${state.mixing.card}"]`);
@@ -839,7 +839,7 @@
 
   els.palCopy.addEventListener('click', () => {
     const n = state.palette.length;
-    if (state.mixing.show && state.mixing.paints.length) {
+    if (state.mixing.show && canMix()) {
       const lines = state.palette.map((c) => recipeLine(c, recipeNow(c)));
       copyText([paintsLegend(), ''].concat(lines).join('\n'), `Copied ${n} color${n === 1 ? '' : 's'} with recipes`);
       return;
@@ -849,7 +849,7 @@
 
   els.palSave.addEventListener('click', () => {
     const list = state.palette;
-    const withRecipes = state.mixing.show && state.mixing.paints.length > 0;
+    const withRecipes = state.mixing.show && canMix();
     const cols = Math.min(6, list.length);
     const rows = Math.ceil(list.length / cols);
     const sw = 180, lab = withRecipes ? 142 : 54, pad = 24, gap = 16;
@@ -1028,7 +1028,7 @@
 
   // ---- Working out recipes, a little at a time ----
 
-  const recipes = { cache: new Map(), queue: [], job: null, timer: 0 };
+  const recipes = { cache: new Map(), queue: [], job: null, strings: [], timer: 0 };
   const recipeKey = (hex) => hex + '|' + state.mixing.key;
 
   function usePaints() {
@@ -1037,11 +1037,16 @@
     m.key = Mixing.paintsKey(m.paints);
     recipes.queue = [];
     recipes.job = null;
+    recipes.strings = [];
   }
+
+  // Recipes need a paint besides white
+  const canMix = () => state.mixing.paints.some((p) => !p.white);
+  const NO_COLORS = 'Add your colors under My paints to get a recipe';
 
   // The recipe for a color if it is ready; otherwise it is queued and recipeReady() follows
   function recipeOf(c) {
-    if (!state.mixing.paints.length) return null;
+    if (!canMix()) return null;
     const hex = toHex(c);
     const key = recipeKey(hex);
     if (recipes.cache.has(key)) return recipes.cache.get(key);
@@ -1059,14 +1064,19 @@
     return recipes.cache.get(key);
   }
 
-  // Works on the queue for about 12 ms, then lets the page breathe
+  // Works on the queue for about 12 ms, then lets the page breathe. Value strings wait until the
+  // recipes are done, and each takes a few milliseconds in one go.
   function pumpRecipes() {
     recipes.timer = 0;
     const end = performance.now() + 12;
     while (performance.now() < end) {
       if (!recipes.job) {
         const next = recipes.queue.shift();
-        if (!next) break;
+        if (!next) {
+          if (!recipes.strings.length) break;
+          stringReady(recipes.strings.shift());
+          continue;
+        }
         if (recipes.cache.has(next.key)) continue;
         recipes.job = Object.assign(next, { task: Mixing.recipeTask(next.rgb, state.mixing.paints) });
       }
@@ -1076,7 +1086,7 @@
       recipes.cache.set(job.key, job.task.result);
       recipeReady(job.hex);
     }
-    if (recipes.job || recipes.queue.length) recipes.timer = setTimeout(pumpRecipes, 0);
+    if (recipes.job || recipes.queue.length || recipes.strings.length) recipes.timer = setTimeout(pumpRecipes, 0);
   }
 
   function recipeReady(hex) {
@@ -1110,16 +1120,20 @@
     return [h < 0 ? h + 360 : h, Math.hypot(lab[1], lab[2])];
   }
   // Blues, cyans and greens that a gray next to warm skin can stand in for
-  const isCool = (lab) => { const [h, c] = hueOf(lab); return c >= 8 && h >= 150 && h <= 330; };
+  const isCool = Mixing.isCool;
   const BLUE_LESSON = 'Use a nearby gray. Next to warm skin, black and white read as blue.';
 
   // What to do about a color the paints can't reach: suggest it by its neighbours
   function lesson(res) {
-    if (res.limit === 'dark') return 'A photo’s darkest darks go further than paint can. Use this mix, and keep the values next to it a step lighter than the photo so the dark still reads.';
-    if (res.limit === 'light') return 'A photo’s lightest lights go further than white paint. Use this mix, and keep what is around it a step darker so it still reads as the light.';
+    if (res.limit === 'light' && !state.mixing.paints.some((p) => p.white)) return 'Without white, these paints go no lighter than this. Add a white under My paints.';
+    if (res.limit === 'dark' && res.diff.includes('lighter')) return 'A photo’s darkest darks go further than paint can. Use this mix, and keep the values next to it a step lighter than the photo so the dark still reads.';
+    if (res.limit === 'light' && res.diff.includes('darker')) return 'A photo’s lightest lights go further than paint can. Use this mix, and keep what is around it a step darker so it still reads as the light.';
+    // the value matches, only not the color: at the paints' limit, a change of color costs value
+    if (res.limit) return `These paints go no ${res.limit}er than this, and changing its color would make it ${res.limit === 'dark' ? 'lighter' : 'darker'}. Keep the value: use this mix, and let the colors next to it carry the color.`;
     if (isCool(res.targetLab) && res.diff.includes('grayer')) return BLUE_LESSON;
-    if (res.diff.includes('darker')) return 'It is lighter than these paints go. Use the nearest mix, and keep what is around it a little darker.';
-    if (res.diff.includes('lighter')) return 'It is darker than these paints go. Use the nearest mix, and keep what is around it a little lighter.';
+    // The paints go this dark (or light), only not with this much color, so the nearest mix gave up value
+    if (res.diff.includes('lighter')) return 'These paints can’t make a color this strong this dark: what darkens a mix also grays it. The nearest mix keeps the color and is lighter. Where the value matters more, darken it and let the colors around it carry the color.';
+    if (res.diff.includes('darker')) return 'These paints can’t make a color this strong this light: what lightens a mix also pales it. The nearest mix keeps the color and is darker. Where the value matters more, lighten it and let the colors around it carry the color.';
     if (res.diff.includes('grayer')) return 'Use the nearest mix and keep the colors around it duller: a color looks stronger next to grays.';
     return 'Use the nearest mix and judge it next to its neighbours, not on its own.';
   }
@@ -1216,10 +1230,10 @@
       meta.textContent = `${hex} · V ${sheet.v} · ${sheet.share}% of picture`;
       btn.append(chip, meta);
     }
-    if (!state.mixing.paints.length) {
+    if (!canMix()) {
       const none = document.createElement('span');
       none.className = 'recipe-note';
-      none.textContent = 'Add paints under My paints to get a recipe';
+      none.textContent = NO_COLORS;
       btn.append(none);
       return;
     }
@@ -1312,9 +1326,24 @@
       const n = niceFraction(res.total / it.parts);
       steps.push([paintOf(it).hex, `Add a touch of ${paintOf(it).name}: about 1/${n} of the pile${n >= 80 ? ', a speck on the tip of the knife' : ''}.`]);
     });
-    steps.push([null, `Check the value: it should read V ${valueLabel(res.targetLab[0])} in the loupe.`]);
+    // The value to check: the photo's, unless the mix lands a value step away from it
+    const off = res.mixLab[0] - res.targetLab[0];
+    const photoV = valueLabel(res.targetLab[0]), mixV = valueLabel(res.mixLab[0]);
+    if (Math.abs(off) < 3) steps.push([null, `Check the value: it should read V ${photoV} in the loupe.`]);
+    else if (res.limit) {
+      steps.push([null, `Check the value: it should read about V ${mixV}, as ${res.limit} as these paints go. The loupe reads V ${photoV} on the photo.`]);
+    } else {
+      steps.push([null, `Check the value: it should read about V ${mixV}, ${off > 0 ? 'lighter' : 'darker'} than the photo’s V ${photoV} in the loupe.`]);
+      const fix = off > 0 ? darkestPaint() : paints.find((p) => p.white);
+      if (fix) {
+        steps.push([fix.hex, `To match the photo’s value instead, add ${fix.name} a little at a time. The mix ${off > 0 ? 'grays as it darkens' : 'pales as it lightens'}.`]);
+      }
+    }
     return steps;
   }
+
+  // The paint that darkens a mix the most: the darkest one besides white
+  const darkestPaint = () => state.mixing.paints.reduce((a, p) => (!p.white && (!a || p.lab[0] < a.lab[0]) ? p : a), null);
 
   function renderMixCard() {
     const m = state.mixing;
@@ -1345,7 +1374,7 @@
       card.append(p);
       return p;
     };
-    if (!m.paints.length) { say('Add paints under My paints to get a recipe.'); return; }
+    if (!canMix()) { say(NO_COLORS + '.'); return; }
     if (!res) { say('Working out a mix…', 'recipe-wait'); return; }
 
     const compare = document.createElement('div');
@@ -1482,9 +1511,12 @@
       els.paintList.append(li);
     });
 
-    const warn = !n ? 'No paints yet. Add the paints you own below.'
-      : !m.paints.some((p) => p.white) ? 'There is no white, so recipes can’t be lightened. Add a white with a tube color close to #F3F1EA.'
-        : n >= MAX_PAINTS ? `That is ${MAX_PAINTS} paints, the most a palette can hold here. Remove one to add another.` : '';
+    const warn = [
+      !n ? 'No paints yet. Add the paints you own below.'
+        : !canMix() ? 'Only white so far. Add the colors you own below to get recipes.'
+          : !m.paints.some((p) => p.white) ? 'There is no white, so recipes can’t be lightened. Add a white with a tube color close to #F3F1EA.' : '',
+      n >= MAX_PAINTS ? `That is ${MAX_PAINTS} paints, the most a palette can hold here. Remove one to add another.` : '',
+    ].filter(Boolean).join(' ');
     els.paintWarn.textContent = warn;
     els.paintWarn.hidden = !warn;
     els.paintAddBtn.disabled = n >= MAX_PAINTS;
@@ -1539,14 +1571,16 @@
   const zoneColors = (r, z) => r.blockColors.filter((c) => c.zone === z)
     .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
 
-  // A value mass's main skin color: its biggest block with a skin-like hue (orange-red to yellow,
-  // neither gray nor garish), or just its biggest block when nothing looks like skin
+  // A value mass's main skin color: its biggest block with a skin-like hue (orange to yellow,
+  // neither gray nor garish), or just its biggest block when nothing looks like skin. Skin sits
+  // between about 40 and 80 degrees of hue in light and shadow; a red shirt, curtain or rose is
+  // redder than 40.
   function mainColor(r, z) {
     const colors = r.blockColors.filter((c) => c.zone === z);
     const skin = colors.filter((c) => {
       const lab = Study.rgbToLab(c.r, c.g, c.b);
       const [h, chroma] = hueOf(lab);
-      return lab[0] >= 15 && chroma >= 8 && chroma <= 60 && h >= 20 && h <= 85;
+      return lab[0] >= 15 && chroma >= 8 && chroma <= 50 && h >= 40 && h <= 80;
     });
     const biggest = (list) => list.reduce((a, c) => (!a || c.share > a.share ? c : a), null);
     const color = biggest(skin) || biggest(colors);
@@ -1556,20 +1590,41 @@
   // ---- Value strings ----
 
   const strings = new Map(); // by recipe key
+
+  // The value string around a color if it is ready; otherwise it is queued after the recipes
   function valueStringOf(c) {
-    const res = recipeOf(c);
-    if (!res) return null;
+    if (!recipeOf(c)) return null;
+    const hex = toHex(c);
+    const key = recipeKey(hex);
+    if (strings.has(key)) return strings.get(key);
+    if (!recipes.strings.some((q) => q.key === key)) recipes.strings.push({ key, hex });
+    if (!recipes.timer) recipes.timer = setTimeout(pumpRecipes, 0);
+    return null;
+  }
+
+  // The value string right away, for copying
+  function valueStringNow(c) {
     const key = recipeKey(toHex(c));
-    if (!strings.has(key)) strings.set(key, Mixing.valueString(res, state.mixing.paints));
+    if (!strings.has(key)) strings.set(key, Mixing.valueString(recipeNow(c), state.mixing.paints));
     return strings.get(key);
+  }
+
+  function stringReady(job) {
+    const res = recipes.cache.get(job.key);
+    if (!res || job.key !== recipeKey(job.hex)) return; // the paints changed since
+    if (!strings.has(job.key)) strings.set(job.key, Mixing.valueString(res, state.mixing.paints));
+    document.querySelectorAll(`[data-string="${job.hex}"]`).forEach(fillValueString);
   }
 
   const darkText = (vs) => vs.dark.map(([i, n]) => (vs.dark.length > 1 ? `${state.mixing.paints[i].code} ${n}` : state.mixing.paints[i].code)).join(' · ');
 
+  // A step's value, or a dash for one past black or white
+  const stepValue = (s) => (s.L < 0 || s.L > 100 ? 'V –' : 'V ' + valueLabel(s.L));
+
   // What goes into one step: "the pile", "pile 3 · W 1", "pile 4 · dark 1"
   function stepText(s) {
     if (!s.add) return 'the pile';
-    if (!s.ratio) return s.dv > 0 ? 'too light to mix' : 'too dark to mix';
+    if (!s.ratio) return s.add === 'white' ? 'too light to mix' : 'too dark to mix';
     return `pile ${s.ratio[0]} · ${s.add === 'white' ? 'W' : 'dark'} ${s.ratio[1]}`;
   }
 
@@ -1589,7 +1644,7 @@
     const h = document.createElement('h4');
     h.textContent = `Value string around ${hex}`;
     box.append(h);
-    if (!state.mixing.paints.length) return;
+    if (!canMix()) return;
     const vs = valueStringOf(c);
     if (!vs) {
       const wait = document.createElement('p');
@@ -1606,7 +1661,7 @@
       tone.className = 'tone' + (s.dv ? '' : ' is-base') + (s.rgb ? '' : ' is-none');
       if (s.rgb) tone.style.background = toHex(s.rgb);
       const v = document.createElement('strong');
-      v.textContent = 'V ' + valueLabel(Math.max(0, Math.min(100, s.L)));
+      v.textContent = stepValue(s);
       const t = document.createElement('span');
       t.textContent = stepText(s);
       li.append(tone, v, t);
@@ -1616,11 +1671,12 @@
     const note = document.createElement('p');
     note.className = 'hint';
     note.textContent = `${box.dataset.skin ? 'The biggest skin-toned block' : 'The biggest block'} in this mass. ` +
-      `Pile: ${partsText(res)}.` + (vs.dark ? ` Dark: ${darkText(vs)}.` : '');
+      `Pile: ${partsText(res)}.` + (vs.dark ? ` Dark: ${darkText(vs)}.` : '') +
+      (vs.held ? ` The pile comes out ${res.mixLab[0] > res.targetLab[0] ? 'lighter' : 'darker'} than the block, so the middle step brings it to the block’s value.` : '');
     box.append(ol, note);
   }
 
-  const valueStringText = (vs) => vs.steps.map((s) => `V ${valueLabel(Math.max(0, Math.min(100, s.L)))} ${stepText(s)}`).join('; ') +
+  const valueStringText = (vs) => vs.steps.map((s) => `${stepValue(s)} ${stepText(s)}`).join('; ') +
     (vs.dark ? `; dark = ${darkText(vs)}` : '');
 
   function renderSheet() {
@@ -1653,7 +1709,7 @@
         ol.append(li);
       });
       group.append(h, ol);
-      if (m.paints.length) group.append(valueStringBlock(mainColor(r, z)));
+      if (canMix()) group.append(valueStringBlock(mainColor(r, z)));
       els.sheetGroups.append(group);
     });
     if (reopen) {
@@ -1676,7 +1732,7 @@
   });
   els.sheetCopy.addEventListener('click', () => {
     const r = state.result;
-    if (!r || !state.mixing.paints.length) return;
+    if (!r || !canMix()) return;
     const lines = ['Mixing sheet', paintsLegend()];
     ZONE_NAMES.forEach((zoneName, z) => {
       const colors = zoneColors(r, z);
@@ -1684,8 +1740,7 @@
       lines.push('', `${zoneName} (${Math.round(r.zoneShare[z] * 100)}% of picture)`);
       colors.forEach((c) => lines.push(recipeLine(c, recipeNow(c))));
       const main = mainColor(r, z).color;
-      recipeNow(main);
-      lines.push(`Value string around ${toHex(main)}: ${valueStringText(valueStringOf(main))}`);
+      lines.push(`Value string around ${toHex(main)}: ${valueStringText(valueStringNow(main))}`);
     });
     copyText(lines.join('\n'), 'Copied the mixing sheet');
   });
@@ -1696,7 +1751,7 @@
   function farBlocks(r) {
     const far = new Set();
     let pending = false;
-    if (!state.mixing.paints.length) return far;
+    if (!canMix()) return far;
     r.blockColors.forEach((c) => {
       const res = recipeOf(c);
       if (!res) pending = true;
@@ -1738,7 +1793,7 @@
     if (!m.hatch) return;
     const name = paletteById(m.active).name;
     const n = r.blockColors.length;
-    const text = !m.paints.length ? 'Add paints under My paints to see which colors they can reach.'
+    const text = !canMix() ? 'Add your colors under My paints to see which colors they can reach.'
       : !far ? 'Working out the recipes…'
         : !far.size ? `Every block color is within reach of ${name}.`
           : `${far.size} of ${n} block colors ${far.size === 1 ? 'is' : 'are'} out of reach of ${name}. ` +

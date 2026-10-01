@@ -251,6 +251,8 @@
   const SPECK = 1 / 200;    // the least of a paint worth adding: a speck on the knife
   const PER_PAINT = 0.6;    // cost of each paint after the first, in ΔE
   const PER_PART = 0.02;    // cost of each whole part, so simpler recipes win
+  const LIMIT = 3;          // a target this close in L* to how dark or light the paints go is at their limit
+  const PER_VALUE = 1;      // cost of each L* a limit's mix falls short of it, past the first
   const CLOSE = 3, NEAR = 6;
 
   const gcd = (a, b) => (b ? gcd(b, a % b) : a);
@@ -280,6 +282,28 @@
   }
 
   /*
+   * How dark and how light these paints go, in L*: the lightest paint, and the darkest paint or
+   * mix of two in tenths (a pair such as ultramarine and crimson can go darker than either).
+   * Kept per paint list, since every recipe from it needs this.
+   */
+  const reaches = new WeakMap();
+  function reachOf(paints) {
+    if (reaches.has(paints)) return reaches.get(paints);
+    const xyz = [0, 0, 0];
+    let dark = Infinity, light = -Infinity;
+    paints.forEach((p, i) => {
+      dark = Math.min(dark, p.lab[0]);
+      light = Math.max(light, p.lab[0]);
+      for (let j = i + 1; j < paints.length; j++) {
+        for (let a = 1; a < GRID; a++) dark = Math.min(dark, 116 * labF(mixXyz(paints, [i, j], [a, GRID - a], 2, xyz)[1]) - 16);
+      }
+    });
+    const reach = { dark, light };
+    reaches.set(paints, reach);
+    return reach;
+  }
+
+  /*
    * Finds a recipe for one color in steps, so a page can spread the work over several frames:
    * call step(ms) until it returns true, then read .result. recipe() runs it all at once.
    *
@@ -289,10 +313,23 @@
    *   3. Each is written out: paints under 1/15 of the pile are touches, kept at their tuned
    *      amount, and the rest become whole parts, trying every size up to 24 parts. The
    *      cheapest wins: ΔE (CIEDE2000) + 0.6 per extra paint + 0.02 per whole part.
+   *
+   * A target as dark as the paints go, or darker (or as light, or lighter), is at their limit.
+   * There the value comes first: each L* the mix stays lighter than the darkest the paints go
+   * (or darker than the lightest), past the first, costs 1 more, so the darkest darks get the
+   * darkest mix rather than a lighter one that is nearer in color.
    */
   function recipeTask(target, paints) {
     const tLab = rgbToLab(target);
     const tY = tLab[0] > 8 ? Math.pow((tLab[0] + 16) / 116, 3) : tLab[0] / KAPPA;
+    const reach = reachOf(paints);
+    const edge = tLab[0] < (reach.dark + reach.light) / 2
+      ? (tLab[0] <= reach.dark + LIMIT ? 'dark' : null)
+      : (tLab[0] >= reach.light - LIMIT ? 'light' : null);
+    // How far a mix is from the target: ΔE (CIEDE2000), plus the value it gives up at a limit
+    const offBy = (lab) => deltaE(lab, tLab) + PER_VALUE * (
+      edge === 'dark' ? Math.max(0, lab[0] - Math.max(tLab[0], reach.dark) - 1)
+        : edge === 'light' ? Math.max(0, Math.min(tLab[0], reach.light) - 1 - lab[0]) : 0);
     const whiteIdx = paints.findIndex((p) => p.white);
     const white = whiteIdx >= 0 ? paints[whiteIdx] : null;
     const colors = paints.map((p, i) => i).filter((i) => i !== whiteIdx);
@@ -315,8 +352,8 @@
         for (let i = 0; i < SIZE; i++) num[i] += v * tks[i];
       }
     }
-    // The loaded colors with w parts of white per part of color: sets lastY, returns ΔE from the
-    // target (or, with yOnly, just the luminance Y)
+    // The loaded colors with w parts of white per part of color: sets lastY, returns how far the
+    // mix is from the target (or, with yOnly, just the luminance Y)
     let lastY = 0;
     function withWhite(w, yOnly) {
       const wp = white ? w * colorSum : 0;
@@ -330,7 +367,7 @@
       }
       evals++;
       lastY = y;
-      return yOnly ? y : deltaE(xyzToLab(x, y, z), tLab);
+      return yOnly ? y : offBy(xyzToLab(x, y, z));
     }
     const evaluate = (set, p, w) => { load(set, p); return withWhite(w, false); };
 
@@ -372,33 +409,31 @@
       if (bestW) found.push(bestW);
     }
 
-    // Coordinate descent on the proportions (and white), in shrinking steps
-    function fineTune(c) {
-      const p = c.p.slice();
-      let w = c.w, dE = c.dE;
+    // Coordinate descent on the proportions (and white) at one step size, changing c in place;
+    // fine-tuning runs it at shrinking steps
+    const TUNE_STEPS = [0.5, 0.2, 0.08, 0.03];
+    function fineTune(c, step) {
+      const p = c.p;
       const n = p.length + (c.white ? 1 : 0);
-      if (n < 2) return c;
-      [0.5, 0.2, 0.08, 0.03].forEach((step) => {
-        for (let pass = 0; pass < 12; pass++) {
-          let moved = false;
-          for (let j = 0; j < n; j++) {
-            for (const f of [1 + step, 1 / (1 + step)]) {
-              const q = p.slice();
-              let qw = w;
-              if (j < p.length) {
-                q[j] *= f;
-                if (c.white) qw *= sumOf(p) / sumOf(q); // keep the white the same while a color changes
-              } else qw *= f;
-              const amounts = c.white ? q.concat(qw * sumOf(q)) : q;
-              if (Math.min(...amounts) < SPECK * sumOf(amounts)) continue;
-              const d = evaluate(c.set, q, qw);
-              if (d < dE - 1e-4) { dE = d; p.splice(0, p.length, ...q); w = qw; moved = true; break; }
-            }
+      if (n < 2) return;
+      for (let pass = 0; pass < 12; pass++) {
+        let moved = false;
+        for (let j = 0; j < n; j++) {
+          for (const f of [1 + step, 1 / (1 + step)]) {
+            const q = p.slice();
+            let qw = c.w;
+            if (j < p.length) {
+              q[j] *= f;
+              if (c.white) qw *= sumOf(p) / sumOf(q); // keep the white the same while a color changes
+            } else qw *= f;
+            const amounts = c.white ? q.concat(qw * sumOf(q)) : q;
+            if (Math.min(...amounts) < SPECK * sumOf(amounts)) continue;
+            const d = evaluate(c.set, q, qw);
+            if (d < c.dE - 1e-4) { c.dE = d; p.splice(0, p.length, ...q); c.w = qw; moved = true; break; }
           }
-          if (!moved) break;
         }
-      });
-      return { set: c.set, p, w, white: c.white, dE };
+        if (!moved) break;
+      }
     }
 
     // Whole parts for the main paints, touches kept at their tuned amounts
@@ -422,24 +457,34 @@
       return best;
     }
 
-    let si = 0;
+    // Each turn of step()'s loop tries one paint set (the first pass), or takes one of the best a
+    // step size further in fine-tuning or writes it out, then checks the time
+    let si = 0, top = null, ti = 0, stage = 0, best = null;
     const task = {
       result: null,
       evals: 0,
       step(ms) {
         if (task.result) return true;
         const end = Date.now() + (ms == null ? Infinity : ms);
-        while (si < sets.length) {
-          firstPass(sets[si++]);
-          if (si < sets.length && Date.now() >= end) { task.evals = evals; return false; }
+        for (;;) {
+          if (si < sets.length) firstPass(sets[si++]);
+          else {
+            if (!top) {
+              const rank = (c) => c.dE + PER_PAINT * (c.set.length + (c.white ? 1 : 0) - 1);
+              top = found.sort((a, b) => rank(a) - rank(b)).slice(0, REFINE).map((c) => Object.assign({}, c, { p: c.p.slice() }));
+            }
+            if (ti < top.length) {
+              if (stage < TUNE_STEPS.length) fineTune(top[ti], TUNE_STEPS[stage++]);
+              else {
+                const r = writeOut(top[ti++]);
+                if (r && (!best || r.cost < best.cost)) best = r;
+                stage = 0;
+              }
+            }
+            if (ti >= top.length) break;
+          }
+          if (Date.now() >= end) { task.evals = evals; return false; }
         }
-        const rank = (c) => c.dE + PER_PAINT * (c.set.length + (c.white ? 1 : 0) - 1);
-        const top = found.sort((a, b) => rank(a) - rank(b)).slice(0, REFINE);
-        let best = null;
-        top.forEach((c) => {
-          const r = writeOut(fineTune(c));
-          if (r && (!best || r.cost < best.cost)) best = r;
-        });
         task.result = best ? describe(best) : null;
         task.evals = evals;
         return true;
@@ -448,17 +493,20 @@
 
     // The written recipe, with its predicted color, badge and how it differs from the target
     function describe(r) {
-      // white first (a pile of white is easy to darken, the other way round wastes paint), then
-      // the biggest parts, then touches
+      // the biggest part first, so the rest go into it, then touches. White wins a tie: a pile of
+      // white is easy to darken, the other way round wastes paint.
       const items = r.ids.map((id, j) => ({ paint: id, parts: r.parts[j], touch: r.touch[j] }));
-      const rank = (it) => (it.touch ? 2 : it.paint === whiteIdx ? 0 : 1);
-      items.sort((a, b) => rank(a) - rank(b) || b.parts - a.parts);
+      const first = (it) => (it.paint === whiteIdx ? 1 : 0);
+      items.sort((a, b) => a.touch - b.touch || b.parts - a.parts || first(b) - first(a));
       const m = mix(paints, paints.map((p, i) => sumOf(items.filter((it) => it.paint === i).map((it) => it.parts))));
       const dE = deltaE(m.lab, tLab);
       const diff = difference(m.lab, tLab);
-      // The right color, only darker (or lighter) than any mix of these paints: a photo's blacks
-      // and highlights go further than paint does. That is a value limit, not a color to give up on.
-      const limit = dE >= CLOSE && diff.length === 1 ? { lighter: 'dark', darker: 'light' }[diff[0]] || null : null;
+      // A target as dark as these paints go or darker (or as light), not close, with a mix that
+      // is as dark (or light) as they go too: a photo's blacks and highlights go further than
+      // paint does. That is a value limit, not a color to give up on. A blue or green is still a
+      // color out of reach: a gray suggests it better than a black does.
+      const atReach = edge === 'dark' ? m.lab[0] <= reach.dark + LIMIT : m.lab[0] >= reach.light - LIMIT;
+      const limit = edge && dE >= CLOSE && atReach && !isCool(tLab) ? edge : null;
       return {
         target: { r: target.r, g: target.g, b: target.b },
         targetLab: tLab,
@@ -483,6 +531,12 @@
     return task.result;
   }
 
+  // Blues, cyans and greens: hues (L*a*b*) from 150 to 330 degrees that aren't nearly gray
+  function isCool(lab) {
+    const h = ((Math.atan2(lab[2], lab[1]) * 180) / Math.PI + 360) % 360;
+    return Math.hypot(lab[1], lab[2]) >= 8 && h >= 150 && h <= 330;
+  }
+
   // How the mix differs from the target, in painters' words: ['grayer', 'lighter'] and so on
   const WARM_HUE = 50 * (Math.PI / 180);
   function difference(mixLab, tLab) {
@@ -500,17 +554,21 @@
   // ---- Value strings ----------------------------------------------------------
 
   /*
-   * Five premixes stepping a value at a time around a recipe's mix (V-2 to V+2): white for
-   * the lighter steps, and for the darker ones a dark of the darkest paint with a little red,
-   * so the string darkens without turning green or cold. Each step says how much white or dark
-   * to add to how much of the base pile.
+   * Five premixes a value apart around a recipe's color (V-2 to V+2): white for the lighter
+   * steps, and for the darker ones a dark of the darkest paint with a little red, so the string
+   * darkens without turning green or cold. The middle step is the recipe's pile, or, when the
+   * pile lands a value step away from the color it was mixed for (the paints can't make it this
+   * strong at its value), the pile brought to the color's value. Each step says how much white
+   * or dark to add to how much of the pile, in a ratio that lands within about 0.1 of its value.
    */
   function valueString(base, paints) {
     if (!base) return null;
     const whiteIdx = paints.findIndex((p) => p.white);
     const pile = paints.map((p, i) => base.items.reduce((s, it) => s + (it.paint === i ? it.parts : 0), 0));
     const pileSum = pile.reduce((a, b) => a + b, 0);
-    const baseL = base.mixLab[0];
+    const pileL = base.mixLab[0];
+    const held = !base.limit && Math.abs(pileL - base.targetLab[0]) >= 3;
+    const baseL = held ? base.targetLab[0] : pileL;
 
     // The dark: the darkest paint, and the reds (orange-red to crimson) that may join it
     const others = paints.map((p, i) => i).filter((i) => i !== whiteIdx);
@@ -529,24 +587,47 @@
       const far = lOf(add, 40);
       if (lighter ? far < L - 0.5 : far > L + 0.5) return null; // out of reach
       let lo = 0, hi = 40;
-      for (let it = 0; it < 30; it++) {
+      for (let it = 0; it < 20; it++) {
         const mid = Math.sqrt((lo + 0.001) * (hi + 0.001)) - 0.001;
         if ((lOf(add, mid) < L) === lighter) lo = mid; else hi = mid;
       }
       return (lo + hi) / 2;
     }
 
-    // Each candidate dark is scored on the step a value darker: how far it lands from the base
-    // color at that value, with chroma falling in step with value (the same color, only darker)
+    // The simplest ratio [pile, added], up to 40 : 40, whose mix lands within 1 L* of L, given
+    // the exact amount k per part of pile; failing that, the one nearest k. A bound out of reach
+    // is no paint added on the pile's side of L, and the most on the other.
+    function ratioFor(add, k, L) {
+      const bounds = [L - 1, L + 1].map((v) => {
+        const amount = amountFor(add, v);
+        return amount != null ? amount : Math.abs(v - pileL) < Math.abs(L - pileL) ? 0 : 40;
+      });
+      const lo = Math.min(...bounds), hi = Math.max(...bounds);
+      let best = null;
+      for (let a = 1; a <= 40; a++) {
+        for (let b = 1; b <= 40; b++) {
+          if (gcd(a, b) !== 1) continue;
+          const c = { ratio: [a, b], fits: b / a >= lo && b / a <= hi, size: a + b, err: Math.abs(Math.log(b / a / k)) };
+          if (!best || (c.fits && (!best.fits || c.size < best.size || (c.size === best.size && c.err < best.err))) ||
+            (!c.fits && !best.fits && c.err < best.err)) best = c;
+        }
+      }
+      return best.ratio;
+    }
+
+    // Each candidate dark is scored on the step a value darker (kept between the darkest the paints
+    // go and half a value under the pile): how far it lands from the pile's color at that value,
+    // with chroma falling in step with value (the same color, only darker)
     let dark = null;
     if (darkest >= 0) {
-      const scale = (baseL - 10) / baseL;
-      const want = [baseL - 10, base.mixLab[1] * scale, base.mixLab[2] * scale];
+      const testL = Math.min(pileL - 5, Math.max(baseL - 10, reachOf(paints).dark + 2));
+      const scale = testL / pileL;
+      const want = [testL, base.mixLab[1] * scale, base.mixLab[2] * scale];
       let best = Infinity;
       [[1, 0], [8, 1], [4, 1], [3, 1], [2, 1], [3, 2], [1, 1]].forEach(([a, b]) => {
         (b ? reds : [-1]).forEach((red) => {
           const unit = paints.map((p, i) => ((i === darkest ? a : 0) + (i === red ? b : 0)) / (a + b));
-          const k = amountFor(unit, baseL - 10);
+          const k = amountFor(unit, testL);
           if (k == null) return;
           const off = deltaE(mix(paints, blend(unit, k)).lab, want) + 0.3 * (b > 0);
           if (off < best) { best = off; dark = { unit, parts: b ? [[darkest, a], [red, b]] : [[darkest, 1]] }; }
@@ -557,33 +638,22 @@
     const steps = [];
     for (let dv = -2; dv <= 2; dv++) {
       const L = baseL + dv * 10;
-      if (dv === 0) {
+      if (dv === 0 && !held) {
         steps.push({ dv, L, rgb: base.mix, lab: base.mixLab, add: null, ratio: null });
         continue;
       }
-      const add = dv > 0 ? (whiteIdx >= 0 ? paints.map((p, i) => (i === whiteIdx ? 1 : 0)) : null) : dark && dark.unit;
+      const lighter = L > pileL;
+      const add = lighter ? (whiteIdx >= 0 ? paints.map((p, i) => (i === whiteIdx ? 1 : 0)) : null) : dark && dark.unit;
       const k = add && L > 0 && L < 100 ? amountFor(add, L) : null;
       if (k == null) {
-        steps.push({ dv, L, rgb: null, lab: null, add: dv > 0 ? 'white' : 'dark', ratio: null });
+        steps.push({ dv, L, rgb: null, lab: null, add: lighter ? 'white' : 'dark', ratio: null });
         continue;
       }
-      const m = mix(paints, blend(add, k));
-      steps.push({ dv, L: m.lab[0], rgb: m.rgb, lab: m.lab, add: dv > 0 ? 'white' : 'dark', ratio: simpleRatio(k) });
+      const ratio = ratioFor(add, k, L);
+      const m = mix(paints, blend(add, ratio[1] / ratio[0]));
+      steps.push({ dv, L: m.lab[0], rgb: m.rgb, lab: m.lab, add: lighter ? 'white' : 'dark', ratio });
     }
-    return { steps, dark: dark ? dark.parts : null, whiteIdx };
-  }
-
-  // k parts per part of pile as small whole numbers: [pile, added], such as [3, 1] for 1/3
-  function simpleRatio(k) {
-    let best = [1, 1], err = Infinity;
-    for (let a = 1; a <= 12; a++) {
-      for (let b = 1; b <= 12; b++) {
-        if (gcd(a, b) !== 1) continue;
-        const e = Math.abs(Math.log((b / a) / k)) + 0.012 * (a + b);
-        if (e < err) { err = e; best = [a, b]; }
-      }
-    }
-    return best;
+    return { steps, dark: dark ? dark.parts : null, whiteIdx, held };
   }
 
   window.Mixing = {
@@ -595,6 +665,7 @@
     recipe,
     recipeTask,
     valueString,
+    isCool,
     hexToRgb,
     rgbToHex,
     TOUCH,
