@@ -37,6 +37,28 @@ The second tab scores a photo of your finished piece against the reference.
 
 With the built-in sample, the tab opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
+### Paint it in steps
+
+The third tab shows the reference as a block-in, painted from big shapes to small in seven steps. It is one method among several (a shadow-first block-in), meant as an order to try, not a rule. Pick a step, or use **Previous step** and **Next step**:
+
+1. **Draw the big shapes**: the outline of the two-value light and shadow shapes, drawn on a toned mid-value ground.
+2. **Fill the shadows**: every shadow filled with one dark mix, hair and background darks included.
+3. **Fill the lights**: one light mix for the rest, which makes a two-value poster.
+4. **Find the halftones**: the shadows stay exactly as they were; the light is split into halftone and light at your **Middle / light split** (or, if that is not above the shadow line, at a split picked from the light shapes).
+5. **Shift the color inside each mass**: the same masses, each with two colors from the photo, named by how they differ (warmer and cooler, grayer and more saturated, or lighter and darker).
+6. **Paint the smaller shapes**: less simplified shapes, with your **Colors per value**.
+7. **Accents and highlights last**: step 6 with the small darkest darks and brightest lights painted in, ringed (solid rings for dark accents, dashed for highlights) and counted, such as "3 dark accents and 5 highlights; keep them this small."
+
+A card next to the picture explains each step in a few sentences and lists the colors it adds, each with **Add to palette** (or **Add all to palette**), with its value and how much of the picture it covers. **Show what's new** grays out everything the step left unchanged: in step 4 only the halftones keep their color, and in step 5 only the second mix of each mass. Hovering samples colors as on the other images, the grid and reference lines appear here too, **Save PNG** saves the step as shown, and the step you were on is remembered.
+
+How the steps are made:
+
+- The steps use their own 600 px copy of the photo, and steps 1 to 5 use fixed Simplify and Merge settings (7 and 8, then 4 and 5) so the shapes stay big. Step 6 uses Simplify 2 and Merge 3.
+- The shadow line is a two-class Otsu split of the simplified values.
+- The one-mix steps (2 to 4) fill each mass with the average of everything in it, in L\*a\*b\*, so a mass that covers dark hair and skin in shadow gets a color between them. That is a deliberate simplification: from step 5 on, each color group is filled with its most prominent photo color, as in the color blocks.
+- Accents are spots of the photo at least 12 L\* darker or lighter than the step 6 shape painted over them, and at least 6 L\* against their own surroundings. Dark accents must be darker than the shadow line, highlights lighter than the halftone split. Thin streaks (a strand of hair, a fold) and spots over half a percent of the picture are left out, a cluster such as flag stars or curls counts once, and only the strongest few are kept, at most six of each. Spots toward the middle of the picture, where the face usually is, rank higher.
+- **This photo has flat lighting; start from step 4** appears on steps 1 to 3 when under a fifth of the border between the two-value masses turns gradually. Under directional light much of that border is a form turning slowly into shadow; under flat light the two masses are just dark and light things (hair, clothes, background) with sharp edges between them. The check is cautious: it flags clearly flat photos, but a flat-lit face against a soft, out-of-focus background can pass without the note.
+
 ## Running it
 
 No build step or install. Open `index.html` in a browser, or serve the folder:
@@ -75,3 +97,4 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `styles.css`: layout and theme (light and dark)
 - `js/processing.js`: image processing (no dependencies)
 - `js/app.js`: controls, loupe, palette and the built-in sample portrait
+- `js/lesson.js`: the Paint it in steps tab

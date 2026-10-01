@@ -14,7 +14,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>Portrait Value Studio</h1>
-      <p>Turn a reference portrait into a three-value study and a color-block study. Hover any image to sample it; click to keep the color.</p>
+      <p>Turn a reference portrait into a three-value study and a color-block study, or paint it in steps from big shapes to accents. Hover any image to sample it; click to keep the color.</p>
     </div>
     <div class="topbar-actions">
       <input type="file" id="file" accept="image/*" class="visually-hidden">
@@ -102,6 +102,7 @@
       <div class="tabs" role="tablist" aria-label="Mode">
         <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
         <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
+        <button type="button" role="tab" class="tab" id="tabLessonBtn" aria-selected="false" aria-controls="tab-lesson" tabindex="-1">Paint it in steps</button>
       </div>
 
       <div class="toolbar" role="group" aria-label="Overlays">
@@ -266,6 +267,59 @@
         </div>
       </section>
 
+      <section class="tabpanel" id="tab-lesson" role="tabpanel" aria-labelledby="tabLessonBtn" hidden>
+        <p class="lesson-intro">One order for blocking in a portrait, from big shapes to small: shadows first, accents last. It is one method among several, so treat it as an order to try, not a rule.</p>
+
+        <div class="lesson-bar">
+          <div class="seg lesson-steps" role="radiogroup" aria-label="Step">
+            <input type="radio" name="lessonStep" id="ls1" value="1"><label for="ls1"><b>1</b> Big shapes</label>
+            <input type="radio" name="lessonStep" id="ls2" value="2"><label for="ls2"><b>2</b> Shadows</label>
+            <input type="radio" name="lessonStep" id="ls3" value="3"><label for="ls3"><b>3</b> Lights</label>
+            <input type="radio" name="lessonStep" id="ls4" value="4"><label for="ls4"><b>4</b> Halftones</label>
+            <input type="radio" name="lessonStep" id="ls5" value="5"><label for="ls5"><b>5</b> Color shifts</label>
+            <input type="radio" name="lessonStep" id="ls6" value="6"><label for="ls6"><b>6</b> Smaller shapes</label>
+            <input type="radio" name="lessonStep" id="ls7" value="7"><label for="ls7"><b>7</b> Accents</label>
+          </div>
+          <div class="lesson-nav">
+            <button type="button" class="btn btn-small" id="lessonPrev">Previous step</button>
+            <button type="button" class="btn btn-small" id="lessonNext">Next step</button>
+            <label class="check" for="lessonNew"><input type="checkbox" id="lessonNew"> Show what's new</label>
+          </div>
+        </div>
+
+        <div class="lesson-body">
+          <figure class="panel">
+            <figcaption><span id="lessonCaption">Step 1 · Draw the big shapes</span><button type="button" class="btn btn-ghost" data-save="lesson">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-lesson" class="view" aria-label="The current step of the block-in"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+
+          <article class="lesson-card" aria-labelledby="lessonTitle">
+            <div class="lesson-text" aria-live="polite">
+              <p class="lesson-kicker" id="lessonKicker">Step 1 of 7</p>
+              <h3 id="lessonTitle">Draw the big shapes</h3>
+              <p id="lessonText"></p>
+            </div>
+            <div class="lesson-note" id="lessonNote" hidden>
+              <p><strong>This photo has flat lighting; start from step 4.</strong> The dark and light shapes here are mostly dark and light things, such as hair, clothes and background, not shadow turning across the form.</p>
+              <button type="button" class="btn btn-small" id="lessonNoteGo">Go to step 4</button>
+            </div>
+            <p class="hint" id="lessonNewHint" hidden></p>
+            <ul class="lesson-legend" id="lessonLegend" hidden>
+              <li><span class="ring ring-dark" aria-hidden="true"></span>Dark accent</li>
+              <li><span class="ring ring-light" aria-hidden="true"></span>Highlight</li>
+            </ul>
+            <div class="lesson-mixes" id="lessonMixes">
+              <div class="lesson-mixes-head">
+                <h4 id="lessonMixTitle">New in this step</h4>
+                <button type="button" class="btn btn-small" id="lessonAddAll">Add all to palette</button>
+              </div>
+              <ul class="lesson-swatches" id="lessonSwatches" aria-labelledby="lessonMixTitle"></ul>
+            </div>
+            <p class="hint" id="lessonSettings"></p>
+          </article>
+        </div>
+      </section>
+
       <section class="palette" aria-labelledby="palTitle">
         <div class="palette-head">
           <h2 id="palTitle" tabindex="-1">Palette <span class="count" id="palCount"></span></h2>
@@ -306,6 +360,7 @@
 </dialog>
 
 <script src="js/processing.js"></script>
+<script src="js/lesson.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

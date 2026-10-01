@@ -25,9 +25,10 @@
     canvases: {
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
+      lesson: $('cv-lesson'),
     },
-    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn') },
-    tabPanels: { study: $('tab-study'), check: $('tab-check') },
+    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn'), lesson: $('tabLessonBtn') },
+    tabPanels: { study: $('tab-study'), check: $('tab-check'), lesson: $('tab-lesson') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -220,6 +221,8 @@
     drawHistogram();
     state.art.dirty = true;
     if (state.tab === 'check') runCheck();
+    // the lesson keeps each step until the photo or a setting that step uses changes
+    if (state.tab === 'lesson') Lesson.build();
     els.busy.hidden = true;
   }
 
@@ -419,7 +422,7 @@
   document.querySelectorAll('[data-save]').forEach((btn) =>
     btn.addEventListener('click', () => {
       const id = btn.dataset.save;
-      const suffix = {
+      const suffix = id === 'lesson' ? Lesson.fileSuffix() : {
         orig: 'original', value: 'three-value', block: 'color-blocks',
         artblock: 'my-painting-blocks', diff: 'accuracy-map',
       }[id];
@@ -999,8 +1002,11 @@
 
   const overlayOf = (canvas) => canvas.nextElementSibling;
 
+  // Extra marks drawn under the reference lines of one image, by view id (the lesson's accent rings)
+  const overlayMarks = { lesson: Lesson.drawRings };
+
   // Draws the grid and lines into a context of size W x H. `unit` is one line-width step in pixels.
-  function drawOverlayContent(g, W, H, unit) {
+  function drawOverlayContent(g, W, H, unit, canvas) {
     g.clearRect(0, 0, W, H);
     g.lineCap = 'round';
     if (state.grid) {
@@ -1018,6 +1024,8 @@
       g.lineWidth = 1.25 * unit;
       g.stroke();
     }
+    const marks = overlayMarks[canvas.id.replace('cv-', '')];
+    if (marks) marks(g, W, H, unit);
     const lines = state.drawing ? state.lines.concat(state.drawing) : state.lines;
     lines.forEach((l) => {
       const x1 = l.x1 * W, y1 = l.y1 * H, x2 = l.x2 * W, y2 = l.y2 * H;
@@ -1055,7 +1063,7 @@
     const dpr = window.devicePixelRatio || 1;
     const W = Math.round(w * dpr), H = Math.round(h * dpr);
     if (o.width !== W || o.height !== H) { o.width = W; o.height = H; }
-    drawOverlayContent(o.getContext('2d'), W, H, dpr);
+    drawOverlayContent(o.getContext('2d'), W, H, dpr, canvas);
   }
 
   function drawAllOverlays() {
@@ -1064,7 +1072,7 @@
 
   // A copy of an image with the grid and lines burned in, for saving
   function withOverlay(canvas) {
-    if (!state.grid && !state.lines.length) return canvas;
+    if (!state.grid && !state.lines.length && !overlayMarks[canvas.id.replace('cv-', '')]) return canvas;
     const out = document.createElement('canvas');
     out.width = canvas.width;
     out.height = canvas.height;
@@ -1072,7 +1080,7 @@
     const layer = document.createElement('canvas');
     layer.width = canvas.width;
     layer.height = canvas.height;
-    drawOverlayContent(layer.getContext('2d'), layer.width, layer.height, Math.max(1, Math.max(canvas.width, canvas.height) / 500));
+    drawOverlayContent(layer.getContext('2d'), layer.width, layer.height, Math.max(1, Math.max(canvas.width, canvas.height) / 500), canvas);
     g.drawImage(canvas, 0, 0);
     g.drawImage(layer, 0, 0);
     return out;
@@ -1150,15 +1158,20 @@
       if (on && focus) btn.focus();
     });
     if (name === 'check' && state.art.dirty) runCheck();
+    if (name === 'lesson') Lesson.build();
     drawAllOverlays();
   }
 
+  // Arrow keys move along the tabs and wrap around; Home and End go to the first and last
+  const tabNames = Object.keys(els.tabs);
   Object.entries(els.tabs).forEach(([key, btn]) => {
     btn.addEventListener('click', () => switchTab(key));
     btn.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const i = tabNames.indexOf(key);
+      const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabNames.length - 1 }[e.key];
+      if (to == null) return;
       e.preventDefault();
-      switchTab(key === 'study' ? 'check' : 'study', true);
+      switchTab(tabNames[(to + tabNames.length) % tabNames.length], true);
     });
   });
 
@@ -1536,6 +1549,9 @@
     return c;
   }
 
+  // What js/lesson.js uses from here
+  window.StudioApp = { state, els, paint, addColor, toast };
+
   // ---- Start --------------------------------------------------------------
 
   function start() {
@@ -1547,6 +1563,7 @@
     setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true);
     if (location.hash === '#check') switchTab('check');
+    if (location.hash === '#steps') switchTab('lesson');
   }
 
   const redrawHist = () => drawHistogram();
