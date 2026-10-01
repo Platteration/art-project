@@ -793,6 +793,7 @@
     const n = list.length;
     els.palCount.textContent = n ? `${n} color${n === 1 ? '' : 's'}` : '';
     els.palEmpty.hidden = n > 0;
+    if (!n) emptyHint();
     els.swatches.classList.toggle('has-recipes', state.mixing.show);
     els.palCopy.textContent = state.mixing.show ? 'Copy hex codes and recipes' : 'Copy hex codes';
     // the How-to-mix card follows its swatch's new recipe line, or closes when the line is gone
@@ -802,6 +803,19 @@
     }
     [els.palSort, els.palCopy, els.palSave, els.palClear].forEach((b) => { b.disabled = n === 0; });
     if (!n) els.copyFallback.hidden = true;
+  }
+
+  // The empty palette points at recipes, or, once they are on, at how to get colors to mix
+  function emptyHint() {
+    const strong = document.createElement('strong');
+    els.palEmpty.textContent = 'Hover any image to sample a color, then click to add it here. ';
+    if (state.mixing.show) {
+      strong.textContent = 'Add block colors to palette';
+      els.palEmpty.append('Each color gets a recipe from your paints; ', strong, ' adds every block color at once.');
+    } else {
+      strong.textContent = 'Show recipes';
+      els.palEmpty.append('Turn on ', strong, ' to see how to mix each one from your own paints.');
+    }
   }
 
   function copyText(text, done) {
@@ -1724,12 +1738,13 @@
     if (!m.hatch) return;
     const name = paletteById(m.active).name;
     const n = r.blockColors.length;
-    els.hatchHint.textContent = !m.paints.length ? 'Add paints under My paints to see which colors they can reach.'
+    const text = !m.paints.length ? 'Add paints under My paints to see which colors they can reach.'
       : !far ? 'Working out the recipes…'
         : !far.size ? `Every block color is within reach of ${name}.`
           : `${far.size} of ${n} block colors ${far.size === 1 ? 'is' : 'are'} out of reach of ${name}. ` +
             (r.blockColors.some((c) => far.has(c.label) && isCool(Study.rgbToLab(c.r, c.g, c.b))) ? BLUE_LESSON
               : 'Use the nearest mix: next to its neighbours it reads closer than it looks alone.');
+    if (els.hatchHint.textContent !== text) els.hatchHint.textContent = text; // it is read aloud on change
   }
 
   els.hatchFar.checked = state.mixing.hatch; // a browser may restore the box on reload

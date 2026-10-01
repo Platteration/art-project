@@ -131,9 +131,10 @@
 
   /*
    * Preset palettes. Each paint has its tube color (a thick, opaque swatch) and a tint of
-   * 1 part paint to 4 parts titanium white, both as they photograph in daylight: typical
-   * artist-grade oils, averaged over a few makers' swatches. Brands vary; the strength
-   * setting is there for a tube that tints more or less than these.
+   * 1 part paint to 4 parts titanium white, both as they would photograph in daylight. These
+   * are estimates for typical artist-grade oils, not measurements of any maker's tubes. Brands
+   * vary; the strength setting is there for a tube that tints more or less than these, and a
+   * paint added with real swatches replaces the guesswork.
    */
   const PAINTS = {
     W: { name: 'Titanium White', code: 'W', hex: '#F3F1EA' },
@@ -215,7 +216,7 @@
 
   // ---- Mixing ---------------------------------------------------------------
 
-  // Mixes paints[idx[j]] in parts[j]. Returns XYZ in out (and Y alone is enough for value).
+  // Mixes paints[idx[j]] in parts[j] and writes the mix's XYZ into out
   function mixXyz(paints, idx, parts, n, out) {
     let den = 0;
     for (let j = 0; j < n; j++) den += parts[j] * paints[idx[j]].t;
@@ -439,7 +440,7 @@
           const r = writeOut(fineTune(c));
           if (r && (!best || r.cost < best.cost)) best = r;
         });
-        task.result = describe(best);
+        task.result = best ? describe(best) : null;
         task.evals = evals;
         return true;
       },
@@ -500,7 +501,7 @@
 
   /*
    * Five premixes stepping a value at a time around a recipe's mix (V-2 to V+2): white for
-   * the lighter steps, and for the darker ones a dark of the darkest paint with a touch of red,
+   * the lighter steps, and for the darker ones a dark of the darkest paint with a little red,
    * so the string darkens without turning green or cold. Each step says how much white or dark
    * to add to how much of the base pile.
    */
@@ -511,7 +512,7 @@
     const pileSum = pile.reduce((a, b) => a + b, 0);
     const baseL = base.mixLab[0];
 
-    // The dark: darkest paint, with the red that keeps the base's hue best
+    // The dark: the darkest paint, and the reds (orange-red to crimson) that may join it
     const others = paints.map((p, i) => i).filter((i) => i !== whiteIdx);
     const darkest = others.reduce((a, i) => (a < 0 || paints[i].lab[0] < paints[a].lab[0] ? i : a), -1);
     const reds = others.filter((i) => {

@@ -441,7 +441,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   gap: 10px;
 }
-.swatch { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; position: relative; }
+.swatch { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 6px; position: relative; }
 .swatch-color {
   appearance: none;
   display: block;
@@ -509,7 +509,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   height: 10px;
   border-radius: 50%;
   background: var(--c);
-  box-shadow: 0 0 0 1px var(--line);
+  box-shadow: 0 0 0 1px var(--muted); /* shows white on light and black on dark */
   vertical-align: -1px;
 }
 .paints-body { padding: 0 12px 14px; display: grid; gap: 12px; }
@@ -541,7 +541,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .paint-name small { font: 0.75rem var(--mono); color: var(--muted); }
 
 .paint-add { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
-.paint-add h3, .sheet-group h3, .value-string h4 {
+.paint-add h3, .sheet-group > h3, .value-string h4 {
   margin: 0;
   font: 700 0.78rem var(--display);
   letter-spacing: 0.09em;
