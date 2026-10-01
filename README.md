@@ -14,7 +14,7 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 - **Grid**: a 3 × 3 or 4 × 4 grid for transferring proportions to your paper.
 - **Draw lines**: switch the pointer to *Draw lines* and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
 
-**Save PNG** includes the grid and lines when they are showing. Where the page runs inside another site's frame and downloads are blocked (such as an artifact viewer), **Save PNG** and **Save palette PNG** open the image in a dialog instead: right-click or long-press it to save. Opened directly, they download as usual.
+**Save PNG** includes the grid and lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and **Save palette PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
 
 ### Check my painting
 
@@ -33,7 +33,7 @@ The second tab scores a photo of your finished piece against the reference.
 
 - **Show reference on top** fades the reference over your painting so you can see where they differ.
 - **Move**, **Size** and **Rotate** shift your photo until it lines up. Any part of the reference your photo no longer covers is left out of the score. It shows hatched on the accuracy-by-shape view, and the panel says how much was left out.
-- **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. A spot that is clearly a color rather than a tinted white or gray (one that would need a channel halved or more than doubled) is refused, and repeated picks are held to the same limit. **Remove color fix** undoes it. It corrects tint only, not exposure.
+- **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. Spots that are clearly a color rather than a white tinted by the light (skin, brick red, leaf green, orange) are refused, and the fix goes no further than ordinary lamps and daylight need: no channel halved, red or green at most doubled, blue at most tripled. Picking again replaces the earlier fix. **Remove color fix** undoes it. It corrects tint only, not exposure.
 
 With the built-in sample, the tab opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
@@ -67,7 +67,7 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 2. Lightness and color are blurred with three box-blur passes, which approximate a gaussian (`Simplify`).
 3. Each pixel goes into shadow, middle or light by its blurred L\*. Small connected shapes are then merged away.
 4. Within each value mass, k-means clusters the blurred colors, weighting chroma a little more than lightness. Small shapes are merged again, but only into shapes of the same value, so blocks never cross value boundaries.
-5. Each color group is filled with its most prominent color. The group's original pixels are sorted into Lab bins about 4 L\* by 6 a\*/b\* wide, with neutral gray in the middle of a bin. The fullest bin wins, counting its neighbouring bins too so a color split across a bin edge isn't outvoted, and only its pixels are averaged, so the result is a color that is really in the photo. The painting check measures each shape the same way.
+5. Each color group is filled with its most prominent color. The group's original pixels are sorted into Lab bins about 4 L\* by 6 a\*/b\* wide, with neutral gray in the middle of a bin. The fullest bin wins, counting its neighbouring bins too so a color split across a bin edge isn't outvoted, and only its pixels are averaged, so the result is a color that is really in the photo. A bin with under half the pixels of its fullest neighbour can't win, so a nearly empty bin between two full ones is never picked. The painting check measures each shape the same way.
 
 ## Files
 

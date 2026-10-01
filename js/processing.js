@@ -60,6 +60,12 @@
     return yToL(0.2126729 * SRGB_TO_LIN[r] + 0.7151522 * SRGB_TO_LIN[g] + 0.072175 * SRGB_TO_LIN[b]);
   }
 
+  // Chroma C*: how far the color is from gray of the same lightness
+  function chromaOf(r, g, b) {
+    const lab = rgbToLab(r, g, b);
+    return Math.hypot(lab[1], lab[2]);
+  }
+
   // ---- Preparation --------------------------------------------------------
 
   function prepare(source, maxSide) {
@@ -353,8 +359,10 @@
    * them: the busiest Lab bin wins, and its own pixels are averaged (in linear light)
    * so the result is a color that is really there. A color whose noise straddles a bin
    * edge is split over neighbouring bins, so each bin is scored with its 3 x 3 x 3
-   * neighbourhood added to twice its own count. Returns linear RGB per label
-   * (lin[l * 3 ...]) and how many pixels each label has.
+   * neighbourhood added to twice its own count. A bin with fewer than half the pixels of
+   * its busiest neighbour can't win, so a nearly empty bin between two busy ones doesn't
+   * outscore them both. Returns linear RGB per label (lin[l * 3 ...]) and how many pixels
+   * each label has.
    */
   function dominantColors(prep, labels, nLabels, mask) {
     const keys = binKeys(prep);
@@ -375,18 +383,21 @@
       const l = Math.floor(k / SPAN);
       const key = k % SPAN;
       const kl = Math.floor(key / (AB_BINS * AB_BINS)), ka = Math.floor(key / AB_BINS) % AB_BINS, kb = key % AB_BINS;
-      let score = c;
+      let score = c, busiest = 0;
       for (let dl = -1; dl <= 1; dl++) {
         if (kl + dl < 0 || kl + dl > 25) continue;
         for (let da = -1; da <= 1; da++) {
           if (ka + da < 0 || ka + da >= AB_BINS) continue;
           for (let db = -1; db <= 1; db++) {
             if (kb + db < 0 || kb + db >= AB_BINS) continue;
-            score += counts.get(k + (dl * AB_BINS + da) * AB_BINS + db) || 0;
+            const nc = counts.get(k + (dl * AB_BINS + da) * AB_BINS + db) || 0;
+            if (nc > busiest) busiest = nc;
+            score += nc;
           }
         }
       }
-      if (score > bestScore[l]) { bestScore[l] = score; best[l] = key; }
+      // the label's busiest bin always qualifies, so every label gets a winner
+      if (2 * c >= busiest && score > bestScore[l]) { bestScore[l] = score; best[l] = key; }
     });
     const lin = new Float64Array(nLabels * 3);
     const m = new Float64Array(nLabels);
@@ -776,6 +787,7 @@
     autoThresholds: (prep, blurRadius) => autoThresholds(blurred(prep, blurRadius).L),
     histogram,
     lightnessOf,
+    chromaOf,
     grayForL,
     compare,
     applyGains,

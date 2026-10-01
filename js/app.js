@@ -137,17 +137,23 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  // Inside a frame (such as an artifact viewer) downloads are often blocked without a word,
-  // so there the PNG opens in a dialog to save by hand instead
-  const framed = (() => {
-    try { return window.top !== window.self; } catch (err) { return true; }
+  // Inside a frame (such as an artifact viewer) a sandbox can block downloads without a word, and
+  // the page can't tell whether it did. So there the download is still tried, and the PNG also
+  // opens in a dialog to save by hand. Only when every frame up to the top is on this site can the
+  // page read their sandboxes, and skip the dialog if none of them blocks downloads.
+  const downloadsMayBeBlocked = (() => {
+    try {
+      for (let w = window; w !== w.top; w = w.parent) {
+        const f = w.frameElement; // null when the page around it is another site's
+        if (!f || (f.hasAttribute('sandbox') && !f.sandbox.contains('allow-downloads'))) return true;
+      }
+      return false;
+    } catch (err) { return true; }
   })();
 
   function savePng(canvas, name) {
-    if (!framed) {
-      canvas.toBlob((blob) => blob && downloadBlob(blob, name), 'image/png');
-      return;
-    }
+    canvas.toBlob((blob) => blob && downloadBlob(blob, name), 'image/png');
+    if (!downloadsMayBeBlocked) return;
     els.saveImg.src = canvas.toDataURL('image/png');
     els.saveImg.alt = name;
     els.saveName.textContent = name;
@@ -981,6 +987,11 @@
     const o = out.getContext('2d');
     o.filter = 'blur(1.4px)';
     o.drawImage(c, 0, 0);
+    // the blur fades the outermost pixels out; keep their color but make them opaque, or
+    // prepare() would mix that fringe with the gray it puts behind transparent areas
+    const soft = o.getImageData(0, 0, W, H);
+    for (let i = 3; i < soft.data.length; i += 4) soft.data[i] = 255;
+    o.putImageData(soft, 0, 0);
     return out;
   }
 
@@ -1109,6 +1120,8 @@
     drawAllOverlays();
   });
   window.addEventListener('keydown', (e) => {
+    // the save dialog is modal: Esc only closes it, and nothing behind it should change
+    if (els.saveDialog.open) return;
     if (e.key === 'Escape' && state.picking) setPicking(false);
     if (e.key === 'Escape' && state.drawing) {
       state.drawing = null;
@@ -1205,8 +1218,10 @@
     g.restore();
 
     const gains = state.art.gains;
+    let photo = null;
     if (gains.some((v) => v !== 1)) {
       const img = g.getImageData(0, 0, w, h);
+      photo = img.data.slice();
       Study.applyGains(img.data, gains);
       g.putImageData(img, 0, 0);
     }
@@ -1229,6 +1244,9 @@
 
     const prep = Study.prepare(c, Math.max(w, h));
     prep.mask = mask;
+    // the photo before the color fix, where a neutral spot is picked (a channel the fix pushed
+    // past white can't be undone from the fixed pixels)
+    prep.photo = photo || prep.rgba;
     return prep;
   }
 
@@ -1432,20 +1450,30 @@
     els.wbUndo.hidden = !fixed;
   }
 
-  // A white or gray under colored light needs at most about this much per channel; a spot that
-  // needs more is a color, not a tinted neutral. Several picks together stay inside it too.
-  const GAIN_MIN = 0.5, GAIN_MAX = 2;
-  const gainOk = (v) => v >= GAIN_MIN && v <= GAIN_MAX;
+  // Colored light tints a white or gray from warm to cool and moves green in step with red and
+  // blue: under daylight or an ordinary lamp, the fix needs a green gain of about red^0.6 x blue^0.4.
+  // Most skin tones and browns are redder than that. So a spot counts as a tinted white or gray if
+  // it is nearly gray already, whatever its tint, or if its fix keeps green within 10% of that, and
+  // then only as far as ordinary light goes: up to 3x blue (a warm bulb the camera only partly
+  // corrected), no channel halved, red or green at most doubled. Paper under a bare bulb with no
+  // correction at all is as orange as orange paint, so the two can't be told apart; both are refused.
+  const GAIN_LIMITS = [[1 / 2, 2], [1 / 2, 2], [1 / 2, 3]]; // red, green, blue
+  const NEAR_GRAY = 12; // C*
+  const tintedByLight = ([r, g, b]) =>
+    Math.abs(Math.log(g) - 0.6 * Math.log(r) - 0.4 * Math.log(b)) <= Math.log(1.1);
 
-  // Averages a 5 x 5 patch of the painting and makes that color neutral
+  // Averages a 5 x 5 patch of the painting and makes that color neutral. The patch is read from the
+  // photo as taken, so a new pick replaces any earlier fix and follows the same rules as a first one.
   function pickNeutral(s) {
+    const data = state.art.prep && state.art.prep.photo;
+    if (!data) return;
     let r = 0, g = 0, b = 0, k = 0;
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const x = s.x + dx, y = s.y + dy;
         if (x < 0 || y < 0 || x >= s.w || y >= s.h) continue;
         const p = (y * s.w + x) * 4;
-        r += s.data[p]; g += s.data[p + 1]; b += s.data[p + 2]; k++;
+        r += data[p]; g += data[p + 1]; b += data[p + 2]; k++;
       }
     }
     const patch = { r: Math.round(r / k), g: Math.round(g / k), b: Math.round(b / k) };
@@ -1454,17 +1482,16 @@
       toast('That spot is too dark to judge. Pick a white or light gray area.');
       return;
     }
-    if (!gains.every(gainOk)) {
+    const neutral = gains.every((v, i) => v >= GAIN_LIMITS[i][0] && v <= GAIN_LIMITS[i][1])
+      && (Study.chromaOf(patch.r, patch.g, patch.b) <= NEAR_GRAY || tintedByLight(gains));
+    if (!neutral) {
       toast(`${toHex(patch)} is too colorful to be white or gray. Pick paper or a neutral gray area.`);
       return;
     }
     setPicking(false);
-    const combined = state.art.gains.map((v, i) => v * gains[i]);
-    state.art.gains = combined.map((v) => Math.max(GAIN_MIN, Math.min(GAIN_MAX, v)));
+    state.art.gains = gains;
     updateColorFix();
-    toast(combined.every(gainOk)
-      ? `Color cast removed: ${toHex(patch)} is now neutral`
-      : `Color cast reduced as far as allowed: ${toHex(patch)} stays slightly tinted`);
+    toast(`Color cast removed: ${toHex(patch)} is now neutral`);
     checkSoon();
   }
 
