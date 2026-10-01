@@ -804,12 +804,13 @@
     return { comp, count };
   }
 
-  // Accuracy map bins, by CIEDE2000 difference. Fills are an ordinal blue ramp.
+  // Accuracy map bins, by CIEDE2000 difference. Fills are an ordinal forest-green ramp, which
+  // stands apart from skin tones.
   const DIFF_BINS = [
     { max: 5, label: 'Close', fill: null },
-    { max: 10, label: 'Noticeable', fill: [134, 182, 239] },
-    { max: 20, label: 'Off', fill: [42, 120, 214] },
-    { max: Infinity, label: 'Far off', fill: [16, 66, 129] },
+    { max: 10, label: 'Noticeable', fill: [172, 204, 150] },
+    { max: 20, label: 'Off', fill: [70, 132, 86] },
+    { max: Infinity, label: 'Far off', fill: [24, 64, 40] },
   ];
   const binFor = (dE) => DIFF_BINS.findIndex((b) => dE < b.max);
 

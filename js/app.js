@@ -932,7 +932,7 @@
     c.width = pad * 2 + cols * sw + (cols - 1) * gap;
     c.height = pad * 2 + rows * (sw + lab) + (rows - 1) * gap;
     const g = c.getContext('2d');
-    g.fillStyle = '#f3f3f1';
+    g.fillStyle = '#faf5ea';
     g.fillRect(0, 0, c.width, c.height);
     list.forEach((col, i) => {
       const x = pad + (i % cols) * (sw + gap);
@@ -941,10 +941,10 @@
       g.fillRect(x, y, sw, sw);
       g.strokeStyle = 'rgba(0,0,0,0.15)';
       g.strokeRect(x + 0.5, y + 0.5, sw - 1, sw - 1);
-      g.fillStyle = '#1c1d20';
+      g.fillStyle = '#1e2b22';
       g.font = '600 20px "IBM Plex Mono", monospace';
       g.fillText(toHex(col), x, y + sw + 26);
-      g.fillStyle = '#5b5e64';
+      g.fillStyle = '#5c6157';
       g.font = '16px "IBM Plex Mono", monospace';
       g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47);
     });

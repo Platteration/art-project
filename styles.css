@@ -1,16 +1,17 @@
 /* Layout: a painter's workbench. A rail of collapsible tool drawers on the left, the three images
    side by side on neutral gray mattes (so values read true). On phones the drawers sit above the images. */
 :root {
-  --ground: #e3e4e2;
-  --surface: #f3f3f1;
-  --ink: #1c1d20;
-  --muted: #5b5e64;
-  --line: #c7c9c6;
-  --accent: #2a43a3;       /* ultramarine */
-  --accent-ink: #ffffff;
-  --danger: #a3322a;
-  --well: #8b8c8e;         /* mid-gray matte behind images */
-  --shadow: rgba(20, 22, 28, 0.18);
+  --ground: #efe7d6;       /* cream */
+  --surface: #faf5ea;
+  --ink: #1e2b22;          /* dark forest */
+  --muted: #5c6157;
+  --line: #d8ccb4;
+  --accent: #2c4a36;       /* forest green */
+  --accent-ink: #faf5ea;
+  --earth: #a4472f;        /* earth red */
+  --danger: #93341f;
+  --well: #8b8c8e;         /* mid-gray matte behind images: kept neutral so values and colors read true */
+  --shadow: rgba(40, 32, 18, 0.18);
 
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -22,30 +23,32 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ground: #17181a;
-    --surface: #222327;
-    --ink: #e8e8e5;
-    --muted: #9b9ea5;
-    --line: #37393e;
-    --accent: #93a5f2;
-    --accent-ink: #10142e;
-    --danger: #f08a80;
+    --ground: #152019;
+    --surface: #1d2b22;
+    --ink: #efe6d3;
+    --muted: #b2ad9a;
+    --line: #34473a;
+    --accent: #a9c79b;
+    --accent-ink: #14201a;
+    --earth: #dc8c6a;
+    --danger: #ee9c82;
     --well: #3b3c3f;
-    --shadow: rgba(0, 0, 0, 0.5);
+    --shadow: rgba(0, 0, 0, 0.45);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --ground: #17181a;
-  --surface: #222327;
-  --ink: #e8e8e5;
-  --muted: #9b9ea5;
-  --line: #37393e;
-  --accent: #93a5f2;
-  --accent-ink: #10142e;
-  --danger: #f08a80;
+  --ground: #152019;
+  --surface: #1d2b22;
+  --ink: #efe6d3;
+  --muted: #b2ad9a;
+  --line: #34473a;
+  --accent: #a9c79b;
+  --accent-ink: #14201a;
+  --earth: #dc8c6a;
+  --danger: #ee9c82;
   --well: #3b3c3f;
-  --shadow: rgba(0, 0, 0, 0.5);
+  --shadow: rgba(0, 0, 0, 0.45);
   color-scheme: dark;
 }
 
@@ -182,12 +185,12 @@ select {
 .drawer-icon {
   grid-row: 1 / span 2;
   width: 20px; height: 20px;
-  fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+  fill: none; stroke: var(--earth); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
 }
-.drawer-icon [fill="currentColor"] { fill: var(--accent); }
+.drawer-icon [fill="currentColor"] { fill: var(--earth); }
 .drawer-title { display: contents; }
 .drawer-name { font: 700 1rem/1.2 var(--display); }
-.drawer > summary:hover .drawer-name { color: var(--accent); }
+.drawer > summary:hover .drawer-name { color: var(--earth); }
 .drawer-state {
   grid-column: 2;
   font: 500 0.72rem/1.3 var(--mono);
@@ -336,7 +339,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   cursor: pointer;
 }
 .tab:hover { color: var(--ink); }
-.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--earth); }
 .tabpanel { display: grid; gap: 16px; min-width: 0; }
 
 /* ---- Tool bar: one icon per tool, beside the images (a pinned row on phones) ---- */
@@ -604,8 +607,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   flex: none;
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--earth);
+  color: var(--surface);
   font: 600 0.66rem/1.5 var(--mono);
 }
 .paint-dots { display: flex; flex-wrap: wrap; gap: 3px; }
@@ -661,7 +664,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   box-shadow: 0 8px 24px var(--shadow);
 }
 .paint-dialog[open] { display: flex; flex-direction: column; }
-.paint-dialog::backdrop { background: rgba(20, 22, 28, 0.55); }
+.paint-dialog::backdrop { background: rgba(21, 32, 25, 0.6); }
 .paint-dialog > .paint-dialog-head, .paint-dialog > .hint, .paint-dialog > .paint-dialog-tools { margin: 0; padding-inline: 16px; }
 .paint-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 14px 6px; }
 .paint-dialog-head .count { font: 500 0.75rem var(--mono); letter-spacing: 0; text-transform: none; color: var(--muted); margin-left: 6px; }
@@ -773,7 +776,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   box-shadow: 0 8px 24px var(--shadow);
 }
 .save-dialog[open] { display: grid; gap: 12px; }
-.save-dialog::backdrop { background: rgba(20, 22, 28, 0.55); }
+.save-dialog::backdrop { background: rgba(21, 32, 25, 0.6); }
 .save-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .save-dialog img {
   display: block;
