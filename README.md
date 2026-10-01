@@ -18,7 +18,7 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 
 ### Hard edges stay hard
 
-**Simplify** smooths the photo before it is split into values. A plain blur turns every hard edge, such as a lit face against dark hair, into a ramp through the middle values, and the split would draw that ramp as a thin gray outline the photo doesn't have. Any thin middle band that runs between shadow and light is split between the two at its halfway value instead, so a hard edge goes straight from shadow to light. A narrow halftone with middle values of its own, such as reflected light along the jaw or the side of the nose, stays. Halftones narrower than about 4 px at the working size can't be told apart from the edge itself and are split too.
+**Simplify** smooths the photo before it is split into values. A plain blur turns every hard edge, such as a lit face against dark hair, into a ramp through the middle values, and the split would draw that ramp as a thin gray outline the photo doesn't have. Any thin middle band that runs between shadow and light is split between the two at its halfway value instead, so a hard edge goes straight from shadow to light. A narrow halftone with middle values of its own, such as reflected light along the jaw or the side of the nose, stays. Halftones narrower than about 4 px at the working size can't be told apart from the edge itself and are split too. With Simplify off nothing is smoothed, and every pixel is split by its own value.
 
 **Smoothing**, under Simplify, chooses how the photo is smoothed:
 
