@@ -428,7 +428,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   font: 600 0.8rem var(--mono);
 }
 .glow-badge svg { width: 13px; height: 13px; }
-.glow-badge.is-plain { background: transparent; color: var(--good); }
+/* a strongest area below 90%: neutral, like its gray label on the map */
+.glow-badge.is-plain { background: transparent; color: var(--ink); border-color: var(--muted); }
+.glow.is-note { display: block; padding-left: 34px; color: var(--muted); }
 
 .step-body { display: grid; gap: 10px; }
 .step-body p { margin: 0; }

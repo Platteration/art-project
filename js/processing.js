@@ -647,14 +647,17 @@
     const refDom = dominantColors(ref, comp, count, mask).lin;
     const artDom = dominantColors(art, comp, count, mask).lin;
     const cnt = new Float64Array(count), sx = new Float64Array(count), sy = new Float64Array(count);
+    const cells = new Float64Array(count * 9); // each shape's pixels in a 3 x 3 grid over the picture
     const first = new Int32Array(count);
     for (let i = 0; i < n; i++) {
       if (mask && !mask[i]) continue;
       const c = comp[i];
+      const x = i % w, y = (i / w) | 0;
       if (!cnt[c]) first[c] = i;
       cnt[c]++;
-      sx[c] += i % w;
-      sy[c] += (i / w) | 0;
+      sx[c] += x;
+      sy[c] += y;
+      cells[c * 9 + ((3 * y / h) | 0) * 3 + ((3 * x / w) | 0)]++;
     }
     const srgbOf = (lin, c) => ({ r: linToSrgb(lin[c * 3]), g: linToSrgb(lin[c * 3 + 1]), b: linToSrgb(lin[c * 3 + 2]) });
 
@@ -665,7 +668,7 @@
       if (!k) {
         regions[c] = {
           id: c, share: 0, dE: 0, dL: 0, dC: 0, dWarm: 0, dGreen: 0, gain: 0, valueGain: 0,
-          ref: null, art: null, cx: 0, cy: 0, bin: 0, zone: 0, pct: 0,
+          ref: null, art: null, refLab: null, artLab: null, cx: 0, cy: 0, cells: null, bin: 0, zone: 0, pct: 0,
         };
         continue;
       }
@@ -693,8 +696,11 @@
         valueGain: share * (100 - valuePct),
         ref: srgbOf(refDom, c),
         art: srgbOf(artDom, c),
+        refLab,
+        artLab,
         cx: sx[c] / k,
         cy: sy[c] / k,
+        cells: Array.from(cells.subarray(c * 9, c * 9 + 9), (v) => v / k), // share in each grid cell, row by row
         bin: binFor(dE),
         pct: Math.round(colorPct), // same per-shape score the color accuracy averages
         zone: Math.floor(refRes.block[first[c]] / refRes.K),
@@ -774,6 +780,27 @@
       comp,
       diffImage,
     };
+  }
+
+  /*
+   * A shape's match (0-100, unrounded) if only some of its difference were painted out. `fixes`
+   * names any of 'value' (lightness), 'warm' (along warm-cool), 'hue' (across warm-cool: yellow-
+   * green to violet) and 'chroma' (more or less gray at the same hue). The hue moves come before
+   * chroma. It tells how much of a shape's payoff a brush instruction naming only those earns.
+   */
+  function matchAfter(reg, fixes) {
+    const [rL, ra, rb] = reg.refLab;
+    let [L, a, b] = reg.artLab;
+    const cw = Math.cos(WARM_HUE), sw = Math.sin(WARM_HUE);
+    if (fixes.includes('value')) L = rL;
+    if (fixes.includes('warm')) { a -= reg.dWarm * cw; b -= reg.dWarm * sw; }
+    if (fixes.includes('hue')) { a += reg.dGreen * sw; b -= reg.dGreen * cw; }
+    if (fixes.includes('chroma')) {
+      const c = Math.hypot(a, b);
+      if (c < 0.5) { a = ra; b = rb; } // a gray has no hue to keep: the color comes back as the reference's
+      else { const k = Math.hypot(ra, rb) / c; a *= k; b *= k; }
+    }
+    return Math.max(0, 100 - 2.5 * deltaE2000(rL, ra, rb, L, a, b));
   }
 
   // Two-pass chamfer distance, in place: each nonzero pixel becomes its distance to the nearest
@@ -856,10 +883,12 @@
     chromaOf,
     grayForL,
     compare,
+    matchAfter,
     shapeRing,
     applyGains,
     neutralGains,
     deltaE2000,
     DIFF_BINS,
+    WARM_HUE,
   };
 })();

@@ -1318,20 +1318,22 @@
 
   // Match percentage on each shape of the accuracy map. The biggest differences get a
   // white label with their number from the list, and what's working gets a green label lettered
-  // as in the feedback; shapes too small for a label stay bare.
+  // as in the feedback. A strongest area below 90% keeps the plain gray label, with its letter.
+  // Shapes too small for a label stay bare.
   function drawLabels(canvas, cmp) {
     const g = canvas.getContext('2d');
     const long = Math.max(canvas.width, canvas.height);
     const minFont = Math.round(long / 60);
     const maxFont = Math.round(long / 26);
     const fb = cmp.feedback;
-    const rank = new Set(cmp.top.map((r) => r.id));
-    const glows = new Set(fb.glows.map((r) => r.id));
+    const named = new Set(cmp.top.concat(fb.glows, fb.strongest || []).map((r) => r.id));
+    // a named shape's label is always drawn, at least at the smallest size
+    const namedFont = (reg) => Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
 
     // style: 'plain' (gray), 'strong' (white, a biggest difference) or 'glow' (green, what's working)
     const pill = (reg, text, font, style) => {
       g.font = `600 ${font}px "IBM Plex Mono", ui-monospace, monospace`;
-      const tick = style === 'glow' && fb.spotOn ? font * 1.1 : 0; // room for a check mark
+      const tick = style === 'glow' ? font * 1.1 : 0; // room for a check mark
       const tw = g.measureText(text).width;
       const pw = tw + tick + font * 0.9;
       const ph = font * 1.45;
@@ -1368,20 +1370,13 @@
     };
 
     cmp.regions.forEach((reg) => {
-      if (!reg.ref || rank.has(reg.id) || glows.has(reg.id)) return;
+      if (!reg.ref || named.has(reg.id)) return;
       const font = Math.min(maxFont, Math.floor(reg.room / 1.5));
       if (font >= minFont) pill(reg, reg.pct + '%', font, 'plain');
     });
-    // praise is worth seeing: its labels never go below a readable size, even on a small shape
-    fb.glows.forEach((reg, i) => {
-      if (rank.has(reg.id)) return; // a strongest area that is also a biggest difference keeps its number
-      const font = Math.max(Math.round(long / 42), Math.min(maxFont, Math.floor(reg.room / 1.9)));
-      pill(reg, `${'ABC'[i]} · ${reg.pct}%`, font, 'glow');
-    });
-    cmp.top.forEach((reg, i) => {
-      const font = Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
-      pill(reg, `${i + 1} · ${reg.pct}%`, font, 'strong');
-    });
+    if (fb.strongest) pill(fb.strongest, `A · ${fb.strongest.pct}%`, namedFont(fb.strongest), 'plain');
+    fb.glows.forEach((reg, i) => pill(reg, `${'ABC'[i]} · ${reg.pct}%`, namedFont(reg), 'glow'));
+    cmp.top.forEach((reg, i) => pill(reg, `${i + 1} · ${reg.pct}%`, namedFont(reg), 'strong'));
   }
 
   // The accuracy map with the next step's shape ringed: a white band framed in near-black, so it
@@ -1400,11 +1395,65 @@
     return d;
   }
 
+  // The ways a shape's color can be off, as Study.matchAfter() names them: lightness, warm-cool,
+  // the hue axis across warm-cool, and chroma
+  const CHANGES = ['value', 'warm', 'hue', 'chroma'];
+
+  /*
+   * What to change to bring a shape to the reference: the fewest changes that close at least
+   * three quarters of its difference (Study.matchAfter repaints just those), and of those the
+   * set that comes closest. So a note or a next step never leaves out the main error while its
+   * payoff counts it, and never says the same thing twice (warm-cool, hue and chroma overlap).
+   * A value change of 0.3 or more is always named: value comes first. Biggest first.
+   */
+  function changesFor(reg) {
+    const lost = 100 - Study.matchAfter(reg, []);
+    const must = Math.abs(reg.dL) >= 3 ? ['value'] : [];
+    let kinds = null, best = -1;
+    for (let size = must.length; size <= CHANGES.length && !kinds; size++) {
+      for (let bits = 0; bits < 1 << CHANGES.length; bits++) {
+        const set = CHANGES.filter((k, i) => bits & (1 << i));
+        if (set.length !== size || !must.every((k) => set.includes(k))) continue;
+        const pct = Study.matchAfter(reg, set);
+        if (100 - pct <= lost / 4 && pct > best) { kinds = set; best = pct; }
+      }
+    }
+    const alone = {};
+    kinds.forEach((k) => { alone[k] = Study.matchAfter(reg, [k]); });
+    return kinds.sort((a, b) => alone[b] - alone[a]);
+  }
+
+  // How far a Lab color leans warm (+) or cool (-), and across that toward yellow-green (+) or violet (-)
+  const lean = (lab) => ({
+    warm: lab[1] * Math.cos(Study.WARM_HUE) + lab[2] * Math.sin(Study.WARM_HUE),
+    green: lab[2] * Math.cos(Study.WARM_HUE) - lab[1] * Math.sin(Study.WARM_HUE),
+  });
+
+  /*
+   * The drift across warm-cool, said the way it looks. On a warm color such as skin its two ends
+   * read as yellow and pink, and a painting pinker than the reference is "too pink". On a gray or
+   * cool color they read as green and purple, and only a painting that leans that way itself is
+   * "too purple"; a gray where the reference is greenish is "not green enough".
+   */
+  function hueDrift(reg) {
+    const warmRef = lean(reg.refLab).warm >= 8;
+    const plus = warmRef ? 'yellow' : 'green', minus = warmRef ? 'pink' : 'purple';
+    const too = reg.dGreen > 0 ? plus : minus, short = reg.dGreen > 0 ? minus : plus;
+    const art = lean(reg.artLab).green;
+    const leans = warmRef || (Math.abs(art) >= 2 && art * reg.dGreen > 0);
+    return leans ? { act: `less ${too}`, note: `too ${too}` } : { act: `more ${short}`, note: `not ${short} enough` };
+  }
+
+  const valueStep = (reg) => Math.max(0.1, Math.abs(reg.dL) / 10).toFixed(1);
+
+  // What is off with a shape, biggest first, in the same terms as the next step
   function describe(reg) {
-    const parts = [];
-    if (Math.abs(reg.dL) >= 3) parts.push(`${reg.dL > 0 ? 'too light' : 'too dark'} by ${Math.abs(reg.dL / 10).toFixed(1)} value`);
-    if (Math.abs(reg.dWarm) >= 4) parts.push(reg.dWarm > 0 ? 'too warm' : 'too cool');
-    if (Math.abs(reg.dC) >= 5) parts.push(reg.dC > 0 ? 'too saturated' : 'too gray');
+    const parts = changesFor(reg).map((kind) => {
+      if (kind === 'value') return `${reg.dL > 0 ? 'too light' : 'too dark'} by ${valueStep(reg)} value`;
+      if (kind === 'warm') return reg.dWarm > 0 ? 'too warm' : 'too cool';
+      if (kind === 'hue') return hueDrift(reg).note;
+      return reg.dC > 0 ? 'too saturated' : 'too gray';
+    });
     if (!parts.length) parts.push('hue is off');
     const text = parts.join(', ');
     return text.charAt(0).toUpperCase() + text.slice(1);
@@ -1417,27 +1466,22 @@
 
   /*
    * What a teacher would say, in order. Praise goes only to shapes at 90% or better: up to three
-   * of the largest. If none get there, the closest large shape is named as the strongest area,
-   * without a check mark. Whole masses are praised when they sit in the right place or have the
-   * right values. The next step is the shape worth the most color points, except while value
-   * accuracy is under 70: then it is the shape whose value is furthest off for its size, because
-   * value comes before color. A step worth less than a point isn't given.
+   * of the largest. Whole masses are praised when they sit in the right place or have the right
+   * values. The next step is the shape worth the most color points, except while value accuracy
+   * is under 70: then it is the shape worth the most value points, because value comes before
+   * color. A step worth less than a point isn't given.
+   * If no shape reaches 90%, the closest large shape is named as the strongest area, without a
+   * check mark. It is never one of the biggest differences, the next step or a far-off shape:
+   * calling a costly shape strong would contradict the list and the map. Without such a shape,
+   * and with no mass to praise, the strongest area is the mass most in place, if at least half
+   * of it is.
    */
   function feedbackFor(cmp) {
     const shapes = cmp.regions.filter((r) => r.ref);
-    let glows = shapes
+    const glows = shapes
       .filter((r) => r.share >= 0.01 && r.pct >= GLOW_PCT)
       .sort((a, b) => b.share - a.share)
       .slice(0, 3);
-    const spotOn = glows.length > 0;
-    if (!spotOn) {
-      // the strongest area: highest match among the large shapes, not one of the biggest differences
-      const worst = new Set(cmp.top.map((r) => r.id));
-      const best = (list) => list.reduce((a, r) => (!a || r.pct > a.pct || (r.pct === a.pct && r.share > a.share) ? r : a), null);
-      const large = shapes.filter((r) => r.share >= 0.02);
-      const pick = best(large.filter((r) => !worst.has(r.id))) || best(large) || best(shapes);
-      glows = pick ? [pick] : [];
-    }
 
     const masses = (test) => [0, 1, 2].filter((z) => cmp.zones[z] && cmp.zones[z].share >= 0.03 && test(cmp.zones[z]));
     const placed = masses((z) => z.shape >= MASS_GOOD);
@@ -1448,51 +1492,82 @@
     let step = null, most = 0;
     shapes.forEach((r) => {
       if (praised.has(r.id)) return;
-      const worth = valueFirst ? r.share * Math.abs(r.dL) : r.gain;
+      const worth = valueFirst ? r.valueGain : r.gain;
       if (worth > most) { most = worth; step = r; }
     });
-    if (step && (valueFirst ? step.valueGain : step.gain) < 1) step = null;
-    return { glows, spotOn, placed, valued, step, valueFirst };
+    if (most < 1) step = null;
+
+    let strongest = null, strongMass = null;
+    if (!glows.length) {
+      const costly = new Set(cmp.top.map((r) => r.id));
+      if (step) costly.add(step.id);
+      // a far-off shape (ΔE 20 or more: 50% or less) is no one's strongest area either
+      const fair = shapes.filter((r) => !costly.has(r.id) && r.pct > 50);
+      const best = (list) => list.reduce((a, r) => (!a || r.pct > a.pct || (r.pct === a.pct && r.share > a.share) ? r : a), null);
+      strongest = best(fair.filter((r) => r.share >= 0.02)) || best(fair.filter((r) => r.share >= 0.01));
+      if (!strongest && !placed.length && !valued.length) {
+        const inPlace = masses((z) => z.shape >= 0.5).sort((a, b) => cmp.zones[b].shape - cmp.zones[a].shape);
+        if (inPlace.length) strongMass = inPlace[0];
+      }
+    }
+    return { glows, strongest, strongMass, placed, valued, step, valueFirst, covers: shapes.length > 0 };
   }
 
-  // Where a point sits on a 3 x 3 grid over the picture. Coarse on purpose: it says where to
-  // look, not which feature it is. Used with a shape's label spot, where its letter is drawn.
+  /*
+   * Where a shape sits, from how its pixels fall on a 3 x 3 grid over the picture. Coarse on
+   * purpose: it says where to look, not which feature it is. A shape with half of itself or more
+   * in one cell is named by that cell, a long one by its row or column, a broad one by the
+   * corner it fills, and one spread wider by the sides it reaches. Nudging the photo can move a
+   * name to a neighboring one, never across the picture.
+   */
   const PLACES = [
-    ['at the upper left', 'at the top', 'at the upper right'],
-    ['on the left', 'in the center', 'on the right'],
-    ['at the lower left', 'at the bottom', 'at the lower right'],
+    'at the upper left', 'at the top', 'at the upper right',
+    'on the left', 'in the center', 'on the right',
+    'at the lower left', 'at the bottom', 'at the lower right',
   ];
-  function locationName(x, y, w, h) {
-    const col = Math.max(0, Math.min(2, Math.floor((x / w) * 3)));
-    const row = Math.max(0, Math.min(2, Math.floor((y / h) * 3)));
-    return PLACES[row][col];
+  const ROWS = ['across the top', 'across the middle', 'across the bottom'];
+  const COLS = ['down the left side', 'down the middle', 'down the right side'];
+  const QUARTERS = [[0, 'toward the upper left'], [1, 'toward the upper right'], [3, 'toward the lower left'], [4, 'toward the lower right']];
+  function placeName(reg) {
+    const f = reg.cells;
+    const sum = (...cells) => cells.reduce((t, c) => t + f[c], 0);
+    const biggest = (list) => list.reduce((a, v, i) => (v > list[a] ? i : a), 0);
+    const cell = biggest(f);
+    if (f[cell] >= 0.5) return PLACES[cell];
+    const rows = [0, 3, 6].map((c) => sum(c, c + 1, c + 2));
+    const cols = [0, 1, 2].map((c) => sum(c, c + 3, c + 6));
+    if (rows[biggest(rows)] >= 0.75) return ROWS[biggest(rows)];
+    if (cols[biggest(cols)] >= 0.75) return COLS[biggest(cols)];
+    const quarters = QUARTERS.map(([c]) => sum(c, c + 1, c + 3, c + 4));
+    if (quarters[biggest(quarters)] >= 0.75) return QUARTERS[biggest(quarters)][1];
+    if (cols[0] >= 0.15 && cols[2] >= 0.15) {
+      if (rows[0] < 0.15 && rows[2] < 0.15) return 'on both sides';
+      if (rows[0] >= 2 * rows[2]) return 'at the top and sides';
+      if (rows[2] >= 2 * rows[0]) return 'at the bottom and sides';
+      if (f[4] < 0.15) return 'around the edges';
+    }
+    return 'across much of the picture';
   }
 
-  const shapeName = (reg) =>
-    `the ${reg.share >= 0.15 ? 'large ' : ''}${SHAPE_WORDS[reg.zone]} shape ${locationName(reg.lx, reg.ly, state.prep.w, state.prep.h)}`;
+  const shapeName = (reg) => `the ${reg.share >= 0.15 ? 'large ' : ''}${SHAPE_WORDS[reg.zone]} shape ${placeName(reg)}`;
 
   const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
   const listOf = (items) => (items.length > 1 ? items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1] : items[0]);
 
-  // What to do with the brush to bring a shape to the reference, from the differences and
-  // thresholds describe() uses. Each step names its object, so the first can name the shape
-  // and the rest say "it". valueOnly keeps to lightness, for when value comes first.
+  // What to do with the brush to bring a shape to the reference: the changes from changesFor(),
+  // biggest first. Each step names its object, so the first can name the shape and the rest say
+  // "it". valueOnly keeps to lightness, for when value comes first.
   function painterAction(reg, valueOnly) {
-    const acts = [];
-    const v = Math.max(0.1, Math.abs(reg.dL) / 10).toFixed(1);
-    if (valueOnly || Math.abs(reg.dL) >= 3) acts.push((it) => `${reg.dL > 0 ? 'darken' : 'lighten'} ${it} by about ${v} value`);
-    if (valueOnly) return acts;
-    if (Math.abs(reg.dWarm) >= 4) {
-      acts.push((it) => `${reg.dWarm > 0 ? 'cool' : 'warm'} ${it}${Math.abs(reg.dWarm) < 8 ? ' slightly' : ''}`);
-    }
-    if (Math.abs(reg.dC) >= 5) {
-      acts.push((it) => (reg.dC > 0 ? `gray ${it} down` : `give ${it} more color`) + (Math.abs(reg.dC) < 10 ? ' a little' : ''));
-    }
-    if (!acts.length) {
-      acts.push((it) => (Math.abs(reg.dGreen) >= 2
-        ? `make ${it} ${reg.dGreen > 0 ? 'less green' : 'less purple'}`
-        : `mix ${it} closer to the reference color`));
-    }
+    const kinds = valueOnly ? ['value'] : changesFor(reg);
+    const acts = kinds.map((kind) => {
+      if (kind === 'value') return (it) => `${reg.dL > 0 ? 'darken' : 'lighten'} ${it} by about ${valueStep(reg)} value`;
+      if (kind === 'warm') return (it) => `${reg.dWarm > 0 ? 'cool' : 'warm'} ${it}${Math.abs(reg.dWarm) < 8 ? ' slightly' : ''}`;
+      if (kind === 'hue') return (it) => `make ${it} ${Math.abs(reg.dGreen) < 8 ? 'slightly ' : ''}${hueDrift(reg).act}`;
+      const small = Math.abs(reg.dC) < 10 ? ' a little' : '';
+      if (reg.dC > 0) return (it) => (it === 'it' ? 'gray it down' : `gray down ${it}`) + small;
+      return (it) => `give ${it} more color${small}`;
+    });
+    if (!acts.length) acts.push((it) => `mix ${it} closer to the reference color`);
     return acts;
   }
 
@@ -1502,6 +1577,7 @@
     up: 'M8 13.5v-11M4 6.5l4-4 4 4',
     down: 'M8 2.5v11M4 9.5l4 4 4-4',
     both: 'M8 2v12M5 5l3-3 3 3M5 11l3 3 3-3',
+    near: 'M3 6.5c1.6-1.4 3.4-1.4 5 0s3.4 1.4 5 0M3 10.5c1.6-1.4 3.4-1.4 5 0s3.4 1.4 5 0', // closest so far
   };
   function icon(name) {
     const ns = 'http://www.w3.org/2000/svg';
@@ -1553,25 +1629,27 @@
       b.append(content);
       return b;
     };
+    const withNote = (text, note) => {
+      const p = para('', text + ' ');
+      p.append(Object.assign(document.createElement('span'), { className: 'glow-note', textContent: note }));
+      return p;
+    };
     const named = new Set();
     fb.glows.forEach((reg, i) => {
-      const letter = 'ABC'[i];
-      if (fb.spotOn) {
-        // two shapes can share a mass and a place; the letters on the map tell them apart
-        let name = shapeName(reg);
-        if (named.has(name)) name = name.replace(/^the /, 'another ');
-        else named.add(name);
-        glow(badge(letter), `${capital(name)} is ${reg.pct >= 95 ? 'spot on' : 'very close'}: ${reg.pct}% match.`);
-      } else {
-        const p = para('');
-        const number = cmp.top.indexOf(reg);
-        p.append(
-          `Your strongest area is ${shapeName(reg)}: ${reg.pct}% match${number >= 0 ? `, number ${number + 1} on the map` : ''}. `,
-          Object.assign(document.createElement('span'), { className: 'glow-note', textContent: `No large shape is at ${GLOW_PCT}% yet.` })
-        );
-        glow(badge(number >= 0 ? String(number + 1) : letter, true), p);
-      }
+      // two shapes can share a mass and a place; the letters on the map tell them apart
+      let name = shapeName(reg);
+      if (named.has(name)) name = name.replace(/^the /, 'another ');
+      else named.add(name);
+      glow(badge('ABC'[i]), `${capital(name)} is ${reg.pct >= 95 ? 'spot on' : 'very close'}: ${reg.pct}% match.`);
     });
+    if (fb.strongest) {
+      glow(badge('A', true), withNote(`Your strongest area is ${shapeName(fb.strongest)}: ${fb.strongest.pct}% match.`,
+        `No large shape is at ${GLOW_PCT}% yet.`));
+    } else if (fb.strongMass !== null) {
+      const z = fb.strongMass;
+      glow(badge(icon('near'), true), withNote(`Your strongest area is your ${SHAPE_WORDS[z]} shapes: ` +
+        `${Math.round(cmp.zones[z].shape * 100)}% of them are in the right place.`, `No shape is at ${GLOW_PCT}% yet.`));
+    }
     if (fb.placed.length) {
       const z = fb.placed;
       glow(badge(icon('check')), `Your ${listOf(z.map((i) => SHAPE_WORDS[i]))} shapes are in the right place: ` +
@@ -1582,8 +1660,16 @@
       glow(badge(icon('check')), `Your ${listOf(z.map((i) => ZONE_NAMES[i].toLowerCase()))} values are on target: ` +
         `${listOf(z.map((i) => Math.round(cmp.zones[i].value)))} out of 100.`);
     }
-    if (!els.glowList.children.length) {
+    if (!fb.covers) {
       glow(badge(icon('both'), true), 'Your photo no longer covers the reference. Click Reset position in the line-up panel.');
+    } else if (!fb.glows.length && !fb.strongest && fb.strongMass === null) {
+      // no shape or mass to name as the strongest: say so plainly, after any praise for the masses
+      const li = document.createElement('li');
+      li.className = 'glow is-note';
+      li.textContent = els.glowList.children.length
+        ? `No single shape is at ${GLOW_PCT}% yet.`
+        : 'Nothing matches closely yet. Start with your next step: it is the change worth the most.';
+      els.glowList.append(li);
     }
 
     // 2. Your next step
@@ -1592,7 +1678,9 @@
     const step = fb.step;
     if (!step) {
       body.append(
-        para('step-action', 'No single shape is worth a full point now.'),
+        para('step-action', cmp.colorScore === 100
+          ? 'Nothing left to fix: every shape matches the reference.'
+          : 'No single shape is worth a full point now.'),
         para('hint', 'For a closer check, raise Colors per value so the reference is split into more shapes.')
       );
     } else {
