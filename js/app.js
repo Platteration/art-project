@@ -1,4 +1,4 @@
-/* Portrait Value Studio - UI wiring: loading photos, settings, loupe sampler and palette. */
+/* Portrait Value Studio - UI wiring: loading photos, tool drawers, settings, loupe sampler and picked colors. */
 (function () {
   'use strict';
 
@@ -63,7 +63,6 @@
     wbUndo: $('wbUndo'),
     wbStatus: $('wbStatus'),
     swatches: $('swatches'),
-    palTitle: $('palTitle'),
     palCount: $('palCount'),
     palEmpty: $('palEmpty'),
     palSort: $('palSort'),
@@ -82,12 +81,21 @@
     saveImg: $('saveImg'),
     saveName: $('saveName'),
     saveClose: $('saveClose'),
+    drawers: {
+      measure: $('drawer-measure'), values: $('drawer-values'),
+      colors: $('drawer-colors'), swatches: $('drawer-swatches'),
+    },
+    drawerState: {
+      measure: $('measureState'), values: $('valuesState'),
+      colors: $('colorsState'), swatches: $('swatchesState'),
+    },
   };
 
   const ZONE_NAMES = ['Shadow', 'Middle', 'Light'];
   const PALETTE_KEY = 'portrait-value-studio.palette';
   const CANVAS_KEY = 'portrait-value-studio.canvasUnit';
   const SMOOTHING_KEY = 'portrait-value-studio.smoothing';
+  const DRAWERS_KEY = 'portrait-value-studio.drawers';
 
   const state = {
     source: null,      // HTMLImageElement or canvas
@@ -241,9 +249,11 @@
     state.pixels.block = r.blockImage;
     renderZones();
     drawHistogram();
+    els.drawerState.values.textContent = `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
     state.art.dirty = true;
     if (state.tab === 'check') runCheck();
     els.busy.hidden = true;
+    window.dispatchEvent(new CustomEvent('studio:result'));
   }
 
   function paint(canvas, rgba, w, h) {
@@ -469,7 +479,7 @@
       .sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
     let added = 0;
     colors.forEach((c) => { if (addColor(c, true)) added++; });
-    toast(added ? `Added ${added} block color${added === 1 ? '' : 's'}` : 'Those colors are already in the palette');
+    toast(added ? `Added ${added} block color${added === 1 ? '' : 's'}` : 'Those colors are already in Picked colors');
   });
 
   // ---- Loupe --------------------------------------------------------------
@@ -823,7 +833,7 @@
     const color = { r: c.r, g: c.g, b: c.b };
     const hex = toHex(color);
     if (state.palette.some((p) => toHex(p) === hex)) {
-      if (!quiet) toast(`${hex} is already in the palette`);
+      if (!quiet) toast(`${hex} is already in Picked colors`);
       return false;
     }
     state.palette.push(color);
@@ -869,10 +879,10 @@
         state.palette = state.palette.filter((p) => toHex(p) !== hex);
         savePalette();
         renderPalette();
-        // keep keyboard focus in the palette: the next remove button, the one before, or the heading
+        // keep keyboard focus in the list: the next remove button, the one before, or the drawer's header
         if (focused) {
           const rest = els.swatches.querySelectorAll('.swatch-remove');
-          (rest[Math.min(index, rest.length - 1)] || els.palTitle).focus();
+          (rest[Math.min(index, rest.length - 1)] || els.drawers.swatches.querySelector('summary')).focus();
         }
       });
 
@@ -881,6 +891,7 @@
     });
     const n = list.length;
     els.palCount.textContent = n ? `${n} color${n === 1 ? '' : 's'}` : '';
+    els.drawerState.swatches.textContent = n ? `${n} color${n === 1 ? '' : 's'}` : 'None yet';
     els.palEmpty.hidden = n > 0;
     [els.palSort, els.palCopy, els.palSave, els.palClear].forEach((b) => { b.disabled = n === 0; });
     if (!n) els.copyFallback.hidden = true;
@@ -1185,6 +1196,22 @@
 
   function drawAllOverlays() {
     Object.values(els.canvases).forEach(syncOverlay);
+    updateMeasureState();
+  }
+
+  const TOOL_NAMES = { sample: '', line: 'Drawing lines', measure: 'Measuring', plumb: 'Plumb' };
+  const count = (n, word) => (n ? `${n} ${word}${n === 1 ? '' : 's'}` : '');
+
+  // What the Measure drawer has showing, so it can stay closed: "3 × 3 · 2 lines · Measuring"
+  function updateMeasureState() {
+    const parts = [
+      state.grid ? `${state.grid} × ${state.grid}` : '',
+      count(state.lines.length, 'line'),
+      count(state.measures.length, 'measure'),
+      count(state.plumbs.length, 'plumb'),
+      TOOL_NAMES[state.tool],
+    ].filter(Boolean);
+    els.drawerState.measure.textContent = parts.join(' · ') || 'Grid, lines, plumb';
   }
 
   // A copy of an image with the grid, lines, measures and plumb lines burned in, for saving
@@ -1760,7 +1787,7 @@
   }
 
   const TOOL_HINTS = {
-    sample: 'Hover to sample a color. Click to add it to the palette. To check proportions, switch the pointer to Measure.',
+    sample: 'Hover to sample a color. Click to keep it in Picked colors. To check proportions, choose Measure or Plumb.',
     line: 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.',
     measure: 'Choose a unit you can see on the sitter, such as eye line to chin, and drag across it first: it becomes 1 U. Then drag across any other length to compare it with the unit. Hold Shift to snap to 15°.',
     plumb: 'Click an image to drop a plumb line and a level through that point, on every image, and see what lines up with it. Drag a ring to move it; click a ring to remove it.',
@@ -1853,6 +1880,7 @@
       state.tool = el.value;
       ['line', 'measure', 'plumb'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
       updateToolHint();
+      updateMeasureState();
     })
   );
   document.querySelectorAll('input[name="lineColor"]').forEach((el) =>
@@ -2281,7 +2309,33 @@
 
   // ---- Start --------------------------------------------------------------
 
+  // ---- Drawers ------------------------------------------------------------
+
+  function restoreDrawers() {
+    let open = [];
+    try { open = JSON.parse(localStorage.getItem(DRAWERS_KEY) || '[]'); } catch (err) { /* storage unavailable: all closed */ }
+    Object.entries(els.drawers).forEach(([key, d]) => {
+      if (Array.isArray(open) && open.includes(key)) d.open = true;
+      d.addEventListener('toggle', () => {
+        const now = Object.keys(els.drawers).filter((k) => els.drawers[k].open);
+        try { localStorage.setItem(DRAWERS_KEY, JSON.stringify(now)); } catch (err) { /* not remembered */ }
+        if (key === 'values' && d.open) drawHistogram();
+      });
+    });
+  }
+
+  // What palette.js needs from the page
+  window.Studio = {
+    result: () => state.result,
+    addColor,
+    toast,
+    toHex,
+    valueLabel,
+  };
+
   function start() {
+    restoreDrawers();
+    updateMeasureState();
     restoreSmoothing();
     updateOutputs();
     renderPalette();

@@ -14,7 +14,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>Portrait Value Studio</h1>
-      <p>Turn a reference portrait into a three-value study and a color-block study. Hover any image to sample it; click to keep the color.</p>
+      <p>Turn a reference portrait into a three-value study and a color-block study, then measure it and plan your paints.</p>
     </div>
     <div class="topbar-actions">
       <input type="file" id="file" accept="image/*" class="visually-hidden">
@@ -23,87 +23,190 @@
   </header>
 
   <div class="layout">
-    <aside class="rail" aria-label="Study settings">
-      <section class="group">
-        <h2>Shapes</h2>
-        <div class="field">
-          <div class="field-head"><label for="simplify">Simplify</label><output id="simplifyOut" for="simplify"></output></div>
-          <input type="range" id="simplify" min="0" max="10" step="1" value="3">
-          <p class="hint">Softens detail so values gather into larger masses.</p>
-        </div>
-        <fieldset class="field">
-          <legend>Smoothing <span class="tag-new">New</span></legend>
-          <div class="seg seg-full">
-            <input type="radio" name="smoothing" id="smoothSoft" value="soft"><label for="smoothSoft">Soft</label>
-            <input type="radio" name="smoothing" id="smoothEdge" value="edge" checked><label for="smoothEdge">Edge-aware</label>
+    <aside class="rail" aria-label="Tools and settings">
+      <details class="drawer" id="drawer-measure" data-drawer="measure">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg><span class="drawer-name">Measure</span></span><span class="drawer-state" id="measureState"></span></summary>
+        <div class="drawer-body">
+          <fieldset class="field">
+            <legend id="gridLabel">Grid</legend>
+            <div class="seg seg-full" role="radiogroup" aria-labelledby="gridLabel">
+              <input type="radio" name="grid" id="gridOff" value="0" checked><label for="gridOff">Off</label>
+              <input type="radio" name="grid" id="grid3" value="3"><label for="grid3">3 × 3</label>
+              <input type="radio" name="grid" id="grid4" value="4"><label for="grid4">4 × 4</label>
+            </div>
+          </fieldset>
+          <fieldset class="field">
+            <legend id="toolLabel">Pointer</legend>
+            <div class="seg seg-grid" role="radiogroup" aria-labelledby="toolLabel">
+              <input type="radio" name="tool" id="toolSample" value="sample" checked><label for="toolSample">Pick colors</label>
+              <input type="radio" name="tool" id="toolLine" value="line"><label for="toolLine">Draw lines</label>
+              <input type="radio" name="tool" id="toolMeasure" value="measure"><label for="toolMeasure">Measure</label>
+              <input type="radio" name="tool" id="toolPlumb" value="plumb"><label for="toolPlumb">Plumb</label>
+            </div>
+          </fieldset>
+          <div class="tool-group line-tools">
+            <span class="tool-label" id="lineColorLabel">Line color</span>
+            <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
+              <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" style="--c:#e5322d" title="Red"><span class="visually-hidden">Red</span></label>
+              <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" style="--c:#1ec8ec" title="Cyan"><span class="visually-hidden">Cyan</span></label>
+              <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" style="--c:#ffd21f" title="Yellow"><span class="visually-hidden">Yellow</span></label>
+              <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" style="--c:#ffffff" title="White"><span class="visually-hidden">White</span></label>
+              <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" style="--c:#111111" title="Black"><span class="visually-hidden">Black</span></label>
+            </div>
+            <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
+            <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
           </div>
-          <p class="hint">Edge-aware flattens detail inside shapes but keeps edges where the photo has them. Soft blurs evenly, for rounder masses. Neither leaves a gray outline along a hard edge.</p>
-        </fieldset>
-        <div class="field">
-          <div class="field-head"><label for="merge">Merge small shapes</label><output id="mergeOut" for="merge"></output></div>
-          <input type="range" id="merge" min="0" max="10" step="1" value="4">
-          <p class="hint">Folds specks into the shape around them.</p>
-        </div>
-        <div class="field">
-          <div class="field-head"><label for="detail">Working size</label></div>
-          <select id="detail">
-            <option value="600">600 px (fastest)</option>
-            <option value="900" selected>900 px</option>
-            <option value="1400">1400 px (most detail)</option>
-          </select>
-        </div>
-      </section>
-
-      <section class="group">
-        <div class="group-head">
-          <h2>Values</h2>
-          <button type="button" class="btn btn-small" id="autoSplit">Auto split</button>
-        </div>
-        <canvas id="hist" class="hist" aria-label="Value histogram with the two split points"></canvas>
-        <div class="field">
-          <div class="field-head"><label for="t1">Shadow / middle split</label><output id="t1Out" for="t1"></output></div>
-          <input type="range" id="t1" min="1" max="98" step="1" value="35">
-        </div>
-        <div class="field">
-          <div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div>
-          <input type="range" id="t2" min="2" max="99" step="1" value="65">
-        </div>
-
-        <fieldset class="field">
-          <legend>Gray values</legend>
-          <div class="seg seg-full">
-            <input type="radio" name="grayMode" id="grayCustom" value="custom" checked><label for="grayCustom">Set values</label>
-            <input type="radio" name="grayMode" id="grayAvg" value="average"><label for="grayAvg">Photo average</label>
+          <div class="tool-group measure-tools">
+            <button type="button" class="btn btn-small" id="measureUnit">Make last line the unit</button>
+            <button type="button" class="btn btn-small" id="measureUndo">Undo measure</button>
+            <button type="button" class="btn btn-small" id="measureClear">Clear measures</button>
+            <span class="canvas-unit">
+              <label class="tool-label" for="canvasSize">Unit on my canvas</label>
+              <input type="number" id="canvasSize" inputmode="decimal" min="0" step="0.1">
+              <select id="canvasSys" aria-label="Centimeters or inches">
+                <option value="cm" selected>cm</option>
+                <option value="in">in</option>
+              </select>
+            </span>
           </div>
-        </fieldset>
-        <div id="customGrays">
+          <div class="tool-group plumb-tools">
+            <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
+            <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
+          </div>
+          <p class="tool-hint" id="toolHint">Hover to sample a color. Click to add it to the palette. To check proportions, switch the pointer to Measure.</p>
+        </div>
+      </details>
+      <details class="drawer" id="drawer-values" data-drawer="values">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg><span class="drawer-name">Values and shapes</span></span><span class="drawer-state" id="valuesState"></span></summary>
+        <div class="drawer-body">
           <div class="field">
-            <div class="field-head"><label for="g0">Shadow value</label><output id="g0Out" for="g0"></output></div>
-            <input type="range" id="g0" min="0" max="100" step="1" value="20">
+            <div class="field-head"><label for="simplify">Simplify</label><output id="simplifyOut" for="simplify"></output></div>
+            <input type="range" id="simplify" min="0" max="10" step="1" value="3">
+            <p class="hint">Softens detail so values gather into larger masses.</p>
+          </div>
+          <fieldset class="field">
+            <legend>Smoothing</legend>
+            <div class="seg seg-full">
+              <input type="radio" name="smoothing" id="smoothSoft" value="soft"><label for="smoothSoft">Soft</label>
+              <input type="radio" name="smoothing" id="smoothEdge" value="edge" checked><label for="smoothEdge">Edge-aware</label>
+            </div>
+            <p class="hint">Edge-aware flattens detail inside shapes but keeps edges where the photo has them. Soft blurs evenly, for rounder masses. Neither leaves a gray outline along a hard edge.</p>
+          </fieldset>
+          <div class="field">
+            <div class="field-head"><label for="merge">Merge small shapes</label><output id="mergeOut" for="merge"></output></div>
+            <input type="range" id="merge" min="0" max="10" step="1" value="4">
+            <p class="hint">Folds specks into the shape around them.</p>
           </div>
           <div class="field">
-            <div class="field-head"><label for="g1">Middle value</label><output id="g1Out" for="g1"></output></div>
-            <input type="range" id="g1" min="0" max="100" step="1" value="50">
+            <div class="field-head"><label for="detail">Working size</label></div>
+            <select id="detail">
+              <option value="600">600 px (fastest)</option>
+              <option value="900" selected>900 px</option>
+              <option value="1400">1400 px (most detail)</option>
+            </select>
+          </div>
+          <div class="group-head">
+            <h3>Value splits</h3>
+            <button type="button" class="btn btn-small" id="autoSplit">Auto split</button>
+          </div>
+          <canvas id="hist" class="hist" aria-label="Value histogram with the two split points"></canvas>
+          <div class="field">
+            <div class="field-head"><label for="t1">Shadow / middle split</label><output id="t1Out" for="t1"></output></div>
+            <input type="range" id="t1" min="1" max="98" step="1" value="35">
           </div>
           <div class="field">
-            <div class="field-head"><label for="g2">Light value</label><output id="g2Out" for="g2"></output></div>
-            <input type="range" id="g2" min="0" max="100" step="1" value="85">
+            <div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div>
+            <input type="range" id="t2" min="2" max="99" step="1" value="65">
+          </div>
+
+          <fieldset class="field">
+            <legend>Gray values</legend>
+            <div class="seg seg-full">
+              <input type="radio" name="grayMode" id="grayCustom" value="custom" checked><label for="grayCustom">Set values</label>
+              <input type="radio" name="grayMode" id="grayAvg" value="average"><label for="grayAvg">Photo average</label>
+            </div>
+          </fieldset>
+          <div id="customGrays">
+            <div class="field">
+              <div class="field-head"><label for="g0">Shadow value</label><output id="g0Out" for="g0"></output></div>
+              <input type="range" id="g0" min="0" max="100" step="1" value="20">
+            </div>
+            <div class="field">
+              <div class="field-head"><label for="g1">Middle value</label><output id="g1Out" for="g1"></output></div>
+              <input type="range" id="g1" min="0" max="100" step="1" value="50">
+            </div>
+            <div class="field">
+              <div class="field-head"><label for="g2">Light value</label><output id="g2Out" for="g2"></output></div>
+              <input type="range" id="g2" min="0" max="100" step="1" value="85">
+            </div>
+          </div>
+
+          <ol class="zones" id="zones" aria-label="The three values"></ol>
+          <label class="check" for="outlines"><input type="checkbox" id="outlines"> Outline shapes on both studies</label>
+        </div>
+      </details>
+      <details class="drawer" id="drawer-colors" data-drawer="colors">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.5-1.3-1.7-1.3-3 0-1 .8-1.7 2-1.7H17a4 4 0 0 0 4-4C21 6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7" r="1.2" fill="currentColor"/></svg><span class="drawer-name">Colors and paints</span></span><span class="drawer-state" id="colorsState"></span></summary>
+        <div class="drawer-body">
+          <div class="field">
+            <div class="field-head"><label for="colors">Colors per value</label><output id="colorsOut" for="colors"></output></div>
+            <input type="range" id="colors" min="1" max="6" step="1" value="3">
+            <p class="hint">How many color groups each of the three values is split into. Each group is painted with its most prominent color, not a mix.</p>
+          </div>
+          <button type="button" class="btn" id="addBlocks">Add block colors to picked colors</button>
+          <div class="paints" id="paints">
+            <h3>Paints for this study</h3>
+            <div class="seg seg-full" role="radiogroup" aria-label="Choose paints from">
+              <input type="radio" name="paintSource" id="srcPreset" value="preset" checked><label for="srcPreset">Known palettes</label>
+              <input type="radio" name="paintSource" id="srcMine" value="mine"><label for="srcMine">My paints</label>
+            </div>
+            <div class="paint-pane" id="presetPane">
+              <p class="hint">Ranked by how closely each one mixes the colors in this study. Pick one to see the mixes.</p>
+              <ul class="preset-list" id="presetList"></ul>
+            </div>
+            <div class="paint-pane" id="minePane" hidden>
+              <div class="mine-row">
+                <p class="mine-count" id="mineCount"></p>
+                <button type="button" class="btn btn-small" id="mineEdit">Choose my paints</button>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="paintMax">Paints on the palette</label><output id="paintMaxOut" for="paintMax"></output></div>
+                <input type="range" id="paintMax" min="3" max="10" step="1" value="6">
+                <p class="hint">Not counting white. Fewer paints keep the colors in harmony.</p>
+              </div>
+              <button type="button" class="btn" id="suggestBtn">Suggest a palette</button>
+            </div>
+            <div class="paint-result" id="paintResult" hidden>
+              <div class="result-head">
+                <h3 id="resultName"></h3>
+                <span class="result-match" id="resultMatch"></span>
+              </div>
+              <ul class="paint-chips" id="resultPaints"></ul>
+              <p class="hint" id="resultAbout"></p>
+              <h3>Mixes for this study</h3>
+              <ol class="mix-list" id="mixList" aria-live="polite"></ol>
+              <p class="hint">Starting mixes worked out from typical paint colors, darkest first. Brands differ, so adjust by eye.</p>
+            </div>
           </div>
         </div>
-
-        <ol class="zones" id="zones" aria-label="The three values"></ol>
-      </section>
-
-      <section class="group">
-        <h2>Color blocks</h2>
-        <div class="field">
-          <div class="field-head"><label for="colors">Colors per value</label><output id="colorsOut" for="colors"></output></div>
-          <input type="range" id="colors" min="1" max="6" step="1" value="3">
-          <p class="hint">How many color groups each of the three values is split into. Each group is painted with its most prominent color, not a mix.</p>
+      </details>
+      <details class="drawer" id="drawer-swatches" data-drawer="swatches">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="drawer-name">Picked colors</span></span><span class="drawer-state" id="swatchesState"></span></summary>
+        <div class="drawer-body">
+          <div class="palette-head">
+            <h3 class="visually-hidden" id="palTitle" tabindex="-1">Picked colors <span class="count" id="palCount"></span></h3>
+            <div class="palette-actions">
+              <button type="button" class="btn btn-small" id="palSort">Sort dark to light</button>
+              <button type="button" class="btn btn-small" id="palCopy">Copy hex codes</button>
+              <button type="button" class="btn btn-small" id="palSave">Save as PNG</button>
+              <button type="button" class="btn btn-small btn-danger" id="palClear">Clear</button>
+            </div>
+          </div>
+          <ul class="swatches" id="swatches"></ul>
+          <p class="empty" id="palEmpty">Hover any image to sample a color, then click to add it here.</p>
+          <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
         </div>
-        <label class="check" for="outlines"><input type="checkbox" id="outlines"> Outline shapes on both studies</label>
-        <button type="button" class="btn" id="addBlocks">Add block colors to palette</button>
-      </section>
+      </details>
     </aside>
 
     <main class="work">
@@ -112,55 +215,6 @@
         <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
       </div>
 
-      <div class="toolbar" role="group" aria-label="Overlays">
-        <div class="tool-group">
-          <span class="tool-label" id="gridLabel">Grid</span>
-          <div class="seg" role="radiogroup" aria-labelledby="gridLabel">
-            <input type="radio" name="grid" id="gridOff" value="0" checked><label for="gridOff">Off</label>
-            <input type="radio" name="grid" id="grid3" value="3"><label for="grid3">3 × 3</label>
-            <input type="radio" name="grid" id="grid4" value="4"><label for="grid4">4 × 4</label>
-          </div>
-        </div>
-        <div class="tool-group">
-          <span class="tool-label" id="toolLabel">Pointer</span>
-          <div class="seg" role="radiogroup" aria-labelledby="toolLabel">
-            <input type="radio" name="tool" id="toolSample" value="sample" checked><label for="toolSample">Pick colors</label>
-            <input type="radio" name="tool" id="toolLine" value="line"><label for="toolLine">Draw lines</label>
-            <input type="radio" name="tool" id="toolMeasure" value="measure"><label for="toolMeasure">Measure</label>
-            <input type="radio" name="tool" id="toolPlumb" value="plumb"><label for="toolPlumb">Plumb</label>
-          </div>
-        </div>
-        <div class="tool-group line-tools">
-          <span class="tool-label" id="lineColorLabel">Line color</span>
-          <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
-            <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" style="--c:#e5322d" title="Red"><span class="visually-hidden">Red</span></label>
-            <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" style="--c:#1ec8ec" title="Cyan"><span class="visually-hidden">Cyan</span></label>
-            <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" style="--c:#ffd21f" title="Yellow"><span class="visually-hidden">Yellow</span></label>
-            <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" style="--c:#ffffff" title="White"><span class="visually-hidden">White</span></label>
-            <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" style="--c:#111111" title="Black"><span class="visually-hidden">Black</span></label>
-          </div>
-          <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
-          <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
-        </div>
-        <div class="tool-group measure-tools">
-          <button type="button" class="btn btn-small" id="measureUnit">Make last line the unit</button>
-          <button type="button" class="btn btn-small" id="measureUndo">Undo measure</button>
-          <button type="button" class="btn btn-small" id="measureClear">Clear measures</button>
-          <span class="canvas-unit">
-            <label class="tool-label" for="canvasSize">Unit on my canvas</label>
-            <input type="number" id="canvasSize" inputmode="decimal" min="0" step="0.1">
-            <select id="canvasSys" aria-label="Centimeters or inches">
-              <option value="cm" selected>cm</option>
-              <option value="in">in</option>
-            </select>
-          </span>
-        </div>
-        <div class="tool-group plumb-tools">
-          <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
-          <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
-        </div>
-        <p class="tool-hint" id="toolHint">Hover to sample a color. Click to add it to the palette. To check proportions, switch the pointer to Measure.</p>
-      </div>
 
       <section class="tabpanel" id="tab-study" role="tabpanel" aria-labelledby="tabStudyBtn">
         <div class="work-bar">
@@ -293,20 +347,6 @@
         </div>
       </section>
 
-      <section class="palette" aria-labelledby="palTitle">
-        <div class="palette-head">
-          <h2 id="palTitle" tabindex="-1">Palette <span class="count" id="palCount"></span></h2>
-          <div class="palette-actions">
-            <button type="button" class="btn btn-small" id="palSort">Sort dark to light</button>
-            <button type="button" class="btn btn-small" id="palCopy">Copy hex codes</button>
-            <button type="button" class="btn btn-small" id="palSave">Save palette PNG</button>
-            <button type="button" class="btn btn-small btn-danger" id="palClear">Clear</button>
-          </div>
-        </div>
-        <ul class="swatches" id="swatches"></ul>
-        <p class="empty" id="palEmpty">Hover any image to sample a color, then click to add it here.</p>
-        <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
-      </section>
     </main>
   </div>
 </div>
@@ -322,6 +362,19 @@
 </div>
 <div class="drop-hint" id="dropHint" hidden><span>Drop the portrait to load it</span></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog class="paint-dialog" id="paintDialog" aria-labelledby="paintDialogTitle">
+  <div class="paint-dialog-head">
+    <h2 id="paintDialogTitle">My paints <span class="count" id="paintDialogCount"></span></h2>
+    <button type="button" class="btn btn-small" id="paintDialogDone">Done</button>
+  </div>
+  <p class="hint">Tick the paints you own. Suggestions only use these. The colors are typical of artist-grade oils.</p>
+  <div class="paint-dialog-tools">
+    <input type="search" id="paintSearch" placeholder="Find a paint or pigment" aria-label="Find a paint or pigment">
+    <select id="paintAddPreset" aria-label="Tick a known palette's paints"></select>
+    <button type="button" class="btn btn-small btn-danger" id="paintNone">Untick all</button>
+  </div>
+  <div class="paint-cats" id="paintCats"></div>
+</dialog>
 <dialog class="save-dialog" id="saveDialog" aria-labelledby="saveTitle" aria-describedby="saveHint">
   <div class="save-head">
     <h2 id="saveTitle">Save image</h2>
@@ -333,6 +386,9 @@
 </dialog>
 
 <script src="js/processing.js"></script>
+<script src="js/mixing.js"></script>
+<script src="js/paints.js"></script>
 <script src="js/app.js"></script>
+<script src="js/palette.js"></script>
 </body>
 </html>

@@ -968,6 +968,7 @@
     // Thresholds are found on the simplified image so they match what gets split
     autoThresholds: (prep, blurRadius, smoothing) => autoThresholds(blurred(prep, blurRadius, smoothing).L),
     histogram,
+    rgbToLab,
     lightnessOf,
     chromaOf,
     grayForL,

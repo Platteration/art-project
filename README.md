@@ -5,21 +5,28 @@ A browser tool for drawing and painting from reference portraits. Load a photo a
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
 - **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it.
 
-Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to add that color to the palette. You can sort the palette dark to light, copy it as hex codes, or save it as a PNG. The palette is kept in your browser between visits and shared by every tab you have the tool open in.
+Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to keep that color.
+
+The tools fold away into four drawers beside the images (above them on a phone), so the page shows only the studies until you need more. Each drawer's header says what it is set to, such as `3 × 3 · 2 lines` or `Splits at V 2.7 and 4.6`, so it can stay closed. The drawers you leave open are opened again on your next visit.
+
+- **Measure**: the grid, reference lines, comparative measuring and plumb lines.
+- **Values and shapes**: Simplify, Smoothing, Merge small shapes, Working size, the value splits and gray values.
+- **Colors and paints**: Colors per value, and paints for the study: known palettes ranked for this photo, or a palette chosen from the paints you own, with a starting mix for every color.
+- **Picked colors**: the colors you clicked. Sort them dark to light, copy them as hex codes, or save them as a PNG. They are kept in your browser between visits and shared by every tab you have the tool open in.
 
 ### Grid and reference lines
 
-The toolbar above the images adds drawing aids that appear on every image at once:
+The **Measure** drawer adds drawing aids that appear on every image at once:
 
 - **Grid**: a 3 × 3 or 4 × 4 grid for transferring proportions to your paper.
 - **Draw lines**: switch the pointer to *Draw lines* and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
 - **Measure** and **Plumb**: compare lengths against a unit, and see what lines up. See below.
 
-**Save PNG** includes the grid, lines, measures and plumb lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and **Save palette PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
+**Save PNG** includes the grid, lines, measures and plumb lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and the picked colors' **Save as PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
 
 ### Measure in units: plumb lines and levels
 
-Proportion mistakes, such as eyes set too high, a head too narrow or a mouth off the center line, are the most common ones in a portrait. Atelier painters catch them by comparative measuring: choose one length you can see on the sitter as the unit, such as eye line to chin, and check every other length against it. Two more settings of the toolbar's **Pointer** do this. Like the lines, everything they draw shows on every image at once, including the panels on the **Check my painting** tab, so the reference's measurements lie over your painting.
+Proportion mistakes, such as eyes set too high, a head too narrow or a mouth off the center line, are the most common ones in a portrait. Atelier painters catch them by comparative measuring: choose one length you can see on the sitter as the unit, such as eye line to chin, and check every other length against it. Two more settings of the Measure drawer's **Pointer** do this. Like the lines, everything they draw shows on every image at once, including the panels on the **Check my painting** tab, so the reference's measurements lie over your painting.
 
 - **Measure**: drag from one landmark to another. The first length you drag is the unit: it is drawn thicker, in yellow, and labelled **1 U**. Every later length is labelled with how many units long it is, plus the nearest whole number, half, third or quarter when the length as shown is within 0.03 of one, and within 4% of a small one, such as `1.48 U ≈ 1½`. So 0.48 U and 0.52 U are both called ½, but 0.36 U is not called ⅓. While you drag, the loupe shows the pixels under the end of the line, its length in units and its tilt; hold Shift to snap to 15°. Lengths are measured on the reference's pixels, so every image and every working size gives the same answer. On the sample, with eye line to chin as the unit, the face's width at the cheekbones reads 1.40 U (250 px over 178 px).
   - **Make last line the unit** turns the newest measure into the unit and relabels the rest.
@@ -41,6 +48,15 @@ Measurements are true to the photo, not to the sitter. A phone held close to a f
 - **Edge-aware** (the default) flattens detail inside shapes but keeps edges where the photo has them. The corners of shadow shapes stay sharp, small dark shapes such as nostrils keep their place, and the color blocks don't spend a color on the in-between colors along an edge. The more you simplify, the stronger a step has to be to count as an edge, so small features still merge into larger masses. Hair, glasses frames and patterned clothing can stay busier than with Soft; **Merge small shapes** or Soft calms them.
 
 The choice is kept in your browser between visits. The painting check simplifies your painting the same way.
+
+### Paints for the study
+
+**Colors and paints** plans the paints for the color-block study. Every color in it gets a starting mix: which paints, in roughly how many parts, such as `TW 6 · YO 2 · CRL 1 · IB touch`. A badge says how close the mix comes: **Close** (ΔE under 3), **Near** (under 6) or **Out of reach**. **Darkest you can mix** and **Lightest you can mix** mark a photo's darks and lights that go further than paint does. Hover a mix for the paints' full names, and press **+** to keep that color with your picked colors.
+
+- **Known palettes** lists ten palettes painters are known for, ranked by how many of this study's colors each can mix and then by how closely: Zorn, Zorn with a blue, three primaries, modern primaries (cyan, magenta and yellow), split primary, Frank Reilly, Richard Schmid, Rembrandt's earths, Sorolla's studio portrait palette and Monet's impressionist palette. Pick one to see its paints and the mixes. The ranking changes with the photo: a warm portrait on a gray ground suits Zorn, while a blue shirt needs a palette with a blue.
+- **My paints**: **Choose my paints** opens a library of 77 artist paints in nine families (whites, yellows, oranges, reds, pinks and violets, blues, greens, earths, and blacks and grays), each with its pigment code and a swatch of the tube color beside its tint with white. Tick the paints you own, or tick a known palette's paints in one go. **Suggest a palette** then chooses a working palette from them for this photo: a white (titanium if you have it), then one paint at a time, whichever brings the study's colors closest with what is already on the palette, until another paint would barely help or the palette reaches the size you set (3 to 10 paints plus white). With no paints ticked, it chooses from the whole library. Your paints are kept in your browser between visits.
+
+The mixes are worked out with a pigment model, not by averaging screen colors (which would make yellow and blue gray instead of green). Each paint is a reflectance curve over the visible spectrum, rebuilt from its color the way spectral.js does it, and paints mix by single-constant Kubelka-Munk theory, weighted by each paint's tinting strength, which is fitted to its tint with white. A recipe tries every set of up to three paints plus white in every proportion, then refines the best. The paint colors are estimates for typical artist-grade oils, not measurements of any maker's tubes, so every mix is a starting point to adjust by eye.
 
 ### Check my painting
 
@@ -101,4 +117,9 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `index.html`: page structure
 - `styles.css`: layout and theme (light and dark)
 - `js/processing.js`: image processing (no dependencies)
-- `js/app.js`: controls, loupe, palette and the built-in sample portrait
+- `js/app.js`: drawers, controls, loupe, picked colors and the built-in sample portrait
+- `js/paints.js`: the paint library and known palettes
+- `js/mixing.js`: the pigment mixing model, recipes and palette suggestions
+- `js/palette.js`: the paints part of the Colors and paints drawer
+
+Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html). The spectral data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) (MIT license).
