@@ -56,6 +56,7 @@
     wbUndo: $('wbUndo'),
     wbStatus: $('wbStatus'),
     swatches: $('swatches'),
+    palTitle: $('palTitle'),
     palCount: $('palCount'),
     palEmpty: $('palEmpty'),
     palSort: $('palSort'),
@@ -70,6 +71,10 @@
     loupeVal: $('loupeVal'),
     dropHint: $('dropHint'),
     toast: $('toast'),
+    saveDialog: $('saveDialog'),
+    saveImg: $('saveImg'),
+    saveName: $('saveName'),
+    saveClose: $('saveClose'),
   };
 
   const ZONE_NAMES = ['Shadow', 'Middle', 'Light'];
@@ -131,6 +136,26 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
+
+  // Inside a frame (such as an artifact viewer) downloads are often blocked without a word,
+  // so there the PNG opens in a dialog to save by hand instead
+  const framed = (() => {
+    try { return window.top !== window.self; } catch (err) { return true; }
+  })();
+
+  function savePng(canvas, name) {
+    if (!framed) {
+      canvas.toBlob((blob) => blob && downloadBlob(blob, name), 'image/png');
+      return;
+    }
+    els.saveImg.src = canvas.toDataURL('image/png');
+    els.saveImg.alt = name;
+    els.saveName.textContent = name;
+    els.saveDialog.showModal();
+  }
+
+  els.saveClose.addEventListener('click', () => els.saveDialog.close());
+  els.saveDialog.addEventListener('close', () => els.saveImg.removeAttribute('src'));
 
   // ---- Settings -----------------------------------------------------------
 
@@ -392,7 +417,7 @@
         orig: 'original', value: 'three-value', block: 'color-blocks',
         artblock: 'my-painting-blocks', diff: 'accuracy-map',
       }[id];
-      withOverlay(els.canvases[id]).toBlob((blob) => blob && downloadBlob(blob, `${state.baseName}-${suffix}.png`), 'image/png');
+      savePng(withOverlay(els.canvases[id]), `${state.baseName}-${suffix}.png`);
     })
   );
 
@@ -529,14 +554,19 @@
     };
   }
 
-  // Shift snaps the line to 15° steps
+  // Shift snaps the line to 15° steps. Near the edge the line is shortened, not bent, to stay inside.
   function snapLine(line, w, h) {
     const dx = (line.x2 - line.x1) * w, dy = (line.y2 - line.y1) * h;
-    const len = Math.hypot(dx, dy);
+    let len = Math.hypot(dx, dy);
     const step = Math.PI / 12;
     const ang = Math.round(Math.atan2(dy, dx) / step) * step;
-    line.x2 = Math.max(0, Math.min(1, line.x1 + (Math.cos(ang) * len) / w));
-    line.y2 = Math.max(0, Math.min(1, line.y1 + (Math.sin(ang) * len) / h));
+    const ux = Math.cos(ang) / w, uy = Math.sin(ang) / h; // image fraction per pixel of length
+    if (ux > 1e-9) len = Math.min(len, (1 - line.x1) / ux);
+    if (ux < -1e-9) len = Math.min(len, -line.x1 / ux);
+    if (uy > 1e-9) len = Math.min(len, (1 - line.y1) / uy);
+    if (uy < -1e-9) len = Math.min(len, -line.y1 / uy);
+    line.x2 = Math.max(0, Math.min(1, line.x1 + ux * len));
+    line.y2 = Math.max(0, Math.min(1, line.y1 + uy * len));
   }
 
   // Tilt from horizontal in degrees (-89 to 90, positive rises to the right), measured on the image
@@ -557,8 +587,10 @@
         d.y2 = pt.y;
         if (e.shiftKey) snapLine(d, canvas.width, canvas.height);
         drawAllOverlays();
+        // the loupe follows the line's end; at the right or bottom edge that is the last pixel, not one past it
         const rect = canvas.getBoundingClientRect();
-        showLoupeFor(canvas, { clientX: rect.left + d.x2 * rect.width, clientY: rect.top + d.y2 * rect.height, pointerType: e.pointerType });
+        const fx = Math.min(d.x2, 1 - 0.5 / canvas.width), fy = Math.min(d.y2, 1 - 0.5 / canvas.height);
+        showLoupeFor(canvas, { clientX: rect.left + fx * rect.width, clientY: rect.top + fy * rect.height, pointerType: e.pointerType });
         return;
       }
       if (e.pointerType === 'touch' && !down) return;
@@ -607,16 +639,16 @@
       if (!start || e.button > 0) return;
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
       const s = showLoupeFor(canvas, e);
+      if (e.pointerType === 'touch') {
+        hideTimer = setTimeout(() => { els.loupe.hidden = true; }, 1100);
+      }
       if (state.picking) {
         if (canvas === els.canvases.art && s && moved < 10) pickNeutral(s);
         else if (moved < 10) toast('Click a white or gray spot on Your painting');
         return;
       }
-      // the accuracy map's tints are not colors worth keeping
-      if (s && moved < 10 && s.id !== 'diff') addColor(s);
-      if (e.pointerType === 'touch') {
-        hideTimer = setTimeout(() => { els.loupe.hidden = true; }, 1100);
-      }
+      // the accuracy map's tints are not colors worth keeping; a line drag cancelled with Esc ends here too
+      if (s && moved < 10 && s.id !== 'diff' && state.tool === 'sample') addColor(s);
     });
   });
 
@@ -624,25 +656,46 @@
 
   // ---- Palette ------------------------------------------------------------
 
-  function loadPalette() {
+  // The saved palette, or null if storage can't be read
+  function readPalette() {
     try {
       const raw = localStorage.getItem(PALETTE_KEY);
       const list = raw ? JSON.parse(raw) : [];
       return Array.isArray(list) ? list.filter((c) => c && Number.isInteger(c.r)) : [];
     } catch (err) {
-      return [];
+      return null;
     }
   }
 
+  function loadPalette() {
+    return readPalette() || [];
+  }
+
+  let paletteSaved = true;
   function savePalette() {
     try {
       localStorage.setItem(PALETTE_KEY, JSON.stringify(state.palette));
+      paletteSaved = true;
     } catch (err) {
       /* storage unavailable: the palette still works for this visit */
+      paletteSaved = false;
     }
   }
 
+  // Another open copy of the page may have changed the saved palette: start each change from it
+  function syncPalette() {
+    const stored = paletteSaved && readPalette();
+    if (stored) state.palette = stored;
+  }
+
+  window.addEventListener('storage', (e) => {
+    if (e.key !== PALETTE_KEY && e.key !== null) return;
+    syncPalette();
+    renderPalette();
+  });
+
   function addColor(c, quiet) {
+    syncPalette();
     const color = { r: c.r, g: c.g, b: c.b };
     const hex = toHex(color);
     if (state.palette.some((p) => toHex(p) === hex)) {
@@ -687,9 +740,16 @@
       remove.textContent = '×';
       remove.setAttribute('aria-label', `Remove ${hex}`);
       remove.addEventListener('click', () => {
-        state.palette.splice(index, 1);
+        const focused = document.activeElement === remove;
+        syncPalette();
+        state.palette = state.palette.filter((p) => toHex(p) !== hex);
         savePalette();
         renderPalette();
+        // keep keyboard focus in the palette: the next remove button, the one before, or the heading
+        if (focused) {
+          const rest = els.swatches.querySelectorAll('.swatch-remove');
+          (rest[Math.min(index, rest.length - 1)] || els.palTitle).focus();
+        }
       });
 
       li.append(chip, meta, remove);
@@ -715,6 +775,7 @@
   }
 
   els.palSort.addEventListener('click', () => {
+    syncPalette();
     state.palette.sort((a, b) => Study.lightnessOf(a.r, a.g, a.b) - Study.lightnessOf(b.r, b.g, b.b));
     savePalette();
     renderPalette();
@@ -750,7 +811,7 @@
       g.font = '16px "IBM Plex Mono", monospace';
       g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47);
     });
-    c.toBlob((blob) => blob && downloadBlob(blob, `${state.baseName}-palette.png`), 'image/png');
+    savePng(c, `${state.baseName}-palette.png`);
   });
 
   let clearArmed = 0;
@@ -1056,7 +1117,8 @@
     }
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) &&
       document.activeElement.type !== 'radio' && document.activeElement.type !== 'range';
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.lines.length && !typing) {
+    // Ctrl/⌘+Z only: with Shift (or Alt) it is redo, which has nothing to redo here
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && state.lines.length && !typing) {
       e.preventDefault();
       els.lineUndo.click();
     }
@@ -1066,6 +1128,7 @@
 
   function switchTab(name, focus) {
     state.tab = name;
+    if (name !== 'check') setPicking(false); // picking a neutral spot only works on Your painting
     Object.entries(els.tabs).forEach(([key, btn]) => {
       const on = key === name;
       btn.setAttribute('aria-selected', on);
@@ -1369,6 +1432,11 @@
     els.wbUndo.hidden = !fixed;
   }
 
+  // A white or gray under colored light needs at most about this much per channel; a spot that
+  // needs more is a color, not a tinted neutral. Several picks together stay inside it too.
+  const GAIN_MIN = 0.5, GAIN_MAX = 2;
+  const gainOk = (v) => v >= GAIN_MIN && v <= GAIN_MAX;
+
   // Averages a 5 x 5 patch of the painting and makes that color neutral
   function pickNeutral(s) {
     let r = 0, g = 0, b = 0, k = 0;
@@ -1386,14 +1454,22 @@
       toast('That spot is too dark to judge. Pick a white or light gray area.');
       return;
     }
+    if (!gains.every(gainOk)) {
+      toast(`${toHex(patch)} is too colorful to be white or gray. Pick paper or a neutral gray area.`);
+      return;
+    }
     setPicking(false);
-    state.art.gains = state.art.gains.map((v, i) => v * gains[i]);
+    const combined = state.art.gains.map((v, i) => v * gains[i]);
+    state.art.gains = combined.map((v) => Math.max(GAIN_MIN, Math.min(GAIN_MAX, v)));
     updateColorFix();
-    toast(`Color cast removed: ${toHex(patch)} is now neutral`);
+    toast(combined.every(gainOk)
+      ? `Color cast removed: ${toHex(patch)} is now neutral`
+      : `Color cast reduced as far as allowed: ${toHex(patch)} stays slightly tinted`);
     checkSoon();
   }
 
   els.wbPick.addEventListener('click', () => setPicking(!state.picking));
+  els.alignPanel.addEventListener('toggle', () => { if (!els.alignPanel.open) setPicking(false); });
   els.wbUndo.addEventListener('click', () => {
     state.art.gains = [1, 1, 1];
     updateColorFix();
@@ -1451,6 +1527,10 @@
   if (window.matchMedia) {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     if (mq.addEventListener) mq.addEventListener('change', redrawHist);
+  }
+  // a host page can also switch theme with data-theme (or a class) on <html>
+  if (window.MutationObserver) {
+    new MutationObserver(redrawHist).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
   }
 
   start();

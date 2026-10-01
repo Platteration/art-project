@@ -74,6 +74,9 @@
     canvas.height = h;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.imageSmoothingQuality = 'high';
+    // transparent areas (a cut-out PNG) sit on mid gray, as in alignArt(), instead of reading as black
+    ctx.fillStyle = '#7f7f7f';
+    ctx.fillRect(0, 0, w, h);
     ctx.drawImage(source, 0, 0, w, h);
     const rgba = ctx.getImageData(0, 0, w, h).data;
 
@@ -167,7 +170,16 @@
         if (v > best) { best = v; t1 = a; t2 = b; }
       }
     }
-    return [Math.round(t1 / 2.56), Math.round(t2 / 2.56)];
+    // Each class starts at bin a. Put the split mid-way along any empty bins from there, and
+    // never below a: rounding down could drop a flat tone into the zone below it.
+    const split = (a) => {
+      let end = a;
+      while (end < BINS - 1 && !hist[end]) end++;
+      const lo = Math.ceil(a / 2.56), hi = Math.floor(end / 2.56);
+      if (lo > hi) return Math.round(a / 2.56); // no empty gap: a continuous image
+      return Math.max(lo, Math.min(hi, Math.round((a + end) / 2 / 2.56)));
+    };
+    return [split(t1), split(t2)];
   }
 
   function histogram(Ls, bins) {
@@ -317,8 +329,9 @@
   // ---- Most prominent color ------------------------------------------------
 
   // Lab bins about 4 L* by 6 a*/b* wide: close enough that colors in one bin read as
-  // the same paint, far enough that ordinary photo noise stays in one bin.
-  const BIN_L = 4, BIN_AB = 6, AB_BINS = 44;
+  // the same paint, far enough that ordinary photo noise stays in one bin. The a*/b* bins
+  // are centred on zero, so a noisy neutral gray stays in one bin instead of four.
+  const BIN_L = 4, BIN_AB = 6, AB_BINS = 44, AB_OFFSET = 132 + BIN_AB / 2;
 
   function binKeys(prep) {
     if (!prep.binKeys) {
@@ -326,8 +339,8 @@
       const keys = new Int32Array(n);
       for (let i = 0; i < n; i++) {
         const l = Math.min(25, Math.max(0, Math.floor(prep.L[i] / BIN_L)));
-        const a = Math.min(AB_BINS - 1, Math.max(0, Math.floor((prep.A[i] + 132) / BIN_AB)));
-        const b = Math.min(AB_BINS - 1, Math.max(0, Math.floor((prep.B[i] + 132) / BIN_AB)));
+        const a = Math.min(AB_BINS - 1, Math.max(0, Math.floor((prep.A[i] + AB_OFFSET) / BIN_AB)));
+        const b = Math.min(AB_BINS - 1, Math.max(0, Math.floor((prep.B[i] + AB_OFFSET) / BIN_AB)));
         keys[i] = (l * AB_BINS + a) * AB_BINS + b;
       }
       prep.binKeys = keys;
@@ -338,7 +351,9 @@
   /*
    * For each label, the color that covers the most pixels, rather than a mix of all of
    * them: the busiest Lab bin wins, and its own pixels are averaged (in linear light)
-   * so the result is a color that is really there. Returns linear RGB per label
+   * so the result is a color that is really there. A color whose noise straddles a bin
+   * edge is split over neighbouring bins, so each bin is scored with its 3 x 3 x 3
+   * neighbourhood added to twice its own count. Returns linear RGB per label
    * (lin[l * 3 ...]) and how many pixels each label has.
    */
   function dominantColors(prep, labels, nLabels, mask) {
@@ -355,10 +370,23 @@
       total[labels[i]]++;
     }
     const best = new Int32Array(nLabels).fill(-1);
-    const bestCount = new Float64Array(nLabels);
+    const bestScore = new Float64Array(nLabels);
     counts.forEach((c, k) => {
       const l = Math.floor(k / SPAN);
-      if (c > bestCount[l]) { bestCount[l] = c; best[l] = k % SPAN; }
+      const key = k % SPAN;
+      const kl = Math.floor(key / (AB_BINS * AB_BINS)), ka = Math.floor(key / AB_BINS) % AB_BINS, kb = key % AB_BINS;
+      let score = c;
+      for (let dl = -1; dl <= 1; dl++) {
+        if (kl + dl < 0 || kl + dl > 25) continue;
+        for (let da = -1; da <= 1; da++) {
+          if (ka + da < 0 || ka + da >= AB_BINS) continue;
+          for (let db = -1; db <= 1; db++) {
+            if (kb + db < 0 || kb + db >= AB_BINS) continue;
+            score += counts.get(k + (dl * AB_BINS + da) * AB_BINS + db) || 0;
+          }
+        }
+      }
+      if (score > bestScore[l]) { bestScore[l] = score; best[l] = key; }
     });
     const lin = new Float64Array(nLabels * 3);
     const m = new Float64Array(nLabels);

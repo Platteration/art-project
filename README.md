@@ -5,7 +5,7 @@ A browser tool for drawing and painting from reference portraits. Load a photo a
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
 - **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it.
 
-Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to add that color to the palette. You can sort the palette dark to light, copy it as hex codes, or save it as a PNG. The palette is kept in your browser between visits.
+Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to add that color to the palette. You can sort the palette dark to light, copy it as hex codes, or save it as a PNG. The palette is kept in your browser between visits and shared by every tab you have the tool open in.
 
 ### Grid and reference lines
 
@@ -14,7 +14,7 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 - **Grid**: a 3 × 3 or 4 × 4 grid for transferring proportions to your paper.
 - **Draw lines**: switch the pointer to *Draw lines* and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
 
-**Save PNG** includes the grid and lines when they are showing.
+**Save PNG** includes the grid and lines when they are showing. Where the page runs inside another site's frame and downloads are blocked (such as an artifact viewer), **Save PNG** and **Save palette PNG** open the image in a dialog instead: right-click or long-press it to save. Opened directly, they download as usual.
 
 ### Check my painting
 
@@ -33,7 +33,7 @@ The second tab scores a photo of your finished piece against the reference.
 
 - **Show reference on top** fades the reference over your painting so you can see where they differ.
 - **Move**, **Size** and **Rotate** shift your photo until it lines up. Any part of the reference your photo no longer covers is left out of the score. It shows hatched on the accuracy-by-shape view, and the panel says how much was left out.
-- **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. **Remove color fix** undoes it. It corrects tint only, not exposure.
+- **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. A spot that is clearly a color rather than a tinted white or gray (one that would need a channel halved or more than doubled) is refused, and repeated picks are held to the same limit. **Remove color fix** undoes it. It corrects tint only, not exposure.
 
 With the built-in sample, the tab opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
@@ -45,7 +45,7 @@ No build step or install. Open `index.html` in a browser, or serve the folder:
 python3 -m http.server 8000   # then visit http://localhost:8000
 ```
 
-To load a photo, use **Load photo**, drag it onto the page, or paste it.
+To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
 
 ## Settings
 
@@ -67,7 +67,7 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 2. Lightness and color are blurred with three box-blur passes, which approximate a gaussian (`Simplify`).
 3. Each pixel goes into shadow, middle or light by its blurred L\*. Small connected shapes are then merged away.
 4. Within each value mass, k-means clusters the blurred colors, weighting chroma a little more than lightness. Small shapes are merged again, but only into shapes of the same value, so blocks never cross value boundaries.
-5. Each color group is filled with its most prominent color. The group's original pixels are sorted into Lab bins about 4 L\* by 6 a\*/b\* wide. The fullest bin wins, and only its pixels are averaged, so the result is a color that is really in the photo. The painting check measures each shape the same way.
+5. Each color group is filled with its most prominent color. The group's original pixels are sorted into Lab bins about 4 L\* by 6 a\*/b\* wide, with neutral gray in the middle of a bin. The fullest bin wins, counting its neighbouring bins too so a color split across a bin edge isn't outvoted, and only its pixels are averaged, so the result is a color that is really in the photo. The painting check measures each shape the same way.
 
 ## Files
 
