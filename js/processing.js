@@ -151,31 +151,32 @@
 
   // ---- Thresholds ---------------------------------------------------------
 
-  // Three-class Otsu on the L* histogram. Returns the two split points in L*.
-  function autoThresholds(Ls) {
-    const BINS = 256;
+  const BINS = 256;
+
+  /*
+   * The L* histogram in 256 bins with prefix sums of the count (P) and of the bin index (S),
+   * which make every Otsu class sum a subtraction. Values below `lo` (L*) are left out.
+   */
+  function otsuTables(Ls, lo) {
     const hist = new Float64Array(BINS);
-    for (let i = 0; i < Ls.length; i++) hist[Math.min(BINS - 1, Math.floor(Ls[i] * 2.56))]++;
+    for (let i = 0; i < Ls.length; i++) {
+      if (Ls[i] < lo) continue;
+      hist[Math.max(0, Math.min(BINS - 1, Math.floor(Ls[i] * 2.56)))]++;
+    }
     const P = new Float64Array(BINS + 1);
     const S = new Float64Array(BINS + 1);
     for (let i = 0; i < BINS; i++) {
       P[i + 1] = P[i] + hist[i];
       S[i + 1] = S[i] + i * hist[i];
     }
+    // count x mean^2 of the class from bin a to bin b; the sum over the classes, less
+    // N x mean^2 of all, is N x the between-class variance that Otsu maximizes
     const term = (a, b) => {
       const p = P[b] - P[a];
       if (p <= 0) return 0;
       const s = S[b] - S[a];
       return (s * s) / p;
     };
-    let best = -1, t1 = 85, t2 = 170;
-    for (let a = 1; a < BINS - 1; a++) {
-      const left = term(0, a);
-      for (let b = a + 1; b < BINS; b++) {
-        const v = left + term(a, b) + term(b, BINS);
-        if (v > best) { best = v; t1 = a; t2 = b; }
-      }
-    }
     // Each class starts at bin a. Put the split mid-way along any empty bins from there, and
     // never below a: rounding down could drop a flat tone into the zone below it.
     const split = (a) => {
@@ -185,7 +186,41 @@
       if (lo > hi) return Math.round(a / 2.56); // no empty gap: a continuous image
       return Math.max(lo, Math.min(hi, Math.round((a + end) / 2 / 2.56)));
     };
+    return { hist, P, S, term, split };
+  }
+
+  // Three-class Otsu on the L* histogram. Returns the two split points in L*.
+  function autoThresholds(Ls) {
+    const { term, split } = otsuTables(Ls, -Infinity);
+    let best = -1, t1 = 85, t2 = 170;
+    for (let a = 1; a < BINS - 1; a++) {
+      const left = term(0, a);
+      for (let b = a + 1; b < BINS; b++) {
+        const v = left + term(a, b) + term(b, BINS);
+        if (v > best) { best = v; t1 = a; t2 = b; }
+      }
+    }
     return [split(t1), split(t2)];
+  }
+
+  /*
+   * Two-class Otsu: the one split into light and shadow, in L*. With `lo`, only values at or
+   * above it count, which splits the light family into halftone and light. Also returns eta,
+   * the share of the value variance the split explains (0 for a picture of one flat value).
+   */
+  function autoThreshold2(Ls, lo) {
+    const { hist, P, S, term, split } = otsuTables(Ls, lo == null ? -Infinity : lo);
+    const N = P[BINS];
+    if (!N) return { t: lo || 50, eta: 0 };
+    let best = -1, a = 128;
+    for (let b = 1; b < BINS; b++) {
+      const v = term(0, b) + term(b, BINS);
+      if (v > best) { best = v; a = b; }
+    }
+    const mean = S[BINS] / N;
+    let sq = 0;
+    for (let i = 0; i < BINS; i++) sq += hist[i] * (i - mean) * (i - mean);
+    return { t: split(a), eta: sq ? (best - N * mean * mean) / sq : 0 };
   }
 
   function histogram(Ls, bins) {
@@ -426,8 +461,9 @@
    * opts: {
    *   blurRadius, minSize, t1, t2,              // shape + value settings (L*)
    *   grayMode: 'average' | 'custom', customL: [L, L, L],
-   *   colorsPerZone, outlines
-   * }
+   *   colorsPerZone, outlines,
+   *   zones                                     // optional: value zones (0-2 per pixel) to use
+   * }                                           // instead of splitting at t1 / t2
    */
   function process(prep, opts) {
     const { w, h, rgba } = prep;
@@ -435,12 +471,15 @@
     const bl = blurred(prep, opts.blurRadius);
 
     // 1. Three value zones from the simplified lightness
-    const zone = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-      const l = bl.L[i];
-      zone[i] = l < opts.t1 ? 0 : l < opts.t2 ? 1 : 2;
+    let zone = opts.zones;
+    if (!zone) {
+      zone = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        const l = bl.L[i];
+        zone[i] = l < opts.t1 ? 0 : l < opts.t2 ? 1 : 2;
+      }
+      mergeSmallRegions(zone, w, h, opts.minSize, 3, 0);
     }
-    mergeSmallRegions(zone, w, h, opts.minSize, 3, 0);
 
     const zoneCount = [0, 0, 0];
     const zoneSumL = [0, 0, 0];
@@ -539,6 +578,212 @@
       img[p + 1] = img[p + 1] * 0.2 + 18 * 0.8;
       img[p + 2] = img[p + 2] * 0.2 + 22 * 0.8;
     }
+  }
+
+  // ---- Painting in steps -----------------------------------------------------
+
+  // L*a*b* -> sRGB (0-255), the inverse of rgbToLab
+  function labToRgb(L, a, b) {
+    const fy = (L + 16) / 116, fx = fy + a / 500, fz = fy - b / 200;
+    const inv = (t) => (t * t * t > EPS ? t * t * t : (116 * t - 16) / KAPPA);
+    const x = inv(fx) * 0.95047, y = lToY(L), z = inv(fz) * 1.08883;
+    return {
+      r: linToSrgb(Math.max(0, 3.2404542 * x - 1.5371385 * y - 0.4985314 * z)),
+      g: linToSrgb(Math.max(0, -0.969266 * x + 1.8760108 * y + 0.041556 * z)),
+      b: linToSrgb(Math.max(0, 0.0556434 * x - 0.2040259 * y + 1.0572252 * z)),
+    };
+  }
+
+  /*
+   * One mix for each label: the average of all its pixels in L*a*b*, so a mass that covers
+   * hair, skin and background gets a color between them at their average value. Unlike the
+   * block colors this needn't be a color that is in the photo; it is what one mix for the
+   * whole mass would be.
+   */
+  function averageColors(prep, labels, nLabels) {
+    const sum = new Float64Array(nLabels * 4);
+    for (let i = 0; i < labels.length; i++) {
+      const k = labels[i] * 4;
+      sum[k] += prep.L[i]; sum[k + 1] += prep.A[i]; sum[k + 2] += prep.B[i]; sum[k + 3]++;
+    }
+    const out = [];
+    for (let l = 0; l < nLabels; l++) {
+      const c = sum[l * 4 + 3];
+      out.push(c ? Object.assign(labToRgb(sum[l * 4] / c, sum[l * 4 + 1] / c, sum[l * 4 + 2] / c), { share: c / labels.length }) : null);
+    }
+    return out;
+  }
+
+  /*
+   * How much of the border between the shadow and light masses turns gradually. Under a
+   * directional light the shadow edge on a face or a fold is a slow turn of the form; under
+   * flat light the masses are just dark and light things (hair, clothes, background) and every
+   * border between them is a sharp edge. A border pixel counts as soft when the photo spans
+   * less than half the gap between the two masses' average values within a few pixels of it.
+   */
+  function softBorder(prep, zones) {
+    const { w, h } = prep;
+    const n = w * h;
+    let s0 = 0, c0 = 0, s1 = 0, c1 = 0;
+    for (let i = 0; i < n; i++) {
+      if (zones[i] === 0) { s0 += prep.L[i]; c0++; } else { s1 += prep.L[i]; c1++; }
+    }
+    if (!c0 || !c1) return 0;
+    const gap = s1 / c1 - s0 / c0;
+    const L = blur(prep.L, w, h, 1);
+    const R = Math.max(3, Math.round(Math.max(w, h) / 120));
+    let border = 0, soft = 0;
+    for (let y = R; y < h - R; y++) {
+      for (let x = R; x < w - R; x++) {
+        const i = y * w + x;
+        if (zones[i] === zones[i + 1] && zones[i] === zones[i + w]) continue;
+        let lo = Infinity, hi = -Infinity;
+        for (let dy = -R; dy <= R; dy++) {
+          for (let dx = -R; dx <= R; dx++) {
+            const v = L[i + dy * w + dx];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+          }
+        }
+        border++;
+        if (hi - lo < gap / 2) soft++;
+      }
+    }
+    return border ? soft / border : 0;
+  }
+
+  /*
+   * A line drawing of the shape borders on a flat ground, like a first lay-in on a toned canvas.
+   * Same edge test as drawOutlines(), but marked on both sides of each border so the line is
+   * two pixels wide and still reads when the image is shown small. Colors are { r, g, b }.
+   */
+  function outlineImage(lab, w, h, ground, ink) {
+    const n = w * h;
+    const img = new Uint8ClampedArray(n * 4);
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      const x = i % w;
+      const edge = (x < w - 1 && lab[i + 1] !== lab[i]) || (i < n - w && lab[i + w] !== lab[i]) ||
+        (x > 0 && lab[i - 1] !== lab[i]) || (i >= w && lab[i - w] !== lab[i]);
+      const c = edge ? ink : ground;
+      img[p] = c.r; img[p + 1] = c.g; img[p + 2] = c.b; img[p + 3] = 255;
+    }
+    return img;
+  }
+
+  /*
+   * Splits the light family (zone 2) of a two-value map into halftone (1) and light (2) at L* t,
+   * then merges small shapes. The shadow shapes stay exactly as they were: as labels 0, 3 and 4
+   * in groups of three, only halftone and light can merge into each other.
+   */
+  function splitLights(prep, zones, blurRadius, t, minSize) {
+    const bl = blurred(prep, blurRadius);
+    const n = zones.length;
+    const lab = new Uint8Array(n);
+    for (let i = 0; i < n; i++) lab[i] = zones[i] === 0 ? 0 : bl.L[i] < t ? 3 : 4;
+    mergeSmallRegions(lab, prep.w, prep.h, minSize, 5, 3);
+    for (let i = 0; i < n; i++) lab[i] = lab[i] ? lab[i] - 2 : 0;
+    return lab;
+  }
+
+  /*
+   * Accents: the small darks and lights a block-in leaves out. A pixel counts when the photo
+   * (smoothed a little against noise) is at least `contrast` L* darker or lighter than the block
+   * painted over it and half that against its own surroundings, so the end of a long gradient
+   * doesn't count. Dark accents must also be darker than `darkBelow` and highlights lighter than
+   * `lightAbove` (L*), so they are the picture's darkest darks and lightest lights.
+   * A spot is kept if it covers `minArea` pixels to `maxShare` of the picture, is no longer than
+   * `maxSpan` pixels and is compact: a thin streak, such as a strand of hair or a fold, is a
+   * shape, not an accent. Spots are ranked by contrast times the square root of their area,
+   * favoring the middle of the picture, where the face usually is, so a busy flag or pattern
+   * at the edge doesn't take every ring. A spot closer than `spacing` pixels to a stronger one
+   * of its kind is skipped, so a cluster (flag stars, curls) counts once, and so is one scoring
+   * under `relative` times the best of its kind. At most `max` of each kind. Returns the spots
+   * and a copy of the block image with each spot painted in its own most prominent color.
+   */
+  function findAccents(prep, res, opts) {
+    const { w, h } = prep;
+    const n = w * h;
+    const long = Math.max(w, h);
+    const smooth = blur(prep.L, w, h, 1);
+    const around = blur(prep.L, w, h, Math.max(2, Math.round(long / 100)));
+    const img = res.blockImage;
+    const kind = new Uint8Array(n); // 0 none, 1 dark accent, 2 highlight
+    const diff = new Float32Array(n);
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      const L = smooth[i];
+      const d = L - lightnessOf(img[p], img[p + 1], img[p + 2]), local = L - around[i];
+      diff[i] = d;
+      if (d <= -opts.contrast && local <= -opts.contrast / 2 && L < opts.darkBelow) kind[i] = 1;
+      else if (d >= opts.contrast && local >= opts.contrast / 2 && L > opts.lightAbove) kind[i] = 2;
+    }
+    const { comp, count } = components(kind, w, h);
+    const area = new Float64Array(count), sx = new Float64Array(count), sy = new Float64Array(count);
+    const strength = new Float64Array(count);
+    const x0 = new Int32Array(count).fill(w), x1 = new Int32Array(count).fill(-1);
+    const y0 = new Int32Array(count).fill(h), y1 = new Int32Array(count).fill(-1);
+    const kindOf = new Uint8Array(count);
+    for (let i = 0; i < n; i++) {
+      if (!kind[i]) continue;
+      const c = comp[i], x = i % w, y = (i / w) | 0;
+      kindOf[c] = kind[i];
+      area[c]++;
+      sx[c] += x; sy[c] += y;
+      strength[c] += Math.abs(diff[i]);
+      if (x < x0[c]) x0[c] = x;
+      if (x > x1[c]) x1[c] = x;
+      if (y < y0[c]) y0[c] = y;
+      if (y > y1[c]) y1[c] = y;
+    }
+    const found = [];
+    for (let c = 0; c < count; c++) {
+      if (!kindOf[c] || area[c] < opts.minArea || area[c] > opts.maxShare * n) continue;
+      const bw = x1[c] - x0[c] + 1, bh = y1[c] - y0[c] + 1;
+      const span = Math.max(bw, bh);
+      if (span > opts.maxSpan) continue;
+      // compact: fills a fair part of its box, and no more than three times as long as wide
+      if (area[c] < 0.35 * bw * bh || span > 3 * Math.min(bw, bh)) continue;
+      const x = sx[c] / area[c], y = sy[c] / area[c];
+      const off = Math.pow(x / w - 0.5, 2) + Math.pow(y / h - 0.4, 2);
+      found.push({
+        id: c, kind: kindOf[c] === 1 ? 'dark' : 'light', area: area[c], x, y, r: span / 2,
+        score: (strength[c] / Math.sqrt(area[c])) * Math.exp(-off / (2 * 0.25 * 0.25)),
+      });
+    }
+    found.sort((a, b) => b.score - a.score);
+    const spots = [];
+    const taken = { dark: 0, light: 0 };
+    const best = {};
+    found.forEach((s) => {
+      if (!best[s.kind]) best[s.kind] = s.score;
+      if (taken[s.kind] >= opts.max || s.score < opts.relative * best[s.kind]) return;
+      if (spots.some((o) => o.kind === s.kind && Math.hypot(o.x - s.x, o.y - s.y) < opts.spacing)) return;
+      spots.push(s);
+      taken[s.kind]++;
+    });
+
+    // each spot painted in its most prominent photo color
+    const keep = new Int32Array(count).fill(-1);
+    spots.forEach((s, k) => { keep[s.id] = k; });
+    const labels = new Int32Array(n);
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const k = keep[comp[i]];
+      if (k < 0 || !kind[i]) continue;
+      labels[i] = k;
+      mask[i] = 1;
+    }
+    const dom = dominantColors(prep, labels, spots.length, mask).lin;
+    const image = new Uint8ClampedArray(img);
+    spots.forEach((s, k) => {
+      s.color = { r: linToSrgb(dom[k * 3]), g: linToSrgb(dom[k * 3 + 1]), b: linToSrgb(dom[k * 3 + 2]) };
+    });
+    for (let i = 0, p = 0; i < n; i++, p += 4) {
+      if (!mask[i]) continue;
+      const c = spots[labels[i]].color;
+      image[p] = c.r; image[p + 1] = c.g; image[p + 2] = c.b;
+    }
+    spots.forEach((s) => { delete s.id; delete s.score; });
+    return { spots, image };
   }
 
   // ---- Comparing a finished painting with the reference ---------------------
@@ -785,10 +1030,18 @@
     process,
     // Thresholds are found on the simplified image so they match what gets split
     autoThresholds: (prep, blurRadius) => autoThresholds(blurred(prep, blurRadius).L),
+    autoThreshold2: (prep, blurRadius, lo) => autoThreshold2(blurred(prep, blurRadius).L, lo),
+    outlineImage,
+    splitLights,
+    findAccents,
+    averageColors,
+    softBorder,
     histogram,
     lightnessOf,
     chromaOf,
     grayForL,
+    rgbToLab,
+    labToRgb,
     compare,
     applyGains,
     neutralGains,
