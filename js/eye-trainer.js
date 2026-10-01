@@ -1129,8 +1129,14 @@
     }
   });
 
-  if (window.ResizeObserver) new ResizeObserver(drawRings).observe(els.canvas);
-  else window.addEventListener('resize', drawRings);
+  // the rings follow the photo when it resizes, or moves inside a matte that resizes around it
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(drawRings);
+    ro.observe(els.canvas);
+    ro.observe(els.canvas.parentElement);
+  } else {
+    window.addEventListener('resize', drawRings);
+  }
 
   // ---- API for app.js ----------------------------------------------------------------------
 
