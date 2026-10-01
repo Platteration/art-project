@@ -5,28 +5,31 @@ A browser tool for drawing and painting from reference portraits. Load a photo a
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
 - **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it.
 
-Hover any of the three images for a magnifying loupe that shows the pixels under the cursor, the hex code, and the value on a 0–10 scale. Click to keep that color.
+A bar of tool icons sits beside the images (a row pinned to the top of the screen on a phone). Press an icon to use that tool; press it again to turn it off, so touching an image just scrolls the page.
 
-The tools fold away into four drawers beside the images (above them on a phone), so the page shows only the studies until you need more. Each drawer's header says what it is set to, such as `3 × 3 · 2 lines` or `Splits at V 2.7 and 4.6`, so it can stay closed. The drawers you leave open are opened again on your next visit.
+- **Magnifier** (on at the start): hover any image to see the pixels under the pointer magnified, with the hex code and the value on a 0–10 scale. Click to keep that color in **Picked colors**.
+- **Lines**, **Measure** and **Plumb**: the drawing and measuring tools below. Each shows how many lines, measures or plumb points it has drawn. While one is on, its options (line color, undo, clear, the unit on your canvas) and a short how-to sit above the images.
+- **Grid**: steps through off, 3 × 3 and 4 × 4.
 
-- **Measure**: the grid, reference lines, comparative measuring and plumb lines.
+The settings fold away into three drawers beside the tool bar (above it on a phone), so the page shows only the studies until you need more. Each drawer's header says what it is set to, such as `Splits at V 2.7 and 4.6`, so it can stay closed. The drawers you leave open are opened again on your next visit.
+
 - **Values and shapes**: Simplify, Smoothing, Merge small shapes, Working size, the value splits and gray values.
 - **Colors and paints**: Colors per value, and paints for the study: known palettes ranked for this photo, or a palette chosen from the paints you own, with a starting mix for every color.
 - **Picked colors**: the colors you clicked. Sort them dark to light, copy them as hex codes, or save them as a PNG. They are kept in your browser between visits and shared by every tab you have the tool open in.
 
 ### Grid and reference lines
 
-The **Measure** drawer adds drawing aids that appear on every image at once:
+The tool bar adds drawing aids that appear on every image at once:
 
 - **Grid**: a 3 × 3 or 4 × 4 grid for transferring proportions to your paper.
-- **Draw lines**: switch the pointer to *Draw lines* and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
+- **Lines**: choose it and drag on any image to draw a straight reference line, such as the eye line or the tilt of the head. Hold Shift to snap to 15° steps. The loupe shows the line's tilt while you draw. Pick a line color, **Undo line** (or Ctrl/⌘+Z), or **Clear lines**.
 - **Measure** and **Plumb**: compare lengths against a unit, and see what lines up. See below.
 
 **Save PNG** includes the grid, lines, measures and plumb lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and the picked colors' **Save as PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
 
 ### Measure in units: plumb lines and levels
 
-Proportion mistakes, such as eyes set too high, a head too narrow or a mouth off the center line, are the most common ones in a portrait. Atelier painters catch them by comparative measuring: choose one length you can see on the sitter as the unit, such as eye line to chin, and check every other length against it. Two more settings of the Measure drawer's **Pointer** do this. Like the lines, everything they draw shows on every image at once, including the panels on the **Check my painting** tab, so the reference's measurements lie over your painting.
+Proportion mistakes, such as eyes set too high, a head too narrow or a mouth off the center line, are the most common ones in a portrait. Atelier painters catch them by comparative measuring: choose one length you can see on the sitter as the unit, such as eye line to chin, and check every other length against it. Two more tools on the tool bar do this. Like the lines, everything they draw shows on every image at once, including the panels on the **Check my painting** tab, so the reference's measurements lie over your painting.
 
 - **Measure**: drag from one landmark to another. The first length you drag is the unit: it is drawn thicker, in yellow, and labelled **1 U**. Every later length is labelled with how many units long it is, plus the nearest whole number, half, third or quarter when the length as shown is within 0.03 of one, and within 4% of a small one, such as `1.48 U ≈ 1½`. So 0.48 U and 0.52 U are both called ½, but 0.36 U is not called ⅓. While you drag, the loupe shows the pixels under the end of the line, its length in units and its tilt; hold Shift to snap to 15°. Lengths are measured on the reference's pixels, so every image and every working size gives the same answer. On the sample, with eye line to chin as the unit, the face's width at the cheekbones reads 1.40 U (250 px over 178 px).
   - **Make last line the unit** turns the newest measure into the unit and relabels the rest.
@@ -117,7 +120,7 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `index.html`: page structure
 - `styles.css`: layout and theme (light and dark)
 - `js/processing.js`: image processing (no dependencies)
-- `js/app.js`: drawers, controls, loupe, picked colors and the built-in sample portrait
+- `js/app.js`: tool bar, drawers, controls, loupe, picked colors and the built-in sample portrait
 - `js/paints.js`: the paint library and known palettes
 - `js/mixing.js`: the pigment mixing model, recipes and palette suggestions
 - `js/palette.js`: the paints part of the Colors and paints drawer

@@ -24,58 +24,6 @@
 
   <div class="layout">
     <aside class="rail" aria-label="Tools and settings">
-      <details class="drawer" id="drawer-measure" data-drawer="measure">
-        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg><span class="drawer-name">Measure</span></span><span class="drawer-state" id="measureState"></span></summary>
-        <div class="drawer-body">
-          <fieldset class="field">
-            <legend id="gridLabel">Grid</legend>
-            <div class="seg seg-full" role="radiogroup" aria-labelledby="gridLabel">
-              <input type="radio" name="grid" id="gridOff" value="0" checked><label for="gridOff">Off</label>
-              <input type="radio" name="grid" id="grid3" value="3"><label for="grid3">3 × 3</label>
-              <input type="radio" name="grid" id="grid4" value="4"><label for="grid4">4 × 4</label>
-            </div>
-          </fieldset>
-          <fieldset class="field">
-            <legend id="toolLabel">Pointer</legend>
-            <div class="seg seg-grid" role="radiogroup" aria-labelledby="toolLabel">
-              <input type="radio" name="tool" id="toolSample" value="sample" checked><label for="toolSample">Pick colors</label>
-              <input type="radio" name="tool" id="toolLine" value="line"><label for="toolLine">Draw lines</label>
-              <input type="radio" name="tool" id="toolMeasure" value="measure"><label for="toolMeasure">Measure</label>
-              <input type="radio" name="tool" id="toolPlumb" value="plumb"><label for="toolPlumb">Plumb</label>
-            </div>
-          </fieldset>
-          <div class="tool-group line-tools">
-            <span class="tool-label" id="lineColorLabel">Line color</span>
-            <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
-              <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" style="--c:#e5322d" title="Red"><span class="visually-hidden">Red</span></label>
-              <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" style="--c:#1ec8ec" title="Cyan"><span class="visually-hidden">Cyan</span></label>
-              <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" style="--c:#ffd21f" title="Yellow"><span class="visually-hidden">Yellow</span></label>
-              <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" style="--c:#ffffff" title="White"><span class="visually-hidden">White</span></label>
-              <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" style="--c:#111111" title="Black"><span class="visually-hidden">Black</span></label>
-            </div>
-            <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
-            <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
-          </div>
-          <div class="tool-group measure-tools">
-            <button type="button" class="btn btn-small" id="measureUnit">Make last line the unit</button>
-            <button type="button" class="btn btn-small" id="measureUndo">Undo measure</button>
-            <button type="button" class="btn btn-small" id="measureClear">Clear measures</button>
-            <span class="canvas-unit">
-              <label class="tool-label" for="canvasSize">Unit on my canvas</label>
-              <input type="number" id="canvasSize" inputmode="decimal" min="0" step="0.1">
-              <select id="canvasSys" aria-label="Centimeters or inches">
-                <option value="cm" selected>cm</option>
-                <option value="in">in</option>
-              </select>
-            </span>
-          </div>
-          <div class="tool-group plumb-tools">
-            <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
-            <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
-          </div>
-          <p class="tool-hint" id="toolHint">Hover to sample a color. Click to add it to the palette. To check proportions, switch the pointer to Measure.</p>
-        </div>
-      </details>
       <details class="drawer" id="drawer-values" data-drawer="values">
         <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg><span class="drawer-name">Values and shapes</span></span><span class="drawer-state" id="valuesState"></span></summary>
         <div class="drawer-body">
@@ -209,7 +157,49 @@
       </details>
     </aside>
 
+    <nav class="toolstrip" aria-label="Tools">
+      <button type="button" class="tool-btn" data-tool="sample" aria-pressed="true" title="Color magnifier"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg><span class="tool-name">Magnifier</span></button>
+      <button type="button" class="tool-btn" data-tool="line" aria-pressed="false" title="Draw lines"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19 20 5"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="20" cy="5" r="1.8" fill="currentColor"/></svg><span class="tool-name">Lines</span></button>
+      <button type="button" class="tool-btn" data-tool="measure" aria-pressed="false" title="Measure in units"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg><span class="tool-name">Measure</span></button>
+      <button type="button" class="tool-btn" data-tool="plumb" aria-pressed="false" title="Plumb lines and levels"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M3 15h18" stroke-dasharray="2.5 2"/><path d="M12 11c-2.2 2.4-3 4-3 5.5a3 3 0 0 0 6 0c0-1.5-.8-3.1-3-5.5z" fill="currentColor"/></svg><span class="tool-name">Plumb</span></button>
+      <span class="tool-sep" aria-hidden="true"></span>
+      <button type="button" class="tool-btn" id="gridBtn" aria-label="Grid: off" title="Grid: off, 3 × 3, 4 × 4"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg><span class="tool-name">Grid</span><span class="tool-badge" id="gridBadge" hidden></span></button>
+    </nav>
+
     <main class="work">
+      <div class="tool-options" id="toolOptions">
+        <div class="tool-group line-tools">
+          <span class="tool-label" id="lineColorLabel">Line color</span>
+          <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
+            <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" style="--c:#e5322d" title="Red"><span class="visually-hidden">Red</span></label>
+            <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" style="--c:#1ec8ec" title="Cyan"><span class="visually-hidden">Cyan</span></label>
+            <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" style="--c:#ffd21f" title="Yellow"><span class="visually-hidden">Yellow</span></label>
+            <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" style="--c:#ffffff" title="White"><span class="visually-hidden">White</span></label>
+            <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" style="--c:#111111" title="Black"><span class="visually-hidden">Black</span></label>
+          </div>
+          <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
+          <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
+        </div>
+        <div class="tool-group measure-tools">
+          <button type="button" class="btn btn-small" id="measureUnit">Make last line the unit</button>
+          <button type="button" class="btn btn-small" id="measureUndo">Undo measure</button>
+          <button type="button" class="btn btn-small" id="measureClear">Clear measures</button>
+          <span class="canvas-unit">
+            <label class="tool-label" for="canvasSize">Unit on my canvas</label>
+            <input type="number" id="canvasSize" inputmode="decimal" min="0" step="0.1">
+            <select id="canvasSys" aria-label="Centimeters or inches">
+              <option value="cm" selected>cm</option>
+              <option value="in">in</option>
+            </select>
+          </span>
+        </div>
+        <div class="tool-group plumb-tools">
+          <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
+          <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
+        </div>
+        <p class="tool-hint" id="toolHint"></p>
+      </div>
+
       <div class="tabs" role="tablist" aria-label="Mode">
         <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
         <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>

@@ -63,6 +63,9 @@
     wbUndo: $('wbUndo'),
     wbStatus: $('wbStatus'),
     swatches: $('swatches'),
+    toolBtns: [...document.querySelectorAll('.tool-btn[data-tool]')],
+    gridBtn: $('gridBtn'),
+    gridBadge: $('gridBadge'),
     palCount: $('palCount'),
     palEmpty: $('palEmpty'),
     palSort: $('palSort'),
@@ -82,11 +85,11 @@
     saveName: $('saveName'),
     saveClose: $('saveClose'),
     drawers: {
-      measure: $('drawer-measure'), values: $('drawer-values'),
+      values: $('drawer-values'),
       colors: $('drawer-colors'), swatches: $('drawer-swatches'),
     },
     drawerState: {
-      measure: $('measureState'), values: $('valuesState'),
+      values: $('valuesState'),
       colors: $('colorsState'), swatches: $('swatchesState'),
     },
   };
@@ -108,7 +111,7 @@
     hover: null,       // last sampled { r, g, b }
     tab: 'study',
     grid: 0,           // 0, 3 or 4 divisions
-    tool: 'sample',    // 'sample', 'line', 'measure' or 'plumb'
+    tool: 'sample',    // 'sample' (the magnifier), 'line', 'measure', 'plumb', or 'none'
     lineColor: '#e5322d',
     lines: [],         // reference lines in 0-1 image coordinates
     measures: [],      // measured lengths, same coordinates
@@ -677,7 +680,7 @@
         return;
       }
       if (state.tool === 'plumb') canvas.classList.toggle('on-ring', plumbAt(canvas, e) >= 0);
-      if (e.pointerType === 'touch' && !down) return;
+      if (!magnifying() || (e.pointerType === 'touch' && !down)) return;
       showLoupeFor(canvas, e);
     });
     canvas.addEventListener('pointerleave', (e) => {
@@ -718,7 +721,7 @@
         loupeAt(canvas, at.x, at.y, e.pointerType);
         return;
       }
-      if (e.pointerType === 'touch') showLoupeFor(canvas, e);
+      if (e.pointerType === 'touch' && magnifying()) showLoupeFor(canvas, e);
     });
     canvas.addEventListener('pointercancel', () => {
       down = null;
@@ -748,9 +751,8 @@
           record({ kind: 'line', op: 'add' });
         }
         drawAllOverlays();
-        // the drag is over: the loupe goes back to the color under the pointer, without its length or tilt
-        if (e.pointerType === 'touch') els.loupe.hidden = true;
-        else showLoupeFor(canvas, e);
+        // the drag is over, and with it the loupe's length and tilt
+        els.loupe.hidden = true;
         return;
       }
       const p = state.dragging;
@@ -770,7 +772,7 @@
         if (e.pointerType === 'touch') els.loupe.hidden = true;
         return;
       }
-      if (!start || e.button > 0) return;
+      if (!start || e.button > 0 || !magnifying()) return;
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
       const s = showLoupeFor(canvas, e);
       if (e.pointerType === 'touch') {
@@ -1196,22 +1198,32 @@
 
   function drawAllOverlays() {
     Object.values(els.canvases).forEach(syncOverlay);
-    updateMeasureState();
+    updateToolbar();
   }
 
-  const TOOL_NAMES = { sample: '', line: 'Drawing lines', measure: 'Measuring', plumb: 'Plumb' };
-  const count = (n, word) => (n ? `${n} ${word}${n === 1 ? '' : 's'}` : '');
+  // The tool bar: which tool is on, how many lines, measures and plumb points each has drawn, and the grid
+  function updateToolbar() {
+    const counts = { line: state.lines.length, measure: state.measures.length, plumb: state.plumbs.length };
+    els.toolBtns.forEach((b) => {
+      const t = b.dataset.tool;
+      b.setAttribute('aria-pressed', String(state.tool === t));
+      if (counts[t]) b.dataset.count = counts[t]; else delete b.dataset.count;
+    });
+    els.gridBtn.setAttribute('aria-pressed', String(!!state.grid));
+    els.gridBtn.setAttribute('aria-label', state.grid ? `Grid: ${state.grid} × ${state.grid}` : 'Grid: off');
+    els.gridBadge.hidden = !state.grid;
+    els.gridBadge.textContent = state.grid ? `${state.grid}×${state.grid}` : '';
+  }
 
-  // What the Measure drawer has showing, so it can stay closed: "3 × 3 · 2 lines · Measuring"
-  function updateMeasureState() {
-    const parts = [
-      state.grid ? `${state.grid} × ${state.grid}` : '',
-      count(state.lines.length, 'line'),
-      count(state.measures.length, 'measure'),
-      count(state.plumbs.length, 'plumb'),
-      TOOL_NAMES[state.tool],
-    ].filter(Boolean);
-    els.drawerState.measure.textContent = parts.join(' · ') || 'Grid, lines, plumb';
+  // Shows the magnified color under the pointer only with the magnifier on, or while picking a neutral spot
+  const magnifying = () => state.tool === 'sample' || state.picking;
+
+  function setTool(tool) {
+    state.tool = tool;
+    ['line', 'measure', 'plumb', 'none'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
+    if (!magnifying()) els.loupe.hidden = true;
+    updateToolHint();
+    updateToolbar();
   }
 
   // A copy of an image with the grid, lines, measures and plumb lines burned in, for saving
@@ -1787,7 +1799,8 @@
   }
 
   const TOOL_HINTS = {
-    sample: 'Hover to sample a color. Click to keep it in Picked colors. To check proportions, choose Measure or Plumb.',
+    sample: 'Hover any image to see the color under the pointer, magnified, with its value. Click to keep it in Picked colors.',
+    none: 'No tool is on, so touching an image scrolls the page. Choose a tool to use it.',
     line: 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.',
     measure: 'Choose a unit you can see on the sitter, such as eye line to chin, and drag across it first: it becomes 1 U. Then drag across any other length to compare it with the unit. Hold Shift to snap to 15°.',
     plumb: 'Click an image to drop a plumb line and a level through that point, on every image, and see what lines up with it. Drag a ring to move it; click a ring to remove it.',
@@ -1872,16 +1885,15 @@
     updateToolHint();
   }
 
-  document.querySelectorAll('input[name="grid"]').forEach((el) =>
-    el.addEventListener('change', () => { state.grid = +el.value; drawAllOverlays(); updateToolHint(); })
-  );
-  document.querySelectorAll('input[name="tool"]').forEach((el) =>
-    el.addEventListener('change', () => {
-      state.tool = el.value;
-      ['line', 'measure', 'plumb'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
-      updateToolHint();
-      updateMeasureState();
-    })
+  // the grid button steps through off, 3 × 3 and 4 × 4
+  els.gridBtn.addEventListener('click', () => {
+    state.grid = { 0: 3, 3: 4, 4: 0 }[state.grid];
+    drawAllOverlays();
+    updateToolHint();
+  });
+  // a tool's button turns it on; pressing the one that is on turns it off, so touch just scrolls
+  els.toolBtns.forEach((b) =>
+    b.addEventListener('click', () => setTool(state.tool === b.dataset.tool ? 'none' : b.dataset.tool))
   );
   document.querySelectorAll('input[name="lineColor"]').forEach((el) =>
     el.addEventListener('change', () => { state.lineColor = el.value; })
@@ -2335,16 +2347,11 @@
 
   function start() {
     restoreDrawers();
-    updateMeasureState();
+    updateToolbar();
     restoreSmoothing();
     updateOutputs();
     renderPalette();
     loadCanvasSize();
-    // a browser that restores form state on reload may bring back another grid or pointer
-    ['grid', 'tool'].forEach((name) => {
-      const el = document.querySelector(`input[name="${name}"]:checked`);
-      if (el && !el.defaultChecked) el.dispatchEvent(new Event('change'));
-    });
     updateToolButtons();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
