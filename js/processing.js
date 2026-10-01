@@ -347,11 +347,15 @@
     const toShadow = new Float32Array(n);
     const toLight = new Float32Array(n);
     const inside = new Float32Array(n); // how deep in the middle zone
+    let shadows = 0, lights = 0;
     for (let i = 0; i < n; i++) {
       toShadow[i] = zone[i] === 0 ? 0 : 1e9;
       toLight[i] = zone[i] === 2 ? 0 : 1e9;
       inside[i] = zone[i] === 1 ? 1e9 : 0;
+      if (zone[i] === 0) shadows++;
+      else if (zone[i] === 2) lights++;
     }
+    if (!shadows || !lights) return;
     chamfer(toShadow, w, h);
     chamfer(toLight, w, h);
     chamfer(inside, w, h);
