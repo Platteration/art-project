@@ -420,8 +420,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   gap: 12px;
 }
 .temp-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; }
-.temp-gain { flex-wrap: nowrap; }
-.temp-gain input[type="range"] { width: 110px; }
+.temp-gain { min-width: 0; } /* wraps its reading under the slider on the narrowest phones */
+.temp-gain input[type="range"] { width: 110px; max-width: 100%; }
 .temp-gain output { white-space: nowrap; }
 .temp-spot {
   display: flex;

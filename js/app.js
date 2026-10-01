@@ -546,11 +546,11 @@
         els.loupeVal.textContent = 'ΔE ' + region.dE.toFixed(1);
       }
     } else if (s.id === 'temp' && state.temp.map) {
-      // on the warm / cool map, how this spot differs from the color it is compared with
+      // on the warm / cool map, how this spot differs from the color it is compared with. The chip
+      // shows that color at this value beside the color read here, which in Blocks is the block's.
       const i = s.y * s.w + s.x;
       const t = Study.temperatureAt(state.temp.map, i);
-      const o = state.pixels.orig;
-      els.loupeChip.style.background = `linear-gradient(90deg, rgb(${t.anchor}) 50%, rgb(${o[i * 4]},${o[i * 4 + 1]},${o[i * 4 + 2]}) 50%)`;
+      els.loupeChip.style.background = `linear-gradient(90deg, rgb(${t.anchor}) 50%, rgb(${t.color}) 50%)`;
       const warm = shiftText(t.warm, 'warmer', 'cooler'), yellow = shiftText(t.yellow, 'yellower', 'redder');
       const [main, other] = state.temp.axis === 'hue' ? [yellow, warm] : [warm, yellow];
       els.loupeHex.textContent = main.charAt(0).toUpperCase() + main.slice(1);
@@ -972,6 +972,25 @@
     g.fillStyle = grad;
     g.fillRect(300, 150, 140, 360);
 
+    // the face's three color zones, as hue and chroma only: the 'color' blend keeps each value.
+    // Forehead yellower, cheeks and nose redder, mouth to chin cooler and grayer.
+    g.globalCompositeOperation = 'color';
+    [
+      [300, 225, 115, 'rgba(214, 178, 96, A)', 0.22],
+      [244, 382, 52, 'rgba(214, 104, 94, A)', 0.4],
+      [356, 382, 52, 'rgba(214, 104, 94, A)', 0.32],
+      [304, 372, 34, 'rgba(214, 104, 94, A)', 0.4],
+      [300, 470, 95, 'rgba(134, 148, 146, A)', 0.45],
+    ].forEach(([x, y, r, color, a]) => {
+      grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, color.replace('A', a));
+      grad.addColorStop(0.55, color.replace('A', a * 0.75));
+      grad.addColorStop(1, color.replace('A', 0));
+      g.fillStyle = grad;
+      g.fillRect(x - r, y - r, 2 * r, 2 * r);
+    });
+    g.globalCompositeOperation = 'source-over';
+
     // eye sockets, eyes, brows
     g.fillStyle = 'rgba(95, 52, 36, 0.38)';
     [[252, 322], [348, 322]].forEach(([x, y]) => { g.beginPath(); g.ellipse(x, y, 36, 21, 0, 0, Math.PI * 2); g.fill(); });
@@ -1024,6 +1043,25 @@
     g.bezierCurveTo(200, 268, 184, 300, 166, 370);
     g.closePath();
     g.fill();
+    // strands combed out from the crown, so the hair is textured the way hair in a photo is
+    g.save();
+    g.clip();
+    let strand = 5;
+    const rand = () => { strand = (strand * 16807) % 2147483647; return strand / 2147483647; };
+    g.lineCap = 'round';
+    for (let k = 0; k < 600; k++) {
+      const x = 160 + rand() * 280, y = 130 + rand() * 240;
+      const dx = x - 300, dy = y - 110, d = Math.hypot(dx, dy) || 1;
+      const len = 25 + rand() * 45, bend = (rand() - 0.5) * 16;
+      g.strokeStyle = rand() < 0.75 ? 'rgba(18, 10, 6, 0.6)' : 'rgba(150, 104, 72, 0.4)';
+      g.lineWidth = 1 + rand() * 1.6;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.quadraticCurveTo(x + (dx / d) * len * 0.5 - (dy / d) * bend, y + (dy / d) * len * 0.5 + (dx / d) * bend,
+        x + (dx / d) * len, y + (dy / d) * len);
+      g.stroke();
+    }
+    g.restore();
 
     // grain, then a soft blur so it reads like a photo
     const img = g.getImageData(0, 0, W, H);
@@ -1660,13 +1698,15 @@
     renderTemp(map);
   }
 
+  // Redraws the map after a short wait, so Updating shows first; then() runs once it is drawn
   let tempTimer = 0;
-  function tempSoon(delay) {
+  function tempSoon(delay, then) {
     els.busy.hidden = false;
     clearTimeout(tempTimer);
     tempTimer = setTimeout(() => {
       runTemp();
       els.busy.hidden = true;
+      if (then) then();
     }, delay == null ? 60 : delay);
   }
 
@@ -1709,7 +1749,13 @@
     els.tempChip.style.background = hex;
     els.tempAuto.hidden = !t.spot;
     let text;
-    if (t.spot) {
+    if (t.mode === 'zone' && map.skin) {
+      // each part has its own zero point here; the spot only says where the skin is
+      text = t.spot
+        ? `The skin is traced from the spot you picked, ${hex}, ringed on the map.`
+        : `The skin is traced from this face's typical color, ${hex}, found automatically.`;
+      text += ' With Same value, gray is the typical color of each part of the skin: its light, halftone or shadow.';
+    } else if (t.spot) {
       text = map.skin
         ? `Gray is the spot you picked, ${hex}, ringed on the map.`
         : `Gray is the spot you picked, ${hex}, but no skin could be traced around it, so nothing is measured. Pick a spot in the middle of the face, away from hair and edges.`;
@@ -1718,7 +1764,6 @@
     } else {
       text = 'No face was found automatically, so the map is measured against neutral gray. Click Pick skin spot, then click the lit forehead or a cheek.';
     }
-    if (t.mode === 'zone' && map.skin) text += ' Same value compares each part of the skin with the typical skin of its own value.';
     els.tempSpotText.textContent = text;
 
     // the skin's light, halftone and shadow
@@ -1752,36 +1797,37 @@
 
   /*
    * Plain notes on how the temperature moves across the form: shadow against light, then the
-   * halftone, where the form turns, against both. Steps under 1.5 count as the same.
+   * halftone, where the form turns, against both. Each part is compared with the other taken to
+   * its own value, so a part that is only darker reads as the same temperature. Steps under 1.5
+   * count as the same.
    */
   function describeTemp([shadow, half, light]) {
     const notes = [];
-    // how b differs from a besides warmth
-    const also = (a, b) => {
+    // how b differs from a, besides warmth
+    const also = (d) => {
       const q = [];
-      const dy = b.yellow - a.yellow, dc = b.dChroma - a.dChroma;
-      if (Math.abs(dy) >= 1.5) q.push(dy > 0 ? 'yellower' : 'redder');
-      if (Math.abs(dc) >= 1.5) q.push(dc > 0 ? 'richer' : 'grayer');
+      if (Math.abs(d.yellow) >= 1.5) q.push(d.yellow > 0 ? 'yellower' : 'redder');
+      if (Math.abs(d.dChroma) >= 1.5) q.push(d.dChroma > 0 ? 'richer' : 'grayer');
       return q;
     };
     if (shadow && light) {
-      const d = shadow.warm - light.warm;
-      const q = also(light, shadow);
-      if (Math.abs(d) < 1.5) {
+      const d = Study.temperatureShift(light.lab, shadow.lab);
+      const q = also(d);
+      if (Math.abs(d.warm) < 1.5) {
         notes.push(`The shadow and the light are about the same temperature${q.length ? `; the shadow is ${q.join(' and ')}` : ''}.`);
       } else {
-        notes.push(`The shadow is ${d > 0 ? 'warmer' : 'cooler'} than the light by ${Math.abs(d).toFixed(0)}${q.length ? `: ${q.join(' and ')}` : ''}.`);
+        notes.push(`The shadow is ${d.warm > 0 ? 'warmer' : 'cooler'} than the light by ${Math.abs(d.warm).toFixed(0)}${q.length ? `: ${q.join(' and ')}` : ''}.`);
       }
     }
     const others = [light, shadow].filter(Boolean);
     if (half && others.length) {
       const names = others.length === 2 ? 'both the light and the shadow' : light ? 'the light' : 'the shadow';
-      const lo = Math.min(...others.map((m) => m.warm)), hi = Math.max(...others.map((m) => m.warm));
-      if (half.warm < lo - 1.5) {
-        const grayer = half.dChroma < Math.min(...others.map((m) => m.dChroma)) - 1.5;
+      const ds = others.map((m) => Study.temperatureShift(m.lab, half.lab));
+      if (ds.every((d) => d.warm < -1.5)) {
+        const grayer = ds.every((d) => d.dChroma < -1.5);
         notes.push(`The halftone is cooler than ${names}: paint the turn with a ${grayer ? 'grayer, ' : ''}cooler mix, not just a darker one.`);
-      } else if (half.warm > hi + 1.5) {
-        const richer = half.dChroma > Math.max(...others.map((m) => m.dChroma)) + 1.5;
+      } else if (ds.every((d) => d.warm > 1.5)) {
+        const richer = ds.every((d) => d.dChroma > 1.5);
         notes.push(`The halftone is warmer than ${names}: keep the turn ${richer ? 'rich and ' : ''}warm rather than graying it.`);
       } else if (others.length === 2) {
         notes.push('The halftone sits between the light and the shadow in temperature.');
@@ -1813,25 +1859,21 @@
   function pickSkin(s) {
     const spot = spotAt(s.x, s.y);
     const hex = toHex(spot);
-    if (Study.lightnessOf(spot.r, spot.g, spot.b) < 12) {
-      toast('That spot is too dark to read. Click lit skin, such as the forehead or a cheek.');
-      return;
-    }
-    const [, a, b] = Study.labOf(spot.r, spot.g, spot.b);
-    if (Math.hypot(a, b) < 5) {
-      toast(`${hex} is nearly gray, so there is no warmth to measure from. Click a patch of skin.`);
-      return;
-    }
-    // skin of every complexion, and under most lights, is between red and yellow
-    const hue = (Math.atan2(b, a) * 180) / Math.PI;
-    if (hue < -30 || hue > 110) {
-      toast(`${hex} doesn't look like skin. Click the lit forehead or a cheek.`);
+    const problem = Study.skinSpotProblem(state.prep, spot.x, spot.y, spot);
+    if (problem) {
+      toast({
+        dark: 'That spot is too dark to read. Click lit skin, such as the forehead or a cheek.',
+        gray: `${hex} is nearly gray, so there is no warmth to measure from. Click a patch of skin.`,
+        hue: `${hex} doesn't look like skin. Click the lit forehead or a cheek.`,
+        vivid: `${hex} is more vivid than skin, like cloth or lips. Click the lit forehead or a cheek.`,
+        texture: 'That spot is textured, like hair, a beard or cloth, or sits on an edge. Click an even patch of skin.',
+      }[problem]);
       return;
     }
     setSkinPicking(false);
     state.temp.spot = spot;
-    runTemp();
-    toast(state.temp.map.skin ? `Skin spot set: ${hex} is now gray on the map` : 'No skin could be traced around that spot');
+    // tracing the skin from a new spot takes a moment at the larger working sizes
+    tempSoon(30, () => toast(state.temp.map.skin ? `Skin spot set: ${hex} is now gray on the map` : 'No skin could be traced around that spot'));
   }
 
   function setSkinPicking(on) {
@@ -1845,14 +1887,14 @@
   els.tempAuto.addEventListener('click', () => {
     state.temp.spot = null;
     setSkinPicking(false);
-    runTemp();
+    tempSoon(30);
   });
   [['tempAxis', 'axis'], ['tempMode', 'mode'], ['tempDetail', 'detail']].forEach(([name, key]) =>
     document.querySelectorAll(`input[name="${name}"]`).forEach((el) =>
       el.addEventListener('change', () => {
         state.temp[key] = el.value;
         saveTempSettings();
-        runTemp();
+        tempSoon(30);
       })
     )
   );
@@ -1865,7 +1907,7 @@
   els.tempFade.addEventListener('change', () => {
     state.temp.fade = els.tempFade.checked;
     saveTempSettings();
-    runTemp();
+    tempSoon(30);
   });
 
   // ---- Start --------------------------------------------------------------

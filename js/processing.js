@@ -863,7 +863,8 @@
    * counting pixels near the middle of the picture and lit pixels (L* 55 and up) fully, and dim
    * or outlying ones less: the face is usually the lit subject, and a wall or curtain behind it is
    * dimmer and spreads to the edges. An area running along the top or sides of the picture is
-   * marked down further. Returns the pixel deepest inside the winner, or -1.
+   * marked down further. Returns the pixel deepest inside the winner, how deep it is, and the
+   * winner's pixels ({ seed, room, area }), or null.
    */
   function findFace(soft, w, h) {
     const n = w * h;
@@ -884,47 +885,70 @@
       const s = score[c] * Math.max(0.1, 1 - (3 * edge[c]) / (w + 2 * h));
       if (s > top) { top = s; best = c; }
     }
-    if (best < 0) return -1;
+    if (best < 0) return null;
     for (let i = 0; i < n; i++) like[i] = comp[i] === best ? 1 : 0;
-    return deepestPoint(like, w, h);
+    return Object.assign(deepestPoint(like, w, h), { area: like });
   }
 
-  // How far a color may stray from the skin spot and still count as the same skin: within
-  // HUE_TOL degrees of hue and half the spot's chroma, measured as an ellipse. The warm / cool
-  // shifts across a face stay well inside this; red fabric, wood and blue shirts fall outside.
-  // A pale spot (a highlight, fair skin) gets at least 8 of chroma and, since hue is looser in
-  // pale colors, up to 35° of hue, so the pinker cheeks around it still count.
-  const HUE_TOL = 20, CHROMA_TOL = 0.5;
+  // How far a color may stray from the skin spot and still count as the same skin. At the spot's
+  // own value skin keeps its hue within about HUE_TOL degrees and its chroma within about half
+  // again either way; blue shirts, green walls and gray backgrounds fall outside. VIVID is the
+  // most chroma skin has for its value, in C* per L* + 16: deep warm shadows on skin reach about
+  // 0.65, red cloth and lipstick go past 0.7.
+  const HUE_TOL = 20, VIVID = 0.7;
 
-  // Pixels colored like the skin spot, at any lightness. Shadows on skin keep their chroma or
-  // gain some, while dark hair and dim walls of the same hue are grayer, so a pixel may be less
-  // chromatic than the spot only by the same margin it may be more.
+  /*
+   * Pixels colored like the skin spot, at any lightness. Light, halftone and shadow on one form
+   * differ in more than value: the halftone, where the form turns, can be nearly gray, the shadow
+   * is often redder and richer than the light, and the light paler and yellower. So the limits
+   * widen with how far a pixel's value is from the spot's: most grayness is allowed in the
+   * halftone, most extra chroma in the shadow, and some of either in the light. Dark hair of a
+   * skin hue is grayer than skin in shadow, so the deepest darks get less grayness again, and no
+   * extra redness unless richer.
+   * Hue and chroma are judged together, as a share of what is allowed (an ellipse).
+   */
   function skinColored(soft, n, spot) {
     const [L0, a0, b0] = spot;
-    const c0 = Math.hypot(a0, b0);
+    const c0 = Math.max(4, Math.hypot(a0, b0));
     const h0 = Math.atan2(b0, a0);
     const minL = Math.max(8, 0.25 * L0);
-    const hueTol = Math.min(35, HUE_TOL * Math.max(1, 20 / c0));
-    const chromaTol = Math.max(8, CHROMA_TOL * c0);
+    // a pale spot (a highlight, fair skin) gets more hue room, since hue is looser in pale colors
+    const hueTol = Math.min(35, HUE_TOL * Math.max(1, 20 / c0)) * DEG;
     const out = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const L = soft.L[i];
       if (L < minL) continue;
       const a = soft.A[i], b = soft.B[i];
       const c = Math.hypot(a, b);
-      if (c < 4) continue;
+      if (c < 3 || c > VIVID * (L + 16)) continue;
+      // depth: 0 at the spot's value and above, 1 at the darkest skin that is read; and height:
+      // 0 at the spot's value and below, 1 from 25 L* above it
+      const t = Math.max(0, Math.min(1, (L0 - L) / (L0 - minL)));
+      const u = Math.max(0, Math.min(1, (L - L0) / 25));
+      // how much grayer or richer than the spot, as a share of what is allowed at this depth
+      const low = c0 * (0.5 - 0.3 * Math.sin(Math.PI * Math.min(1, t * 1.6)) - 0.3 * u);
+      const high = Math.max(1.5 * c0, c0 + 8) * (1 + 3 * t + u);
+      const dc = c >= c0 ? (c - c0) / (high - c0) : (c0 - c) / (c0 - low);
+      if (dc > 1) continue;
       let dh = Math.atan2(b, a) - h0;
       if (dh > Math.PI) dh -= 2 * Math.PI;
       else if (dh < -Math.PI) dh += 2 * Math.PI;
-      dh = (dh * 180) / Math.PI / hueTol;
-      const dc = (c - c0) / chromaTol;
-      if (dh * dh + dc * dc <= 1) out[i] = 1;
+      // hue wanders in grayish colors. Lights may turn yellower. Skin turns redder where it is
+      // also richer: cheeks, nose and ears, and more so in shadow. A grayer dark of a redder hue
+      // is more likely hair than skin.
+      const loose = Math.min(3, Math.max(1, 10 / c));
+      const rich = Math.max(0, Math.min(1, (c / c0 - 0.8) / 0.4));
+      const tol = dh > 0 ? hueTol + 15 * DEG * u : hueTol + (10 + 20 * t) * DEG * rich;
+      const dhn = dh / (tol * loose);
+      if (dhn * dhn + dc * dc > 1) continue;
+      out[i] = 1;
     }
     return out;
   }
 
-  // The pixel deepest inside a mask (farthest from its edge), by a two-pass chamfer distance
-  function deepestPoint(mask, w, h) {
+  // Distance from each pixel of a mask to the nearest pixel outside it, by a two-pass chamfer;
+  // 0 outside. With edges set, the picture's border counts as outside too.
+  function chamfer(mask, w, h, edges) {
     const n = w * h;
     const dist = new Float32Array(n);
     for (let i = 0; i < n; i++) dist[i] = mask[i] ? 1e9 : 0;
@@ -933,36 +957,74 @@
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         if (!dist[i]) continue;
-        if (x === 0 || y === 0 || x === w - 1) { dist[i] = 1; continue; }
-        dist[i] = Math.min(dist[i], dist[i - 1] + 1, dist[i - w] + 1, dist[i - w - 1] + D, dist[i - w + 1] + D);
+        if (edges && (x === 0 || y === 0 || x === w - 1)) { dist[i] = 1; continue; }
+        if (x > 0) dist[i] = Math.min(dist[i], dist[i - 1] + 1);
+        if (y > 0) {
+          dist[i] = Math.min(dist[i], dist[i - w] + 1);
+          if (x > 0) dist[i] = Math.min(dist[i], dist[i - w - 1] + D);
+          if (x < w - 1) dist[i] = Math.min(dist[i], dist[i - w + 1] + D);
+        }
       }
     }
-    let best = -1, room = 0;
     for (let y = h - 1; y >= 0; y--) {
       for (let x = w - 1; x >= 0; x--) {
         const i = y * w + x;
         if (!dist[i]) continue;
-        if (x === w - 1 || y === h - 1 || x === 0) dist[i] = 1;
-        else dist[i] = Math.min(dist[i], dist[i + 1] + 1, dist[i + w] + 1, dist[i + w + 1] + D, dist[i + w - 1] + D);
-        if (dist[i] > room) { room = dist[i]; best = i; }
+        if (edges && (x === w - 1 || y === h - 1 || x === 0)) { dist[i] = 1; continue; }
+        if (x < w - 1) dist[i] = Math.min(dist[i], dist[i + 1] + 1);
+        if (y < h - 1) {
+          dist[i] = Math.min(dist[i], dist[i + w] + 1);
+          if (x < w - 1) dist[i] = Math.min(dist[i], dist[i + w + 1] + D);
+          if (x > 0) dist[i] = Math.min(dist[i], dist[i + w - 1] + D);
+        }
       }
     }
-    return best;
+    return dist;
+  }
+
+  // The pixel deepest inside a mask (farthest from its edge), and its distance from the edge
+  function deepestPoint(mask, w, h) {
+    const dist = chamfer(mask, w, h, true);
+    let best = -1, room = 0;
+    for (let i = 0; i < dist.length; i++) if (dist[i] > room) { room = dist[i]; best = i; }
+    return { seed: best, room };
+  }
+
+  // A mask without its strips thinner than about 2r pixels (the soft edge between a shirt and the
+  // wall, a lock of hair), which a flood fill can run along; the rest keeps its exact outline
+  function opened(mask, w, h, r) {
+    const inside = chamfer(mask, w, h, false);
+    const away = new Uint8Array(mask.length);
+    for (let i = 0; i < mask.length; i++) away[i] = inside[i] > r ? 0 : 1;
+    const near = chamfer(away, w, h, false); // distance to the nearest pixel that is deep inside
+    const out = new Uint8Array(mask.length);
+    for (let i = 0; i < mask.length; i++) out[i] = mask[i] && near[i] <= r + 0.5 ? 1 : 0;
+    return out;
   }
 
   /*
    * The skin connected to a seed pixel. First the skin-colored area reachable from the seed
-   * without stepping across a sharp value edge (a hairline, the jaw against a dark collar). Then
-   * anything textured is taken out: skin is smooth, while hair or a beard of the same color is
-   * not. Brows and eyes can cut the smooth skin into pieces (forehead, cheeks, nose), so every
-   * piece at least a sixth the size of the seed's own is kept; scraps of hair are smaller. The
-   * texture limit is set from the skin around the seed, so a grainy photo or a painting isn't cut
-   * to nothing. Small holes (eyes, nostrils) are filled.
+   * without stepping onto a sharp edge in value or color (a hairline, the jaw against a dark
+   * collar, an ear against the blurred head behind it). Then anything textured is taken out: skin
+   * is smooth, while hair or a beard of the same color is not, and so are strips too thin to be
+   * a face. Brows and eyes can cut the smooth skin into pieces (forehead, cheeks, nose), so every
+   * piece at least a sixth the size of the seed's own, and about as smooth, is kept; scraps of
+   * hair are smaller or rougher. The texture limit is set from the skin around the seed, so a
+   * grainy photo or a painting isn't cut to nothing. Small holes (eyes, nostrils) are filled.
    */
   function skinAround(soft, w, h, colored, seed) {
     const n = w * h;
-    const { L, T, r } = soft;
+    const { L, A, B, T, r } = soft;
     const maxStep = 9 / r; // about a 25 L* step, once blurred
+    const maxTurn = 6 / r; // about a 15 step in a* plus b*: skin against a blue-gray wall or red hair
+    const sharp = (p, q) => Math.abs(L[q] - L[p]) > maxStep || Math.abs(A[q] - A[p]) + Math.abs(B[q] - B[p]) > maxTurn;
+    // pixels on a sharp edge are never entered, so the fill can't run along the soft line where
+    // two other colors meet (a dark red shirt against a teal wall can blend to a skin color)
+    const open = colored.slice();
+    for (let p = 0; p < n; p++) {
+      if (p % w < w - 1 && sharp(p, p + 1)) open[p] = open[p + 1] = 0;
+      if (p < n - w && sharp(p, p + w)) open[p] = open[p + w] = 0;
+    }
     const reach = new Uint8Array(n);
     const stack = new Int32Array(n);
     let sp = 0;
@@ -970,15 +1032,15 @@
     stack[sp++] = seed;
     while (sp) {
       const p = stack[--sp];
-      const x = p % w, l = L[p];
+      const x = p % w;
       let q = p - 1;
-      if (x > 0 && colored[q] && !reach[q] && Math.abs(L[q] - l) <= maxStep) { reach[q] = 1; stack[sp++] = q; }
+      if (x > 0 && open[q] && !reach[q]) { reach[q] = 1; stack[sp++] = q; }
       q = p + 1;
-      if (x < w - 1 && colored[q] && !reach[q] && Math.abs(L[q] - l) <= maxStep) { reach[q] = 1; stack[sp++] = q; }
+      if (x < w - 1 && open[q] && !reach[q]) { reach[q] = 1; stack[sp++] = q; }
       q = p - w;
-      if (p >= w && colored[q] && !reach[q] && Math.abs(L[q] - l) <= maxStep) { reach[q] = 1; stack[sp++] = q; }
+      if (p >= w && open[q] && !reach[q]) { reach[q] = 1; stack[sp++] = q; }
       q = p + w;
-      if (p < n - w && colored[q] && !reach[q] && Math.abs(L[q] - l) <= maxStep) { reach[q] = 1; stack[sp++] = q; }
+      if (p < n - w && open[q] && !reach[q]) { reach[q] = 1; stack[sp++] = q; }
     }
 
     // the skin's own texture: the median around the seed
@@ -989,12 +1051,17 @@
     }
     near.sort((p, q) => p - q);
     const maxTex = Math.max(7, 2.5 * near[near.length >> 1]);
-    const smooth = new Uint8Array(n);
+    let smooth = new Uint8Array(n);
     for (let i = 0; i < n; i++) smooth[i] = reach[i] && T[i] <= maxTex ? 1 : 0;
+    smooth = opened(smooth, w, h, r);
 
     const { comp, count } = components(smooth, w, h);
-    const size = new Float64Array(count);
-    for (let i = 0; i < n; i++) if (smooth[i]) size[comp[i]]++;
+    const size = new Float64Array(count), tex = new Float64Array(count);
+    for (let i = 0; i < n; i++) {
+      if (!smooth[i]) continue;
+      size[comp[i]]++;
+      tex[comp[i]] += T[i];
+    }
     // the seed may sit on a freckle or a pore too textured to keep: use the piece nearest it
     let own = smooth[seed] ? comp[seed] : -1;
     for (let d = 1; own < 0 && d <= 6 * r; d++) {
@@ -1004,8 +1071,11 @@
     }
     const region = new Uint8Array(n);
     if (own < 0) return region;
-    const keep = size[own] / 6;
-    for (let i = 0; i < n; i++) if (smooth[i] && size[comp[i]] >= keep) region[i] = 1;
+    // dark hair beside a forehead can be colored like the skin's shadow, but even soft hair is
+    // rougher on average than the skin
+    const keep = size[own] / 6, rough = 1.5 * (tex[own] / size[own]) + 1;
+    const kept = (c) => size[c] >= keep && tex[c] / size[c] <= rough;
+    for (let i = 0; i < n; i++) if (smooth[i] && kept(comp[i])) region[i] = 1;
     mergeSmallRegions(region, w, h, Math.round(n * 0.0005), 2, 0);
     return region;
   }
@@ -1040,6 +1110,47 @@
     });
   }
 
+  // How textured this picture's skin is: the texture a quarter of its skin-colored pixels stay
+  // under, so the smoother skin rather than hair or walls of a skin color. Wrinkled skin, a grainy
+  // photo or a painting's brushwork raise it.
+  function skinTexture(soft) {
+    if (soft.skinTex == null) {
+      const hist = new Uint32Array(401); // T in tenths, up to 40
+      let all = 0;
+      for (let i = 0; i < soft.T.length; i++) {
+        const L = soft.L[i], a = soft.A[i], b = soft.B[i], c = Math.hypot(a, b), hue = Math.atan2(b, a);
+        if (L < 25 || L > 95 || c < 8 || c > 36 || hue < 10 * DEG || hue > 80 * DEG) continue;
+        hist[Math.min(400, Math.round(soft.T[i] * 10))]++;
+        all++;
+      }
+      let k = 0;
+      for (let seen = 0; k < 400 && (seen += hist[k]) < all / 4; k++);
+      soft.skinTex = all ? k / 10 : 0;
+    }
+    return soft.skinTex;
+  }
+
+  /*
+   * Why a picked patch can't be a skin spot, or '' if it can. rgb is the patch's average color, at
+   * (x, y) in working-size pixels. Refused: too dark to read; nearly gray, so there is no warmth to
+   * measure from; not between red and yellow the way skin of every complexion is (a green wall, a
+   * blue shirt); more vivid than skin gets at its value (red cloth); or textured, as hair, beards
+   * and fabric are and skin is not: rougher than findFace()'s limit and than twice this picture's
+   * smoother skin, so wrinkles and brushwork still pass.
+   */
+  function skinSpotProblem(prep, x, y, rgb) {
+    const [L, a, b] = rgbToLab(rgb.r, rgb.g, rgb.b);
+    const c = Math.hypot(a, b);
+    if (L < 25) return 'dark';
+    if (c < 6) return 'gray';
+    const hue = Math.atan2(b, a) / DEG;
+    if (hue < -15 || hue > 105) return 'hue';
+    if (c > VIVID * (L + 16)) return 'vivid';
+    const soft = softBlurred(prep);
+    if (soft.T[y * prep.w + x] > Math.max(7, 2 * skinTexture(soft))) return 'texture';
+    return '';
+  }
+
   // Nearest skin-colored pixel to a picked spot, within a short reach, or -1
   function nearestColored(colored, w, h, x, y) {
     const reach = Math.max(3, Math.round(Math.max(w, h) / 60));
@@ -1070,18 +1181,21 @@
     const { w, h } = prep;
     const n = w * h;
     const soft = softBlurred(prep);
-    let spot = null, seed = -1;
+    let spot = null, seed = -1, face = null;
     if (picked) {
       spot = rgbToLab(picked.r, picked.g, picked.b);
       seed = Math.max(0, Math.min(h - 1, picked.y)) * w + Math.max(0, Math.min(w - 1, picked.x));
     } else {
-      seed = findFace(soft, w, h);
-      if (seed >= 0) {
-        // the face's color, for finding the rest of its skin: the median around its middle
-        const r = 4 * soft.r, sx = seed % w, sy = (seed / w) | 0;
+      face = findFace(soft, w, h);
+      if (face) {
+        // the face's color, for finding the rest of its skin: the median of the largest disk
+        // that fits in the skin-like area. Not just its middle, which may be the nose: a face's
+        // color zones can differ by more than the hue the skin is traced across.
+        seed = face.seed;
+        const reach = face.room, sx = seed % w, sy = (seed / w) | 0;
         const near = new Uint8Array(n);
-        for (let y = Math.max(0, sy - r); y <= Math.min(h - 1, sy + r); y++) {
-          near.fill(1, y * w + Math.max(0, sx - r), y * w + Math.min(w, sx + r + 1));
+        for (let i = 0; i < n; i++) {
+          if (face.area[i] && Math.hypot((i % w) - sx, ((i / w) | 0) - sy) <= reach) near[i] = 1;
         }
         spot = skinMedians(soft, near, null)[0].lab;
       }
@@ -1089,7 +1203,14 @@
     let skin = null, count = 0;
     if (spot) {
       const colored = skinColored(soft, n, spot);
-      if (!colored[seed]) seed = nearestColored(colored, w, h, seed % w, (seed / w) | 0);
+      if (!colored[seed] && face) {
+        // the middle of the face is off the typical color (a red nose): grow from the deepest
+        // part of the face that is on it
+        for (let i = 0; i < n; i++) face.area[i] &= colored[i];
+        seed = deepestPoint(face.area, w, h).seed;
+      } else if (!colored[seed]) {
+        seed = nearestColored(colored, w, h, seed % w, (seed / w) | 0);
+      }
       if (seed >= 0) {
         skin = skinAround(soft, w, h, colored, seed);
         for (let i = 0; i < n; i++) count += skin[i];
@@ -1146,8 +1267,9 @@
     });
     const anchors = [0, 1, 2].map((z) => (opts.mode === 'zone' && masses[z] ? masses[z].lab : main));
 
-    // Where each pixel's color is read: its color block, or the blurred photo
-    let srcL = prep.L, srcA, srcB;
+    // Where each pixel's color is read: its color block, or the blurred photo. srcL is the value
+    // the map is painted at, readL the one that goes with the color read.
+    let srcL = prep.L, readL, srcA, srcB;
     if (opts.perBlock) {
       const bl = [];
       for (let k = 0; k < res.blockRGB.length; k += 3) bl.push(rgbToLab(res.blockRGB[k], res.blockRGB[k + 1], res.blockRGB[k + 2]));
@@ -1156,10 +1278,11 @@
         const c = bl[res.block[i]];
         srcL[i] = c[0]; srcA[i] = c[1]; srcB[i] = c[2];
       }
+      readL = srcL;
     } else {
       // the Simplify blur when it is stronger than the light one, so the map simplifies with the studies
       const bc = prep.blurCache && prep.blurCache.r > soft.r ? prep.blurCache : soft;
-      srcA = bc.A; srcB = bc.B;
+      readL = bc.L; srcA = bc.A; srcB = bc.B;
     }
     // which of the skin's three parts each pixel's value falls in, for comparing like with like
     const zone = new Uint8Array(n);
@@ -1178,7 +1301,9 @@
     for (let i = 0, p = 0; i < n; i++, p += 4) {
       const an = anchors[zone[i]];
       const L = srcL[i];
-      const v = (srcA[i] - an[1]) * ax + (srcB[i] - an[2]) * ay;
+      // compared with the anchor taken to this pixel's value: see shift()
+      const k = (readL[i] + 16) / (an[0] + 16);
+      const v = (srcA[i] - k * an[1]) * ax + (srcB[i] - k * an[2]) * ay;
       if (fade && !skin[i]) {
         // outside the skin: a pale, flat gray that still shows where things are
         image[p] = image[p + 1] = image[p + 2] = grayForL(62 + L * 0.22);
@@ -1202,7 +1327,7 @@
       skin,       // 1 where the pixel is part of the measured skin, or null if none was found
       seed,       // the pixel the skin was grown from, or -1
       zone,       // the skin part (0-2) each pixel's value falls in
-      srcA, srcB, // the a*, b* each pixel was read from
+      readL, srcA, srcB, // the L*, a*, b* each pixel was read from
       anchors,    // Lab each part is compared with
       spot: { lab: main, rgb: labToSrgb(main[0], main[1], main[2]), found: !!spot, picked: !!opts.spot },
       skinShare: count / n,
@@ -1211,14 +1336,22 @@
     };
   }
 
-  // How color b differs from color a: warmth along the warm axis, yellower (+) or redder (-)
-  // across it, and chroma
+  /*
+   * How color b differs from color a: warmth along the warm axis, yellower (+) or redder (-)
+   * across it, and chroma. a is first taken to b's value the way less (or more) of the same light
+   * would take it: dimming a color's light scales its a* and b* with L* + 16, exactly while it is
+   * not near black. Otherwise every shadow would read cooler and grayer than the light, since
+   * chroma shrinks with value, and a face modelled with one color darkened would look modelled
+   * in temperature. This way plain darkening reads as no change, and what shows is the shift
+   * that darkening alone doesn't give.
+   */
   function shift(a, b) {
-    const da = b[1] - a[1], db = b[2] - a[2];
+    const k = (b[0] + 16) / (a[0] + 16);
+    const da = b[1] - k * a[1], db = b[2] - k * a[2];
     return {
       warm: da * COS_W + db * SIN_W,
       yellow: db * COS_W - da * SIN_W,
-      dChroma: Math.hypot(b[1], b[2]) - Math.hypot(a[1], a[2]),
+      dChroma: Math.hypot(b[1], b[2]) - k * Math.hypot(a[1], a[2]),
     };
   }
 
@@ -1232,11 +1365,16 @@
     return [at(down), labToSrgb(60, 0, 0), at(up)];
   }
 
-  // What the loupe reads at pixel i of a warm / cool map
+  // What the loupe reads at pixel i of a warm / cool map: the shift, the color it is compared with
+  // (the anchor at this value: what gray stands for here) and the color that was read, which in
+  // Blocks is the block's
   function temperatureAt(map, i) {
     const an = map.anchors[map.zone[i]];
-    return Object.assign(shift(an, [0, map.srcA[i], map.srcB[i]]), {
-      anchor: labToSrgb(an[0], an[1], an[2]),
+    const L = map.readL[i];
+    const k = (L + 16) / (an[0] + 16);
+    return Object.assign(shift(an, [L, map.srcA[i], map.srcB[i]]), {
+      anchor: labToSrgb(L, k * an[1], k * an[2]),
+      color: labToSrgb(L, map.srcA[i], map.srcB[i]),
       skin: !map.skin || !!map.skin[i],
     });
   }
@@ -1285,5 +1423,7 @@
     temperatureMap,
     temperatureAt,
     temperatureLegend,
+    temperatureShift: shift,
+    skinSpotProblem,
   };
 })();
