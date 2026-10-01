@@ -31,6 +31,17 @@ Proportion mistakes, such as eyes set too high, a head too narrow or a mouth off
 
 Measurements are true to the photo, not to the sitter. A phone held close to a face enlarges the nose and shrinks the ears, so measure photos taken from 1.5 m or more, zoomed in. While you measure or drop plumb points, touching an image draws instead of scrolling the page, as with **Draw lines**.
 
+### Hard edges stay hard
+
+**Simplify** smooths the photo before it is split into values. A plain blur turns every hard edge, such as a lit face against dark hair, into a ramp through the middle values, and the split would draw that ramp as a thin gray outline the photo doesn't have. Any thin middle band that runs between shadow and light is split between the two at its halfway value instead, so a hard edge goes straight from shadow to light. A narrow halftone with middle values of its own, such as reflected light along the jaw or the side of the nose, stays. Halftones narrower than about 4 px at the working size can't be told apart from the edge itself and are split too. With Simplify off nothing is smoothed, and every pixel is split by its own value.
+
+**Smoothing**, under Simplify, chooses how the photo is smoothed:
+
+- **Soft** blurs everything evenly, for rounder masses.
+- **Edge-aware** (the default) flattens detail inside shapes but keeps edges where the photo has them. The corners of shadow shapes stay sharp, small dark shapes such as nostrils keep their place, and the color blocks don't spend a color on the in-between colors along an edge. The more you simplify, the stronger a step has to be to count as an edge, so small features still merge into larger masses. Hair, glasses frames and patterned clothing can stay busier than with Soft; **Merge small shapes** or Soft calms them.
+
+The choice is kept in your browser between visits. The painting check simplifies your painting the same way.
+
 ### Check my painting
 
 The second tab scores a photo of your finished piece against the reference.
@@ -66,7 +77,8 @@ To load a photo, use **Load photo**, drag it onto the page, or paste it. Transpa
 
 | Setting | What it does |
 | --- | --- |
-| Simplify | Blurs detail before the value split so values gather into larger masses. |
+| Simplify | Smooths detail before the value split so values gather into larger masses. |
+| Smoothing | **Soft** blurs evenly. **Edge-aware** flattens detail inside shapes but keeps edges where the photo has them. |
 | Merge small shapes | Folds any shape smaller than a size threshold into the neighbor it shares the most edge with. |
 | Working size | The resolution the studies are computed at (600 / 900 / 1400 px on the long side). |
 | Shadow / middle and middle / light splits | Where the value scale is cut. **Auto split** picks them from the photo with three-class Otsu thresholding. |
@@ -79,9 +91,9 @@ To load a photo, use **Load photo**, drag it onto the page, or paste it. Transpa
 All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Munsell-style value is shown as L\* / 10.
 
 1. The photo is scaled to the working size and converted to Lab (`js/processing.js`, `prepare`).
-2. Lightness and color are blurred with three box-blur passes, which approximate a gaussian (`Simplify`).
-3. Each pixel goes into shadow, middle or light by its blurred L\*. Small connected shapes are then merged away.
-4. Within each value mass, k-means clusters the blurred colors, weighting chroma a little more than lightness. Small shapes are merged again, but only into shapes of the same value, so blocks never cross value boundaries.
+2. Lightness and color are smoothed (`Simplify`). **Soft** uses three box-blur passes, which approximate a gaussian. **Edge-aware** uses the domain transform recursive filter (Gastal and Oliveira 2011) on L\*, a\* and b\* together, with the same spread as the blur. Along each row and column, a color step counts as distance: a 30 L\* step as much as 1% of the picture's long side, so the smoothing flows inside shapes and stops at hard edges. The filter is guided by the box blur first and then by its own result, two rounds of rolling guidance (Zhang et al. 2014), so fine texture the blur removes, such as hair strands, pores and noise, doesn't stop it.
+3. Each pixel goes into shadow, middle or light by its smoothed L\*. Where the middle zone is thinner than about 2σ + 2 px (σ is the blur's spread) and lies between shadow and light, it is split between the two at the smoothed value halfway between the splits. A pixel there keeps the middle value if its own L\* (barely blurred) is a middle value, unless shadow and light values are both within 2 px of it. Small connected shapes are then merged away.
+4. Within each value mass, k-means clusters the smoothed colors, weighting chroma a little more than lightness. Small shapes are merged again, but only into shapes of the same value, so blocks never cross value boundaries.
 5. Each color group is filled with its most prominent color. The group's original pixels are sorted into Lab bins about 4 L\* by 6 a\*/b\* wide, with neutral gray in the middle of a bin. The fullest bin wins, counting its neighbouring bins too so a color split across a bin edge isn't outvoted, and only its pixels are averaged, so the result is a color that is really in the photo. A bin with under half the pixels of its fullest neighbour can't win, so a nearly empty bin between two full ones is never picked. The painting check measures each shape the same way.
 
 ## Files
