@@ -25,7 +25,23 @@
     canvases: {
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
+      temp: $('cv-temp'),
     },
+    vTemp: $('vTemp'),
+    tempBar: $('tempBar'),
+    tempNotes: $('tempNotes'),
+    tempGain: $('tempGain'), tempGainOut: $('tempGainOut'),
+    tempFade: $('tempFade'),
+    tempChip: $('tempChip'),
+    tempSpotText: $('tempSpotText'),
+    tempPick: $('tempPick'),
+    tempAuto: $('tempAuto'),
+    tempTitle: $('tempTitle'),
+    tempLegLo: $('tempLegLo'),
+    tempLegHi: $('tempLegHi'),
+    tempRamp: $('tempRamp'),
+    tempParts: $('tempParts'),
+    tempSay: $('tempSay'),
     tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn') },
     tabPanels: { study: $('tab-study'), check: $('tab-check') },
     toolHint: $('toolHint'),
@@ -79,6 +95,7 @@
 
   const ZONE_NAMES = ['Shadow', 'Middle', 'Light'];
   const PALETTE_KEY = 'portrait-value-studio.palette';
+  const TEMP_KEY = 'portrait-value-studio.temp';
 
   const state = {
     source: null,      // HTMLImageElement or canvas
@@ -106,6 +123,18 @@
       gains: [1, 1, 1],  // white-balance correction, linear light
     },
     picking: false,      // waiting for a click on a neutral spot of the painting
+    temp: Object.assign({  // the warm / cool map; these five settings are remembered
+      axis: 'warm',      // 'warm' (warm / cool) or 'hue' (red / yellow)
+      mode: 'spot',      // compare with the skin spot, or 'zone': each value with its own skin
+      detail: 'smooth',  // or 'blocks'
+      gain: 3,           // exaggeration
+      fade: true,        // fade all but the skin
+    }, loadTempSettings(), {
+      spot: null,        // picked skin spot { x, y, fx, fy, r, g, b }, or null for the whole face
+      map: null,         // Study.temperatureMap() output
+      dirty: true,
+      picking: false,    // waiting for a click on the skin
+    }),
   };
 
   // ---- Helpers ------------------------------------------------------------
@@ -219,7 +248,9 @@
     renderZones();
     drawHistogram();
     state.art.dirty = true;
+    state.temp.dirty = true;
     if (state.tab === 'check') runCheck();
+    if (tempVisible()) runTemp();
     els.busy.hidden = true;
   }
 
@@ -235,6 +266,9 @@
     const { w, h, rgba } = state.prep;
     paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
     state.pixels.orig = rgba;
+    // a picked skin spot stays on the same place in the photo at the new working size
+    const spot = state.temp.spot;
+    if (spot) state.temp.spot = spotAt(Math.floor(spot.fx * w), Math.floor(spot.fy * h));
     if (resetSplit) autoSplit();
     runSoon(0);
   }
@@ -326,6 +360,7 @@
         toast('Reference lines cleared for the new photo');
       }
       if (state.art.isExample) setArt(null);
+      state.temp.spot = null;
       prepareAndRun(true);
     });
   }
@@ -413,7 +448,7 @@
   els.g.forEach((el) => el.addEventListener('input', () => { updateOutputs(); runSoon(); }));
 
   document.querySelectorAll('input[name="view"]').forEach((el) =>
-    el.addEventListener('change', () => { els.panels.dataset.view = el.value; })
+    el.addEventListener('change', () => showView(el.value))
   );
 
   document.querySelectorAll('[data-save]').forEach((btn) =>
@@ -422,6 +457,7 @@
       const suffix = {
         orig: 'original', value: 'three-value', block: 'color-blocks',
         artblock: 'my-painting-blocks', diff: 'accuracy-map',
+        temp: state.temp.axis === 'hue' ? 'red-yellow-map' : 'warm-cool-map',
       }[id];
       savePng(withOverlay(els.canvases[id]), `${state.baseName}-${suffix}.png`);
     })
@@ -509,6 +545,17 @@
         els.loupeHex.textContent = region.pct + '% match';
         els.loupeVal.textContent = 'ΔE ' + region.dE.toFixed(1);
       }
+    } else if (s.id === 'temp' && state.temp.map) {
+      // on the warm / cool map, how this spot differs from the color it is compared with
+      const i = s.y * s.w + s.x;
+      const t = Study.temperatureAt(state.temp.map, i);
+      const o = state.pixels.orig;
+      els.loupeChip.style.background = `linear-gradient(90deg, rgb(${t.anchor}) 50%, rgb(${o[i * 4]},${o[i * 4 + 1]},${o[i * 4 + 2]}) 50%)`;
+      const warm = shiftText(t.warm, 'warmer', 'cooler'), yellow = shiftText(t.yellow, 'yellower', 'redder');
+      const [main, other] = state.temp.axis === 'hue' ? [yellow, warm] : [warm, yellow];
+      els.loupeHex.textContent = main.charAt(0).toUpperCase() + main.slice(1);
+      els.loupeVal.textContent = [other, `chroma ${t.dChroma >= 0 ? '+' : '−'}${Math.abs(t.dChroma).toFixed(1)}`]
+        .concat(t.skin ? [] : ['not skin']).join(' · ');
     } else {
       els.loupeChip.style.background = hex;
       els.loupeHex.textContent = hex;
@@ -610,7 +657,7 @@
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button > 0) return;
       down = { x: e.clientX, y: e.clientY };
-      if (state.picking) return;
+      if (state.picking || state.temp.picking) return;
       if (state.tool === 'line') {
         if (!canvas.width) return;
         e.preventDefault();
@@ -653,8 +700,14 @@
         else if (moved < 10) toast('Click a white or gray spot on Your painting');
         return;
       }
-      // the accuracy map's tints are not colors worth keeping; a line drag cancelled with Esc ends here too
-      if (s && moved < 10 && s.id !== 'diff' && state.tool === 'sample') addColor(s);
+      if (state.temp.picking) {
+        if ((canvas === els.canvases.orig || canvas === els.canvases.temp) && s && moved < 10) pickSkin(s);
+        else if (moved < 10) toast('Click the skin on the Original or on the map');
+        return;
+      }
+      // the accuracy map's and warm / cool map's tints are not colors worth keeping; a line drag
+      // cancelled with Esc ends here too
+      if (s && moved < 10 && s.id !== 'diff' && s.id !== 'temp' && state.tool === 'sample') addColor(s);
     });
   });
 
@@ -1123,6 +1176,7 @@
     // the save dialog is modal: Esc only closes it, and nothing behind it should change
     if (els.saveDialog.open) return;
     if (e.key === 'Escape' && state.picking) setPicking(false);
+    if (e.key === 'Escape' && state.temp.picking) setSkinPicking(false);
     if (e.key === 'Escape' && state.drawing) {
       state.drawing = null;
       els.loupe.hidden = true;
@@ -1142,6 +1196,7 @@
   function switchTab(name, focus) {
     state.tab = name;
     if (name !== 'check') setPicking(false); // picking a neutral spot only works on Your painting
+    if (name !== 'study') setSkinPicking(false);
     Object.entries(els.tabs).forEach(([key, btn]) => {
       const on = key === name;
       btn.setAttribute('aria-selected', on);
@@ -1150,6 +1205,7 @@
       if (on && focus) btn.focus();
     });
     if (name === 'check' && state.art.dirty) runCheck();
+    if (tempVisible() && state.temp.dirty) tempSoon(30);
     drawAllOverlays();
   }
 
@@ -1536,17 +1592,298 @@
     return c;
   }
 
+  // ---- Warm / cool map -------------------------------------------------------
+
+  // The remembered map settings, kept only if they are ones the controls offer
+  function loadTempSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(TEMP_KEY) || '{}') || {};
+      const out = {};
+      if (saved.axis === 'warm' || saved.axis === 'hue') out.axis = saved.axis;
+      if (saved.mode === 'spot' || saved.mode === 'zone') out.mode = saved.mode;
+      if (saved.detail === 'smooth' || saved.detail === 'blocks') out.detail = saved.detail;
+      if (typeof saved.gain === 'number' && saved.gain >= 1 && saved.gain <= 5) out.gain = Math.round(saved.gain * 2) / 2;
+      if (typeof saved.fade === 'boolean') out.fade = saved.fade;
+      return out;
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function saveTempSettings() {
+    const { axis, mode, detail, gain, fade } = state.temp;
+    try {
+      localStorage.setItem(TEMP_KEY, JSON.stringify({ axis, mode, detail, gain, fade }));
+    } catch (err) {
+      /* storage unavailable: the settings still work for this visit */
+    }
+  }
+
+  function syncTempControls() {
+    const t = state.temp;
+    document.querySelector(`input[name="tempAxis"][value="${t.axis}"]`).checked = true;
+    document.querySelector(`input[name="tempMode"][value="${t.mode}"]`).checked = true;
+    document.querySelector(`input[name="tempDetail"][value="${t.detail}"]`).checked = true;
+    els.tempGain.value = t.gain;
+    els.tempGainOut.value = `${t.gain}× exaggerated`;
+    els.tempFade.checked = t.fade;
+  }
+
+  const tempVisible = () => state.tab === 'study' && els.panels.dataset.view === 'temp';
+
+  function showView(view) {
+    els.panels.dataset.view = view;
+    const temp = view === 'temp';
+    els.tempBar.hidden = els.tempNotes.hidden = !temp;
+    if (!temp) setSkinPicking(false);
+    if (temp && state.temp.dirty) tempSoon(30); // finding the skin can take a moment: show Updating first
+  }
+
+  function runTemp() {
+    const t = state.temp;
+    if (!state.result) return;
+    t.dirty = false;
+    const { w, h } = state.prep;
+    const map = Study.temperatureMap(state.prep, state.result, {
+      spot: t.spot,
+      mode: t.mode,
+      axis: t.axis,
+      gain: t.gain,
+      perBlock: t.detail === 'blocks',
+      skinOnly: t.fade,
+      outlines: els.outlines.checked,
+    });
+    t.map = map;
+    paint(els.canvases.temp, map.image, w, h);
+    if (t.spot) markSpot(els.canvases.temp, t.spot);
+    state.pixels.temp = map.image;
+    renderTemp(map);
+  }
+
+  let tempTimer = 0;
+  function tempSoon(delay) {
+    els.busy.hidden = false;
+    clearTimeout(tempTimer);
+    tempTimer = setTimeout(() => {
+      runTemp();
+      els.busy.hidden = true;
+    }, delay == null ? 60 : delay);
+  }
+
+  // Rings the picked skin spot on the map, so it is clear what gray stands for
+  function markSpot(canvas, spot) {
+    const g = canvas.getContext('2d');
+    const r = Math.max(5, Math.max(canvas.width, canvas.height) / 90);
+    g.beginPath();
+    g.arc(spot.x + 0.5, spot.y + 0.5, r, 0, Math.PI * 2);
+    g.lineWidth = r / 2.5;
+    g.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+    g.stroke();
+    g.lineWidth = r / 5;
+    g.strokeStyle = '#ffffff';
+    g.stroke();
+  }
+
+  // "warmer by 3.4", or "same" when the difference is too small to see
+  function shiftText(v, more, less) {
+    return Math.abs(v) < 0.5 ? 'same' : `${v > 0 ? more : less} by ${Math.abs(v).toFixed(1)}`;
+  }
+
+  const rgbCss = (c) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+  const hexOf = (c) => toHex({ r: c[0], g: c[1], b: c[2] });
+
+  function renderTemp(map) {
+    const t = state.temp;
+    const hue = t.axis === 'hue';
+    els.tempTitle.textContent = hue ? 'Red / yellow' : 'Warm / cool';
+    els.tempLegLo.textContent = hue ? 'Redder' : 'Cooler';
+    els.tempLegHi.textContent = hue ? 'Yellower' : 'Warmer';
+    els.tempRamp.style.background = `linear-gradient(90deg, ${Study.temperatureLegend(t.axis).map(rgbCss).join(', ')})`;
+    els.canvases.temp.setAttribute('aria-label', hue
+      ? "Red / yellow map: the photo's values, tinted red where the skin is redder than the skin spot and yellow where it is yellower"
+      : "Warm / cool map: the photo's values, tinted orange where the skin is warmer than the skin spot and blue where it is cooler");
+
+    // the skin spot: what gray on the map stands for
+    const hex = hexOf(map.spot.rgb);
+    els.tempChip.hidden = !map.spot.found;
+    els.tempChip.style.background = hex;
+    els.tempAuto.hidden = !t.spot;
+    let text;
+    if (t.spot) {
+      text = map.skin
+        ? `Gray is the spot you picked, ${hex}, ringed on the map.`
+        : `Gray is the spot you picked, ${hex}, but no skin could be traced around it, so nothing is measured. Pick a spot in the middle of the face, away from hair and edges.`;
+    } else if (map.spot.found) {
+      text = `Gray is this face's typical skin color, ${hex}, found automatically. Wrong face, or want another zero point? Pick a skin spot, such as the lit forehead.`;
+    } else {
+      text = 'No face was found automatically, so the map is measured against neutral gray. Click Pick skin spot, then click the lit forehead or a cheek.';
+    }
+    if (t.mode === 'zone' && map.skin) text += ' Same value compares each part of the skin with the typical skin of its own value.';
+    els.tempSpotText.textContent = text;
+
+    // the skin's light, halftone and shadow
+    els.tempParts.innerHTML = '';
+    [2, 1, 0].forEach((z) => {
+      const m = map.masses[z];
+      if (!m) return;
+      const li = document.createElement('li');
+      const sw = document.createElement('span');
+      sw.className = 'temp-swatch';
+      sw.style.background = rgbCss(m.rgb);
+      sw.title = hexOf(m.rgb);
+      const name = document.createElement('span');
+      name.className = 'temp-part-name';
+      name.textContent = ['Shadow', 'Halftone', 'Light'][z];
+      const meta = document.createElement('small');
+      meta.textContent = `V ${valueLabel(m.lab[0])} · ${Math.round(m.share * 100)}% of the skin`;
+      name.append(meta);
+      const shift = document.createElement('span');
+      shift.className = 'temp-part-shift';
+      const warm = shiftText(m.warm, 'warmer', 'cooler'), yellow = shiftText(m.yellow, 'yellower', 'redder');
+      (hue ? [yellow, warm] : [warm, yellow]).forEach((line, k) => {
+        if (k) shift.append(document.createElement('br'));
+        shift.append(line);
+      });
+      li.append(sw, name, shift);
+      els.tempParts.append(li);
+    });
+    els.tempSay.textContent = map.skin ? describeTemp(map.masses) : 'Pick a skin spot to measure the face.';
+  }
+
+  /*
+   * Plain notes on how the temperature moves across the form: shadow against light, then the
+   * halftone, where the form turns, against both. Steps under 1.5 count as the same.
+   */
+  function describeTemp([shadow, half, light]) {
+    const notes = [];
+    // how b differs from a besides warmth
+    const also = (a, b) => {
+      const q = [];
+      const dy = b.yellow - a.yellow, dc = b.dChroma - a.dChroma;
+      if (Math.abs(dy) >= 1.5) q.push(dy > 0 ? 'yellower' : 'redder');
+      if (Math.abs(dc) >= 1.5) q.push(dc > 0 ? 'richer' : 'grayer');
+      return q;
+    };
+    if (shadow && light) {
+      const d = shadow.warm - light.warm;
+      const q = also(light, shadow);
+      if (Math.abs(d) < 1.5) {
+        notes.push(`The shadow and the light are about the same temperature${q.length ? `; the shadow is ${q.join(' and ')}` : ''}.`);
+      } else {
+        notes.push(`The shadow is ${d > 0 ? 'warmer' : 'cooler'} than the light by ${Math.abs(d).toFixed(0)}${q.length ? `: ${q.join(' and ')}` : ''}.`);
+      }
+    }
+    const others = [light, shadow].filter(Boolean);
+    if (half && others.length) {
+      const names = others.length === 2 ? 'both the light and the shadow' : light ? 'the light' : 'the shadow';
+      const lo = Math.min(...others.map((m) => m.warm)), hi = Math.max(...others.map((m) => m.warm));
+      if (half.warm < lo - 1.5) {
+        const grayer = half.dChroma < Math.min(...others.map((m) => m.dChroma)) - 1.5;
+        notes.push(`The halftone is cooler than ${names}: paint the turn with a ${grayer ? 'grayer, ' : ''}cooler mix, not just a darker one.`);
+      } else if (half.warm > hi + 1.5) {
+        const richer = half.dChroma > Math.max(...others.map((m) => m.dChroma)) + 1.5;
+        notes.push(`The halftone is warmer than ${names}: keep the turn ${richer ? 'rich and ' : ''}warm rather than graying it.`);
+      } else if (others.length === 2) {
+        notes.push('The halftone sits between the light and the shadow in temperature.');
+      } else {
+        notes.push(`The halftone is about the same temperature as ${names}.`);
+      }
+    }
+    return notes.length ? notes.join(' ') : 'Too little of the skin was measured to compare its light and shadow.';
+  }
+
+  // The 5 x 5 patch of the photo around a pixel, as a skin spot
+  function spotAt(x, y) {
+    const { w, h, rgba } = state.prep;
+    x = Math.max(0, Math.min(w - 1, x));
+    y = Math.max(0, Math.min(h - 1, y));
+    let r = 0, g = 0, b = 0, k = 0;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const px = x + dx, py = y + dy;
+        if (px < 0 || py < 0 || px >= w || py >= h) continue;
+        const p = (py * w + px) * 4;
+        r += rgba[p]; g += rgba[p + 1]; b += rgba[p + 2]; k++;
+      }
+    }
+    return { x, y, fx: (x + 0.5) / w, fy: (y + 0.5) / h, r: Math.round(r / k), g: Math.round(g / k), b: Math.round(b / k) };
+  }
+
+  // Makes the clicked patch of skin the zero point: gray on the map
+  function pickSkin(s) {
+    const spot = spotAt(s.x, s.y);
+    const hex = toHex(spot);
+    if (Study.lightnessOf(spot.r, spot.g, spot.b) < 12) {
+      toast('That spot is too dark to read. Click lit skin, such as the forehead or a cheek.');
+      return;
+    }
+    const [, a, b] = Study.labOf(spot.r, spot.g, spot.b);
+    if (Math.hypot(a, b) < 5) {
+      toast(`${hex} is nearly gray, so there is no warmth to measure from. Click a patch of skin.`);
+      return;
+    }
+    // skin of every complexion, and under most lights, is between red and yellow
+    const hue = (Math.atan2(b, a) * 180) / Math.PI;
+    if (hue < -30 || hue > 110) {
+      toast(`${hex} doesn't look like skin. Click the lit forehead or a cheek.`);
+      return;
+    }
+    setSkinPicking(false);
+    state.temp.spot = spot;
+    runTemp();
+    toast(state.temp.map.skin ? `Skin spot set: ${hex} is now gray on the map` : 'No skin could be traced around that spot');
+  }
+
+  function setSkinPicking(on) {
+    state.temp.picking = on;
+    document.body.classList.toggle('picking-skin', on);
+    els.tempPick.classList.toggle('is-active', on);
+    els.tempPick.textContent = on ? 'Click the skin… (Esc to cancel)' : 'Pick skin spot';
+  }
+
+  els.tempPick.addEventListener('click', () => setSkinPicking(!state.temp.picking));
+  els.tempAuto.addEventListener('click', () => {
+    state.temp.spot = null;
+    setSkinPicking(false);
+    runTemp();
+  });
+  [['tempAxis', 'axis'], ['tempMode', 'mode'], ['tempDetail', 'detail']].forEach(([name, key]) =>
+    document.querySelectorAll(`input[name="${name}"]`).forEach((el) =>
+      el.addEventListener('change', () => {
+        state.temp[key] = el.value;
+        saveTempSettings();
+        runTemp();
+      })
+    )
+  );
+  els.tempGain.addEventListener('input', () => {
+    state.temp.gain = +els.tempGain.value;
+    els.tempGainOut.value = `${state.temp.gain}× exaggerated`;
+    saveTempSettings();
+    tempSoon();
+  });
+  els.tempFade.addEventListener('change', () => {
+    state.temp.fade = els.tempFade.checked;
+    saveTempSettings();
+    runTemp();
+  });
+
   // ---- Start --------------------------------------------------------------
 
   function start() {
     updateOutputs();
     renderPalette();
     updateLineButtons();
+    syncTempControls();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true);
     if (location.hash === '#check') switchTab('check');
+    if (location.hash === '#warm-cool') {
+      els.vTemp.checked = true;
+      showView('temp');
+    }
   }
 
   const redrawHist = () => drawHistogram();

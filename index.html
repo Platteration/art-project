@@ -14,7 +14,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>Portrait Value Studio</h1>
-      <p>Turn a reference portrait into a three-value study and a color-block study. Hover any image to sample it; click to keep the color.</p>
+      <p>Turn a reference portrait into a three-value study, a color-block study and a warm / cool map of the skin. Hover any image to sample it; click to keep the color.</p>
     </div>
     <div class="topbar-actions">
       <input type="file" id="file" accept="image/*" class="visually-hidden">
@@ -143,6 +143,47 @@
             <input type="radio" name="view" id="vOrig" value="orig"><label for="vOrig">Original</label>
             <input type="radio" name="view" id="vValue" value="value"><label for="vValue">Values</label>
             <input type="radio" name="view" id="vBlock" value="block"><label for="vBlock">Blocks</label>
+            <input type="radio" name="view" id="vTemp" value="temp"><label for="vTemp">Warm / cool <span class="tag-new">New</span></label>
+          </div>
+        </div>
+
+        <div class="temp-bar" id="tempBar" hidden>
+          <div class="temp-controls">
+            <div class="tool-group">
+              <span class="tool-label" id="tempAxisLabel">Map</span>
+              <div class="seg" role="radiogroup" aria-labelledby="tempAxisLabel">
+                <input type="radio" name="tempAxis" id="taWarm" value="warm" checked><label for="taWarm">Warm / cool</label>
+                <input type="radio" name="tempAxis" id="taHue" value="hue"><label for="taHue">Red / yellow</label>
+              </div>
+            </div>
+            <div class="tool-group">
+              <span class="tool-label" id="tempModeLabel">Compare with</span>
+              <div class="seg" role="radiogroup" aria-labelledby="tempModeLabel">
+                <input type="radio" name="tempMode" id="tmSpot" value="spot" checked><label for="tmSpot">Skin spot</label>
+                <input type="radio" name="tempMode" id="tmZone" value="zone"><label for="tmZone">Same value</label>
+              </div>
+            </div>
+            <div class="tool-group">
+              <span class="tool-label" id="tempDetailLabel">Detail</span>
+              <div class="seg" role="radiogroup" aria-labelledby="tempDetailLabel">
+                <input type="radio" name="tempDetail" id="tdSmooth" value="smooth" checked><label for="tdSmooth">Smooth</label>
+                <input type="radio" name="tempDetail" id="tdBlocks" value="blocks"><label for="tdBlocks">Blocks</label>
+              </div>
+            </div>
+            <div class="tool-group temp-gain">
+              <label class="tool-label" for="tempGain">Exaggerate</label>
+              <input type="range" id="tempGain" min="1" max="5" step="0.5" value="3">
+              <output id="tempGainOut" for="tempGain"></output>
+            </div>
+            <label class="check" for="tempFade"><input type="checkbox" id="tempFade" checked> Fade all but the skin</label>
+          </div>
+          <div class="temp-spot">
+            <span class="chip" id="tempChip"></span>
+            <p class="hint" id="tempSpotText"></p>
+            <div class="temp-spot-actions">
+              <button type="button" class="btn btn-small" id="tempPick">Pick skin spot</button>
+              <button type="button" class="btn btn-small" id="tempAuto" hidden>Use the whole face</button>
+            </div>
           </div>
         </div>
 
@@ -159,6 +200,29 @@
             <figcaption><span>Color blocks</span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
             <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
           </figure>
+          <figure class="panel" data-panel="temp">
+            <figcaption><span id="tempTitle">Warm / cool</span><button type="button" class="btn btn-ghost" data-save="temp">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-temp" class="view" aria-label="Warm / cool map: the photo's values, tinted orange where the skin is warmer than the skin spot and blue where it is cooler"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            <div class="temp-legend"><span id="tempLegLo">Cooler</span><span class="temp-ramp" id="tempRamp"></span><span id="tempLegHi">Warmer</span></div>
+          </figure>
+        </div>
+
+        <div class="temp-notes" id="tempNotes" hidden>
+          <section class="temp-card" aria-labelledby="tempSumTitle">
+            <h3 id="tempSumTitle">Across the form</h3>
+            <ol class="temp-parts" id="tempParts"></ol>
+            <p class="temp-say" id="tempSay"></p>
+            <p class="hint">Measured on the outlined skin, which is split into its own light, halftone and shadow. Each row is that part's typical color and how it differs from the skin spot. Numbers are color-difference steps: about 2 is just visible side by side.</p>
+          </section>
+          <section class="temp-card" aria-labelledby="tempZonesTitle">
+            <h3 id="tempZonesTitle">Three color zones of the face</h3>
+            <ul class="temp-zones">
+              <li><strong>Forehead</strong> leans yellow.</li>
+              <li><strong>Cheeks, nose and ears</strong> lean red, where blood runs close to the surface.</li>
+              <li><strong>Mouth, jaw and chin</strong> lean blue-gray or green, most of all with beard shadow.</li>
+            </ul>
+            <p class="hint">Test it on this photo: the Red / yellow map shows the first two, Warm / cool the third. Hover a zone to read it on the loupe. The light and the camera can override all three, and when they do, paint what you see.</p>
+          </section>
         </div>
       </section>
 

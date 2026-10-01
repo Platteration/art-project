@@ -16,6 +16,23 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 
 **Save PNG** includes the grid and lines when they are showing. Inside another site's frame, such as an artifact viewer, downloads can be blocked without any sign, so there **Save PNG** and **Save palette PNG** start the download and also open the image in a dialog: if no download arrives, right-click or long-press it to save. Opened directly, or in a frame on the same site that allows downloads, they just download.
 
+### Warm / cool map
+
+Mixing one flesh color and lightening or darkening it with white and black makes skin look chalky: what models a head is the shift in temperature inside each value. **Show → Warm / cool** puts a map of those shifts next to the original. It keeps every pixel's value exactly and replaces its color with an exaggerated reading against the skin:
+
+- **Map**: **Warm / cool** tints the skin orange where it is warmer than the skin spot, blue where it is cooler and gray where it is the same. **Red / yellow** reads across that: red where the skin is redder, yellow where it is yellower. That is how the forehead, cheeks and nose differ, and for skin a turn of hue barely moves it warmer or cooler.
+- **Skin spot**: the color that shows as gray. Without a pick it is the typical color of the face the tool finds by itself: the most central, best-lit area of smooth, skin-colored pixels. **Pick skin spot**, then click a patch of skin on the original or on the map, such as the lit forehead. The five-by-five pixel patch there becomes the zero point and is ringed on the map. Spots that are nearly gray or too dark are refused. **Use the whole face** goes back to the automatic one.
+- **Compare with**: **Skin spot** measures everything against that one color. **Same value** measures the skin's light, halftone and shadow each against its own typical color, so only the shifts within a value show.
+- **Detail**: **Smooth** reads each pixel, through the Simplify blur or a light blur of its own. **Blocks** reads each color block.
+- **Exaggerate**: 1× to 5×, 3× by default. The map's colors are exaggerated on purpose: mix the shift, not the map's color.
+- **Fade all but the skin** turns everything outside the measured skin pale gray and outlines the skin, so hair, clothes and background don't pull the eye.
+
+Only the skin is measured. From the spot, the tool takes the connected pixels whose hue and chroma are close to the spot's at any value (shadows on skin keep their chroma; dark hair, red curtains and blue shirts don't match), stops at sharp value edges such as a hairline, and leaves out anything textured: skin is smooth, while hair, beards and fabric are not. That skin is split into its own light, halftone and shadow with the same three-class Otsu as **Auto split**, because a picture's value masses often put a whole face in one mass.
+
+**Across the form**, under the map, lists the typical (median) color of each of the three parts and how it differs from the spot, then says how the temperature moves, for example: "The shadow is cooler than the light by 3: redder and grayer. The halftone is warmer than both the light and the shadow: keep the turn rich and warm rather than graying it." The numbers are steps in L\*a\*b\* along the map's axis; about 2 is just visible side by side. Hover the map and the loupe gives the same reading for the pixel under the cursor, with a chip of the color it is compared with next to the photo's color. A short card lists the three color zones of the face (forehead yellow; cheeks, nose and ears red; mouth to chin blue-gray) so you can test them on your own photo.
+
+The map's settings are kept in your browser. Open `index.html#warm-cool` to start on this view.
+
 ### Check my painting
 
 The second tab scores a photo of your finished piece against the reference.
