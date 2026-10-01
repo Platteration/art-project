@@ -387,7 +387,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .score-of { font: 500 1rem var(--mono); color: var(--muted); }
 .score-grade { font-weight: 600; }
 .score-sub { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 12px; }
-.score-sub div { display: grid; gap: 4px; }
+.score-sub div { display: grid; grid-template-rows: 1fr auto; gap: 4px; } /* figures line up when a label wraps */
 .score-sub dd { margin: 0; display: grid; gap: 6px; font: 600 1.3rem var(--display); font-variant-numeric: tabular-nums; }
 .meter { display: block; height: 6px; border-radius: 3px; background: var(--ground); overflow: hidden; }
 .meter span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; }
@@ -462,8 +462,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 }
 .temp-card h3 { margin: 0; font: 700 0.78rem var(--display); letter-spacing: 0.09em; text-transform: uppercase; }
 .temp-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.temp-parts li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
-.temp-swatch { width: 34px; height: 34px; border-radius: 4px; border: 1px solid var(--line); }
+.temp-parts li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.temp-swatch { width: 44px; height: 34px; border-radius: 4px; border: 1px solid var(--line); } /* skin spot | this part */
 .temp-part-name { font-weight: 600; min-width: 0; }
 .temp-part-name small { display: block; font: 0.75rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .temp-part-shift { font: 500 0.8rem var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
@@ -571,6 +571,10 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 }
 .chip { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); }
 .loupe-val { color: var(--muted); }
+/* the warm / cool map's details on a line of their own, under the reading, within the screen */
+.loupe-long .loupe-info { display: grid; grid-template-columns: auto 1fr; row-gap: 2px; max-width: min(360px, calc(100vw - 16px)); border-radius: 14px; }
+.loupe-long .loupe-val { grid-column: 2; white-space: normal; }
+.loupe-long .loupe-val span { white-space: nowrap; }
 
 /* ---- Drop hint & toast ---- */
 .drop-hint {

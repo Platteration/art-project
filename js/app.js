@@ -533,6 +533,8 @@
 
     const hex = toHex(s);
     const cmp = state.art.cmp;
+    // the warm / cool map's reading is long: its details go on a second line
+    els.loupe.classList.toggle('loupe-long', s.id === 'temp' && !!state.temp.map);
     if (s.id === 'diff' && cmp) {
       // on the accuracy map, show the reference color against yours for the shape
       const i = s.y * s.w + s.x;
@@ -556,8 +558,14 @@
       const warm = shiftText(t.warm, 'warmer', 'cooler'), yellow = shiftText(t.yellow, 'yellower', 'redder');
       const [main, other] = state.temp.axis === 'hue' ? [yellow, warm] : [warm, yellow];
       els.loupeHex.textContent = main.charAt(0).toUpperCase() + main.slice(1);
-      els.loupeVal.textContent = [other, `chroma ${t.dChroma >= 0 ? '+' : '−'}${Math.abs(t.dChroma).toFixed(1)}`]
-        .concat(t.skin ? [] : ['not skin']).join(' · ');
+      // each part in a span of its own, so a long reading wraps between parts only
+      const parts = [other, `chroma ${t.dChroma >= 0 ? '+' : '−'}${Math.abs(t.dChroma).toFixed(1)}`]
+        .concat(t.muted ? ['chip muted to fit'] : [], t.skin ? [] : ['not skin']);
+      els.loupeVal.replaceChildren(...parts.flatMap((part, k) => {
+        const span = document.createElement('span');
+        span.textContent = part;
+        return k ? [' · ', span] : [span];
+      }));
     } else {
       els.loupeChip.style.background = hex;
       els.loupeHex.textContent = hex;
@@ -1755,16 +1763,23 @@
     els.tempChip.style.background = hex;
     els.tempAuto.hidden = !t.spot;
     let text;
+    // a spot picked on the face found automatically keeps that face's skin; elsewhere the skin is
+    // traced from the spot
+    const sameFace = ' It is on the face found automatically, so that face\'s outlined skin is measured.';
     if (t.mode === 'zone' && map.skin) {
       // each part has its own zero point here; the spot only says where the skin is
-      text = t.spot
-        ? `The skin is traced from the spot you picked, ${hex}, ringed on the map.`
-        : `The skin is traced from this face's typical color, ${hex}, found automatically.`;
+      text = !t.spot
+        ? `The skin is traced from this face's typical color, ${hex}, found automatically.`
+        : map.spot.own
+          ? `The skin is traced from the spot you picked, ${hex}, ringed on the map.`
+          : `You picked ${hex}, ringed on the map.${sameFace}`;
       text += ' With Same value, gray is the typical color of each part of the skin: its light, halftone or shadow.';
     } else if (t.spot) {
-      text = map.skin
-        ? `Gray is the spot you picked, ${hex}, ringed on the map.`
-        : `Gray is the spot you picked, ${hex}, but no skin could be traced around it, so nothing is measured. Pick a spot in the middle of the face, away from hair and edges.`;
+      text = !map.skin
+        ? `Gray is the spot you picked, ${hex}, but no skin could be traced around it, so nothing is measured. Pick a spot in the middle of the face, away from hair and edges.`
+        : map.spot.own
+          ? `Gray is the spot you picked, ${hex}, ringed on the map, and the outlined skin is traced from it.`
+          : `Gray is the spot you picked, ${hex}, ringed on the map.${sameFace}`;
     } else if (map.spot.found) {
       text = `Gray is this face's typical skin color, ${hex}, found automatically. Wrong face, or want another zero point? Pick a skin spot, such as the lit forehead.`;
     } else {
@@ -1778,10 +1793,13 @@
       const m = map.masses[z];
       if (!m) return;
       const li = document.createElement('li');
+      // the skin spot taken to this part's value, beside the part's typical color: the step
+      // between the two halves is what the numbers measure
       const sw = document.createElement('span');
+      const [was, is, kept] = m.chip;
       sw.className = 'temp-swatch';
-      sw.style.background = rgbCss(m.rgb);
-      sw.title = hexOf(m.rgb);
+      sw.style.background = `linear-gradient(90deg, ${rgbCss(was)} 50%, ${rgbCss(is)} 50%)`;
+      sw.title = `Left: the skin spot at this value. Right: ${hexOf(m.rgb)}.${kept < 0.9 ? ' Both muted to fit.' : ''}`;
       const name = document.createElement('span');
       name.className = 'temp-part-name';
       name.textContent = ['Shadow', 'Halftone', 'Light'][z];
@@ -1805,7 +1823,8 @@
    * Plain notes on how the temperature moves across the form: shadow against light, then the
    * halftone, where the form turns, against both. Each part is compared with the other taken to
    * its own value, so a part that is only darker reads as the same temperature. Steps under 1.5
-   * count as the same.
+   * count as the same. Darkening alone makes a color cooler and duller side by side, so when the
+   * shadow's swatch looks that way against the light's while the shadow is not, that is said too.
    */
   function describeTemp([shadow, half, light]) {
     const notes = [];
@@ -1820,10 +1839,16 @@
       const d = Study.temperatureShift(light.lab, shadow.lab);
       const q = also(d);
       if (Math.abs(d.warm) < 1.5) {
-        notes.push(`The shadow and the light are about the same temperature${q.length ? `; the shadow is ${q.join(' and ')}` : ''}.`);
+        notes.push(`At the same value, the shadow and the light are about the same temperature${q.length ? `; the shadow is ${q.join(' and ')}` : ''}.`);
       } else {
-        notes.push(`The shadow is ${d.warm > 0 ? 'warmer' : 'cooler'} than the light by ${Math.abs(d.warm).toFixed(0)}${q.length ? `: ${q.join(' and ')}` : ''}.`);
+        notes.push(`The shadow is ${d.warm > 0 ? 'warmer' : 'cooler'} than the light by ${Math.abs(d.warm).toFixed(0)} at the same value${q.length ? `: ${q.join(' and ')} than the light's color only darkened` : ''}.`);
       }
+      // the two as they are, value and all
+      const [, a0, b0] = light.lab, [, a1, b1] = shadow.lab;
+      const looks = [];
+      if ((a1 - a0) * Math.cos(Study.WARM_HUE) + (b1 - b0) * Math.sin(Study.WARM_HUE) <= -1.5 && d.warm > -1.5) looks.push('cooler');
+      if (Math.hypot(a1, b1) - Math.hypot(a0, b0) <= -1.5 && d.dChroma > -1.5) looks.push('duller');
+      if (looks.length) notes.push(`Side by side the shadow looks ${looks.join(' and ')}, only because it is darker.`);
     }
     const others = [light, shadow].filter(Boolean);
     if (half && others.length) {

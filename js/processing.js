@@ -936,19 +936,21 @@
    * halftone, most extra chroma in the shadow, and some of either in the light. Dark hair of a
    * skin hue is grayer than skin in shadow, so the deepest darks get less grayness again, and no
    * extra redness unless richer.
-   * Hue and chroma are judged together, as a share of what is allowed (an ellipse).
+   * Hue and chroma are judged together, as a share of what is allowed (an ellipse). Nothing darker
+   * than floor counts (see skinFor()).
    */
-  function skinColored(soft, n, spot) {
+  function skinColored(soft, n, spot, floor) {
     const [L0, a0, b0] = spot;
     const c0 = Math.max(4, Math.hypot(a0, b0));
     const h0 = Math.atan2(b0, a0);
     const minL = Math.max(8, 0.25 * L0);
+    const lowest = Math.max(minL, floor || 0);
     // a pale spot (a highlight, fair skin) gets more hue room, since hue is looser in pale colors
     const hueTol = Math.min(35, HUE_TOL * Math.max(1, 20 / c0)) * DEG;
     const out = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const L = soft.L[i];
-      if (L < minL) continue;
+      if (L < lowest) continue;
       const a = soft.A[i], b = soft.B[i];
       const c = Math.hypot(a, b);
       if (c < 3 || c > VIVID * (L + 16)) continue;
@@ -1042,6 +1044,7 @@
    * piece at least a sixth the size of the seed's own, and about as smooth, is kept; scraps of
    * hair are smaller or rougher. The texture limit is set from the skin around the seed, so a
    * grainy photo or a painting isn't cut to nothing. Small holes (eyes, nostrils) are filled.
+   * Returns the skin and everything the fill reached ({ region, reach }).
    */
   function skinAround(soft, w, h, colored, seed) {
     const n = w * h;
@@ -1101,14 +1104,14 @@
       });
     }
     const region = new Uint8Array(n);
-    if (own < 0) return region;
+    if (own < 0) return { region, reach };
     // dark hair beside a forehead can be colored like the skin's shadow, but even soft hair is
     // rougher on average than the skin
     const keep = size[own] / 6, rough = 1.5 * (tex[own] / size[own]) + 1;
     const kept = (c) => size[c] >= keep && tex[c] / size[c] <= rough;
     for (let i = 0; i < n; i++) if (smooth[i] && kept(comp[i])) region[i] = 1;
     mergeSmallRegions(region, w, h, Math.round(n * 0.0005), 2, 0);
-    return region;
+    return { region, reach };
   }
 
   // Median L*, a*, b* of the masked pixels, overall and (if zone is given) in each zone 0-2, from
@@ -1182,6 +1185,34 @@
     return '';
   }
 
+  // Whether pixel p lies in a hole in a mask: the area outside the mask around it is enclosed by
+  // the mask, never reaching the picture's edge, and smaller than the mask (an eye, not the
+  // background between two arms)
+  function inHole(mask, w, h, p, size) {
+    const seen = new Uint8Array(mask.length);
+    const stack = [p];
+    seen[p] = 1;
+    let count = 0;
+    while (stack.length) {
+      const q = stack.pop();
+      const x = q % w, y = (q / w) | 0;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1 || ++count > size) return false;
+      for (const r of [q - 1, q + 1, q - w, q + w]) {
+        if (!mask[r] && !seen[r]) { seen[r] = 1; stack.push(r); }
+      }
+    }
+    return true;
+  }
+
+  // The L* that the given share of the masked pixels stay under, to a tenth
+  function percentileL(Ls, mask, count, share) {
+    const hist = new Uint32Array(1001);
+    for (let i = 0; i < mask.length; i++) if (mask[i]) hist[Math.max(0, Math.min(1000, Math.round(Ls[i] * 10)))]++;
+    let k = 0;
+    for (let seen = 0; k < 1000 && (seen += hist[k]) < count * share; k++);
+    return k / 10;
+  }
+
   // Nearest skin-colored pixel to a picked spot, within a short reach, or -1
   function nearestColored(colored, w, h, x, y) {
     const reach = Math.max(3, Math.round(Math.max(w, h) / 60));
@@ -1198,24 +1229,43 @@
   }
 
   /*
-   * The skin to measure: around a picked spot ({ x, y, r, g, b } in working-size pixels), or
-   * around the face findFace() picks. Kept on the prep, since it doesn't depend on the value
-   * splits or Simplify. The skin is split into its own light, halftone and shadow by three-class
-   * Otsu on its lightness: the picture's value masses often put a whole face in one mass, while
-   * the form's light and shadow are what the temperature changes across.
-   * Returns { spot: Lab or null, seed, skin: mask or null, count, splits: [L, L], parts }, where
-   * parts holds the median color and pixel count of the shadow, halftone and light.
+   * The skin to measure: around the face findFace() picks, or around a picked spot ({ x, y, r, g,
+   * b } in working-size pixels). A spot on the skin found automatically measures that same skin,
+   * traced from the face's typical color, and is only the zero point: a spot on a grayer chin or
+   * a redder cheek traces less of the face than its typical color does, and the notes should
+   * describe the face, not where on it the spot was picked. A spot anywhere else (another face,
+   * or the right face when the wrong one was found) is traced from its own color. Kept on the
+   * prep, since it doesn't depend on the value splits or Simplify. The skin is split into its own
+   * light, halftone and shadow by three-class Otsu on its lightness: the picture's value masses
+   * often put a whole face in one mass, while the form's light and shadow are what the
+   * temperature changes across.
+   * Returns { spot: Lab or null, seed, skin: mask or null, count, splits: [L, L], parts, own },
+   * where parts holds the median color and pixel count of the shadow, halftone and light, and own
+   * is true when the skin was traced from the picked spot.
    */
   function skinFor(prep, picked) {
     const key = picked ? [picked.x, picked.y, picked.r, picked.g, picked.b].join(',') : 'auto';
-    if (prep.skinCache && prep.skinCache.key === key) return prep.skinCache;
+    const slot = picked ? 'picked' : 'auto';
+    const cache = prep.skinCache || (prep.skinCache = {});
+    if (cache[slot] && cache[slot].key === key) return cache[slot];
     const { w, h } = prep;
     const n = w * h;
     const soft = softBlurred(prep);
     let spot = null, seed = -1, face = null;
     if (picked) {
       spot = rgbToLab(picked.r, picked.g, picked.b);
-      seed = Math.max(0, Math.min(h - 1, picked.y)) * w + Math.max(0, Math.min(w - 1, picked.x));
+      const px = Math.max(0, Math.min(w - 1, picked.x)), py = Math.max(0, Math.min(h - 1, picked.y));
+      seed = py * w + px;
+      // on the automatically found skin, within the light blur's reach of its outline, or in a
+      // hole in it (the lips, an eye)
+      const auto = skinFor(prep, null);
+      let onAuto = false;
+      for (let y = Math.max(0, py - soft.r); auto.skin && !onAuto && y <= Math.min(h - 1, py + soft.r); y++) {
+        for (let x = Math.max(0, px - soft.r); x <= Math.min(w - 1, px + soft.r); x++) if (auto.skin[y * w + x]) onAuto = true;
+      }
+      if (onAuto || (auto.skin && inHole(auto.skin, w, h, seed, auto.count))) {
+        return (cache[slot] = Object.assign({}, auto, { key, spot }));
+      }
     } else {
       face = findFace(soft, w, h);
       if (face) {
@@ -1231,9 +1281,9 @@
         spot = skinMedians(soft, near, null)[0].lab;
       }
     }
-    let skin = null, count = 0;
-    if (spot) {
-      const colored = skinColored(soft, n, spot);
+    let skin = null, count = 0, reach = null;
+    const trace = (floor) => {
+      const colored = skinColored(soft, n, spot, floor);
       if (!colored[seed] && face) {
         // the middle of the face is off the typical color (a red nose): grow from the deepest
         // part of the face that is on it
@@ -1242,12 +1292,24 @@
       } else if (!colored[seed]) {
         seed = nearestColored(colored, w, h, seed % w, (seed / w) | 0);
       }
-      if (seed >= 0) {
-        skin = skinAround(soft, w, h, colored, seed);
-        for (let i = 0; i < n; i++) count += skin[i];
-        // a speck isn't a face: measure nothing rather than the wrong thing
-        if (count < n * 0.002) { skin = null; count = 0; }
-      }
+      skin = reach = null;
+      count = 0;
+      if (seed < 0) return;
+      ({ region: skin, reach } = skinAround(soft, w, h, colored, seed));
+      for (let i = 0; i < n; i++) count += skin[i];
+      // a speck isn't a face: measure nothing rather than the wrong thing
+      if (count < n * 0.002) { skin = null; count = 0; }
+    };
+    if (spot) {
+      trace(0);
+      // Skin in shadow keeps some light, while dark hair goes nearly black, so nothing darker than
+      // a quarter of the lit skin's value is read. skinColored() sets that floor from the spot,
+      // which is right for a spot on the lit skin; a spot in the halftone or on the chin lowers it
+      // enough to let dark hair of a skin hue in. So the floor is raised to a quarter of the value
+      // of the brightest tenth of the skin traced, and the skin traced again if the fill reached
+      // anything darker.
+      const floor = skin ? percentileL(soft.L, skin, count, 0.9) / 4 : 0;
+      if (floor > Math.max(8, spot[0] / 4) + 1 && reach.some((v, i) => v && soft.L[i] < floor)) trace(floor);
     }
     let splits = null, parts = null;
     if (skin) {
@@ -1264,8 +1326,7 @@
     } else if (!picked) {
       spot = null;
     }
-    prep.skinCache = { key, spot, seed: skin ? seed : -1, skin, count, splits, parts };
-    return prep.skinCache;
+    return (cache[slot] = { key, spot, seed: skin ? seed : -1, skin, count, splits, parts, own: !!picked });
   }
 
   /*
@@ -1286,7 +1347,7 @@
     const { w, h } = prep;
     const n = w * h;
     const soft = softBlurred(prep);
-    const { spot, seed, skin, count, splits, parts } = skinFor(prep, opts.spot);
+    const { spot, seed, skin, count, splits, parts, own } = skinFor(prep, opts.spot);
     const main = spot || [50, 0, 0];
 
     // The typical skin in its shadow, halftone and light: medians, as the shifts being measured
@@ -1294,7 +1355,10 @@
     const masses = [0, 1, 2].map((z) => {
       const m = parts && parts[z];
       if (!m || m.count < Math.max(100, count * 0.04)) return null;
-      return Object.assign({ share: m.count / count, lab: m.lab, rgb: labToSrgb(m.lab[0], m.lab[1], m.lab[2]) }, shift(main, m.lab));
+      // a chip of the spot taken to this part's value beside the part's color: what the shift measures
+      const k = (m.lab[0] + 16) / (main[0] + 16);
+      const chip = chipPair(m.lab[0], [k * main[1], k * main[2]], [m.lab[1], m.lab[2]]);
+      return Object.assign({ share: m.count / count, lab: m.lab, rgb: labToSrgb(m.lab[0], m.lab[1], m.lab[2]), chip }, shift(main, m.lab));
     });
     const anchors = [0, 1, 2].map((z) => (opts.mode === 'zone' && masses[z] ? masses[z].lab : main));
 
@@ -1302,11 +1366,19 @@
     // the map is painted at, readL the one that goes with the color read.
     let srcL = prep.L, readL, srcA, srcB;
     if (opts.perBlock) {
-      const bl = [];
-      for (let k = 0; k < res.blockRGB.length; k += 3) bl.push(rgbToLab(res.blockRGB[k], res.blockRGB[k + 1], res.blockRGB[k + 2]));
+      // A color group spans the whole picture, so one can take in the jaw's shadow and a dark red
+      // shirt both. On the skin each group is read from its skin pixels alone: their most
+      // prominent color, found the way the color-block study finds a group's.
+      const nb = res.blockRGB.length / 3;
+      const onSkin = skin && dominantColors(prep, res.block, nb, skin);
+      const bl = [], sb = [];
+      for (let k = 0; k < nb; k++) {
+        bl.push(rgbToLab(res.blockRGB[k * 3], res.blockRGB[k * 3 + 1], res.blockRGB[k * 3 + 2]));
+        sb.push(onSkin && onSkin.total[k] ? linToLab(onSkin.lin[k * 3], onSkin.lin[k * 3 + 1], onSkin.lin[k * 3 + 2]) : bl[k]);
+      }
       srcL = new Float32Array(n); srcA = new Float32Array(n); srcB = new Float32Array(n);
       for (let i = 0; i < n; i++) {
-        const c = bl[res.block[i]];
+        const c = (skin && skin[i] ? sb : bl)[res.block[i]];
         srcL[i] = c[0]; srcA[i] = c[1]; srcB[i] = c[2];
       }
       readL = srcL;
@@ -1360,10 +1432,12 @@
       zone,       // the skin part (0-2) each pixel's value falls in
       readL, srcA, srcB, // the L*, a*, b* each pixel was read from
       anchors,    // Lab each part is compared with
-      spot: { lab: main, rgb: labToSrgb(main[0], main[1], main[2]), found: !!spot, picked: !!opts.spot },
+      // own: the skin was traced from the picked spot rather than found automatically
+      spot: { lab: main, rgb: labToSrgb(main[0], main[1], main[2]), found: !!spot, picked: !!opts.spot, own },
       skinShare: count / n,
       splits,     // L* where the skin's shadow meets its halftone, and its halftone its light
-      masses,     // shadow, halftone, light: typical skin color, and how it differs from the spot
+      masses,     // shadow, halftone, light: typical skin color, how it differs from the spot, and a
+                  // chip of the two at the part's value ([spot, part, share of chroma kept])
     };
   }
 
@@ -1396,16 +1470,40 @@
     return [at(down), labToSrgb(60, 0, 0), at(up)];
   }
 
+  /*
+   * Two colors at one value, p and q as [a*, b*], in sRGB for a two-part chip. The color compared
+   * with, taken to a light value, can be more vivid than a screen shows; clipping it alone would
+   * change its value and shrink the step between the two. So when either doesn't fit, both are
+   * muted toward gray by the same share: each keeps its value, and the step keeps its direction
+   * and its size relative to the colors. Returns [p, q, the share of chroma kept].
+   */
+  function chipPair(L, p, q) {
+    const fits = (s) => [p, q].every(([a, b]) => labToLin(L, s * a, s * b).every((v) => v >= -1e-4 && v <= 1 + 1e-4));
+    let kept = 1;
+    if (!fits(1)) {
+      let lo = 0, hi = 1;
+      for (let it = 0; it < 14; it++) {
+        const mid = (lo + hi) / 2;
+        if (fits(mid)) lo = mid;
+        else hi = mid;
+      }
+      kept = lo;
+    }
+    return [labToSrgb(L, kept * p[0], kept * p[1]), labToSrgb(L, kept * q[0], kept * q[1]), kept];
+  }
+
   // What the loupe reads at pixel i of a warm / cool map: the shift, the color it is compared with
   // (the anchor at this value: what gray stands for here) and the color that was read, which in
-  // Blocks is the block's
+  // Blocks is the block's color on the skin; muted when the chip shows the two muted to fit
   function temperatureAt(map, i) {
     const an = map.anchors[map.zone[i]];
     const L = map.readL[i];
     const k = (L + 16) / (an[0] + 16);
+    const [anchor, color, kept] = chipPair(L, [k * an[1], k * an[2]], [map.srcA[i], map.srcB[i]]);
     return Object.assign(shift(an, [L, map.srcA[i], map.srcB[i]]), {
-      anchor: labToSrgb(L, k * an[1], k * an[2]),
-      color: labToSrgb(L, map.srcA[i], map.srcB[i]),
+      anchor,
+      color,
+      muted: kept < 0.9,
       skin: !map.skin || !!map.skin[i],
     });
   }
