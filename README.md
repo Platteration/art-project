@@ -22,8 +22,8 @@ The toolbar above the images adds drawing aids that appear on every image at onc
 
 **Smoothing**, under Simplify, chooses how the photo is smoothed:
 
-- **Soft** (the default) blurs everything evenly, for rounder masses.
-- **Edge-aware** flattens detail inside shapes but keeps edges where the photo has them. The corners of shadow shapes stay sharp, small dark shapes such as nostrils keep their place, and the color blocks don't spend a color on the in-between colors along an edge. The more you simplify, the stronger a step has to be to count as an edge, so small features still merge into larger masses. Hair, glasses frames and patterned clothing can stay busier than with Soft; **Merge small shapes** or Soft calms them.
+- **Soft** blurs everything evenly, for rounder masses.
+- **Edge-aware** (the default) flattens detail inside shapes but keeps edges where the photo has them. The corners of shadow shapes stay sharp, small dark shapes such as nostrils keep their place, and the color blocks don't spend a color on the in-between colors along an edge. The more you simplify, the stronger a step has to be to count as an edge, so small features still merge into larger masses. Hair, glasses frames and patterned clothing can stay busier than with Soft; **Merge small shapes** or Soft calms them.
 
 The choice is kept in your browser between visits. The painting check simplifies your painting the same way.
 
