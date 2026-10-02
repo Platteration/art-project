@@ -203,6 +203,7 @@
       <div class="tabs" role="tablist" aria-label="Mode">
         <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study">Study the reference</button>
         <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1">Check my painting</button>
+        <button type="button" role="tab" class="tab" id="tabGameBtn" aria-selected="false" aria-controls="tab-game" tabindex="-1">Paint by numbers</button>
       </div>
 
 
@@ -337,6 +338,89 @@
         </div>
       </section>
 
+
+      <section class="tabpanel" id="tab-game" role="tabpanel" aria-labelledby="tabGameBtn" hidden>
+        <div class="game-setup" id="gameSetup">
+          <div class="game-card">
+            <h2 class="game-title">Paint by numbers</h2>
+            <p class="game-lede">Your reference becomes a numbered study, outlined in black. Choose a number, then tap paints to mix its color: every tap adds one part. Match the photo before the time runs out, then lock in your portrait for a score.</p>
+            <fieldset class="field">
+              <legend>Difficulty</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Difficulty">
+                <input type="radio" name="gameLevel" id="gameEasy" value="easy"><label for="gameEasy">Easy<small>Up to 6 colors · 3 min</small></label>
+                <input type="radio" name="gameLevel" id="gameMedium" value="medium" checked><label for="gameMedium">Medium<small>Up to 9 colors · 5 min</small></label>
+                <input type="radio" name="gameLevel" id="gameHard" value="hard"><label for="gameHard">Hard<small>Up to 12 colors · 8 min</small></label>
+              </div>
+            </fieldset>
+            <div class="field">
+              <div class="field-head"><label for="gamePalette">Palette</label></div>
+              <select id="gamePalette"></select>
+              <span class="paint-dots" id="gamePaletteDots"></span>
+              <p class="hint" id="gamePaletteHint"></p>
+            </div>
+            <button type="button" class="btn btn-primary game-start" id="gameStart">Start painting</button>
+            <p class="game-best" id="gameBest"></p>
+          </div>
+          <figure class="game-preview">
+            <div class="matte"><canvas id="gamePreview" aria-label="Preview of the numbered portrait"></canvas></div>
+            <figcaption class="hint" id="gamePreviewNote"></figcaption>
+          </figure>
+        </div>
+
+        <div class="game-play" id="gamePlay" hidden>
+          <div class="game-bar">
+            <div class="game-timer" id="gameTimer" role="timer" aria-label="Time left">0:00</div>
+            <p class="game-progress" id="gameProgress"></p>
+            <button type="button" class="btn btn-primary" id="gameLock">Lock in portrait</button>
+          </div>
+          <div class="game-boards">
+            <figure class="game-board">
+              <div class="matte"><canvas id="gameCanvas" aria-label="Numbered portrait. Choose a number below, or tap a shape."></canvas></div>
+            </figure>
+            <figure class="game-ref" id="gameRefFig">
+              <button type="button" class="game-ref-toggle" id="gameRefToggle" aria-expanded="true" aria-controls="gameRef">Reference</button>
+              <div class="matte"><canvas id="gameRef" aria-label="Reference photo"></canvas></div>
+            </figure>
+          </div>
+          <div class="game-mixer">
+            <ol class="game-numbers" id="gameNumbers" aria-label="Numbers to paint"></ol>
+            <div class="game-mix">
+              <div class="game-mix-head">
+                <span class="game-mix-chip" id="gameMixChip"></span>
+                <div class="game-mix-text">
+                  <h3 id="gameMixTitle"></h3>
+                  <p class="game-mix-parts" id="gameMixParts" aria-live="polite"></p>
+                </div>
+                <div class="game-mix-actions">
+                  <button type="button" class="btn btn-small" id="gameUndo">Undo</button>
+                  <button type="button" class="btn btn-small btn-danger" id="gameClear">Clear</button>
+                </div>
+              </div>
+              <ul class="game-paints" id="gamePaints" aria-label="Paints: each tap adds one part"></ul>
+              <p class="hint">Tap a paint to add one part; hold it to keep adding. Every shape with the same number takes the same mix.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="game-result" id="gameResult" hidden>
+          <div class="game-score">
+            <p class="game-grade" id="gameGrade"></p>
+            <p class="game-points"><span id="gamePoints">0</span> <span class="game-points-unit">points</span></p>
+            <dl class="game-breakdown" id="gameBreakdown"></dl>
+            <div class="game-again">
+              <button type="button" class="btn btn-primary" id="gameAgain">Play again</button>
+              <button type="button" class="btn" id="gameNew">Change settings</button>
+            </div>
+          </div>
+          <div class="game-compare">
+            <figure><figcaption>Your portrait</figcaption><div class="matte"><canvas id="gameYours"></canvas></div></figure>
+            <figure><figcaption>The study's colors</figcaption><div class="matte"><canvas id="gameTarget"></canvas></div></figure>
+            <figure><figcaption>The photo</figcaption><div class="matte"><canvas id="gamePhoto"></canvas></div></figure>
+          </div>
+          <h3 class="game-zones-title">Number by number, furthest off first</h3>
+          <ol class="game-zones" id="gameZones"></ol>
+        </div>
+      </section>
     </main>
   </div>
 </div>
@@ -380,5 +464,6 @@
 <script src="js/paints.js"></script>
 <script src="js/app.js"></script>
 <script src="js/palette.js"></script>
+<script src="js/game.js"></script>
 </body>
 </html>

@@ -61,6 +61,16 @@ The choice is kept in your browser between visits. The painting check simplifies
 
 The mixes are worked out with a pigment model, not by averaging screen colors (which would make yellow and blue gray instead of green). Each paint is a reflectance curve over the visible spectrum, rebuilt from its color the way spectral.js does it, and paints mix by single-constant Kubelka-Munk theory, weighted by each paint's tinting strength, which is fitted to its tint with white. A recipe tries every set of up to three paints plus white in every proportion, then refines the best. The paint colors are estimates for typical artist-grade oils, not measurements of any maker's tubes, so every mix is a starting point to adjust by eye.
 
+### Paint by numbers
+
+The third tab is a timed game on the color-block study. The reference becomes a paint-by-numbers board: its color groups, outlined in black and numbered from the darkest (1) to the lightest. The side panels step aside while you play.
+
+1. Choose a difficulty and a palette. **Easy** has up to 6 numbers and 3 minutes, **Medium** up to 9 and 5 minutes, **Hard** up to 12 and 8 minutes; a photo with fewer distinct colors gets fewer numbers. The palette can be any of the known palettes or, once you have ticked at least two, **My paints**. The setup says how many of the portrait's colors that palette can mix closely.
+2. **Start painting.** Choose a number with its button, or tap a shape on the board. Then tap paints to mix its color: every tap adds one part, and holding a paint keeps adding. Every shape with that number takes the mix at once. **Undo** takes back the last part and **Clear** empties the mix. The mix is predicted with the same pigment model as the palette planner, so yellow and blue make green and white cools a red as it lightens it. The reference stays beside the board (in its corner on a phone) to match by eye.
+3. **Lock in portrait** when you are done. When the clock runs out, the portrait locks in by itself.
+
+The score is out of 1,200. Color accuracy gives up to 1,000: each number scores `100 − 2.5 × ΔE` (CIEDE2000) against the study's color for it, weighted by its area, and an unpainted number scores 0. If every number is painted, the time left adds up to 200 more, scaled by your accuracy, so speed only pays when the colors are right. The results show your portrait beside the study's colors and the photo, every number from furthest off to closest with what was wrong (such as "too light by 0.6 value, too warm") and a mix that would have been closer, and how accurate the best mixes from that palette could be. Your best score for each portrait, level and palette is kept in your browser.
+
 ### Check my painting
 
 The second tab scores a photo of your finished piece against the reference.
@@ -124,5 +134,6 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `js/paints.js`: the paint library and known palettes
 - `js/mixing.js`: the pigment mixing model, recipes and palette suggestions
 - `js/palette.js`: the paints part of the Colors and paints drawer
+- `js/game.js`: the Paint by numbers game
 
 Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html). The spectral data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) (MIT license).

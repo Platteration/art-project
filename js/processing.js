@@ -693,7 +693,7 @@
       const g = linToSrgb(dom.lin[b * 3 + 1]);
       const bb = linToSrgb(dom.lin[b * 3 + 2]);
       blockRGB[b * 3] = r; blockRGB[b * 3 + 1] = g; blockRGB[b * 3 + 2] = bb;
-      blockColors.push({ r, g, b: bb, zone: Math.floor(b / K), share: sc[b] / n });
+      blockColors.push({ r, g, b: bb, zone: Math.floor(b / K), share: sc[b] / n, label: b });
     }
 
     const blockImage = new Uint8ClampedArray(n * 4);

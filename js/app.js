@@ -26,8 +26,8 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn') },
-    tabPanels: { study: $('tab-study'), check: $('tab-check') },
+    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn'), game: $('tabGameBtn') },
+    tabPanels: { study: $('tab-study'), check: $('tab-check'), game: $('tab-game') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -191,8 +191,8 @@
 
   // ---- Settings -----------------------------------------------------------
 
-  function settings() {
-    const { w, h } = state.prep;
+  function settings(prep = state.prep) {
+    const { w, h } = prep;
     const long = Math.max(w, h);
     const simplify = +els.simplify.value;
     const merge = +els.merge.value;
@@ -1949,7 +1949,11 @@
       if (on && focus) btn.focus();
     });
     if (name === 'check' && state.art.dirty) runCheck();
+    // the game has its own board and controls: the drawers and tool bar step aside
+    document.body.classList.toggle('tab-game', name === 'game');
+    if (name === 'game') els.loupe.hidden = true;
     drawAllOverlays();
+    window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
   }
 
   Object.entries(els.tabs).forEach(([key, btn]) => {
@@ -1957,7 +1961,9 @@
     btn.addEventListener('keydown', (e) => {
       if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
       e.preventDefault();
-      switchTab(key === 'study' ? 'check' : 'study', true);
+      const keys = Object.keys(els.tabs);
+      const step = e.key === 'ArrowRight' ? 1 : keys.length - 1;
+      switchTab(keys[(keys.indexOf(key) + step) % keys.length], true);
     });
   });
 
@@ -2339,6 +2345,10 @@
   // What palette.js needs from the page
   window.Studio = {
     result: () => state.result,
+    source: () => state.source,
+    sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
+    settings,
+    tab: () => state.tab,
     addColor,
     toast,
     toHex,
@@ -2358,6 +2368,7 @@
     setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true);
     if (location.hash === '#check') switchTab('check');
+    if (location.hash === '#game') switchTab('game');
   }
 
   const redrawHist = () => drawHistogram();
