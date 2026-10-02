@@ -986,14 +986,38 @@
 
   els.lock.addEventListener('click', () => lockIn());
   els.start.addEventListener('click', startGame);
-  document.querySelectorAll('[data-game="again"]').forEach((b) => b.addEventListener('click', startGame));
-  document.querySelectorAll('[data-game="new"]').forEach((b) => b.addEventListener('click', () => {
+  function toSetup() {
     els.result.hidden = true;
     els.setup.hidden = false;
     game = null;
     refreshSetup();
     showPalette();
+  }
+  document.querySelectorAll('[data-game="new"]').forEach((b) => b.addEventListener('click', toSetup));
+
+  // Play again asks first: the same portrait, or a new one (a painting dealt at random, or another photo)
+  const again = { dialog: $('againDialog'), hint: $('againHint'), same: $('againSame'), next: $('againNew'), cancel: $('againCancel') };
+  document.querySelectorAll('[data-game="again"]').forEach((b) => b.addEventListener('click', () => {
+    const painting = subject.kind === 'painting';
+    again.same.textContent = painting ? 'Same portrait' : 'Same photo';
+    again.next.textContent = painting ? 'New portrait' : 'New photo';
+    again.hint.textContent = painting ? 'Try the same portrait again, or take on a new one?' : 'Try the same photo again, or load a new one?';
+    if (again.dialog.showModal) again.dialog.showModal(); else startGame();
+    again.same.focus();
   }));
+  again.same.addEventListener('click', () => { again.dialog.close(); startGame(); });
+  again.next.addEventListener('click', () => {
+    again.dialog.close();
+    if (subject.kind === 'painting') {
+      setSubject({ kind: 'painting', id: deal() }, false);
+      startGame();
+    } else {
+      // back to the setup, which shows the new photo's board once it has loaded
+      toSetup();
+      document.getElementById('file').click();
+    }
+  });
+  again.cancel.addEventListener('click', () => again.dialog.close());
 
   // ---- Wiring ---------------------------------------------------------------
 
