@@ -396,8 +396,12 @@
                   <button type="button" class="btn btn-small btn-danger" id="gameClear">Clear</button>
                 </div>
               </div>
-              <ul class="game-paints" id="gamePaints" aria-label="Paints: each tap adds one part"></ul>
-              <p class="hint">Tap a paint to add one part; hold it to keep adding. Every shape with the same number takes the same mix.</p>
+              <div class="field game-amount">
+                <div class="field-head"><label for="gameAmount">Amount per tap</label><output id="gameAmountOut" for="gameAmount"></output></div>
+                <input type="range" id="gameAmount" min="0" max="4" step="1" value="2">
+              </div>
+              <ul class="game-paints" id="gamePaints" aria-label="Paints: each tap adds the amount above"></ul>
+              <p class="hint">Tap a paint to add it; hold to keep adding. Use small amounts for a touch of a strong paint, large ones for a pile of white. Every shape with the same number takes the same mix. On a phone, drag the reference to move it.</p>
             </div>
           </div>
         </div>

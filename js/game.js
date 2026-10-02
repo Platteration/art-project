@@ -21,6 +21,7 @@
     numbers: $('gameNumbers'),
     mixChip: $('gameMixChip'), mixTitle: $('gameMixTitle'), mixParts: $('gameMixParts'),
     undo: $('gameUndo'), clear: $('gameClear'), paints: $('gamePaints'),
+    amount: $('gameAmount'), amountOut: $('gameAmountOut'), board: document.querySelector('.game-board'),
     grade: $('gameGrade'), points: $('gamePoints'), breakdown: $('gameBreakdown'),
     again: $('gameAgain'), newGame: $('gameNew'),
     yours: $('gameYours'), target: $('gameTarget'), photo: $('gamePhoto'), zones: $('gameZones'),
@@ -35,6 +36,8 @@
   const PAPER = [245, 240, 230];
   const EDGE = [27, 30, 26];
   const MAX_PARTS = 60;        // per number
+  const AMOUNTS = [0.25, 0.5, 1, 2, 4]; // parts added per tap, chosen with the slider
+  const AMOUNT_KEY = 'portrait-value-studio.gameAmount';
   const BONUS = 200;           // most points the time can add
   const BEST_KEY = 'portrait-value-studio.gameBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
@@ -282,7 +285,7 @@
       board,
       palette: p,
       paints: p.codes.map(paintFor),
-      parts: board.groups.map(() => []),     // paint indexes in the order they were added
+      parts: board.groups.map(() => []),     // { paint, amount } in the order they were added
       fills: [],                              // rgb per number, from the mix
       labs: [],
       selected: 0,
@@ -334,7 +337,7 @@
       b.type = 'button';
       b.className = 'game-paint';
       b.dataset.index = i;
-      b.setAttribute('aria-label', `Add one part of ${paint.name}`);
+      b.setAttribute('aria-label', `Add ${paint.name}`);
       b.title = paint.name;
       const dot = document.createElement('span');
       dot.className = 'game-paint-dot';
@@ -381,11 +384,21 @@
     updateMix();
   }
 
+  const perTap = () => AMOUNTS[+els.amount.value];
+  // how much of paint i a number's mix has, in parts
+  const amountOf = (list, i) => list.reduce((s, x) => s + (x.paint === i ? x.amount : 0), 0);
+  // 2.75 -> "2¾"; 0.5 -> "½"
+  function fmtParts(v) {
+    const q = Math.round(v * 4) / 4, whole = Math.floor(q), frac = ['', '¼', '½', '¾'][Math.round((q - whole) * 4)];
+    return whole ? `${whole}${frac}` : frac || '0';
+  }
+
   function addPart(i) {
     if (game.over) return;
     const list = game.parts[game.selected];
-    if (list.length >= MAX_PARTS) { Studio.toast(`A mix holds up to ${MAX_PARTS} parts`); return; }
-    list.push(i);
+    const amount = perTap();
+    if (list.reduce((s, x) => s + x.amount, 0) + amount > MAX_PARTS) { Studio.toast(`A mix holds up to ${MAX_PARTS} parts`); return; }
+    list.push({ paint: i, amount });
     remix(game.selected);
   }
 
@@ -395,7 +408,7 @@
       game.fills[k] = null;
       game.labs[k] = null;
     } else {
-      const counts = game.paints.map((p, i) => list.filter((x) => x === i).length);
+      const counts = game.paints.map((p, i) => amountOf(list, i));
       const m = Mixing.mix(game.paints, counts);
       game.fills[k] = [m.rgb.r, m.rgb.g, m.rgb.b];
       game.labs[k] = m.lab;
@@ -407,9 +420,9 @@
     const list = game.parts[k];
     if (!list.length) return 'Empty. Tap a paint below to start the mix.';
     return game.paints
-      .map((p, i) => [p.code, list.filter((x) => x === i).length])
+      .map((p, i) => [p.code, amountOf(list, i)])
       .filter(([, n]) => n)
-      .map(([code, n]) => `${code} ${n}`)
+      .map(([code, n]) => `${code} ${fmtParts(n)}`)
       .join(' · ');
   }
 
@@ -423,8 +436,8 @@
     els.undo.disabled = !game.parts[k].length;
     els.clear.disabled = !game.parts[k].length;
     els.paints.querySelectorAll('.game-paint').forEach((b) => {
-      const n = game.parts[k].filter((x) => x === +b.dataset.index).length;
-      b.querySelector('.game-paint-count').textContent = n || '';
+      const n = amountOf(game.parts[k], +b.dataset.index);
+      b.querySelector('.game-paint-count').textContent = n ? fmtParts(n) : '';
     });
     els.numbers.querySelectorAll('.game-number').forEach((b) => {
       const j = +b.dataset.number;
@@ -457,6 +470,51 @@
     const open = els.refFig.classList.toggle('is-collapsed') === false;
     els.refToggle.setAttribute('aria-expanded', String(open));
   });
+
+  // ---- Amount per tap -------------------------------------------------------
+
+  function showAmount() {
+    const a = perTap();
+    els.amountOut.textContent = `${fmtParts(a)} part${a > 1 ? 's' : ''} per tap`;
+  }
+  els.amount.value = Math.max(0, AMOUNTS.indexOf(load(AMOUNT_KEY, 1)));
+  els.amount.addEventListener('input', () => { save(AMOUNT_KEY, perTap()); showAmount(); });
+  showAmount();
+
+  // ---- The reference, moved around the board on smaller screens --------------
+
+  const narrow = window.matchMedia('(max-width: 999px)');
+  const refPos = { x: 0, y: 0 };
+  function placeRef(x, y) {
+    if (!narrow.matches) { refPos.x = refPos.y = 0; els.refFig.style.transform = ''; return; }
+    // keep it over the board: its default spot is the board's top right corner
+    const b = els.board.getBoundingClientRect();
+    const r = els.refFig.getBoundingClientRect();
+    const baseX = r.left - refPos.x, baseY = r.top - refPos.y;
+    refPos.x = Math.min(b.right - r.width - baseX, Math.max(b.left - baseX, x));
+    refPos.y = Math.min(b.bottom - r.height - baseY, Math.max(b.top - baseY, y));
+    els.refFig.style.transform = `translate(${refPos.x}px, ${refPos.y}px)`;
+  }
+  els.ref.addEventListener('pointerdown', (e) => {
+    if (!narrow.matches || e.button > 0) return;
+    e.preventDefault();
+    els.ref.setPointerCapture(e.pointerId);
+    const start = { x: e.clientX, y: e.clientY, px: refPos.x, py: refPos.y };
+    els.refFig.classList.add('is-moving');
+    const move = (ev) => placeRef(start.px + ev.clientX - start.x, start.py + ev.clientY - start.y);
+    const end = () => {
+      els.refFig.classList.remove('is-moving');
+      els.ref.removeEventListener('pointermove', move);
+      els.ref.removeEventListener('pointerup', end);
+      els.ref.removeEventListener('pointercancel', end);
+    };
+    els.ref.addEventListener('pointermove', move);
+    els.ref.addEventListener('pointerup', end);
+    els.ref.addEventListener('pointercancel', end);
+  });
+  const keepRef = () => placeRef(refPos.x, refPos.y);
+  window.addEventListener('resize', keepRef);
+  if (narrow.addEventListener) narrow.addEventListener('change', keepRef);
 
   // ---- Scoring --------------------------------------------------------------
 

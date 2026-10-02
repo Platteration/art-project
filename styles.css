@@ -779,9 +779,14 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
     justify-items: end;
   }
   .game-ref .matte { padding: 4px; box-shadow: 0 2px 8px var(--shadow); }
+  .game-ref canvas { cursor: grab; touch-action: none; }
+  .game-ref.is-moving canvas { cursor: grabbing; }
+  .game-ref.is-moving .matte { box-shadow: 0 6px 18px var(--shadow); }
+  /* the numbers come after the paints, nearer the thumb */
+  .game-numbers { order: 2; }
 }
 
-.game-mixer { grid-area: mixer; display: grid; gap: 12px; min-width: 0; }
+.game-mixer { grid-area: mixer; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .game-numbers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .game-number {
   appearance: none;
