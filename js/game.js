@@ -24,7 +24,9 @@
     copy: $('gameCopy'), copyBar: $('gameCopyBar'), copyText: $('gameCopyText'), copyDone: $('gameCopyDone'),
     amount: $('gameAmount'), amountOut: $('gameAmountOut'), board: document.querySelector('.game-board'),
     grade: $('gameGrade'), points: $('gamePoints'), breakdown: $('gameBreakdown'),
-    again: $('gameAgain'), newGame: $('gameNew'),
+    final: $('gameFinal'), popup: $('gamePopup'), popupClose: $('gamePopupClose'), showScore: $('gameShowScore'),
+    kicker: $('gameKicker'), pct: $('gamePct'), stars: $('gameStars'), newBest: $('gameNewBest'),
+    analyze: $('gameAnalyze'), analysis: $('gameAnalysis'),
     yours: $('gameYours'), target: $('gameTarget'), photo: $('gamePhoto'), zones: $('gameZones'),
   };
 
@@ -327,8 +329,7 @@
     els.timer.textContent = fmtTime(Math.ceil(left));
     els.timer.classList.toggle('is-low', left <= 30);
     if (left <= 0) {
-      Studio.toast('Time’s up! Your portrait is locked in.');
-      lockIn();
+      lockIn(true);
     }
   }
 
@@ -441,6 +442,16 @@
     if (list.reduce((s, x) => s + x.amount, 0) + amount > MAX_PARTS) { Studio.toast(`A mix holds up to ${MAX_PARTS} parts`); return; }
     list.push({ paint: i, amount });
     remix(game.selected);
+    pop(i);
+  }
+
+  // the paint swells and snaps back with each tap
+  function pop(i) {
+    const b = els.paints.querySelector(`.game-paint[data-index="${i}"]`);
+    if (!b) return;
+    b.classList.remove('is-pop');
+    void b.offsetWidth;
+    b.classList.add('is-pop');
   }
 
   function remix(k) {
@@ -563,10 +574,15 @@
 
   // ---- Scoring --------------------------------------------------------------
 
-  const GRADES = [[90, 'Master colorist'], [80, 'Sharp eye'], [65, 'Getting there'], [0, 'Keep mixing']];
+  // Stars by color match: the closest mixes most palettes can make land around 85-96%
+  const STARS = [88, 78, 65, 50, 30];
+  const GRADES = ['Keep mixing', 'Keep mixing', 'Getting there', 'Good eye', 'Sharp eye!', 'Master colorist!'];
+  const starsFor = (pct) => STARS.filter((min) => pct >= min).length;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  function lockIn() {
+  function lockIn(timedOut) {
     if (!game || game.over) return;
+    timedOut = timedOut === true;
     game.over = true;
     clearInterval(timer);
     endCopy();
@@ -588,7 +604,11 @@
 
     els.play.hidden = true;
     els.result.hidden = false;
-    els.grade.textContent = (GRADES.find(([min]) => accuracy >= min) || GRADES[3])[1] + (isBest ? ' · new best' : '');
+    els.analysis.hidden = true;
+    els.analyze.setAttribute('aria-expanded', 'false');
+    els.analyze.textContent = 'Analyze';
+    drawBoard(els.final, game.board, game.fills, { selected: -1, numbers: false });
+    showScore(accuracy, isBest, timedOut);
     els.points.textContent = points;
     els.breakdown.innerHTML = '';
     [
@@ -611,8 +631,58 @@
     drawBoard(els.target, game.board, game.board.groups.map((g) => g.rgb), { selected: -1, numbers: false });
     drawRef(els.photo);
     renderZones(rows, bestRow[1], total);
-    els.again.focus();
   }
+
+  // The arcade card over the portrait: the match counts up, then the stars pop in one by one
+  let countUp = 0;
+  function showScore(accuracy, isBest, timedOut) {
+    const pct = Math.round(accuracy);
+    const stars = starsFor(accuracy);
+    els.kicker.textContent = timedOut ? 'Time’s up!' : 'Portrait locked in';
+    els.grade.textContent = GRADES[stars];
+    els.newBest.hidden = !isBest;
+    els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${pct}% color match`);
+    els.stars.querySelectorAll('.game-star').forEach((st, i) => {
+      st.classList.toggle('is-on', i < stars);
+      st.style.setProperty('--i', i);
+    });
+    els.popup.hidden = false;
+    els.showScore.hidden = true;
+    // restart the entrance animations
+    els.popup.classList.remove('is-shown');
+    void els.popup.offsetWidth;
+    els.popup.classList.add('is-shown');
+    cancelAnimationFrame(countUp);
+    if (reduceMotion.matches) { els.pct.textContent = pct; }
+    else {
+      const t0 = performance.now(), ms = 1100;
+      const step = (t) => {
+        const k = Math.min(1, (t - t0) / ms);
+        els.pct.textContent = Math.round(pct * (1 - Math.pow(1 - k, 3)));
+        if (k < 1) countUp = requestAnimationFrame(step);
+      };
+      countUp = requestAnimationFrame(step);
+    }
+    els.analyze.focus({ preventScroll: true });
+  }
+
+  els.popupClose.addEventListener('click', () => {
+    els.popup.hidden = true;
+    els.showScore.hidden = false;
+    els.showScore.focus();
+  });
+  els.showScore.addEventListener('click', () => {
+    els.popup.hidden = false;
+    els.showScore.hidden = true;
+    els.analyze.focus();
+  });
+  els.analyze.addEventListener('click', () => {
+    const open = els.analysis.hidden;
+    els.analysis.hidden = !open;
+    els.analyze.setAttribute('aria-expanded', String(open));
+    els.analyze.textContent = open ? 'Hide analysis' : 'Analyze';
+    if (open) els.analysis.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' });
+  });
 
   // Plain words for how a mix is off: "too light by 0.6 value, too warm"
   function describe(lab, target) {
@@ -693,16 +763,16 @@
     })();
   }
 
-  els.lock.addEventListener('click', lockIn);
+  els.lock.addEventListener('click', () => lockIn());
   els.start.addEventListener('click', startGame);
-  els.again.addEventListener('click', startGame);
-  els.newGame.addEventListener('click', () => {
+  document.querySelectorAll('[data-game="again"]').forEach((b) => b.addEventListener('click', startGame));
+  document.querySelectorAll('[data-game="new"]').forEach((b) => b.addEventListener('click', () => {
     els.result.hidden = true;
     els.setup.hidden = false;
     game = null;
     refreshSetup();
     showPalette();
-  });
+  }));
 
   // ---- Wiring ---------------------------------------------------------------
 

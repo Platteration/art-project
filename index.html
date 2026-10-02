@@ -412,22 +412,51 @@
         </div>
 
         <div class="game-result" id="gameResult" hidden>
-          <div class="game-score">
-            <p class="game-grade" id="gameGrade"></p>
-            <p class="game-points"><span id="gamePoints">0</span> <span class="game-points-unit">points</span></p>
-            <dl class="game-breakdown" id="gameBreakdown"></dl>
-            <div class="game-again">
-              <button type="button" class="btn btn-primary" id="gameAgain">Play again</button>
-              <button type="button" class="btn" id="gameNew">Change settings</button>
+          <div class="game-final">
+            <div class="matte game-final-matte">
+              <canvas id="gameFinal" aria-label="Your finished portrait"></canvas>
+              <div class="game-popup" id="gamePopup" role="group" aria-labelledby="gameKicker">
+                <button type="button" class="game-popup-close" id="gamePopupClose" aria-label="Hide the score to see your portrait">×</button>
+                <p class="game-kicker" id="gameKicker">Portrait locked in</p>
+                <p class="game-pct"><span id="gamePct">0</span><span class="game-pct-sign">%</span></p>
+                <p class="game-pct-label">color match</p>
+                <div class="game-stars" id="gameStars" role="img" aria-label="">
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                </div>
+                <p class="game-grade" id="gameGrade"></p>
+                <p class="game-newbest" id="gameNewBest" hidden>New best!</p>
+                <div class="game-popup-actions">
+                  <button type="button" class="btn btn-primary" id="gameAnalyze" aria-expanded="false" aria-controls="gameAnalysis">Analyze</button>
+                  <button type="button" class="btn" data-game="again">Play again</button>
+                  <button type="button" class="btn btn-ghost" data-game="new">Change settings</button>
+                </div>
+              </div>
+              <button type="button" class="btn btn-small game-show-score" id="gameShowScore" hidden>Show score</button>
             </div>
           </div>
-          <div class="game-compare">
-            <figure><figcaption>Your portrait</figcaption><div class="matte"><canvas id="gameYours"></canvas></div></figure>
-            <figure><figcaption>The study's colors</figcaption><div class="matte"><canvas id="gameTarget"></canvas></div></figure>
-            <figure><figcaption>The photo</figcaption><div class="matte"><canvas id="gamePhoto"></canvas></div></figure>
+
+          <div class="game-analysis" id="gameAnalysis" hidden>
+            <div class="game-score">
+              <h3 class="game-zones-title">Analysis</h3>
+              <p class="game-points"><span id="gamePoints">0</span> <span class="game-points-unit">points</span></p>
+              <dl class="game-breakdown" id="gameBreakdown"></dl>
+              <div class="game-again">
+                <button type="button" class="btn btn-primary" data-game="again">Play again</button>
+                <button type="button" class="btn" data-game="new">Change settings</button>
+              </div>
+            </div>
+            <div class="game-compare">
+              <figure><figcaption>Your portrait</figcaption><div class="matte"><canvas id="gameYours"></canvas></div></figure>
+              <figure><figcaption>The study's colors</figcaption><div class="matte"><canvas id="gameTarget"></canvas></div></figure>
+              <figure><figcaption>The photo</figcaption><div class="matte"><canvas id="gamePhoto"></canvas></div></figure>
+            </div>
+            <h3 class="game-zones-title">Number by number, furthest off first</h3>
+            <ol class="game-zones" id="gameZones"></ol>
           </div>
-          <h3 class="game-zones-title">Number by number, furthest off first</h3>
-          <ol class="game-zones" id="gameZones"></ol>
         </div>
       </section>
     </main>

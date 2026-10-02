@@ -936,6 +936,87 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-mix > .hint { grid-area: hint; }
 }
 
+/* ---- Paint by numbers: the arcade score over the finished portrait ---- */
+.game-final-matte { position: relative; overflow: hidden; }
+.game-final canvas { display: block; max-width: 100%; height: auto; max-height: 78vh; }
+.game-popup {
+  position: absolute;
+  left: 50%; top: 50%;
+  translate: -50% -50%;
+  width: min(92%, 360px);
+  display: grid; justify-items: center; gap: 6px;
+  padding: 22px 18px 18px;
+  text-align: center;
+  color: #faf5ea;
+  background: #1e2b22;
+  border: 3px solid #d9a441;
+  border-radius: 14px;
+  box-shadow: 0 0 0 100vmax rgba(21, 32, 25, 0.55), 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 3px #1e2b22, inset 0 0 0 4px rgba(217, 164, 65, 0.45);
+}
+.game-popup.is-shown { animation: popup-in 0.5s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+@keyframes popup-in { from { transform: scale(0.55); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.game-popup p { margin: 0; }
+.game-popup-close {
+  position: absolute; top: 6px; right: 8px;
+  width: 30px; height: 30px;
+  font: 600 1.2rem/1 var(--body);
+  color: #faf5ea; background: transparent; border: 0; border-radius: 50%;
+  cursor: pointer; opacity: 0.7;
+}
+.game-popup-close:hover { opacity: 1; }
+.game-kicker { font: 600 0.78rem var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: #d9a441; }
+.game-pct {
+  font: 700 4.6rem/0.95 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  text-shadow: 0 0 18px rgba(217, 164, 65, 0.55);
+}
+.game-pct-sign { font-size: 0.5em; margin-left: 2px; vertical-align: 0.6em; }
+.game-pct-label { font: 500 0.75rem var(--mono); letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.75; }
+.game-stars { display: flex; gap: 6px; margin: 8px 0 2px; }
+.game-star { position: relative; width: 38px; height: 38px; }
+.game-star svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.star-empty path { fill: rgba(250, 245, 234, 0.12); stroke: rgba(250, 245, 234, 0.45); stroke-width: 1; }
+.star-full { overflow: visible; filter: drop-shadow(0 0 5px rgba(227, 176, 75, 0.75)); }
+.star-full path { fill: #e3b04b; stroke: #fff2c8; stroke-width: 0.8; }
+.game-star:not(.is-on) .star-full { display: none; }
+.is-shown .game-star.is-on .star-full { animation: star-pop 0.45s cubic-bezier(0.2, 1.8, 0.4, 1) both; animation-delay: calc(1.05s + var(--i) * 0.2s); }
+@keyframes star-pop {
+  0% { opacity: 0; transform: scale(0.2) rotate(-35deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+.game-popup .game-grade { font: 700 1.25rem var(--display); color: #faf5ea; }
+.is-shown .game-grade { animation: grade-in 0.4s ease-out both; animation-delay: 2.1s; }
+@keyframes grade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.game-newbest {
+  font: 700 0.85rem var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+  color: #1e2b22; background: #e3b04b; padding: 2px 10px; border-radius: 4px;
+}
+.is-shown .game-newbest { animation: blink 0.8s steps(2, jump-none) 2.3s 4 both; }
+@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.2; } }
+.game-popup-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 10px; }
+.game-popup .btn-primary { background: #d9a441; border-color: #d9a441; color: #1e2b22; }
+.game-popup .btn-primary:hover { border-color: #faf5ea; }
+.game-popup .btn:not(.btn-primary) { background: transparent; color: #faf5ea; border-color: rgba(250, 245, 234, 0.4); }
+.game-popup .btn.btn-ghost { border-color: transparent; color: rgba(250, 245, 234, 0.75); }
+.game-popup .btn.btn-ghost:hover { color: #faf5ea; border-color: rgba(250, 245, 234, 0.4); }
+.game-popup :focus-visible { outline-color: #e3b04b; }
+.game-show-score { position: absolute; left: 50%; bottom: 14px; translate: -50% 0; box-shadow: 0 2px 8px var(--shadow); }
+.game-analysis { display: grid; gap: 18px; }
+
+/* a paint swells and snaps back when tapped */
+.game-paint.is-pop .game-paint-dot { animation: paint-pop 0.26s ease-out; }
+@keyframes paint-pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); }
+  70% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-popup.is-shown, .is-shown .game-star.is-on .star-full, .is-shown .game-grade, .is-shown .game-newbest, .game-paint.is-pop .game-paint-dot { animation: none; }
+}
+
 /* ---- Loupe ---- */
 .loupe {
   position: fixed;
