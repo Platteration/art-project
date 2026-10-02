@@ -4,8 +4,11 @@
  * The study's color groups become numbers, darkest first, outlined in black. The player picks a
  * number and taps paints to mix its color, one part per tap; the mix is predicted with the same
  * pigment model as the palette planner (Mixing.mix), and every shape with that number takes it.
- * Locking in the portrait, or running out of time, scores each number against the study's color
- * for it with CIEDE2000, weighted by area, plus a time bonus that grows with accuracy.
+ * Each number's target is the study's color as the chosen palette can mix it: the closest recipe the
+ * pigment model finds, in amounts the player can tap, so every color can be matched exactly. The
+ * game suggests the palette that mixes the portrait's colors best. Locking in the portrait, or
+ * running out of time, scores each number against its target with CIEDE2000, weighted by area,
+ * plus a time bonus that grows with accuracy.
  */
 (function () {
   'use strict';
@@ -287,12 +290,77 @@
     if (refresh) refreshSetup();
   }
 
+  // The board's colors as the study has them, for the palette planner
+  const studyColors = (b) => b.groups.map((g) => ({ rgb: { r: g.rgb[0], g: g.rgb[1], b: g.rgb[2] }, weight: g.share }));
+
+  /*
+   * The palette that mixes this board's colors best: the highest area-weighted match, and of
+   * palettes within a point of it, the one with fewest paints. Worked out once per board.
+   */
+  function suggestedPalette(b) {
+    if (!b.suggested) {
+      const colors = studyColors(b);
+      const rated = paletteChoices().map((p) => ({ p, cov: Mixing.coverage(p.codes.map(paintFor), colors) }));
+      const top = Math.max(...rated.map((r) => r.cov.match));
+      const pick = rated.filter((r) => r.cov.match >= top - 1).sort((a, c) => a.p.codes.length - c.p.codes.length || c.cov.match - a.cov.match)[0];
+      b.suggested = { id: pick.p.id, cov: pick.cov };
+    }
+    return b.suggested;
+  }
+
+  // A new board selects its suggested palette; otherwise the palette chosen stays
+  let paletteFor = null;
   function renderPalettes() {
     const keep = els.palette.value || load(PALETTE_KEY, 'zorn');
+    const choices = paletteChoices();
+    const sug = board ? suggestedPalette(board).id : null;
     els.palette.innerHTML = '';
-    paletteChoices().forEach((p) => els.palette.append(new Option(p.name, p.id)));
-    els.palette.value = paletteChoices().some((p) => p.id === keep) ? keep : 'zorn';
+    choices.forEach((p) => els.palette.append(new Option(p.id === sug ? `${p.name} (suggested)` : p.name, p.id)));
+    const fresh = board && paletteFor !== board;
+    paletteFor = board;
+    els.palette.value = fresh && sug ? sug : choices.some((p) => p.id === keep) ? keep : 'zorn';
     showPalette();
+  }
+
+  /*
+   * Each number's target with this palette: the closest recipe the pigment model finds for the
+   * study's color, its amounts rounded to quarter parts (what the taps can add), and the color
+   * that recipe makes. Kept per board and palette. Worked out a few numbers per frame; resolves
+   * to the targets, or to null if the board or palette changed first.
+   */
+  function targetsFor(b, p) {
+    b.targets = b.targets || {};
+    b.mixing = b.mixing || {};
+    if (b.targets[p.id]) return Promise.resolve(b.targets[p.id]);
+    if (b.mixing[p.id]) return b.mixing[p.id];
+    const paints = p.codes.map(paintFor);
+    const out = [];
+    let k = 0, task = null;
+    const done = (v) => { delete b.mixing[p.id]; return v; };
+    return (b.mixing[p.id] = new Promise((resolve) => {
+      (function next() {
+        if (board !== b || chosenPalette().id !== p.id) { resolve(null); return; }
+        const end = performance.now() + 24;
+        while (k < b.groups.length && performance.now() < end) {
+          const g = b.groups[k];
+          if (!task) task = Mixing.recipeTask({ r: g.rgb[0], g: g.rgb[1], b: g.rgb[2] }, paints);
+          if (!task.step(Math.max(1, end - performance.now()))) break;
+          const counts = paints.map(() => 0);
+          task.result.items.forEach((it) => { counts[it.paint] += Math.max(0.25, Math.round(it.parts * 4) / 4); });
+          const m = Mixing.mix(paints, counts);
+          out.push({ rgb: [m.rgb.r, m.rgb.g, m.rgb.b], lab: m.lab, counts, studyMiss: deltaE(m.lab, g.lab) });
+          task = null;
+          k++;
+        }
+        if (k < b.groups.length) {
+          els.paletteHint.textContent = `Mixing the reference from these paints: ${k} of ${b.groups.length} colors…`;
+          requestAnimationFrame(next);
+          return;
+        }
+        b.targets[p.id] = out;
+        resolve(out);
+      })();
+    }).then(done));
   }
 
   function chosenPalette() {
@@ -310,8 +378,23 @@
       els.paletteDots.append(d);
     });
     if (board) {
-      const cov = Mixing.coverage(p.codes.map(paintFor), board.groups.map((g) => ({ rgb: { r: g.rgb[0], g: g.rgb[1], b: g.rgb[2] }, weight: g.share })));
-      els.paletteHint.textContent = `${p.codes.length} paints. They can mix ${cov.reached} of this portrait's ${board.groups.length} colors closely.`;
+      const b = board, sug = suggestedPalette(b);
+      const sugName = (paletteChoices().find((x) => x.id === sug.id) || {}).name;
+      const lead = p.id === sug.id ? 'Suggested for this portrait.' : `Suggested for this portrait: ${sugName}.`;
+      const say = (t) => {
+        const close = t.filter((x) => x.studyMiss < Mixing.NEAR).length;
+        els.paletteHint.textContent = `${lead} ${p.codes.length} paints, which mix ${close} of its ${t.length} colors closely. The reference is mixed from them, so every number can be matched exactly.`;
+      };
+      const ready = b.targets && b.targets[p.id];
+      els.start.disabled = !ready;
+      if (ready) say(ready);
+      else {
+        targetsFor(b, p).then((t) => {
+          if (!t || board !== b || chosenPalette().id !== p.id) return;
+          els.start.disabled = false;
+          say(t);
+        });
+      }
     }
     const best = load(BEST_KEY, {})[bestKey()];
     els.best.textContent = best ? `Your best on this portrait at this level with this palette: ${best} points` : '';
@@ -333,13 +416,16 @@
 
   let timer = 0;
 
-  function startGame() {
+  async function startGame() {
     refreshSetup();
     const p = chosenPalette();
+    const targets = await targetsFor(board, p);
+    if (!targets) return; // the board or palette changed while it was being mixed
     save(PALETTE_KEY, p.id);
     save(LEVEL_KEY, level());
     game = {
       board,
+      targets,                                // per number: { rgb, lab, counts } the palette can mix
       palette: p,
       paints: p.codes.map(paintFor),
       parts: board.groups.map(() => []),     // { paint, amount } in the order they were added
@@ -373,7 +459,7 @@
   // The reference: the photo itself, or its color-block study (the colors each number is scored against)
   function drawRef(canvas, view = 'photo') {
     if (view === 'blocks') {
-      drawBoard(canvas, game.board, game.board.groups.map((g) => g.rgb), { selected: -1, numbers: false, edges: false });
+      drawBoard(canvas, game.board, game.targets.map((t) => t.rgb), { selected: -1, numbers: false, edges: false });
       return;
     }
     const { w, h, rgba } = game.board.prep;
@@ -831,9 +917,9 @@
     const groups = game.board.groups;
     const total = groups.reduce((s, g) => s + g.share, 0);
     const rows = groups.map((g, k) => {
-      const lab = game.labs[k];
-      const dE = lab ? deltaE(lab, g.lab) : null;
-      return { k, g, lab, fill: game.fills[k], dE, match: lab ? matchOf(dE) : 0 };
+      const lab = game.labs[k], t = game.targets[k];
+      const dE = lab ? deltaE(lab, t.lab) : null;
+      return { k, g, t, lab, fill: game.fills[k], dE, match: lab ? matchOf(dE) : 0 };
     });
     const accuracy = rows.reduce((s, r) => s + r.g.share * r.match, 0) / total;
     const allPainted = rows.every((r) => r.lab);
@@ -864,15 +950,11 @@
       dd.textContent = pts ? `${v} · ${pts}` : v;
       els.breakdown.append(dt, dd);
     });
-    const bestRow = [document.createElement('dt'), document.createElement('dd')];
-    bestRow[0].textContent = 'Best this palette can do';
-    bestRow[1].textContent = 'working it out…';
-    els.breakdown.append(...bestRow);
 
     drawBoard(els.yours, game.board, game.fills, { selected: -1, numbers: false });
-    drawBoard(els.target, game.board, game.board.groups.map((g) => g.rgb), { selected: -1, numbers: false });
+    drawBoard(els.target, game.board, game.targets.map((t) => t.rgb), { selected: -1, numbers: false });
     drawRef(els.photo);
-    renderZones(rows, bestRow[1], total);
+    renderZones(rows);
   }
 
   // The arcade card over the portrait: the match counts up, then the stars pop in one by one
@@ -939,10 +1021,9 @@
     return out.join(', ');
   }
 
-  function renderZones(rows, bestCell, total) {
+  function renderZones(rows) {
     els.zones.innerHTML = '';
     const sorted = rows.slice().sort((a, b) => a.match - b.match);
-    const recipeCells = new Map();
     sorted.forEach((r) => {
       const li = document.createElement('li');
       li.className = 'game-zone';
@@ -951,11 +1032,11 @@
       num.textContent = r.k + 1;
       const chips = document.createElement('span');
       chips.className = 'mix-chips';
-      [r.fill, r.g.rgb].forEach((c, i) => {
+      [r.fill, r.t.rgb].forEach((c, i) => {
         const s = document.createElement('span');
         s.className = 'mix-chip' + (c ? '' : ' mix-pending');
         if (c) s.style.background = toHex(c);
-        s.title = (i ? 'The study’s color ' : 'Your mix ') + (c ? toHex(c) : '(not painted)');
+        s.title = (i ? 'The color to match ' : 'Your mix ') + (c ? toHex(c) : '(not painted)');
         chips.append(s);
       });
       const text = document.createElement('span');
@@ -968,41 +1049,19 @@
       top.append(pct);
       const note = document.createElement('span');
       note.className = 'mix-zone';
-      note.textContent = r.lab ? describe(r.lab, r.g.lab) || 'spot on' : '';
+      note.textContent = r.lab ? describe(r.lab, r.t.lab) || 'spot on' : '';
       top.append(note);
       const yours = document.createElement('span');
       yours.className = 'mix-recipe';
       yours.textContent = r.lab ? `You: ${partsText(r.k)}` : '';
       const tip = document.createElement('span');
       tip.className = 'mix-recipe game-zone-tip';
-      tip.textContent = 'Try: working it out…';
+      // the recipe the target was mixed from
+      tip.textContent = 'Mix: ' + game.paints.map((p, i) => [p.code, r.t.counts[i]]).filter(([, n]) => n).map(([code, n]) => `${code} ${fmtParts(n)}`).join(' · ');
       text.append(top, yours, tip);
       li.append(num, chips, text);
       els.zones.append(li);
-      recipeCells.set(r.k, tip);
     });
-
-    // the closest mix the model finds for each number, a few at a time so the page stays responsive
-    const paints = game.paints;
-    let i = 0, task = null, best = 0;
-    const current = game;
-    (function next() {
-      if (game !== current) return;
-      const r = rows[i];
-      if (!task) task = Mixing.recipeTask({ r: r.g.rgb[0], g: r.g.rgb[1], b: r.g.rgb[2] }, paints);
-      if (task.step(12)) {
-        const res = task.result;
-        best += r.g.share * matchOf(res.dE);
-        const main = res.items.filter((x) => !x.touch).length;
-        recipeCells.get(r.k).textContent = 'Try: ' + res.items.map((it) => {
-          const code = paints[it.paint].code;
-          return it.touch ? `${code} touch` : main > 1 ? `${code} ${it.parts}` : code;
-        }).join(' · ') + ` (${Math.round(matchOf(res.dE))}%)`;
-        task = null;
-        if (++i >= rows.length) { bestCell.textContent = `${(best / total).toFixed(0)}% color accuracy`; return; }
-      }
-      setTimeout(next, 0);
-    })();
   }
 
   els.lock.addEventListener('click', () => lockIn());
