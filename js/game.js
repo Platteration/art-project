@@ -23,6 +23,7 @@
     undo: $('gameUndo'), clear: $('gameClear'), paints: $('gamePaints'),
     copy: $('gameCopy'), copyBar: $('gameCopyBar'), copyText: $('gameCopyText'), copyDone: $('gameCopyDone'),
     amount: $('gameAmount'), amountOut: $('gameAmountOut'), board: document.querySelector('.game-board'),
+    sound: $('gameSound'), quit: $('gameQuit'), quickUndo: $('gameQuickUndo'),
     grade: $('gameGrade'), points: $('gamePoints'), breakdown: $('gameBreakdown'),
     final: $('gameFinal'), popup: $('gamePopup'), popupClose: $('gamePopupClose'), showScore: $('gameShowScore'),
     kicker: $('gameKicker'), pct: $('gamePct'), stars: $('gameStars'), newBest: $('gameNewBest'),
@@ -41,6 +42,7 @@
   const MAX_PARTS = 60;        // per number
   const AMOUNTS = [0.25, 0.5, 1, 2, 4]; // parts added per tap, chosen with the slider
   const AMOUNT_KEY = 'portrait-value-studio.gameAmount';
+  const SOUND_KEY = 'portrait-value-studio.gameSound';
   const BONUS = 200;           // most points the time can add
   const BEST_KEY = 'portrait-value-studio.gameBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
@@ -301,6 +303,8 @@
     els.setup.hidden = true;
     els.result.hidden = true;
     els.play.hidden = false;
+    unlockAudio(); // the Start button is a tap, which lets the page make sound from now on
+    setFocus(true);
     endCopy();
     drawRef(els.ref);
     renderPaints();
@@ -443,6 +447,7 @@
     list.push({ paint: i, amount });
     remix(game.selected);
     pop(i);
+    tock(i);
   }
 
   // the paint swells and snaps back with each tap
@@ -509,7 +514,83 @@
     drawBoard(els.canvas, game.board, game.fills, { selected: k, numbers: true });
   }
 
-  els.undo.addEventListener('click', () => { game.parts[game.selected].pop(); remix(game.selected); });
+  const undoLast = () => { game.parts[game.selected].pop(); remix(game.selected); };
+  els.undo.addEventListener('click', undoLast);
+  els.quickUndo.addEventListener('click', () => { if (game && !game.over && game.parts[game.selected].length) undoLast(); });
+
+  // ---- Sound ------------------------------------------------------------------
+
+  // A short wooden tock for each tap, made in the browser: a triangle wave dropping fast in pitch,
+  // a little higher for each paint along the palette
+  let soundOn = load(SOUND_KEY, true) !== false;
+  let audio = null;
+  function unlockAudio() {
+    if (!soundOn) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch (err) {
+      audio = null;
+    }
+  }
+  function tock(i) {
+    if (!soundOn) return;
+    unlockAudio();
+    if (!audio) return;
+    const t = audio.currentTime;
+    const pitch = 760 * Math.pow(1.07, i % 10);
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(pitch * 1.7, t);
+    osc.frequency.exponentialRampToValueAtTime(pitch * 0.5, t + 0.05);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + 0.09);
+  }
+  function showSound() {
+    els.sound.setAttribute('aria-pressed', String(soundOn));
+    els.sound.title = soundOn ? 'Sound on' : 'Sound off';
+  }
+  els.sound.addEventListener('click', () => {
+    soundOn = !soundOn;
+    save(SOUND_KEY, soundOn);
+    showSound();
+    if (soundOn) { unlockAudio(); tock(0); }
+  });
+  showSound();
+
+  // ---- Full screen on phones ------------------------------------------------------
+
+  // While playing on a phone, the page header and tabs step aside so the bar, the painting and the
+  // palette fill the screen
+  function setFocus(on) {
+    document.body.classList.toggle('game-focus', on);
+    if (on) window.scrollTo(0, 0);
+  }
+
+  // the tabs are hidden while playing, so the bar has a way out: tap ✕ twice
+  let quitArmed = 0;
+  els.quit.addEventListener('click', () => {
+    if (!game || game.over) return;
+    if (performance.now() - quitArmed > 3000) {
+      quitArmed = performance.now();
+      Studio.toast('Tap ✕ again to quit this game');
+      return;
+    }
+    quitArmed = 0;
+    game.over = true;
+    clearInterval(timer);
+    endCopy();
+    game = null;
+    setFocus(false);
+    els.play.hidden = true;
+    els.setup.hidden = false;
+    refreshSetup();
+  });
   els.clear.addEventListener('click', () => { game.parts[game.selected] = []; remix(game.selected); });
 
   // tapping a shape on the board chooses its number
@@ -604,6 +685,7 @@
 
     els.play.hidden = true;
     els.result.hidden = false;
+    setFocus(false);
     els.analysis.hidden = true;
     els.analyze.setAttribute('aria-expanded', 'false');
     els.analyze.textContent = 'Analyze';
@@ -786,6 +868,7 @@
   // the setup shows the current reference; a game in progress keeps the one it started with
   window.addEventListener('studio:result', () => { if (Studio.tab() === 'game' && !game) refreshSetup(); });
   window.addEventListener('studio:tab', (e) => {
+    setFocus(e.detail === 'game' && !!game && !game.over);
     if (e.detail !== 'game') return;
     if (!game) { renderPalettes(); refreshSetup(); }
   });

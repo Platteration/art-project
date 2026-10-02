@@ -892,40 +892,86 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-zone-match { font: 600 0.8rem var(--mono); }
 .game-zone-tip { color: var(--muted); }
 
+/* small round icon buttons in the game: sound, quit, quick undo */
+.game-icon-btn {
+  appearance: none;
+  flex: none;
+  display: inline-grid; place-items: center;
+  width: 36px; height: 36px;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.game-icon-btn:hover { border-color: var(--muted); }
+.game-icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.game-icon-btn [fill="currentColor"] { fill: currentColor; }
+#gameSound[aria-pressed="true"] .icon-off, #gameSound[aria-pressed="false"] .icon-on { display: none; }
+#gameSound[aria-pressed="false"] { color: var(--muted); }
+.game-quick-undo { display: none; }
+@media (max-width: 999px) { .wide-only { display: none; } }
+
 @media (max-width: 999px) {
-  /* phones: the paints are a toolbar beside the painting, the amount slider sits right under it,
-     then the mix, and the numbers last, nearest the thumb */
+  /* phones: while playing, the bar, the painting and the palette (paints, then the amount slider
+     and a quick undo) fill the screen; the painting takes whatever height is left. The mix, copy and
+     number buttons are just below. */
+  .game-focus .topbar, .game-focus .tabs { display: none; }
+  .game-focus .app { padding-block: 8px; gap: 0; }
+  .game-focus .work { gap: 0; }
   .game-play {
-    grid-template-columns: minmax(0, 1fr) 64px;
-    grid-template-areas: "bar bar" "board paints" "amount amount" "head head" "copy copy" "numbers numbers" "hint hint";
-    column-gap: 8px;
-    row-gap: 10px;
+    --bar-h: 50px;
+    --paints-h: 64px;
+    --amount-h: 36px;
+    --gap: 6px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "bar" "board" "paints" "amount" "head" "copy" "numbers" "hint";
+    grid-template-rows: var(--bar-h) calc(100vh - 16px - var(--bar-h) - var(--paints-h) - var(--amount-h) - 3 * var(--gap)) var(--paints-h) var(--amount-h);
+    grid-template-rows: var(--bar-h) calc(100dvh - 16px - var(--bar-h) - var(--paints-h) - var(--amount-h) - 3 * var(--gap)) var(--paints-h) var(--amount-h);
+    row-gap: var(--gap);
   }
+  .game-bar { padding: 4px 6px 4px 10px; gap: 6px; flex-wrap: nowrap; }
+  .game-timer { font-size: 1.4rem; min-width: 3.6ch; }
+  .game-progress { font-size: 0.72rem; line-height: 1.2; min-width: 0; }
+  .game-bar .btn-primary { padding: 8px 10px; font-size: 0.8rem; }
   .game-mixer, .game-mix { display: contents; }
-  .game-board .matte { padding: 6px; }
+  .game-board { height: 100%; min-height: 0; }
+  .game-board .matte { height: 100%; padding: 4px; display: flex; align-items: center; justify-content: center; }
+  .game-board canvas { max-height: 100%; max-width: 100%; }
   .game-paints {
     grid-area: paints;
-    contain: size;            /* as tall as the painting, scrolling if the palette is longer */
-    align-self: stretch;
-    overflow-y: auto;
-    display: flex; flex-direction: column; gap: 6px;
+    display: flex; gap: 6px;
+    overflow-x: auto;
     padding: 4px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r);
   }
-  .game-paint { padding: 5px 2px 4px; }
-  .game-paint-dot { width: 34px; height: 34px; }
-  .game-paint-code { font-size: 0.62rem; }
+  .game-paints li { flex: 1 0 52px; max-width: 86px; }
+  .game-paint { height: 100%; padding: 4px 2px 3px; gap: 2px; }
+  .game-paint-dot { width: 32px; height: 32px; }
+  .game-paint-code { font-size: 0.6rem; }
   .game-amount {
     grid-area: amount;
-    padding: 8px 12px 10px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 0 4px 0 12px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r);
   }
+  .game-amount .field-head { display: contents; }
+  .game-amount label { grid-column: 1; grid-row: 1; font-size: 0.75rem; }
+  .game-amount input { grid-column: 2; grid-row: 1; }
+  .game-amount output { grid-column: 3; grid-row: 1; font-size: 0.72rem; }
+  .game-quick-undo { display: inline-grid; grid-column: 4; grid-row: 1; width: 30px; height: 30px; }
+  .game-quick-undo svg { width: 17px; height: 17px; }
   .game-mix-head {
     grid-area: head;
+    margin-top: 6px;
     padding: 10px 12px;
     background: var(--surface);
     border: 1px solid var(--line);

@@ -371,6 +371,8 @@
           <div class="game-bar">
             <div class="game-timer" id="gameTimer" role="timer" aria-label="Time left">0:00</div>
             <p class="game-progress" id="gameProgress"></p>
+            <button type="button" class="game-icon-btn" id="gameSound" aria-pressed="true" aria-label="Sound" title="Sound on"><svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/></svg><svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg></button>
+            <button type="button" class="game-icon-btn" id="gameQuit" aria-label="Quit this game" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
             <button type="button" class="btn btn-primary" id="gameLock">Lock in portrait</button>
           </div>
           <div class="game-boards">
@@ -402,8 +404,9 @@
                 <button type="button" class="btn btn-small" id="gameCopyDone">Done</button>
               </div>
               <div class="field game-amount">
-                <div class="field-head"><label for="gameAmount">Amount per tap</label><output id="gameAmountOut" for="gameAmount"></output></div>
+                <div class="field-head"><label for="gameAmount">Amount<span class="wide-only"> per tap</span></label><output id="gameAmountOut" for="gameAmount"></output></div>
                 <input type="range" id="gameAmount" min="0" max="4" step="1" value="2">
+                <button type="button" class="game-icon-btn game-quick-undo" id="gameQuickUndo" aria-label="Undo the last tap" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
               </div>
               <ul class="game-paints" id="gamePaints" aria-label="Paints: each tap adds the amount above"></ul>
               <p class="hint">Tap a paint to add it; hold to keep adding. Use small amounts for a touch of a strong paint, large ones for a pile of white. Every shape with the same number takes the same mix. On a phone, drag the reference to move it.</p>
