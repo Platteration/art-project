@@ -430,54 +430,91 @@
     return c;
   }
 
-  // ---- The 25 portraits ------------------------------------------------------------------
+  // ---- A new portrait every time -----------------------------------------------------------
 
-  const L = (painter, seed, look, title) => ({ id: `${painter}-${seed}`, painter, seed, look, title });
-  const W = { woman: true };
-  const PORTRAITS = [
-    L('rembrandt', 7, { moustache: true, collar: 'flat' }, 'Man with a moustache'),
-    L('rembrandt', 21, { ...W, hair: 'long', collar: 'flat' }, 'Young woman with loose hair'),
-    L('rembrandt', 33, { beard: true, collar: 'flat' }, 'Old man with a beard'),
-    L('rembrandt', 45, { ...W, hair: 'bun', collar: 'flat', pearl: true }, 'Woman in a white collar'),
-    L('zorn', 11, { ...W, hair: 'bun', collar: 'open' }, 'Woman in red'),
-    L('zorn', 52, { moustache: true, collar: 'flat', clothes: 'black' }, 'Man with a moustache'),
-    L('zorn', 64, { ...W, hair: 'long', collar: 'open', clothes: 'black' }, 'Woman in black'),
-    L('zorn', 70, { beard: true, collar: 'none', clothes: 'black' }, 'Bearded man'),
-    L('sargent', 81, { ...W, hair: 'bun', collar: 'open', pearl: true }, 'Lady in a black gown'),
-    L('sargent', 92, { moustache: true, collar: 'flat' }, 'Gentleman'),
-    L('sargent', 103, { ...W, hair: 'long', collar: 'open', clothes: 'white' }, 'Lady in white'),
-    L('sargent', 114, { collar: 'flat' }, 'Young man'),
-    L('sorolla', 125, { beard: true, collar: 'none' }, 'Man in white'),
-    L('sorolla', 136, { ...W, hair: 'bun', collar: 'open' }, 'Woman in the sun'),
-    L('sorolla', 147, { ...W, hair: 'long', collar: 'open' }, 'Girl on the beach'),
-    L('velazquez', 158, { moustache: true, collar: 'flat' }, 'Courtier'),
-    L('velazquez', 169, { beard: true, collar: 'flat', deep: true }, 'Man with a lace collar'),
-    L('velazquez', 180, { ...W, hair: 'bun', collar: 'ruff' }, 'Lady with a ruff'),
-    L('velazquez', 191, { beard: true, collar: 'ruff' }, 'Bearded man with a ruff'),
-    L('hals', 202, { beard: true, moustache: true, collar: 'ruff' }, 'Gentleman with a ruff'),
-    L('hals', 213, { beard: true, collar: 'flat' }, 'Burgher'),
-    L('hals', 224, { ...W, hair: 'bun', collar: 'ruff' }, 'Woman with a ruff'),
-    L('vermeer', 235, { ...W, hair: 'bun', collar: 'flat', pearl: true, clothes: 'blue' }, 'Girl with a pearl'),
-    L('vermeer', 246, { ...W, hair: 'long', collar: 'flat' }, 'Woman in a yellow jacket'),
-    L('vermeer', 257, { ...W, hair: 'bun', collar: 'flat', pearl: true }, 'Woman reading a letter'),
-  ];
+  /*
+   * Nothing is stored: a portrait is a painter and a seed, written "hals-48213". The seed decides
+   * everything else, from who the sitter is (a man or a woman, a beard, a bun or long hair, a pearl,
+   * a collar, the clothes) to how the head is turned and lit, so the same id always draws the same
+   * portrait and a fresh random seed draws a new one. The choices follow each painter's habits.
+   */
+  const PAINTERS = Object.keys(STYLES);
+  // what each painter tends to put on a sitter: collars and clothes, for men and for women
+  const HABITS = {
+    rembrandt: { collar: ['flat', 'flat', 'none', 'open'], clothes: { man: [undefined], woman: [undefined] } },
+    zorn: { collar: ['open', 'flat', 'none'], clothes: { man: ['black', 'black', undefined], woman: [undefined, 'black'] } },
+    sargent: { collar: ['open', 'flat', 'flat'], clothes: { man: [undefined], woman: [undefined, 'white'] } },
+    sorolla: { collar: ['open', 'none', 'open'], clothes: { man: [undefined], woman: [undefined] } },
+    velazquez: { collar: ['flat', 'ruff', 'flat'], clothes: { man: [undefined], woman: [undefined] } },
+    hals: { collar: ['ruff', 'ruff', 'flat'], clothes: { man: [undefined], woman: [undefined] } },
+    vermeer: { collar: ['flat', 'flat', 'open'], clothes: { man: [undefined, 'black'], woman: [undefined, 'blue'] } },
+  };
+  const pickOf = (r, list) => list[Math.floor(r() * list.length)];
 
+  function lookFor(painter, seed) {
+    const r = rng((seed ^ 0x5bd1e995) >>> 0);
+    const h = HABITS[painter];
+    const woman = r() < 0.5;
+    const look = { collar: pickOf(r, h.collar) };
+    if (woman) {
+      look.woman = true;
+      look.hair = r() < 0.55 ? 'bun' : 'long';
+      if (r() < 0.4) look.pearl = true;
+      // a bare neck suits a woman better than none at all
+      if (look.collar === 'none') look.collar = 'open';
+    } else {
+      const beard = r() < 0.42;
+      if (beard) look.beard = true;
+      if (r() < (beard ? 0.25 : 0.45)) look.moustache = true;
+    }
+    const clothes = pickOf(r, h.clothes[woman ? 'woman' : 'man']);
+    if (clothes) look.clothes = clothes;
+    if (painter === 'velazquez' && r() < 0.14) look.deep = true;
+    return look;
+  }
 
-  // The portrait's picture, at size (1 = 600 x 750); kept so it is drawn only once
+  function titleFor(look, painter) {
+    const who = look.woman ? 'Woman' : 'Man';
+    const extra = look.beard ? 'with a beard' : look.moustache ? 'with a moustache' : look.pearl ? 'with a pearl earring' : look.hair === 'long' ? 'with loose hair' : '';
+    const dress = look.collar === 'ruff' ? 'in a ruff' : '';
+    return [who, extra || dress].filter(Boolean).join(' ');
+  }
+
+  // The portrait an id names, or null if the painter is unknown
+  function entry(id) {
+    const m = /^([a-z]+)-(\d+)$/.exec(id || '');
+    if (!m || !STYLES[m[1]]) return null;
+    const seed = +m[2];
+    const look = lookFor(m[1], seed);
+    return { id, painter: m[1], seed, look, title: titleFor(look, m[1]) };
+  }
+
+  // A new id: a random painter and seed, never the one given
+  function random(not) {
+    for (;;) {
+      const id = `${pickOf(Math.random, PAINTERS)}-${Math.floor(Math.random() * 1e6)}`;
+      if (id !== not) return id;
+    }
+  }
+
+  // The portrait's picture, at size (1 = 600 x 750); the last few are kept so they are not redrawn
   const cache = new Map();
   function picture(id, size = 1) {
     const key = id + '@' + size;
     if (!cache.has(key)) {
-      const pt = PORTRAITS.find((x) => x.id === id);
+      const pt = entry(id);
       if (!pt) return null;
+      if (cache.size >= 6) cache.delete(cache.keys().next().value);
       cache.set(key, drawPortrait(pt.painter, pt.seed, pt.look, size));
     }
     return cache.get(key);
   }
 
   window.Subjects = {
-    PORTRAITS,
-    painterOf: (id) => { const pt = PORTRAITS.find((x) => x.id === id); return pt ? STYLES[pt.painter].painter : ''; },
+    PAINTERS,
+    entry,
+    random,
+    painterOf: (id) => { const pt = entry(id); return pt ? STYLES[pt.painter].painter : ''; },
     picture,
     drawPortrait,
   };

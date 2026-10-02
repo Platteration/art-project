@@ -279,13 +279,8 @@
 
   // ---- What to paint: the player's photo or a generated painting, dealt at random ----
 
-  const PAINTINGS = Subjects.PORTRAITS;
-  // a painting at random, never the one just played
-  const deal = () => {
-    const last = subject && subject.id || load(LAST_PAINTING_KEY, null);
-    const others = PAINTINGS.filter((p) => p.id !== last);
-    return others[Math.floor(Math.random() * others.length)].id;
-  };
+  // a brand-new portrait, drawn from a random painter and seed (never the one just played)
+  const deal = () => Subjects.random(subject && subject.id || load(LAST_PAINTING_KEY, null));
   let subject = null;
   subject = load(SUBJECT_KEY, { kind: 'photo' }).kind === 'painting' ? { kind: 'painting', id: deal() } : { kind: 'photo' };
   if (subject.id) save(LAST_PAINTING_KEY, subject.id);
@@ -492,7 +487,7 @@
     save(LEVEL_KEY, level());
     const m = mode();
     const now = performance.now();
-    const painting = subject.kind === 'painting' && PAINTINGS.find((x) => x.id === subject.id);
+    const painting = subject.kind === 'painting' && Subjects.entry(subject.id);
     game = {
       board,
       targets,                                // per number: { rgb, lab, counts } the palette can mix
