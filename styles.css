@@ -283,9 +283,24 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 
 .panel { margin: 0; display: grid; gap: 8px; min-width: 0; align-content: start; }
 .panel figcaption {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px;
   font-family: var(--display); font-weight: 700; font-size: 1rem;
 }
+.panel figcaption > span:first-child { white-space: nowrap; }
+/* a small two-way switch: Photo | Blocks, Photo | Zorn */
+.pill-switch { display: inline-flex; flex: none; padding: 2px; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
+.pill-switch button {
+  appearance: none; border: 0; background: none; border-radius: 999px; cursor: pointer;
+  padding: 3px 8px; font: 600 0.72rem var(--body); color: var(--muted);
+  max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pill-switch button:hover { color: var(--ink); }
+.pill-switch button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.pill-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pill-switch button.is-busy { opacity: 0.7; }
+.block-view { margin-left: auto; }
+.panel figcaption .block-view + .btn { padding-inline: 4px; margin-left: auto; }
+
 .matte {
   position: relative;
   background: var(--well);
@@ -798,14 +813,6 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   padding: 4px 10px; cursor: pointer;
 }
 .game-ref-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.game-ref-view { display: inline-flex; padding: 2px; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
-.game-ref-view button {
-  appearance: none; border: 0; background: none; border-radius: 999px; cursor: pointer;
-  padding: 3px 9px; font: 600 0.72rem var(--body); color: var(--muted);
-}
-.game-ref-view button:hover { color: var(--ink); }
-.game-ref-view button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
-.game-ref-view button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .game-ref.is-collapsed .game-ref-view { display: none; }
 .game-ref-toggle::after { content: " · hide"; color: var(--muted); font-weight: 500; }
 .game-ref.is-collapsed .game-ref-toggle::after { content: " · show"; }

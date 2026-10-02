@@ -3,7 +3,7 @@
 A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original:
 
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
-- **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it.
+- **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it. The switch above it shows the blocks in the photo's colors (**Photo**) or as your palette mixes them (for example **Zorn**): each block is repainted with the closest mix the palette makes, so you can see the painting your paints would give. The palette is the one chosen under **Colors and paints**, or, until you choose one, the known palette that mixes the study best. The choice is remembered, and the magnifier and **Save PNG** use the colors shown.
 
 A bar of tool icons sits beside the images (a row pinned to the top of the screen on a phone). Press an icon to use that tool; press it again to turn it off, so touching an image just scrolls the page.
 

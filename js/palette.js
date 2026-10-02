@@ -160,6 +160,7 @@
       b.addEventListener('click', () => {
         choice.preset = preset.id;
         save(CHOICE_KEY, choice);
+        announce();
         els.presetList.querySelectorAll('.preset').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
         showPreset(preset.id);
       });
@@ -203,6 +204,7 @@
       els.suggest.textContent = 'Suggest again';
       const picks = task.result.picks.map((i) => codes[i]);
       suggested = { codes: picks, cov: task.result, from: mine.size ? 'your paints' : 'the whole library' };
+      announce();
       showSuggested();
     });
   }
@@ -321,6 +323,7 @@
     input.addEventListener('change', () => {
       choice.source = input.value;
       save(CHOICE_KEY, choice);
+      announce();
       cancel('mix');
       refresh();
     });
@@ -422,6 +425,35 @@
     else refresh();
   });
 
+  // ---- The palette in use, for the study's color blocks ----------------------
+
+  /*
+   * The palette chosen here: the known palette picked, or the suggested one from My paints. With
+   * none chosen yet, the known palette that mixes this study's colors best (most within reach,
+   * then closest), as the list ranks them. { name, short, codes, chosen } or null.
+   */
+  let bestFor = null, best = null;
+  function current() {
+    if (choice.source === 'preset' && choice.preset) {
+      const pr = Paints.PRESETS.find((p) => p.id === choice.preset);
+      if (pr) return { name: pr.name, codes: pr.paints, chosen: true };
+    }
+    if (choice.source === 'mine' && suggested) return { name: 'Suggested palette', codes: suggested.codes, chosen: true };
+    const r = Studio.result();
+    if (!r) return null;
+    if (bestFor !== r) {
+      const colors = studyColors();
+      bestFor = r;
+      best = Paints.PRESETS.map((pr) => ({ pr, cov: Mixing.coverage(pr.paints.map(paintFor), colors) }))
+        .sort((a, b) => b.cov.reached - a.cov.reached || a.cov.score - b.cov.score)[0].pr;
+    }
+    return { name: best.name, codes: best.paints, chosen: false };
+  }
+  // tells the page the palette in use may have changed
+  function announce() { window.dispatchEvent(new CustomEvent('studio:palette')); }
+  window.StudioPalette = { current };
+
   renderMine();
   refresh();
+  announce();
 })();

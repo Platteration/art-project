@@ -229,7 +229,7 @@
             <div class="matte"><canvas id="cv-value" class="view" aria-label="Three-value study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
           </figure>
           <figure class="panel" data-panel="block">
-            <figcaption><span>Color blocks</span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
+            <figcaption><span>Color blocks</span><span class="pill-switch block-view" role="group" aria-label="Color the blocks with"><button type="button" data-block-view="photo" aria-pressed="true" title="The colors in the photo">Photo</button><button type="button" data-block-view="palette" aria-pressed="false" id="blockViewPalette">Palette</button></span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
             <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
           </figure>
         </div>
@@ -398,7 +398,7 @@
             <figure class="game-ref" id="gameRefFig">
               <div class="game-ref-head">
                 <button type="button" class="game-ref-toggle" id="gameRefToggle" aria-expanded="true" aria-controls="gameRef">Reference</button>
-                <div class="game-ref-view" role="group" aria-label="Show the reference as">
+                <div class="pill-switch game-ref-view" role="group" aria-label="Show the reference as">
                   <button type="button" data-ref-view="photo" aria-pressed="true">Photo</button>
                   <button type="button" data-ref-view="blocks" aria-pressed="false">Blocks</button>
                 </div>

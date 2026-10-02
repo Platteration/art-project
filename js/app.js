@@ -98,6 +98,7 @@
   const PALETTE_KEY = 'portrait-value-studio.palette';
   const CANVAS_KEY = 'portrait-value-studio.canvasUnit';
   const SMOOTHING_KEY = 'portrait-value-studio.smoothing';
+  const BLOCK_VIEW_KEY = 'portrait-value-studio.blockView';
   const DRAWERS_KEY = 'portrait-value-studio.drawers';
 
   const state = {
@@ -247,9 +248,8 @@
     const r = Study.process(state.prep, settings());
     state.result = r;
     paint(els.canvases.value, r.valueImage, r.w, r.h);
-    paint(els.canvases.block, r.blockImage, r.w, r.h);
     state.pixels.value = r.valueImage;
-    state.pixels.block = r.blockImage;
+    showBlocks();
     renderZones();
     drawHistogram();
     els.drawerState.values.textContent = `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
@@ -258,6 +258,85 @@
     els.busy.hidden = true;
     window.dispatchEvent(new CustomEvent('studio:result'));
   }
+
+  // ---- Color blocks: the photo's colors, or as the chosen palette mixes them ----
+
+  let blockView = 'photo';
+  try { if (localStorage.getItem(BLOCK_VIEW_KEY) === 'palette') blockView = 'palette'; } catch (err) { /* photo */ }
+  const blockViewButtons = document.querySelectorAll('[data-block-view]');
+  const blockViewPalette = $('blockViewPalette');
+  const paletteMade = new Map();
+  const paletteBlocks = { key: null, image: null, job: 0 };
+  const shortName = (name) => name.replace(/\s*\(.*\)$/, '').replace(/ palette$/i, '');
+
+  /*
+   * The color-block study with each block's color replaced by the mix the palette makes of it
+   * (the closest recipe the pigment model finds, as the Colors and paints list shows). Outlines
+   * stay as they are. Worked out a color at a time; null until it is ready.
+   */
+  function blocksInPalette(r, pal) {
+    const key = pal.codes.join(',');
+    if (paletteBlocks.result === r && paletteBlocks.key === key) return paletteBlocks.image;
+    paletteBlocks.result = r;
+    paletteBlocks.key = key;
+    paletteBlocks.image = null;
+    const job = ++paletteBlocks.job;
+    const paints = pal.codes.map((c) => {
+      if (!paletteMade.has(c)) paletteMade.set(c, Mixing.makePaint(Object.assign({ strength: 'normal' }, Paints.byCode(c))));
+      return paletteMade.get(c);
+    });
+    const colors = r.blockColors.filter((c) => c.share > 0);
+    const mixed = new Map();
+    let i = 0, task = null;
+    function next() {
+      if (job !== paletteBlocks.job) return;
+      const end = performance.now() + 20;
+      while (i < colors.length && performance.now() < end) {
+        const c = colors[i];
+        if (!task) task = Mixing.recipeTask({ r: c.r, g: c.g, b: c.b }, paints);
+        if (!task.step(Math.max(1, end - performance.now()))) break;
+        mixed.set(c.label, task.result ? task.result.mix : { r: c.r, g: c.g, b: c.b });
+        task = null;
+        i++;
+      }
+      if (i < colors.length) { setTimeout(next, 0); return; }
+      // recolor every block pixel; outline pixels (not their block's color) are left alone
+      const img = new Uint8ClampedArray(r.blockImage);
+      const own = new Map(r.blockColors.map((c) => [c.label, c]));
+      for (let k = 0, p = 0; k < r.block.length; k++, p += 4) {
+        const c = own.get(r.block[k]), m = mixed.get(r.block[k]);
+        if (!m || img[p] !== c.r || img[p + 1] !== c.g || img[p + 2] !== c.b) continue;
+        img[p] = m.r; img[p + 1] = m.g; img[p + 2] = m.b;
+      }
+      paletteBlocks.image = img;
+      showBlocks();
+    }
+    setTimeout(next, 0);
+    return null;
+  }
+
+  function showBlocks() {
+    const r = state.result;
+    const pal = window.StudioPalette && window.StudioPalette.current();
+    blockViewPalette.textContent = pal ? shortName(pal.name) : 'Palette';
+    blockViewPalette.title = pal ? `As ${pal.name} mixes them${pal.chosen ? '' : ' (the best match: choose another under Colors and paints)'}` : 'Choose a palette under Colors and paints';
+    blockViewButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.blockView === blockView)));
+    if (!r) return;
+    let img = r.blockImage;
+    const inPalette = blockView === 'palette' && pal;
+    if (inPalette) img = blocksInPalette(r, pal) || img;
+    blockViewPalette.classList.toggle('is-busy', !!inPalette && img === r.blockImage);
+    els.canvases.block.setAttribute('aria-label', inPalette ? `Color-block study as ${pal.name} mixes it` : 'Color-block study');
+    if (state.pixels.block === img && els.canvases.block.width === r.w) return;
+    paint(els.canvases.block, img, r.w, r.h);
+    state.pixels.block = img;
+  }
+  blockViewButtons.forEach((b) => b.addEventListener('click', () => {
+    blockView = b.dataset.blockView;
+    try { localStorage.setItem(BLOCK_VIEW_KEY, blockView); } catch (err) { /* kept for this visit only */ }
+    showBlocks();
+  }));
+  window.addEventListener('studio:palette', showBlocks);
 
   function paint(canvas, rgba, w, h) {
     canvas.width = w;
