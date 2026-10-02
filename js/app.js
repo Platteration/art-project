@@ -2346,6 +2346,7 @@
   window.Studio = {
     result: () => state.result,
     source: () => state.source,
+    prep: () => state.prep,
     sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
     settings,
     tab: () => state.tab,

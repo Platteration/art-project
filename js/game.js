@@ -39,7 +39,7 @@
     medium: { colors: 3, seconds: 300, merge: 6 },
     hard: { colors: 4, seconds: 480, merge: 5 },
   };
-  const SIZE = 700;            // the board's long side, in pixels
+  const SIZE = 700;            // a generated painting's board's long side, in pixels
   const PAPER = [245, 240, 230];
   const EDGE = [27, 30, 26];
   const MAX_PARTS = 60;        // per number
@@ -85,25 +85,25 @@
   // ---- The board ------------------------------------------------------------
 
   /*
-   * Builds a board from the reference (the photo, or a generated painting): its own color-block
-   * study at SIZE with the level's colors per value and a stronger merge (so shapes are big
-   * enough to paint), the numbers darkest first, the outline pixels and where each shape's
-   * number goes. A painting gets its value splits worked out for it, as Auto does for a photo.
+   * Builds a board from the reference: its color-block study with the level's colors per value,
+   * the numbers darkest first, the outline pixels and where each shape's number goes. A photo is
+   * simplified exactly as the Study tab simplifies it (same working size, splits, simplify,
+   * smoothing and merge), so the board has the shapes of the color-block study. A generated
+   * painting is already flat planes: it gets no blur, so their straight edges stay, only specks
+   * merge away, and its value splits are worked out for it, as Auto does for a photo.
    */
   function buildBoard(levelId) {
     const level = LEVELS[levelId];
-    const prep = Study.prepare(subjectSource(), SIZE);
+    const painting = subject.kind === 'painting';
+    const prep = painting ? Study.prepare(subjectSource(), SIZE) : Studio.prep();
     const opts = Studio.settings(prep);
     const { w, h } = prep;
     opts.colorsPerZone = level.colors;
     opts.outlines = false;
-    if (subject.kind === 'painting') {
-      // already flat planes: no blur, so their straight edges stay, and only specks merge away
+    if (painting) {
       opts.blurRadius = 0;
       opts.minSize = Math.round(w * h * 0.004 * Math.pow(level.merge / 10, 2));
       [opts.t1, opts.t2] = Study.autoThresholds(prep, opts.blurRadius, opts.smoothing);
-    } else {
-      opts.minSize = Math.max(opts.minSize, Math.round(w * h * 0.012 * Math.pow(level.merge / 10, 2)));
     }
     const res = Study.process(prep, opts);
 
