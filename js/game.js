@@ -21,6 +21,7 @@
     numbers: $('gameNumbers'),
     mixChip: $('gameMixChip'), mixTitle: $('gameMixTitle'), mixParts: $('gameMixParts'),
     undo: $('gameUndo'), clear: $('gameClear'), paints: $('gamePaints'),
+    copy: $('gameCopy'), copyBar: $('gameCopyBar'), copyText: $('gameCopyText'), copyDone: $('gameCopyDone'),
     amount: $('gameAmount'), amountOut: $('gameAmountOut'), board: document.querySelector('.game-board'),
     grade: $('gameGrade'), points: $('gamePoints'), breakdown: $('gameBreakdown'),
     again: $('gameAgain'), newGame: $('gameNew'),
@@ -289,6 +290,7 @@
       fills: [],                              // rgb per number, from the mix
       labs: [],
       selected: 0,
+      copyFrom: null,                         // the number whose mix is being copied
       seconds: LEVELS[board.level].seconds,
       ends: performance.now() + LEVELS[board.level].seconds * 1000,
       over: false,
@@ -297,6 +299,7 @@
     els.setup.hidden = true;
     els.result.hidden = true;
     els.play.hidden = false;
+    endCopy();
     drawRef(els.ref);
     renderPaints();
     renderNumbers();
@@ -380,9 +383,47 @@
   }
 
   function select(k) {
+    if (game.copyFrom !== null) {
+      if (k === game.copyFrom) endCopy(); else paste(k);
+      return;
+    }
     game.selected = k;
     updateMix();
   }
+
+  // ---- Copying a mix ----------------------------------------------------------
+
+  // Copy mix: every number or shape tapped next gets the chosen number's mix, part for part
+  function startCopy() {
+    const k = game.selected;
+    if (!game.parts[k].length) return;
+    game.copyFrom = k;
+    els.play.classList.add('is-copying');
+    els.copyBar.hidden = false;
+    els.copyText.textContent = `Copying number ${k + 1}. Tap the numbers or shapes to paste its mix into.`;
+    updateMix();
+  }
+
+  function endCopy() {
+    if (!game) return;
+    game.copyFrom = null;
+    els.play.classList.remove('is-copying');
+    els.copyBar.hidden = true;
+    if (!game.over) updateMix();
+  }
+
+  function paste(k) {
+    const from = game.copyFrom;
+    game.parts[k] = game.parts[from].map((x) => ({ paint: x.paint, amount: x.amount }));
+    remix(k);
+    Studio.toast(`Number ${from + 1}’s mix pasted into number ${k + 1}`);
+  }
+
+  els.copy.addEventListener('click', () => (game.copyFrom === null ? startCopy() : endCopy()));
+  els.copyDone.addEventListener('click', endCopy);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && game && !game.over && game.copyFrom !== null) endCopy();
+  });
 
   const perTap = () => AMOUNTS[+els.amount.value];
   // how much of paint i a number's mix has, in parts
@@ -418,7 +459,7 @@
 
   function partsText(k) {
     const list = game.parts[k];
-    if (!list.length) return 'Empty. Tap a paint below to start the mix.';
+    if (!list.length) return 'Empty. Tap a paint to start the mix, or copy one from a painted number.';
     return game.paints
       .map((p, i) => [p.code, amountOf(list, i)])
       .filter(([, n]) => n)
@@ -435,6 +476,10 @@
     els.mixChip.classList.toggle('is-empty', !fill);
     els.undo.disabled = !game.parts[k].length;
     els.clear.disabled = !game.parts[k].length;
+    const copying = game.copyFrom !== null;
+    els.copy.disabled = !copying && !game.parts[k].length;
+    els.copy.textContent = copying ? 'Stop copying' : 'Copy mix';
+    els.copy.setAttribute('aria-pressed', String(copying));
     els.paints.querySelectorAll('.game-paint').forEach((b) => {
       const n = amountOf(game.parts[k], +b.dataset.index);
       b.querySelector('.game-paint-count').textContent = n ? fmtParts(n) : '';
@@ -524,6 +569,7 @@
     if (!game || game.over) return;
     game.over = true;
     clearInterval(timer);
+    endCopy();
     const left = timeLeft();
     const groups = game.board.groups;
     const total = groups.reduce((s, g) => s + g.share, 0);
@@ -673,4 +719,6 @@
     if (e.detail !== 'game') return;
     if (!game) { renderPalettes(); refreshSetup(); }
   });
+  // the page may open straight on this tab (index.html#game), before this script was listening
+  if (Studio.tab() === 'game') { renderPalettes(); refreshSetup(); }
 })();

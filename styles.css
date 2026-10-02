@@ -760,7 +760,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-ref { grid-area: ref; margin: 0; display: grid; gap: 6px; min-width: 0; }
 .game-ref canvas { max-height: 34vh; }
 .game-ref-toggle {
-  appearance: none; justify-self: start;
+  appearance: none; justify-self: start; white-space: nowrap;
   font: 600 0.75rem var(--body); color: var(--ink);
   background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
   padding: 4px 10px; cursor: pointer;
@@ -782,8 +782,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-ref canvas { cursor: grab; touch-action: none; }
   .game-ref.is-moving canvas { cursor: grabbing; }
   .game-ref.is-moving .matte { box-shadow: 0 6px 18px var(--shadow); }
-  /* the numbers come after the paints, nearer the thumb */
-  .game-numbers { order: 2; }
+
 }
 
 .game-mixer { grid-area: mixer; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -819,7 +818,17 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-mix-chip.is-empty { background: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px); }
 .game-mix-text h3 { margin: 0; font: 700 1rem var(--display); }
 .game-mix-parts { margin: 2px 0 0; font: 500 0.82rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.game-mix-actions { grid-column: 2; display: flex; gap: 6px; }
+.game-mix-actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
+#gameCopy[aria-pressed="true"] { background: var(--earth); border-color: var(--earth); color: var(--surface); }
+.game-copy {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  border: 1px dashed var(--earth);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.is-copying .game-board canvas, .is-copying .game-number { cursor: copy; }
 .game-paints { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; }
 .game-paint {
   appearance: none;
@@ -882,6 +891,50 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-zone-number { font: 700 1.1rem var(--display); text-align: center; }
 .game-zone-match { font: 600 0.8rem var(--mono); }
 .game-zone-tip { color: var(--muted); }
+
+@media (max-width: 999px) {
+  /* phones: the paints are a toolbar beside the painting, the amount slider sits right under it,
+     then the mix, and the numbers last, nearest the thumb */
+  .game-play {
+    grid-template-columns: minmax(0, 1fr) 64px;
+    grid-template-areas: "bar bar" "board paints" "amount amount" "head head" "copy copy" "numbers numbers" "hint hint";
+    column-gap: 8px;
+    row-gap: 10px;
+  }
+  .game-mixer, .game-mix { display: contents; }
+  .game-board .matte { padding: 6px; }
+  .game-paints {
+    grid-area: paints;
+    contain: size;            /* as tall as the painting, scrolling if the palette is longer */
+    align-self: stretch;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+  }
+  .game-paint { padding: 5px 2px 4px; }
+  .game-paint-dot { width: 34px; height: 34px; }
+  .game-paint-code { font-size: 0.62rem; }
+  .game-amount {
+    grid-area: amount;
+    padding: 8px 12px 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+  }
+  .game-mix-head {
+    grid-area: head;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+  }
+  .game-copy { grid-area: copy; }
+  .game-numbers { grid-area: numbers; }
+  .game-mix > .hint { grid-area: hint; }
+}
 
 /* ---- Loupe ---- */
 .loupe {
