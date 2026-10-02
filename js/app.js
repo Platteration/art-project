@@ -2426,6 +2426,7 @@
     result: () => state.result,
     source: () => state.source,
     prep: () => state.prep,
+    savePng,
     sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
     settings,
     tab: () => state.tab,

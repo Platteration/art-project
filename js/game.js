@@ -8,7 +8,8 @@
  * pigment model finds, in amounts the player can tap, so every color can be matched exactly. The
  * game suggests the palette that mixes the portrait's colors best. Locking in the portrait, or
  * running out of time, scores each number against its target with CIEDE2000, weighted by area,
- * plus a time bonus that grows with accuracy.
+ * plus a time bonus that grows with accuracy. Modes change how it is played: no clock, a reference
+ * that hides after a look, a greyscale value stage before the color, or a palette dealt at random.
  */
 (function () {
   'use strict';
@@ -33,6 +34,12 @@
     kicker: $('gameKicker'), pct: $('gamePct'), stars: $('gameStars'), newBest: $('gameNewBest'),
     analyze: $('gameAnalyze'), analysis: $('gameAnalysis'),
     yours: $('gameYours'), target: $('gameTarget'), photo: $('gamePhoto'), zones: $('gameZones'),
+    mode: $('gameMode'), modeAbout: $('gameModeAbout'), deal: $('gameDeal'),
+    value: $('gameValue'), valueRange: $('gameValueRange'), valueTitle: $('gameValueTitle'), valueText: $('gameValueText'),
+    valueChip: $('gameValueChip'), valueClear: $('gameValueClear'),
+    spot: $('gameSpot'),
+    finalWrap: $('gameFinalWrap'), finalTarget: $('gameFinalTarget'), handle: $('gameFinalHandle'),
+    showBar: $('gameShowBar'), compare: $('gameCompare'),
     photoPane: $('gameFromPhotoPane'), photoName: $('gamePhotoName'),
     paintingPane: $('gameFromPaintingPane'), paintingName: $('gamePaintingName'), reroll: $('gameReroll'),
   };
@@ -42,9 +49,23 @@
     medium: { colors: 3, seconds: 300, merge: 6 },
     hard: { colors: 4, seconds: 480, merge: 5 },
   };
+  // How a game is played; the mode is chosen in the setup
+  const MODES = {
+    classic: { name: 'Classic', about: 'Beat the clock: mix every number to match the reference, then lock in.' },
+    relaxed: { name: 'Relaxed', about: 'No clock and no time bonus. Take as long as you like; a stopwatch just counts up.' },
+    memory: { name: 'Memory', about: 'The reference shows for 10 seconds, then hides. Paint from memory. A peek at it costs 10 seconds on the clock.' },
+    value: { name: 'Value first', about: 'First set each number\u2019s value, light to dark, in greys. Then add the color over your underpainting. The value study scores too.' },
+    mystery: { name: 'Mystery palette', about: 'Paint with white and three paints dealt at random. The colors to match are mixed from them, so every one can be reached.' },
+  };
+  const LOOK_SECONDS = 10;     // memory mode: how long the reference shows before it hides
+  const PEEK_SECONDS = 3;      // ...how long a peek shows it
+  const PEEK_COST = 10;        // ...and what a peek costs on the clock
+  const MAX_PEEKS = 3;
+  const SPOT = 95;             // a number this well matched (percent) earns the "Spot on!" chime
   const SIZE = 700;            // a generated painting's board's long side, in pixels
   const PAPER = [245, 240, 230];
   const EDGE = [27, 30, 26];
+  const FLASH = [217, 164, 65];    // the gold a number's shapes flash when you are sent to them
   const MAX_PARTS = 60;        // per number
   const AMOUNTS = [0.25, 0.5, 1, 2, 4]; // parts added per tap, chosen with the slider
   const AMOUNT_KEY = 'portrait-value-studio.gameAmount';
@@ -57,6 +78,7 @@
   const SUBJECT_KEY = 'portrait-value-studio.gameSubject';
   const LAST_PAINTING_KEY = 'portrait-value-studio.gamePainting';
   const REF_VIEW_KEY = 'portrait-value-studio.gameRefView';
+  const MODE_KEY = 'portrait-value-studio.gameMode';
 
   function load(key, fallback) {
     try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (err) { return fallback; }
@@ -211,10 +233,10 @@
     const sel = opts.selected;
     for (let i = 0, p = 0; i < w * h; i++, p += 4) {
       const v = cell[i];
-      let c = fills[v] || PAPER;
+      let c = v === opts.flash ? FLASH : fills[v] || PAPER;
       if (edge[i] && opts.edges !== false) {
         c = v === sel || (sel >= 0 && neighbourIs(cell, i, w, h, sel)) ? [164, 71, 47] : EDGE;
-      } else if (v === sel && !fills[v]) {
+      } else if (v === sel && !fills[v] && v !== opts.flash) {
         c = [226, 234, 216];
       }
       d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2]; d[p + 3] = 255;
@@ -251,7 +273,9 @@
   let setupFor = null;   // { from, level } the setup board was built for
 
   const level = () => document.querySelector('input[name="gameLevel"]:checked').value;
-  const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${els.palette.value}`;
+  const mode = () => els.mode.value;
+  // bests are kept per mode; Classic's keys stay as they were
+  const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
 
   // ---- What to paint: the player's photo or a generated painting, dealt at random ----
 
@@ -363,8 +387,50 @@
     }).then(done));
   }
 
+  // Mystery palette: white and three paints dealt at random, redealt for each new portrait. Of a
+  // few random hands, the first that mixes the portrait's colors well enough is kept (else the best).
+  let mystery = null;
+  function dealMystery() {
+    if (!board) return;
+    const colors = studyColors(board);
+    const pool = Paints.LIBRARY.filter((p) => p.category !== 'white');
+    let best = null;
+    for (let i = 0; i < 24; i++) {
+      const picks = [];
+      while (picks.length < 3) {
+        const c = pool[Math.floor(Math.random() * pool.length)].code;
+        if (!picks.includes(c)) picks.push(c);
+      }
+      const codes = ['TW', ...picks];
+      const match = Mixing.coverage(codes.map(paintFor), colors).match;
+      if (!best || match > best.match) best = { codes, match };
+      if (match >= 82) break;
+    }
+    mystery = { id: `mystery-${best.codes.join('-')}`, name: 'Mystery palette', codes: best.codes };
+  }
+
   function chosenPalette() {
+    if (mode() === 'mystery' && mystery) return mystery;
     return paletteChoices().find((p) => p.id === els.palette.value) || paletteChoices()[0];
+  }
+
+  // What the chosen mode changes in the setup
+  function showMode() {
+    const m = mode();
+    els.modeAbout.textContent = MODES[m].about;
+    els.palette.hidden = m === 'mystery';
+    els.deal.hidden = m !== 'mystery';
+    document.querySelectorAll('.game-levels label').forEach((l) => {
+      const lv = LEVELS[l.getAttribute('for').replace('game', '').toLowerCase()];
+      l.querySelector('small').textContent = `Up to ${lv.colors * 3} colors · ${m === 'relaxed' ? 'no clock' : lv.seconds / 60 + ' min'}`;
+    });
+    if (board) notePreview();
+  }
+  function notePreview() {
+    const m = mode(), lv = LEVELS[level()];
+    els.previewNote.textContent = `${board.groups.length} numbers to mix, `
+      + (m === 'relaxed' ? 'no time limit.' : `${fmtTime(lv.seconds)} on the clock${m === 'memory' ? `, after a ${LOOK_SECONDS}-second look.` : '.'}`)
+      + (m === 'value' ? ' Values first, then color.' : '');
   }
 
   function showPalette() {
@@ -380,7 +446,7 @@
     if (board) {
       const b = board, sug = suggestedPalette(b);
       const sugName = (paletteChoices().find((x) => x.id === sug.id) || {}).name;
-      const lead = p.id === sug.id ? 'Suggested for this portrait.' : `Suggested for this portrait: ${sugName}.`;
+      const lead = mode() === 'mystery' ? 'Dealt at random: white and three paints.' : p.id === sug.id ? 'Suggested for this portrait.' : `Suggested for this portrait: ${sugName}.`;
       const say = (t) => {
         const close = t.filter((x) => x.studyMiss < Mixing.NEAR).length;
         els.paletteHint.textContent = `${lead} ${p.codes.length} paints, which mix ${close} of its ${t.length} colors closely. The reference is mixed from them, so every number can be matched exactly.`;
@@ -397,7 +463,7 @@
       }
     }
     const best = load(BEST_KEY, {})[bestKey()];
-    els.best.textContent = best ? `Your best on this portrait at this level with this palette: ${best} points` : '';
+    els.best.textContent = best ? `Your best on this portrait at this level in ${MODES[mode()].name} mode: ${best} points` : '';
   }
 
   function refreshSetup() {
@@ -407,8 +473,9 @@
     if (board && setupFor && setupFor.from === subjectStamp() && setupFor.level === level()) { showPalette(); return; }
     setupFor = { from: subjectStamp(), level: level() };
     board = buildBoard(level());
+    if (mode() === 'mystery') dealMystery();
     drawBoard(els.preview, board, [], { selected: -1, numbers: true });
-    els.previewNote.textContent = `${board.groups.length} numbers to mix, ${fmtTime(LEVELS[level()].seconds)} on the clock.`;
+    notePreview();
     renderPalettes();
   }
 
@@ -423,9 +490,25 @@
     if (!targets) return; // the board or palette changed while it was being mixed
     save(PALETTE_KEY, p.id);
     save(LEVEL_KEY, level());
+    const m = mode();
+    const now = performance.now();
+    const painting = subject.kind === 'painting' && PAINTINGS.find((x) => x.id === subject.id);
     game = {
       board,
       targets,                                // per number: { rgb, lab, counts } the palette can mix
+      mode: m,
+      timed: m !== 'relaxed',
+      phase: m === 'memory' ? 'look' : m === 'value' ? 'values' : 'play',  // look (memory), values (value first), play
+      began: now,
+      lookEnds: now + LOOK_SECONDS * 1000,
+      peeksLeft: MAX_PEEKS,
+      peeking: false,
+      values: board.groups.map(() => null),  // value first: each number's chosen L*
+      under: [],                              // ...and its grey, shown under the color until it is mixed
+      spot: [],                               // numbers whose mix is currently spot on
+      pulse: -1,                              // a number whose shapes are flashing
+      subjectLabel: painting ? `${painting.title}, after ${Subjects.painterOf(painting.id)}` : 'My photo',
+      levelName: level(),
       palette: p,
       paints: p.codes.map(paintFor),
       parts: board.groups.map(() => []),     // { paint, amount } in the order they were added
@@ -434,7 +517,7 @@
       selected: 0,
       copyFrom: null,                         // the number whose mix is being copied
       seconds: LEVELS[board.level].seconds,
-      ends: performance.now() + LEVELS[board.level].seconds * 1000,
+      ends: m === 'memory' || m === 'relaxed' ? Infinity : now + LEVELS[board.level].seconds * 1000,
       over: false,
       bestKey: bestKey(),
     };
@@ -449,6 +532,8 @@
     renderNumbers();
     els.paints.scrollLeft = 0;
     requestAnimationFrame(syncPaintScroll);
+    els.refFig.classList.remove('is-collapsed');
+    applyPhase();
     select(0);
     tick();
     clearInterval(timer);
@@ -459,7 +544,9 @@
   // The reference: the photo itself, or its color-block study (the colors each number is scored against)
   function drawRef(canvas, view = 'photo') {
     if (view === 'blocks') {
-      drawBoard(canvas, game.board, game.targets.map((t) => t.rgb), { selected: -1, numbers: false, edges: false });
+      // the value stage is about the reference's own values; the color stage's targets are what the palette mixes
+      const cols = game.phase === 'values' ? game.board.groups.map((g) => g.rgb) : game.targets.map((t) => t.rgb);
+      drawBoard(canvas, game.board, cols, { selected: -1, numbers: false, edges: false });
       return;
     }
     const { w, h, rgba } = game.board.prep;
@@ -469,11 +556,92 @@
   }
 
   function timeLeft() {
-    return Math.max(0, (game.ends - performance.now()) / 1000);
+    return game.timed ? Math.max(0, (game.ends - performance.now()) / 1000) : 0;
+  }
+
+  /*
+   * The game's phases: Memory starts with a look at the reference (the clock waits), Value first
+   * starts with the greyscale value stage, and every game ends in the color stage ("play").
+   * This sets what the screen shows for the phase.
+   */
+  function applyPhase() {
+    const ph = game.phase;
+    els.play.classList.toggle('is-looking', ph === 'look');
+    els.play.classList.toggle('is-valuing', ph === 'values');
+    els.value.hidden = ph !== 'values';
+    els.lock.textContent = ph === 'look' ? 'Ready: hide it' : ph === 'values' ? 'Done with values' : 'Lock in portrait';
+    els.refFig.classList.toggle('is-gray', ph === 'values');
+    els.refFig.classList.toggle('is-memory', game.mode === 'memory');
+    els.timer.classList.toggle('is-look', ph === 'look');
+    els.timer.setAttribute('aria-label', ph === 'look' ? 'Time left to memorize' : game.timed ? 'Time left' : 'Time taken');
+    if (game.mode === 'memory') {
+      els.refFig.classList.toggle('is-collapsed', ph === 'play' && !game.peeking);
+      showPeekLabel();
+    } else {
+      els.refToggle.textContent = 'Reference';
+    }
+    els.refToggle.setAttribute('aria-expanded', String(!els.refFig.classList.contains('is-collapsed')));
+    if (game.mode === 'value') drawRef(els.ref, refView);
+  }
+
+  function showPeekLabel() {
+    els.refToggle.textContent = game.phase === 'look' ? 'Memorize this'
+      : game.peeking ? 'Peeking…'
+      : game.peeksLeft ? `Peek · ${game.peeksLeft} left (−${PEEK_COST} s)` : 'No peeks left';
+  }
+
+  // Memory: a peek shows the reference for a few seconds and takes some of the clock
+  function peek() {
+    if (game.peeking) return;
+    if (!game.peeksLeft) { Studio.toast('No peeks left'); return; }
+    if (timeLeft() <= PEEK_COST) { Studio.toast('Not enough time left to peek'); return; }
+    const g = game;
+    g.peeksLeft--;
+    g.ends -= PEEK_COST * 1000;
+    g.peeking = true;
+    els.refFig.classList.remove('is-collapsed');
+    showPeekLabel();
+    tick();
+    setTimeout(() => {
+      g.peeking = false;
+      if (game !== g || g.over || g.phase !== 'play') return;
+      els.refFig.classList.add('is-collapsed');
+      showPeekLabel();
+    }, PEEK_SECONDS * 1000);
+  }
+
+  function endLook() {
+    if (!game || game.over || game.phase !== 'look') return;
+    game.phase = 'play';
+    game.ends = performance.now() + game.seconds * 1000;
+    applyPhase();
+    updateMix();
+    tick();
+    Studio.toast('The reference is hidden. Paint from memory.');
+  }
+
+  function endValues() {
+    if (!game || game.over || game.phase !== 'values') return;
+    game.phase = 'play';
+    applyPhase();
+    updateMix();
+    Studio.toast('Values set. Now mix the colors over them.');
   }
 
   function tick() {
     if (!game || game.over) return;
+    if (game.phase === 'look') {
+      const look = Math.max(0, (game.lookEnds - performance.now()) / 1000);
+      els.timer.textContent = fmtTime(Math.ceil(look));
+      els.timer.classList.remove('is-low');
+      if (look <= 0) endLook();
+      return;
+    }
+    if (!game.timed) {
+      els.timer.textContent = fmtTime((performance.now() - game.began) / 1000);
+      els.timer.classList.remove('is-low');
+      return;
+    }
     const left = timeLeft();
     els.timer.textContent = fmtTime(Math.ceil(left));
     els.timer.classList.toggle('is-low', left <= 30);
@@ -582,6 +750,47 @@
       li.append(b);
       els.numbers.append(li);
     });
+    const li = document.createElement('li');
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'btn btn-small game-next';
+    next.textContent = 'Next ▸';
+    next.title = 'Go to the next number with no paint on it';
+    next.addEventListener('click', nextUnpainted);
+    li.append(next);
+    els.numbers.append(li);
+  }
+
+  /*
+   * Sends you to the next number with nothing on it yet (a value in the value stage, a mix in the
+   * color stage), and flashes its shapes on the board so you can see where they are.
+   */
+  let pulseTimer = 0;
+  function nextUnpainted() {
+    if (!game || game.over || game.phase === 'look') return;
+    if (game.copyFrom !== null) { Studio.toast('Finish copying first'); return; }
+    const n = game.board.groups.length;
+    const has = (j) => (game.phase === 'values' ? game.values[j] != null : !!game.fills[j]);
+    for (let i = 1; i <= n; i++) {
+      const j = (game.selected + i) % n;
+      if (!has(j)) { select(j); pulse(j); return; }
+    }
+    Studio.toast(game.phase === 'values' ? 'Every number has a value. Press Done with values.' : 'Every number has a mix. Lock in when you are ready.');
+    els.lock.classList.remove('is-nudge');
+    void els.lock.offsetWidth;
+    els.lock.classList.add('is-nudge');
+  }
+  function pulse(j) {
+    clearTimeout(pulseTimer);
+    const g = game;
+    let n = 0;
+    const step = () => {
+      if (game !== g || g.over) return;
+      g.pulse = n % 2 === 0 ? j : -1;
+      paintBoard();
+      if (++n < 6) pulseTimer = setTimeout(step, reduceMotion.matches ? 250 : 170);
+    };
+    step();
   }
 
   function select(k) {
@@ -615,6 +824,7 @@
   }
 
   function paste(k) {
+    if (game.phase !== 'play') return;
     const from = game.copyFrom;
     game.parts[k] = game.parts[from].map((x) => ({ paint: x.paint, amount: x.amount }));
     remix(k);
@@ -637,7 +847,7 @@
   }
 
   function addPart(i) {
-    if (game.over) return;
+    if (game.over || game.phase !== 'play') return;
     const list = game.parts[game.selected];
     const amount = perTap();
     if (list.reduce((s, x) => s + x.amount, 0) + amount > MAX_PARTS) { Studio.toast(`A mix holds up to ${MAX_PARTS} parts`); return; }
@@ -668,6 +878,23 @@
       game.labs[k] = m.lab;
     }
     updateMix();
+    // a number that has just come within reach of its color gets the chime
+    const spot = !!game.labs[k] && matchOf(deltaE(game.labs[k], game.targets[k].lab)) >= SPOT;
+    if (spot && !game.spot[k]) celebrate(k);
+    game.spot[k] = spot;
+  }
+
+  function celebrate(k) {
+    chime();
+    if (soundOn && navigator.vibrate) navigator.vibrate([18, 40, 28]);
+    const again = (el) => { el.classList.remove('is-spot'); void el.offsetWidth; el.classList.add('is-spot'); };
+    again(els.mixChip);
+    const nb = els.numbers.querySelector(`.game-number[data-number="${k}"]`);
+    if (nb) again(nb);
+    els.spot.textContent = `Spot on! Number ${k + 1}`;
+    els.spot.classList.remove('is-on');
+    void els.spot.offsetWidth;
+    els.spot.classList.add('is-on');
   }
 
   function partsText(k) {
@@ -680,9 +907,30 @@
       .join(' · ');
   }
 
+  // what each number shows on the board: its mix, or else its grey underpainting
+  const shown = () => game.board.groups.map((g, k) => game.fills[k] || game.under[k] || null);
+  function paintBoard() {
+    drawBoard(els.canvas, game.board, shown(), { selected: game.selected, numbers: true, flash: game.pulse });
+  }
+
+  function progressText() {
+    const n = game.board.groups.length;
+    if (game.phase === 'look') return 'Memorize the colors. The reference hides soon.';
+    if (game.phase === 'values') return `${game.values.filter((v) => v != null).length} of ${n} values set`;
+    return `${game.fills.filter(Boolean).length} of ${n} numbers painted`;
+  }
+
   function updateMix() {
     const k = game.selected;
     const fill = game.fills[k];
+    if (game.phase === 'values') {
+      const L = game.values[k];
+      els.valueTitle.textContent = `Number ${k + 1}`;
+      els.valueText.textContent = L == null ? 'Not set: slide to set its value' : `Value ${(L / 10).toFixed(1)}`;
+      els.valueChip.style.background = L == null ? '' : toHex(game.under[k]);
+      els.valueRange.value = L == null ? 50 : L;
+      els.valueClear.disabled = L == null;
+    }
     els.mixTitle.textContent = `Number ${k + 1}`;
     els.mixParts.textContent = partsText(k);
     els.mixChip.style.background = fill ? toHex(fill) : '';
@@ -697,23 +945,48 @@
       const n = amountOf(game.parts[k], +b.dataset.index);
       b.querySelector('.game-paint-count').textContent = n ? fmtParts(n) : '';
     });
+    const valuing = game.phase === 'values';
     els.numbers.querySelectorAll('.game-number').forEach((b) => {
       const j = +b.dataset.number;
-      const f = game.fills[j];
+      const f = valuing ? game.under[j] : game.fills[j];
       b.setAttribute('aria-pressed', String(j === k));
       b.style.setProperty('--fill', f ? toHex(f) : 'transparent');
       b.classList.toggle('is-filled', !!f);
       b.classList.toggle('is-dark', !!f && lightness(f) < 55);
-      b.setAttribute('aria-label', `Number ${j + 1}${f ? ', painted' : ', not painted yet'}`);
+      b.setAttribute('aria-label', `Number ${j + 1}${f ? (valuing ? ', value set' : ', painted') : valuing ? ', no value yet' : ', not painted yet'}`);
     });
-    const done = game.fills.filter(Boolean).length;
-    els.progress.textContent = `${done} of ${game.board.groups.length} numbers painted`;
-    drawBoard(els.canvas, game.board, game.fills, { selected: k, numbers: true });
+    const next = els.numbers.querySelector('.game-next');
+    if (next) next.disabled = game.phase === 'look';
+    els.progress.textContent = progressText();
+    paintBoard();
   }
 
-  const undoLast = () => { game.parts[game.selected].pop(); remix(game.selected); };
+  const undoLast = () => { if (game.phase !== 'play') return; game.parts[game.selected].pop(); remix(game.selected); };
   els.undo.addEventListener('click', undoLast);
   els.quickUndo.addEventListener('click', () => { if (game && !game.over && game.parts[game.selected].length) undoLast(); });
+
+  // ---- Value stage ------------------------------------------------------------
+
+  // The grey for a lightness L* (0 black to 100 white), as an sRGB color
+  function greyOf(L) {
+    const Y = L > 8 ? Math.pow((L + 16) / 116, 3) : L / 903.3;
+    const v = Math.round(255 * (Y <= 0.0031308 ? 12.92 * Y : 1.055 * Math.pow(Y, 1 / 2.4) - 0.055));
+    return [v, v, v];
+  }
+  // the slider's track runs through the greys in even steps of lightness
+  els.valueRange.style.setProperty('--ramp', `linear-gradient(90deg, ${[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((L) => `rgb(${greyOf(L)})`).join(', ')})`);
+  function setValue(k, L) {
+    game.values[k] = L;
+    game.under[k] = greyOf(L);
+    updateMix();
+  }
+  els.valueRange.addEventListener('input', () => { if (game && !game.over && game.phase === 'values') setValue(game.selected, +els.valueRange.value); });
+  els.valueClear.addEventListener('click', () => {
+    if (!game || game.phase !== 'values') return;
+    game.values[game.selected] = null;
+    game.under[game.selected] = null;
+    updateMix();
+  });
 
   // ---- Sound ------------------------------------------------------------------
 
@@ -782,9 +1055,32 @@
     if (!soundOn || !audio) return;
     snap(audio.currentTime, vary(4200, 0.08), 0.3, 9);
   }
+  // "Spot on!": two bright bell notes, a fifth apart, each with a quiet octave overtone
+  function bell(t, freq, level) {
+    [[1, level], [2, level * 0.22]].forEach(([mult, lv]) => {
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq * mult;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(lv, t + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + 0.6);
+    });
+  }
+  function chime() {
+    if (!soundOn) return;
+    unlockAudio();
+    if (!audio) return;
+    const t = audio.currentTime;
+    bell(t, 1318.5, 0.14);
+    bell(t + 0.09, 1975.5, 0.12);
+  }
   function showSound() {
     els.sound.setAttribute('aria-pressed', String(soundOn));
-    els.sound.title = soundOn ? 'Sound on' : 'Sound off';
+    els.sound.title = soundOn ? 'Sound and vibration on' : 'Sound and vibration off';
   }
   els.sound.addEventListener('click', () => {
     soundOn = !soundOn;
@@ -822,7 +1118,7 @@
     els.setup.hidden = false;
     refreshSetup();
   });
-  els.clear.addEventListener('click', () => { game.parts[game.selected] = []; remix(game.selected); });
+  els.clear.addEventListener('click', () => { if (game.phase !== 'play') return; game.parts[game.selected] = []; remix(game.selected); });
 
   // tapping a shape on the board chooses its number
   els.canvas.addEventListener('click', (e) => {
@@ -850,6 +1146,7 @@
   showRefView();
 
   els.refToggle.addEventListener('click', () => {
+    if (game && !game.over && game.mode === 'memory') { if (game.phase === 'play') peek(); return; }
     const open = els.refFig.classList.toggle('is-collapsed') === false;
     els.refToggle.setAttribute('aria-expanded', String(open));
   });
@@ -912,8 +1209,11 @@
     timedOut = timedOut === true;
     game.over = true;
     clearInterval(timer);
+    clearTimeout(pulseTimer);
+    game.pulse = -1;
     endCopy();
     const left = timeLeft();
+    const elapsed = (performance.now() - game.began) / 1000;
     const groups = game.board.groups;
     const total = groups.reduce((s, g) => s + g.share, 0);
     const rows = groups.map((g, k) => {
@@ -923,8 +1223,15 @@
     });
     const accuracy = rows.reduce((s, r) => s + r.g.share * r.match, 0) / total;
     const allPainted = rows.every((r) => r.lab);
-    const bonus = allPainted ? Math.round(BONUS * (left / game.seconds) * (accuracy / 100)) : 0;
-    const points = Math.round(accuracy * 10) + bonus;
+    const bonus = game.timed && allPainted ? Math.round(BONUS * (left / game.seconds) * (accuracy / 100)) : 0;
+    // Value first: the value study is worth up to 100 points, and the colors 900 instead of 1,000
+    const valueMode = game.mode === 'value';
+    const valueAcc = valueMode
+      ? groups.reduce((s, g, k) => s + g.share * (game.values[k] == null ? 0 : Math.max(0, 100 - 2.5 * Math.abs(game.values[k] - g.lab[0]))), 0) / total
+      : 0;
+    const colorPts = Math.round(accuracy * (valueMode ? 9 : 10));
+    const valuePts = valueMode ? Math.round(valueAcc) : 0;
+    const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
     const isBest = !bests[game.bestKey] || points > bests[game.bestKey];
     if (isBest) { bests[game.bestKey] = points; save(BEST_KEY, bests); }
@@ -935,13 +1242,20 @@
     els.analysis.hidden = true;
     els.analyze.setAttribute('aria-expanded', 'false');
     els.analyze.textContent = 'Analyze';
-    drawBoard(els.final, game.board, game.fills, { selected: -1, numbers: false });
+    drawBoard(els.final, game.board, shown(), { selected: -1, numbers: false });
+    drawBoard(els.finalTarget, game.board, game.targets.map((t) => t.rgb), { selected: -1, numbers: false });
+    setCompare(false);
+    game.result = { pct: Math.round(accuracy), stars: starsFor(accuracy), points, grade: GRADES[starsFor(accuracy)] };
     showScore(accuracy, isBest, timedOut);
     els.points.textContent = points;
     els.breakdown.innerHTML = '';
     [
-      ['Color accuracy', `${accuracy.toFixed(0)}%`, `${Math.round(accuracy * 10)}`],
-      ['Time left', fmtTime(Math.ceil(left)), allPainted ? `+${bonus}` : '+0 (some numbers unpainted)'],
+      ['Mode', MODES[game.mode].name, ''],
+      ...(valueMode ? [['Value study', `${valueAcc.toFixed(0)}%`, `+${valuePts}`]] : []),
+      ['Color accuracy', `${accuracy.toFixed(0)}%`, `${colorPts}`],
+      game.timed
+        ? ['Time left', fmtTime(Math.ceil(left)), allPainted ? `+${bonus}` : '+0 (some numbers unpainted)']
+        : ['Time taken', fmtTime(elapsed), '+0 (no clock)'],
       ['Palette', game.palette.name, ''],
     ].forEach(([t, v, pts]) => {
       const dt = document.createElement('dt');
@@ -951,7 +1265,7 @@
       els.breakdown.append(dt, dd);
     });
 
-    drawBoard(els.yours, game.board, game.fills, { selected: -1, numbers: false });
+    drawBoard(els.yours, game.board, shown(), { selected: -1, numbers: false });
     drawBoard(els.target, game.board, game.targets.map((t) => t.rgb), { selected: -1, numbers: false });
     drawRef(els.photo);
     renderZones(rows);
@@ -971,7 +1285,7 @@
       st.style.setProperty('--i', i);
     });
     els.popup.hidden = false;
-    els.showScore.hidden = true;
+    els.showBar.hidden = true;
     // restart the entrance animations
     els.popup.classList.remove('is-shown');
     void els.popup.offsetWidth;
@@ -992,12 +1306,12 @@
 
   els.popupClose.addEventListener('click', () => {
     els.popup.hidden = true;
-    els.showScore.hidden = false;
+    els.showBar.hidden = false;
     els.showScore.focus();
   });
   els.showScore.addEventListener('click', () => {
     els.popup.hidden = false;
-    els.showScore.hidden = true;
+    els.showBar.hidden = true;
     els.analyze.focus();
   });
   els.analyze.addEventListener('click', () => {
@@ -1007,6 +1321,152 @@
     els.analyze.textContent = open ? 'Hide analysis' : 'Analyze';
     if (open) els.analysis.scrollIntoView({ behavior: reduceMotion.matches ? 'auto' : 'smooth', block: 'start' });
   });
+
+  // ---- The reveal: wipe between your portrait and the colors to match ----------------
+
+  let cut = 50, sweep = 0;
+  function setCut(pct) {
+    cut = Math.max(0, Math.min(100, pct));
+    els.finalWrap.style.setProperty('--cut', `${cut}%`);
+    els.handle.setAttribute('aria-valuenow', String(Math.round(cut)));
+  }
+  function setCompare(on, animate) {
+    cancelAnimationFrame(sweep);
+    els.finalWrap.classList.toggle('is-comparing', on);
+    els.compare.setAttribute('aria-pressed', String(on));
+    els.compare.textContent = on ? 'Stop comparing' : 'Compare with target';
+    setCut(50);
+    if (on && animate && !reduceMotion.matches) {
+      // the target wipes in from the right edge
+      const t0 = performance.now();
+      const step = (t) => {
+        const k = Math.min(1, (t - t0) / 800);
+        setCut(100 - 50 * (1 - Math.pow(1 - k, 3)));
+        if (k < 1) sweep = requestAnimationFrame(step);
+      };
+      setCut(100);
+      sweep = requestAnimationFrame(step);
+    }
+  }
+  els.compare.addEventListener('click', () => setCompare(!els.finalWrap.classList.contains('is-comparing'), true));
+  els.finalWrap.addEventListener('pointerdown', (e) => {
+    if (!els.finalWrap.classList.contains('is-comparing') || e.button > 0) return;
+    e.preventDefault();
+    cancelAnimationFrame(sweep);
+    els.finalWrap.setPointerCapture(e.pointerId);
+    const r = els.finalWrap.getBoundingClientRect();
+    const to = (x) => setCut(((x - r.left) / r.width) * 100);
+    to(e.clientX);
+    const move = (ev) => to(ev.clientX);
+    const end = () => {
+      els.finalWrap.removeEventListener('pointermove', move);
+      els.finalWrap.removeEventListener('pointerup', end);
+      els.finalWrap.removeEventListener('pointercancel', end);
+    };
+    els.finalWrap.addEventListener('pointermove', move);
+    els.finalWrap.addEventListener('pointerup', end);
+    els.finalWrap.addEventListener('pointercancel', end);
+  });
+  els.handle.addEventListener('keydown', (e) => {
+    const step = { ArrowLeft: -5, ArrowRight: 5 }[e.key];
+    if (step) setCut(cut + step);
+    else if (e.key === 'Home') setCut(0);
+    else if (e.key === 'End') setCut(100);
+    else return;
+    e.preventDefault();
+  });
+
+  // ---- The share card: your portrait with its score, as one picture -------------------
+
+  const STAR = 'M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z';
+  function makeCard() {
+    const r = game.result;
+    const W = 1080, H = 1350;
+    const FONT = '"Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.fillStyle = '#efe7d6';
+    g.fillRect(0, 0, W, H);
+    // the header band
+    g.fillStyle = '#2c4a36';
+    g.fillRect(0, 0, W, 120);
+    g.textBaseline = 'middle';
+    g.textAlign = 'left';
+    g.fillStyle = '#faf5ea';
+    g.font = `700 38px ${FONT}`;
+    g.fillText('Portrait Value Studio', 60, 62);
+    g.textAlign = 'right';
+    g.fillStyle = 'rgba(250, 245, 234, 0.82)';
+    g.font = `600 25px ${FONT}`;
+    g.fillText(`Paint by numbers · ${MODES[game.mode].name}`, W - 60, 62);
+    // the portrait on its gray matte
+    const box = { x: 70, y: 150, w: 940, h: 760 };
+    g.fillStyle = '#8b8c8e';
+    g.fillRect(box.x, box.y, box.w, box.h);
+    const src = els.final;
+    const k = Math.min((box.w - 60) / src.width, (box.h - 60) / src.height);
+    const pw = src.width * k, ph = src.height * k;
+    g.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    g.shadowBlur = 18;
+    g.shadowOffsetY = 5;
+    g.drawImage(src, box.x + (box.w - pw) / 2, box.y + (box.h - ph) / 2, pw, ph);
+    g.shadowColor = 'transparent';
+    // the score
+    g.textAlign = 'left';
+    g.textBaseline = 'alphabetic';
+    g.fillStyle = '#2c4a36';
+    g.font = `800 190px ${FONT}`;
+    g.fillText(`${r.pct}%`, 60, 1100);
+    g.fillStyle = '#5c6157';
+    g.font = `600 34px ${FONT}`;
+    g.fillText('color match', 68, 1148);
+    // the stars and the grade
+    const path = new Path2D(STAR);
+    for (let i = 0; i < 5; i++) {
+      g.save();
+      g.translate(560 + i * 90, 985);
+      g.scale(3.4, 3.4);
+      g.fillStyle = i < r.stars ? '#d9a441' : 'rgba(30, 43, 34, 0.14)';
+      g.fill(path);
+      g.restore();
+    }
+    g.fillStyle = '#a4472f';
+    g.font = `700 44px ${FONT}`;
+    g.fillText(r.grade, 560, 1100);
+    g.fillStyle = '#1e2b22';
+    g.font = `600 32px ${FONT}`;
+    g.fillText(`${r.points.toLocaleString('en-US')} points`, 560, 1148);
+    // what it was
+    g.fillStyle = '#d8ccb4';
+    g.fillRect(60, 1190, W - 120, 3);
+    g.fillStyle = '#1e2b22';
+    g.font = `700 36px ${FONT}`;
+    g.fillText(game.subjectLabel, 60, 1250);
+    g.fillStyle = '#5c6157';
+    g.font = `500 30px ${FONT}`;
+    const level = game.levelName[0].toUpperCase() + game.levelName.slice(1);
+    g.fillText(`${game.palette.name} · ${level}`, 60, 1298);
+    g.textAlign = 'right';
+    g.fillText(new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }), W - 60, 1298);
+    return c;
+  }
+
+  // Share on phones that can; otherwise save the picture
+  async function shareCard() {
+    if (!game || !game.result) return;
+    const c = makeCard();
+    const name = `portrait-value-studio-${game.result.pct}pct.png`;
+    const blob = await new Promise((done) => c.toBlob(done, 'image/png'));
+    if (!blob) return;
+    const file = new File([blob], name, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'My Portrait Value Studio result' }); return; }
+      catch (err) { if (err && err.name === 'AbortError') return; }
+    }
+    Studio.savePng(c, name);
+  }
+  document.querySelectorAll('[data-game="share"]').forEach((b) => b.addEventListener('click', shareCard));
 
   // Plain words for how a mix is off: "too light by 0.6 value, too warm"
   function describe(lab, target) {
@@ -1064,7 +1524,12 @@
     });
   }
 
-  els.lock.addEventListener('click', () => lockIn());
+  els.lock.addEventListener('click', () => {
+    if (!game || game.over) return;
+    if (game.phase === 'look') endLook();
+    else if (game.phase === 'values') endValues();
+    else lockIn();
+  });
   els.start.addEventListener('click', startGame);
   function toSetup() {
     els.result.hidden = true;
@@ -1101,6 +1566,16 @@
 
   // ---- Wiring ---------------------------------------------------------------
 
+  const savedMode = load(MODE_KEY, 'classic');
+  els.mode.value = MODES[savedMode] ? savedMode : 'classic';
+  showMode();
+  els.mode.addEventListener('change', () => {
+    save(MODE_KEY, mode());
+    if (mode() === 'mystery' && board) dealMystery();
+    showMode();
+    if (board) renderPalettes();
+  });
+  els.deal.addEventListener('click', () => { dealMystery(); renderPalettes(); });
   const savedLevel = load(LEVEL_KEY, 'medium');
   document.querySelectorAll('input[name="gameLevel"]').forEach((r) => {
     r.checked = r.value === savedLevel;

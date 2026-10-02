@@ -1069,6 +1069,18 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
     border-radius: var(--r);
   }
   .game-copy { grid-area: copy; }
+  .game-value {
+    grid-area: paints-start / 1 / amount-end / 2;
+    align-content: center; gap: 2px;
+    padding: 6px 10px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  }
+  .game-value-head { gap: 0 10px; }
+  .game-value-chip { width: 30px; height: 30px; }
+  .game-value-text h3 { font-size: 0.85rem; line-height: 1.2; }
+  .game-value-hint { display: none; }
+  /* the board's top can be scrolled out of sight here, so the pill stays under the bar */
+  .game-spot { position: fixed; top: 66px; }
   .game-numbers { grid-area: numbers; }
   .game-mix > .hint { grid-area: hint; }
 }
@@ -1138,8 +1150,86 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-popup .btn.btn-ghost { border-color: transparent; color: rgba(250, 245, 234, 0.75); }
 .game-popup .btn.btn-ghost:hover { color: #faf5ea; border-color: rgba(250, 245, 234, 0.4); }
 .game-popup :focus-visible { outline-color: #e3b04b; }
-.game-show-score { position: absolute; left: 50%; bottom: 14px; translate: -50% 0; box-shadow: 0 2px 8px var(--shadow); }
 .game-analysis { display: grid; gap: 18px; }
+
+
+/* ---- Paint by numbers: modes, the spot-on flash and the reveal slider ---- */
+.game-board { position: relative; }
+.game-timer.is-look { color: var(--accent); }
+.game-ref.is-gray canvas { filter: grayscale(1); }
+.game-ref.is-memory .game-ref-toggle::after, .game-ref.is-memory.is-collapsed .game-ref-toggle::after { content: ""; }
+.is-looking .game-paints, .is-looking .game-amount, .is-looking .game-mix-head, .is-looking .game-paint-scroll { opacity: 0.45; pointer-events: none; }
+.game-next { height: 40px; white-space: nowrap; }
+
+/* the value stage: one slider on a black-to-white track */
+.is-valuing .game-mix > :not(.game-value) { display: none; }
+.game-value { display: grid; gap: 10px; }
+.game-value-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.game-value-chip {
+  width: 56px; height: 56px; border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+  background: repeating-linear-gradient(45deg, var(--line) 0 4px, transparent 4px 8px);
+}
+.game-value-text h3 { margin: 0; font: 700 1rem var(--display); }
+.game-value-hint { margin: 0; }
+.game-value-range { -webkit-appearance: none; appearance: none; width: 100%; height: 40px; margin: 0; background: transparent; cursor: pointer; }
+.game-value-range::-webkit-slider-runnable-track { height: 28px; border-radius: 14px; background: var(--ramp, linear-gradient(90deg, #000, #fff)); border: 1px solid var(--line); }
+.game-value-range::-moz-range-track { height: 28px; border-radius: 14px; background: var(--ramp, linear-gradient(90deg, #000, #fff)); border: 1px solid var(--line); }
+.game-value-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 40px; margin-top: -7px; border-radius: 8px; background: var(--surface); border: 2px solid var(--ink); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45); }
+.game-value-range::-moz-range-thumb { width: 12px; height: 36px; border-radius: 8px; background: var(--surface); border: 2px solid var(--ink); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45); }
+.game-value-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 14px; }
+
+/* "Spot on!" over the board, and the pulses on the mix and its number */
+.game-spot {
+  position: absolute; left: 50%; top: 12px; translate: -50% 0; z-index: 3;
+  padding: 6px 16px; border-radius: 999px;
+  background: #d9a441; color: #1e2b22;
+  font: 700 0.95rem/1.2 var(--display); white-space: nowrap;
+  box-shadow: 0 2px 10px var(--shadow);
+  opacity: 0; pointer-events: none;
+}
+.game-spot.is-on { animation: spot-pop 1.4s ease-out both; }
+@keyframes spot-pop {
+  0% { opacity: 0; transform: translateY(10px) scale(0.8); }
+  12% { opacity: 1; transform: translateY(0) scale(1.1); }
+  22% { transform: scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+.game-mix-chip.is-spot { animation: chip-ring 0.8s ease-out; }
+@keyframes chip-ring {
+  0% { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15), 0 0 0 0 rgba(217, 164, 65, 0.95); }
+  100% { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15), 0 0 0 18px rgba(217, 164, 65, 0); }
+}
+.game-number.is-spot { animation: num-pop 0.55s ease-out; }
+@keyframes num-pop { 0% { transform: scale(1); } 35% { transform: scale(1.3); } 100% { transform: scale(1); } }
+.game-lock.is-nudge, #gameLock.is-nudge { animation: lock-nudge 0.7s ease-in-out 2; }
+@keyframes lock-nudge { 0%, 100% { transform: none; } 30% { transform: scale(1.12); } 60% { transform: scale(0.96); } }
+
+/* the reveal: drag the divider to wipe between your portrait and the colors to match */
+.game-final-wrap { position: relative; display: grid; max-width: 100%; line-height: 0; --cut: 50%; }
+.game-final-target { display: none; position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 0 0 var(--cut)); }
+.is-comparing .game-final-target { display: block; }
+.game-final-wrap.is-comparing { touch-action: none; cursor: ew-resize; }
+.game-final-handle { display: none; position: absolute; top: 0; bottom: 0; left: var(--cut); width: 48px; translate: -50% 0; cursor: ew-resize; touch-action: none; z-index: 2; }
+.is-comparing .game-final-handle { display: block; }
+.game-final-handle span { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; translate: -50% 0; background: #faf5ea; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.game-final-handle span::after {
+  content: "\2194"; position: absolute; top: 50%; left: 50%; translate: -50% -50%;
+  width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: #faf5ea; color: #1e2b22; font: 700 20px/1 var(--body);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.game-final-handle:focus { outline: none; }
+.game-final-handle:focus-visible span::after { outline: 3px solid #d9a441; }
+.game-final-tag { display: none; position: absolute; top: 10px; padding: 3px 10px; border-radius: 999px; font: 700 0.72rem/1.4 var(--body); background: rgba(20, 24, 20, 0.72); color: #faf5ea; pointer-events: none; z-index: 2; }
+.tag-yours { left: 10px; }
+.tag-target { right: 10px; }
+.is-comparing .game-final-tag { display: block; }
+.game-show-bar { position: absolute; left: 50%; bottom: 14px; translate: -50% 0; display: flex; gap: 8px; z-index: 3; white-space: nowrap; }
+.game-show-bar .btn { box-shadow: 0 2px 8px var(--shadow); }
+.game-show-bar .btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
 /* a paint swells and snaps back when tapped */
 .game-paint.is-pop .game-paint-dot { animation: paint-pop 0.26s ease-out; }
@@ -1151,7 +1241,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .game-popup.is-shown, .is-shown .game-star.is-on .star-full, .is-shown .game-grade, .is-shown .game-newbest, .game-paint.is-pop .game-paint-dot { animation: none; }
+  .game-popup.is-shown, .is-shown .game-star.is-on .star-full, .is-shown .game-grade, .is-shown .game-newbest, .game-paint.is-pop .game-paint-dot,
+  .game-spot.is-on, .game-mix-chip.is-spot, .game-number.is-spot, #gameLock.is-nudge { animation: none; }
+  .game-spot.is-on { opacity: 1; }
 }
 
 /* ---- Loupe ---- */
