@@ -352,6 +352,67 @@
     return mixRgb(hexRgb(ramp[i]), hexRgb(ramp[i + 1]), t - i);
   }
 
+  /*
+   * Closes any gap inside a figure drawn on a transparent layer: pixels the outside can't reach
+   * that are empty or only half covered (a hairline seam between two planes, say) take the average
+   * color of the solid pixels around them, working inward from the gap's edge. The figure's own
+   * soft edge, within two pixels of the outside, is left alone.
+   */
+  function closeGaps(canvas) {
+    const w = canvas.width, h = canvas.height;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.getImageData(0, 0, w, h), d = img.data;
+    const outside = new Uint8Array(w * h), stack = [];
+    const push = (x, y) => { const i = y * w + x; if (!outside[i] && d[i * 4 + 3] < 8) { outside[i] = 1; stack.push(i); } };
+    for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1); }
+    for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y); }
+    while (stack.length) {
+      const i = stack.pop(), x = i % w, y = (i / w) | 0;
+      if (x > 0) push(x - 1, y);
+      if (x < w - 1) push(x + 1, y);
+      if (y > 0) push(x, y - 1);
+      if (y < h - 1) push(x, y + 1);
+    }
+    // the outside, grown by two pixels: where the figure's edge is allowed to be soft
+    const near = new Uint8Array(w * h);
+    for (let pass = 0; pass < 2; pass++) {
+      const src = pass ? near : outside, grown = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          if (src[i]) { grown[i] = 1; continue; }
+          if ((x > 0 && src[i - 1]) || (x < w - 1 && src[i + 1]) || (y > 0 && src[i - w]) || (y < h - 1 && src[i + w])) grown[i] = 1;
+        }
+      }
+      near.set(grown);
+    }
+    let gap = [];
+    const isGap = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) if (!near[i] && d[i * 4 + 3] < 250) { isGap[i] = 1; gap.push(i); }
+    if (!gap.length) return;
+    for (let pass = 0; pass < 16 && gap.length; pass++) {
+      const fill = [], rest = [];
+      gap.forEach((i) => {
+        const x = i % w, y = (i / w) | 0;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            const j = yy * w + xx;
+            if (isGap[j] || d[j * 4 + 3] < 250) continue;
+            r += d[j * 4]; g += d[j * 4 + 1]; b += d[j * 4 + 2]; n++;
+          }
+        }
+        if (n) fill.push([i, r / n, g / n, b / n]); else rest.push(i);
+      });
+      if (!fill.length) break;
+      fill.forEach(([i, r, g, b]) => { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255; isGap[i] = 0; });
+      gap = rest;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
   // A background color, shifted by the portrait's tint and shade
   function bgColor(hex, look) {
     let c = hexRgb(hex);
@@ -377,6 +438,11 @@
     c.width = W; c.height = H;
     const g = c.getContext('2d');
     g.scale(size, size);
+    // the figure is drawn alone on a transparent layer first, so gaps in it can be found and closed
+    const layer = document.createElement('canvas');
+    layer.width = W; layer.height = H;
+    const f = layer.getContext('2d');
+    f.scale(size, size);
     const side = r() < 0.65 ? 1 : -1;
     const view = look.view || 'three-quarter';
     // the turn of the head: three-quarter, nearly full face, or in profile
@@ -447,19 +513,23 @@
         if (look.woman && HAIR_OVER.has(key)) part = 'hair';
         if (part === 'collar') part = look.collar === 'open' ? 'neck' : look.collar === 'none' || look.collar === 'ruff' ? 'clothes' : 'collar';
         const body = part0 === 'clothes' || part0 === 'collar';
-        const k = body ? 0.45 : part0 === 'neck' ? 0.75 : 1;
         const pts = names.map((n) => {
           const q = (look.woman && WOMAN[n]) || P[n], d = old && AGE[n] || [0, 0, 0];
           return [(mirror ? -1 : 1) * (q[0] + d[0]), q[1] + d[1], q[2] + d[2]];
         });
-        facets.push({ part, pts, k, centre: body ? [0, -1.4, -0.05] : part0 === 'neck' ? [0, -0.75, -0.08] : [0, 0, 0], bias: body ? -0.6 : 0 });
+        facets.push({ part, pts, k: null, centre: body ? [0, -1.4, -0.05] : part0 === 'neck' ? [0, -0.75, -0.08] : [0, 0, 0], bias: body ? -0.6 : 0 });
       });
     });
     extras(look, side).forEach((e) => facets.push({ k: e.part === 'ruff' ? 0.75 : 1, centre: e.centre || [0, 0, 0], bias: 0, ...e }));
 
+    // The turn eases from the head (all of it) down through the neck to the shoulders (0.45 of it).
+    // It depends on height alone, so a point shared by head, neck and body lands in one place and
+    // the joins have no gaps.
+    const twist = (y) => (y >= -0.6 ? 1 : y >= -1.05 ? 1 - 0.4 * ((-0.6 - y) / 0.45) : y >= -1.45 ? 0.6 - 0.15 * ((-1.05 - y) / 0.4) : 0.45);
+    const kOf = (f, q) => (f.k == null ? twist(q[1]) : f.k);
     const polys = [];
     facets.forEach((f) => {
-      const pts = f.pts.map((q) => rot(q, f.k));
+      const pts = f.pts.map((q) => rot(q, kOf(f, q)));
       // Newell's normal, pointed away from the inside of the form
       let nx = 0, ny = 0, nz = 0;
       for (let i = 0; i < pts.length; i++) {
@@ -469,28 +539,39 @@
         nz += (a[0] - b[0]) * (a[1] + b[1]);
       }
       const mid = pts.reduce((m, q) => [m[0] + q[0] / pts.length, m[1] + q[1] / pts.length, m[2] + q[2] / pts.length], [0, 0, 0]);
-      const inside = rot(f.centre, f.k);
+      const inside = rot(f.centre, kOf(f, f.centre));
       if (!f.twoSided && nx * (mid[0] - inside[0]) + ny * (mid[1] - inside[1]) + nz * (mid[2] - inside[2]) < 0) { nx = -nx; ny = -ny; nz = -nz; }
       const nl = Math.hypot(nx, ny, nz) || 1;
       nx /= nl; ny /= nl; nz /= nl;
       if (f.twoSided && nz < 0) { nx = -nx; ny = -ny; nz = -nz; }   // a brim or cloth seen from either side
-      if (nz <= 0.01) return;                                         // facing away from the viewer
+      const pal = f.part === 'pearl' ? PEARL : s[f.part] || s[SAME[f.part]] || s.hair;
+      if (nz <= 0.01) {
+        // Facing away from the viewer. The body's own planes are skipped, but a hidden plane of the
+        // head, neck or shoulders is laid at the very back in its shadow color: it is covered by
+        // everything in front and only shows where the front planes leave a gap (under the jaw, say)
+        if (f.k == null) polys.push({ pts, z: -10, color: planeColor(pal, 0, 0) });
+        return;
+      }
       const lam = nx * L[0] + ny * L[1] + nz * L[2];
       const bounce = nx * B[0] + ny * B[1] + nz * B[2];
-      const pal = f.part === 'pearl' ? PEARL : s[f.part] || s[SAME[f.part]] || s.hair;
       polys.push({ pts, z: mid[2] + f.bias, color: planeColor(pal, lam, bounce) });
     });
     polys.sort((a, b) => a.z - b.z);
-    g.lineJoin = 'round';
+    f.lineJoin = 'round';
     polys.forEach((q) => {
-      g.beginPath();
-      q.pts.forEach(([x, y], i) => (i ? g.lineTo(ox + x * unit, oy - y * unit) : g.moveTo(ox + x * unit, oy - y * unit)));
-      g.closePath();
-      g.fillStyle = g.strokeStyle = css(q.color);
-      g.lineWidth = 1.2;
-      g.fill();
-      g.stroke();
+      f.beginPath();
+      q.pts.forEach(([x, y], i) => (i ? f.lineTo(ox + x * unit, oy - y * unit) : f.moveTo(ox + x * unit, oy - y * unit)));
+      f.closePath();
+      f.fillStyle = f.strokeStyle = css(q.color);
+      f.lineWidth = 1.2;
+      f.fill();
+      f.stroke();
     });
+    if (look._layer === 'raw') return layer;             // for tests: the figure alone, as drawn
+    closeGaps(layer);
+    if (look._layer) return layer;                       // ...and with its gaps closed
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(layer, 0, 0);
     return c;
   }
 
