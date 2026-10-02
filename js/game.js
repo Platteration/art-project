@@ -358,9 +358,15 @@
       b.append(dot, code, count);
       // a tap adds one part; holding keeps adding
       let hold = 0, repeat = 0;
-      const stop = () => { clearTimeout(hold); clearInterval(repeat); };
+      let pressed = false;
+      const stop = () => {
+        clearTimeout(hold);
+        clearInterval(repeat);
+        if (pressed) { pressed = false; keyUp(); }
+      };
       b.addEventListener('pointerdown', (e) => {
         if (e.button > 0) return;
+        pressed = true;
         addPart(i);
         hold = setTimeout(() => { repeat = setInterval(() => addPart(i), 130); }, 420);
       });
@@ -447,7 +453,7 @@
     list.push({ paint: i, amount });
     remix(game.selected);
     pop(i);
-    tock(i);
+    keyDown(i);
   }
 
   // the paint swells and snaps back with each tap
@@ -520,8 +526,10 @@
 
   // ---- Sound ------------------------------------------------------------------
 
-  // A short wooden tock for each tap, made in the browser: a triangle wave dropping fast in pitch,
-  // a little higher for each paint along the palette
+  // A mechanical keyboard click for each tap, made in the browser: a very short burst of
+  // band-passed noise for the switch's click over a quick low thock for the keycap bottoming
+  // out. Each press varies a little, as real keys do; letting go adds the switch's softer
+  // release click.
   let soundOn = load(SOUND_KEY, true) !== false;
   let audio = null;
   function unlockAudio() {
@@ -533,23 +541,55 @@
       audio = null;
     }
   }
-  function tock(i) {
+  let noise = null;
+  function noiseBuffer() {
+    if (!noise) {
+      noise = audio.createBuffer(1, Math.round(audio.sampleRate * 0.06), audio.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let k = 0; k < d.length; k++) d[k] = Math.random() * 2 - 1;
+    }
+    return noise;
+  }
+  // one burst of filtered noise, `level` loud, decaying over `ms`
+  function snap(t, freq, level, ms) {
+    const src = audio.createBufferSource();
+    src.buffer = noiseBuffer();
+    const band = audio.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = freq;
+    band.Q.value = 1.4;
+    const gain = audio.createGain();
+    gain.gain.setValueAtTime(level, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+    src.connect(band).connect(gain).connect(audio.destination);
+    src.start(t);
+    src.stop(t + ms / 1000 + 0.01);
+  }
+  const vary = (v, by) => v * (1 + (Math.random() * 2 - 1) * by);
+  function keyDown(i) {
     if (!soundOn) return;
     unlockAudio();
     if (!audio) return;
     const t = audio.currentTime;
-    const pitch = 760 * Math.pow(1.07, i % 10);
+    // the click: bright and very short, a touch higher along the palette
+    snap(t, vary(3400 + (i % 10) * 90, 0.08), vary(0.9, 0.12), 14);
+    snap(t + 0.004, vary(1800, 0.1), 0.35, 10);
+    // the thock: the keycap landing
     const osc = audio.createOscillator();
     const gain = audio.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(pitch * 1.7, t);
-    osc.frequency.exponentialRampToValueAtTime(pitch * 0.5, t + 0.05);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(vary(210, 0.05), t);
+    osc.frequency.exponentialRampToValueAtTime(95, t + 0.035);
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    gain.gain.exponentialRampToValueAtTime(vary(0.32, 0.1), t + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
     osc.connect(gain).connect(audio.destination);
     osc.start(t);
-    osc.stop(t + 0.09);
+    osc.stop(t + 0.05);
+  }
+  function keyUp() {
+    if (!soundOn || !audio) return;
+    snap(audio.currentTime, vary(4200, 0.08), 0.3, 9);
   }
   function showSound() {
     els.sound.setAttribute('aria-pressed', String(soundOn));
@@ -559,7 +599,7 @@
     soundOn = !soundOn;
     save(SOUND_KEY, soundOn);
     showSound();
-    if (soundOn) { unlockAudio(); tock(0); }
+    if (soundOn) { unlockAudio(); keyDown(0); setTimeout(keyUp, 90); }
   });
   showSound();
 
