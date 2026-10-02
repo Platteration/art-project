@@ -30,6 +30,8 @@
     kicker: $('gameKicker'), pct: $('gamePct'), stars: $('gameStars'), newBest: $('gameNewBest'),
     analyze: $('gameAnalyze'), analysis: $('gameAnalysis'),
     yours: $('gameYours'), target: $('gameTarget'), photo: $('gamePhoto'), zones: $('gameZones'),
+    photoPane: $('gameFromPhotoPane'), photoName: $('gamePhotoName'),
+    paintingPane: $('gameFromPaintingPane'), gallery: $('gameGallery'), paintingName: $('gamePaintingName'), surprise: $('gameSurprise'),
   };
 
   const LEVELS = {
@@ -49,6 +51,8 @@
   const MINE_KEY = 'portrait-value-studio.myPaints';
   const LEVEL_KEY = 'portrait-value-studio.gameLevel';
   const PALETTE_KEY = 'portrait-value-studio.gamePalette';
+  const SUBJECT_KEY = 'portrait-value-studio.gameSubject';
+  const LAST_PAINTING_KEY = 'portrait-value-studio.gamePainting';
 
   function load(key, fallback) {
     try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (err) { return fallback; }
@@ -81,18 +85,26 @@
   // ---- The board ------------------------------------------------------------
 
   /*
-   * Builds a board from the current reference: its own color-block study at SIZE with the
-   * level's colors per value and a stronger merge (so shapes are big enough to paint), the
-   * numbers darkest first, the outline pixels and where each shape's number goes.
+   * Builds a board from the reference (the photo, or a generated painting): its own color-block
+   * study at SIZE with the level's colors per value and a stronger merge (so shapes are big
+   * enough to paint), the numbers darkest first, the outline pixels and where each shape's
+   * number goes. A painting gets its value splits worked out for it, as Auto does for a photo.
    */
   function buildBoard(levelId) {
     const level = LEVELS[levelId];
-    const prep = Study.prepare(Studio.source(), SIZE);
+    const prep = Study.prepare(subjectSource(), SIZE);
     const opts = Studio.settings(prep);
     const { w, h } = prep;
     opts.colorsPerZone = level.colors;
     opts.outlines = false;
-    opts.minSize = Math.max(opts.minSize, Math.round(w * h * 0.012 * Math.pow(level.merge / 10, 2)));
+    if (subject.kind === 'painting') {
+      // already flat planes: no blur, so their straight edges stay, and only specks merge away
+      opts.blurRadius = 0;
+      opts.minSize = Math.round(w * h * 0.004 * Math.pow(level.merge / 10, 2));
+      [opts.t1, opts.t2] = Study.autoThresholds(prep, opts.blurRadius, opts.smoothing);
+    } else {
+      opts.minSize = Math.max(opts.minSize, Math.round(w * h * 0.012 * Math.pow(level.merge / 10, 2)));
+    }
     const res = Study.process(prep, opts);
 
     const groups = res.blockColors
@@ -232,10 +244,77 @@
 
   let board = null;      // the board being set up or played
   let game = null;       // the game in progress or just scored
-  let setupFor = null;   // { result, level } the setup board was built for
+  let setupFor = null;   // { from, level } the setup board was built for
 
   const level = () => document.querySelector('input[name="gameLevel"]:checked').value;
-  const bestKey = () => `${Studio.sourceKey()}|${level()}|${els.palette.value}`;
+  const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${els.palette.value}`;
+
+  // ---- What to paint: the player's photo or one of the generated paintings ----
+
+  const PAINTINGS = Subjects.PORTRAITS;
+  let subject = load(SUBJECT_KEY, { kind: 'photo' });
+  if (subject.kind === 'painting' && !PAINTINGS.some((p) => p.id === subject.id)) subject = { kind: 'photo' };
+
+  const subjectSource = () => (subject.kind === 'painting' ? Subjects.picture(subject.id) : Studio.source());
+  // the board is rebuilt when this changes: the photo's study (photo or settings), or the painting
+  const subjectStamp = () => (subject.kind === 'painting' ? subject.id : Studio.result());
+  const paintingTitle = (p) => `${p.title}, after ${Subjects.painterOf(p.id)}`;
+
+  // The gallery: small pictures of all the paintings, drawn a few at a time so the tab opens at once
+  let galleryBuilt = false;
+  function buildGallery() {
+    if (galleryBuilt) return;
+    galleryBuilt = true;
+    const buttons = PAINTINGS.map((p) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'game-thumb';
+      b.dataset.id = p.id;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-label', paintingTitle(p));
+      b.title = paintingTitle(p);
+      b.addEventListener('click', () => choosePainting(p.id));
+      els.gallery.append(b);
+      return b;
+    });
+    let i = 0;
+    const next = () => {
+      const end = Math.min(buttons.length, i + 5);
+      for (; i < end; i++) buttons[i].append(Subjects.picture(PAINTINGS[i].id, 0.16));
+      if (i < buttons.length) requestAnimationFrame(next);
+    };
+    next();
+    markPainting();
+  }
+
+  function markPainting() {
+    const id = subject.kind === 'painting' ? subject.id : null;
+    els.gallery.querySelectorAll('.game-thumb').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.id === id)));
+    const p = PAINTINGS.find((x) => x.id === id);
+    els.paintingName.textContent = p ? paintingTitle(p) : 'Choose a painting, or let the game pick one.';
+  }
+
+  function showSubject() {
+    const painting = subject.kind === 'painting';
+    document.querySelector(`input[name="gameSubject"][value="${painting ? 'painting' : 'photo'}"]`).checked = true;
+    els.photoPane.hidden = painting;
+    els.paintingPane.hidden = !painting;
+    const key = Studio.source() ? Studio.sourceKey() : '';
+    els.photoName.textContent = !key ? 'Load a photo to paint from it.'
+      : key.startsWith('sample-study:') ? 'Painting from the sample portrait. Load your own photo to paint from it.'
+      : `Painting from ${key.replace(/:\d+x\d+$/, '')}.`;
+    if (painting) { buildGallery(); markPainting(); }
+  }
+
+  function setSubject(next, refresh = true) {
+    subject = next;
+    save(SUBJECT_KEY, subject);
+    if (subject.kind === 'painting') save(LAST_PAINTING_KEY, subject.id);
+    showSubject();
+    if (refresh) refreshSetup();
+  }
+
+  function choosePainting(id) { setSubject({ kind: 'painting', id }); }
 
   function renderPalettes() {
     const keep = els.palette.value || load(PALETTE_KEY, 'zorn');
@@ -268,10 +347,11 @@
   }
 
   function refreshSetup() {
-    if (!Studio.source() || !Studio.result()) return;
-    // a new board whenever the study (photo or settings) or the level changes
-    if (board && setupFor && setupFor.result === Studio.result() && setupFor.level === level()) { showPalette(); return; }
-    setupFor = { result: Studio.result(), level: level() };
+    showSubject();
+    if (subject.kind === 'painting' ? !subject.id : !Studio.source() || !Studio.result()) return;
+    // a new board whenever the reference (photo, its settings, or the painting) or the level changes
+    if (board && setupFor && setupFor.from === subjectStamp() && setupFor.level === level()) { showPalette(); return; }
+    setupFor = { from: subjectStamp(), level: level() };
     board = buildBoard(level());
     drawBoard(els.preview, board, [], { selected: -1, numbers: true });
     els.previewNote.textContent = `${board.groups.length} numbers to mix, ${fmtTime(LEVELS[level()].seconds)} on the clock.`;
@@ -953,9 +1033,23 @@
     r.addEventListener('change', () => { if (Studio.tab() === 'game') refreshSetup(); });
   });
   els.palette.addEventListener('change', showPalette);
+  document.querySelectorAll('input[name="gameSubject"]').forEach((r) => r.addEventListener('change', () => {
+    if (r.value === 'photo') setSubject({ kind: 'photo' });
+    else if (subject.kind !== 'painting') {
+      // the last painting chosen, or a first one at random
+      const last = load(LAST_PAINTING_KEY, null);
+      setSubject({ kind: 'painting', id: PAINTINGS.some((p) => p.id === last) ? last : PAINTINGS[Math.floor(Math.random() * PAINTINGS.length)].id });
+    }
+  }));
+  els.surprise.addEventListener('click', () => {
+    const others = PAINTINGS.filter((p) => p.id !== subject.id);
+    choosePainting(others[Math.floor(Math.random() * others.length)].id);
+  });
 
   // the setup shows the current reference; a game in progress keeps the one it started with
   window.addEventListener('studio:result', () => { if (Studio.tab() === 'game' && !game) refreshSetup(); });
+  // loading a photo from the game's setup means painting from it
+  document.getElementById('file').addEventListener('change', () => { if (Studio.tab() === 'game' && !game && subject.kind !== 'photo') setSubject({ kind: 'photo' }, false); });
   window.addEventListener('studio:tab', (e) => {
     setFocus(e.detail === 'game' && !!game && !game.over);
     if (e.detail !== 'game') return;

@@ -1,16 +1,15 @@
 /*
- * Generated subjects to paint: simplified portraits and fruit still lifes in the manner of old
- * and modern masters, drawn in code from a seed so each one is the same every time.
+ * Generated portraits to paint: a Loomis / Asaro style planar head, painted after seven masters.
  *
- * Each subject is modelled as a relief: every form (head, hair, hat, coat, fruit, jug, cloth,
- * table) is a height field over the picture, so it has surface normals, and one lamp lights the
- * lot. Form shadows, cast shadows (the nose on the cheek, a hat brim on the brow, fruit on the
- * table) and reflected light all come from that light, which is what a value study needs to find.
+ * The head, neck and shoulders are flat facets in 3D (forehead, brow, eye sockets, the nose's
+ * ridge, sides and underside, cheekbones, muzzle, lips, chin, jaw, ear), turned and tilted, then
+ * lit by one lamp. Each facet is filled with a single colour from the painter's palette for how
+ * much light it catches, so a portrait reads like a colour-block study: big flat planes of light,
+ * half tone and shadow. Hair, beards, hats, collars and clothes are planes too. Every portrait is
+ * drawn from a seed, so it comes out the same each time.
  */
 (function () {
   'use strict';
-
-  // ---- Small tools ------------------------------------------------------------
 
   function rng(seed) {
     let a = seed >>> 0;
@@ -23,246 +22,11 @@
     };
   }
   const between = (r, a, b) => a + (b - a) * r();
-  const pick = (r, list) => list[Math.floor(r() * list.length)];
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
-  const smooth = (a, b, v) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
-  const gauss = (a, b) => Math.exp(-(a * a + b * b));
 
-  const toLin = (c) => Math.pow(c / 255, 2.2);
-  const toSrgb = (v) => 255 * Math.pow(clamp01(v), 1 / 2.2);
-  // '#rrggbb' -> linear [r, g, b]
-  function lin(h) {
-    const v = parseInt(h.slice(1), 16);
-    return [toLin(v >> 16), toLin((v >> 8) & 255), toLin(v & 255)];
-  }
-  const mixLin = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+  // ---- The planar head ------------------------------------------------------------
 
-  function canvas(w, h) {
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    return c;
-  }
-
-  // ---- The relief renderer ----------------------------------------------------------
-
-  /*
-   * A scene is a depth buffer over the picture. add() rasterises one form: a height function
-   * h(x, y) (null outside the form) and its colour (albedo, linear RGB) and shine. The highest
-   * form wins each pixel. render() lights the forms and lays them over what is already on the
-   * canvas; pixels no form covers keep the painted background.
-   */
-  function Scene(w, h) {
-    const n = w * h;
-    this.w = w; this.h = h;
-    this.z = new Float32Array(n).fill(-1e9);
-    this.nx = new Float32Array(n); this.ny = new Float32Array(n); this.nz = new Float32Array(n);
-    this.alb = new Float32Array(n * 3);
-    this.spec = new Float32Array(n);
-    this.gloss = new Float32Array(n);
-  }
-
-  // x0..x1, y0..y1: the form's box. height(x, y) -> number or null. paint(x, y, h, out3) sets
-  // the albedo. mat: { spec, gloss }
-  Scene.prototype.add = function (x0, y0, x1, y1, height, paint, mat) {
-    const { w, h: H } = this;
-    x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
-    x1 = Math.min(w - 1, Math.ceil(x1)); y1 = Math.min(H - 1, Math.ceil(y1));
-    const bw = x1 - x0 + 3, bh = y1 - y0 + 3;
-    // heights on a grid one pixel larger all round, for the normals at the edge
-    const hf = new Float32Array(bw * bh).fill(NaN);
-    for (let y = 0; y < bh; y++) {
-      for (let x = 0; x < bw; x++) {
-        const v = height(x0 - 1 + x, y0 - 1 + y);
-        if (v !== null) hf[y * bw + x] = v;
-      }
-    }
-    const out = [0, 0, 0];
-    for (let y = 1; y < bh - 1; y++) {
-      for (let x = 1; x < bw - 1; x++) {
-        const k = y * bw + x;
-        const z = hf[k];
-        if (z !== z) continue;
-        const px = x0 - 1 + x, py = y0 - 1 + y;
-        if (px < 0 || py < 0 || px >= w || py >= H) continue;
-        const i = py * w + px;
-        if (z <= this.z[i]) continue;
-        const l = hf[k - 1], r = hf[k + 1], u = hf[k - bw], d = hf[k + bw];
-        const dx = ((r === r ? r : z) - (l === l ? l : z)) / ((r === r) + (l === l) || 1);
-        const dy = ((d === d ? d : z) - (u === u ? u : z)) / ((d === d) + (u === u) || 1);
-        // a form's own edge falls away steeply, so its silhouette turns from the light
-        const edge = (l !== l) + (r !== r) + (u !== u) + (d !== d);
-        let nx = -dx, ny = -dy, nz = edge ? 0.6 : 1;
-        if (edge) { nx -= (l !== l) - (r !== r); ny -= (u !== u) - (d !== d); }
-        const len = Math.hypot(nx, ny, nz);
-        this.z[i] = z;
-        this.nx[i] = nx / len; this.ny[i] = ny / len; this.nz[i] = nz / len;
-        paint(px, py, z, out);
-        this.alb[i * 3] = out[0]; this.alb[i * 3 + 1] = out[1]; this.alb[i * 3 + 2] = out[2];
-        this.spec[i] = mat ? mat.spec || 0 : 0;
-        this.gloss[i] = mat ? mat.gloss || 12 : 12;
-      }
-    }
-  };
-
-  /*
-   * light: { dir: [x, y, z] toward the lamp (y up the picture is negative), key: linear RGB,
-   * ambient: linear RGB, bounce: linear RGB from below, shadowSoft: px }
-   */
-  Scene.prototype.render = function (g, light) {
-    const { w, h, z } = this;
-    const n = w * h;
-    let [lx, ly, lz] = light.dir;
-    const ll = Math.hypot(lx, ly, lz);
-    lx /= ll; ly /= ll; lz /= ll;
-    // cast shadows: march from each pixel toward the lamp over the depth buffer
-    const lit = new Float32Array(n);
-    const sx = lx / Math.hypot(lx, ly), sy = ly / Math.hypot(lx, ly);
-    const rise = lz / Math.hypot(lx, ly);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        if (z[i] < -1e8) continue;
-        let free = 1;
-        for (let t = 2; t < 160; t += 1.5) {
-          const qx = Math.round(x + sx * t), qy = Math.round(y + sy * t);
-          if (qx < 0 || qy < 0 || qx >= w || qy >= h) break;
-          if (z[qy * w + qx] > z[i] + 1.5 + t * rise) { free = 0; break; }
-        }
-        lit[i] = free;
-      }
-    }
-    // soften the shadow edges a little, as paint and the eye do
-    const soft = boxBlur(lit, w, h, light.shadowSoft || 2);
-    const img = g.getImageData(0, 0, w, h);
-    const d = img.data;
-    const [kr, kg, kb] = light.key, [ar, ag, ab] = light.ambient, [br, bg, bb] = light.bounce || [0, 0, 0];
-    for (let i = 0; i < n; i++) {
-      if (z[i] < -1e8) continue;
-      const nx = this.nx[i], ny = this.ny[i], nz = this.nz[i];
-      const dot = nx * lx + ny * ly + nz * lz;
-      const lam = Math.max(0, dot) * (lit[i] ? soft[i] : soft[i] * 0.6);
-      // ambient is stronger on forms facing the viewer and up; bounce light comes from below
-      const amb = 0.55 + 0.45 * nz;
-      const up = Math.max(0, ny);
-      // the shine: Blinn-Phong toward a viewer straight in front
-      let sp = 0;
-      if (this.spec[i] && lam > 0) {
-        const hx = lx, hy = ly, hz = lz + 1, hl = Math.hypot(hx, hy, hz);
-        sp = this.spec[i] * Math.pow(Math.max(0, (nx * hx + ny * hy + nz * hz) / hl), this.gloss[i]) * soft[i];
-      }
-      const a = i * 3;
-      d[i * 4] = toSrgb(this.alb[a] * (kr * lam + ar * amb + br * up) + sp * kr);
-      d[i * 4 + 1] = toSrgb(this.alb[a + 1] * (kg * lam + ag * amb + bg * up) + sp * kg);
-      d[i * 4 + 2] = toSrgb(this.alb[a + 2] * (kb * lam + ab * amb + bb * up) + sp * kb);
-      d[i * 4 + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-  };
-
-  function boxBlur(src, w, h, r) {
-    if (r < 1) return src;
-    let a = Float32Array.from(src), b = new Float32Array(src.length);
-    for (let pass = 0; pass < 2; pass++) {
-      for (let y = 0; y < h; y++) {
-        let s = 0;
-        for (let x = -r; x <= r; x++) s += a[y * w + Math.min(w - 1, Math.max(0, x))];
-        for (let x = 0; x < w; x++) {
-          b[y * w + x] = s / (2 * r + 1);
-          s += a[y * w + Math.min(w - 1, x + r + 1)] - a[y * w + Math.max(0, x - r)];
-        }
-      }
-      for (let x = 0; x < w; x++) {
-        let s = 0;
-        for (let y = -r; y <= r; y++) s += b[Math.min(h - 1, Math.max(0, y)) * w + x];
-        for (let y = 0; y < h; y++) {
-          a[y * w + x] = s / (2 * r + 1);
-          s += b[Math.min(h - 1, y + r + 1) * w + x] - b[Math.max(0, y - r) * w + x];
-        }
-      }
-    }
-    return a;
-  }
-
-  /*
-   * An oil-paint look (the Kuwahara filter): each pixel takes the mean colour of whichever of the
-   * four squares around it is the most even, so gradients settle into flat strokes while edges
-   * between forms stay sharp. Integral images keep it to a few operations per pixel.
-   */
-  function paintify(img, rad) {
-    const { width: w, height: h, data } = img;
-    const W1 = w + 1;
-    const sum = [0, 1, 2].map(() => new Float64Array(W1 * (h + 1)));
-    const sq = new Float64Array(W1 * (h + 1));
-    for (let y = 0; y < h; y++) {
-      const rs = [0, 0, 0];
-      let rq = 0;
-      for (let x = 0; x < w; x++) {
-        const p = (y * w + x) * 4;
-        let lum = 0;
-        for (let c = 0; c < 3; c++) { rs[c] += data[p + c]; lum += data[p + c]; }
-        rq += (lum / 3) * (lum / 3);
-        const k = (y + 1) * W1 + x + 1, up = y * W1 + x + 1;
-        for (let c = 0; c < 3; c++) sum[c][k] = sum[c][up] + rs[c];
-        sq[k] = sq[up] + rq;
-      }
-    }
-    const box = (arr, x0, y0, x1, y1) => arr[y1 * W1 + x1] - arr[y0 * W1 + x1] - arr[y1 * W1 + x0] + arr[y0 * W1 + x0];
-    const out = new Uint8ClampedArray(data.length);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let best = Infinity, bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
-        for (let q = 0; q < 4; q++) {
-          const x0 = Math.max(0, q & 1 ? x : x - rad), x1 = Math.min(w, (q & 1 ? x + rad : x) + 1);
-          const y0 = Math.max(0, q & 2 ? y : y - rad), y1 = Math.min(h, (q & 2 ? y + rad : y) + 1);
-          const n = (x1 - x0) * (y1 - y0);
-          const m = (box(sum[0], x0, y0, x1, y1) + box(sum[1], x0, y0, x1, y1) + box(sum[2], x0, y0, x1, y1)) / (3 * n);
-          const v = box(sq, x0, y0, x1, y1) / n - m * m;
-          if (v < best) { best = v; bx0 = x0; by0 = y0; bx1 = x1; by1 = y1; }
-        }
-        const n = (bx1 - bx0) * (by1 - by0), p = (y * w + x) * 4;
-        for (let c = 0; c < 3; c++) out[p + c] = box(sum[c], bx0, by0, bx1, by1) / n;
-        out[p + 3] = 255;
-      }
-    }
-    data.set(out);
-  }
-
-  // Oil-paint strokes, canvas grain, a faint weave and a darkened edge: the painting's surface
-  function finish(c, r, vignette, brush) {
-    const g = c.getContext('2d');
-    const { width: w, height: h } = c;
-    const img = g.getImageData(0, 0, w, h);
-    paintify(img, brush || 4);
-    const d = img.data;
-    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-      const x = p % w, y = (p / w) | 0;
-      const weave = ((x + y) % 6 < 3 ? 1.2 : -1.2) + ((x - y + 6000) % 6 < 3 ? 0.8 : -0.8);
-      const nse = (r() - 0.5) * 8 + weave;
-      d[i] += nse; d[i + 1] += nse; d[i + 2] += nse;
-    }
-    g.putImageData(img, 0, 0);
-    const v = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.75);
-    v.addColorStop(0, 'rgba(0,0,0,0)');
-    v.addColorStop(1, `rgba(0,0,0,${vignette})`);
-    g.fillStyle = v;
-    g.fillRect(0, 0, w, h);
-  }
-
-  // A solid colour as an albedo painter
-  const flat = (col) => (x, y, z, out) => { out[0] = col[0]; out[1] = col[1]; out[2] = col[2]; };
-
-  // ---- Portraits: a planar head ------------------------------------------------------
-  /*
-   * A Loomis / Asaro style planar head: the head, neck and shoulders built from flat facets in 3D
-   * (forehead, brow, eye sockets, the nose's ridge, sides and underside, cheekbones, muzzle,
-   * lips, chin, jaw, ear), turned and tilted, then lit by one lamp. Each facet is filled with a
-   * single colour from the painter's palette for how much light it catches, so the result reads
-   * like a colour-block study: big flat planes of light, half tone and shadow.
-   */
-
-  // Points on the right half of the head, in head units (y up, z toward the viewer). Points on
-  // the centre line have x = 0; the left half mirrors the right.
+  // Points on the right half, in head units (y up, z toward the viewer); the left half mirrors them
   const P = {
     // centre line
     crown: [0, 0.64, -0.04], vertexBack: [0, 0.52, -0.38], back: [0, 0.16, -0.52], occiput: [0, -0.14, -0.46], nape: [0, -0.4, -0.34],
@@ -368,48 +132,192 @@
     ['clothes', 'shoulder', 'shoulderBack', 'armBack', 'arm'],
   ];
 
+  // Facets a beard or moustache covers, by their first two points
+  const BEARD = new Set(['labiomental chinSide', 'lipLow corner', 'nasolabial hollow', 'hollow ramus', 'chin chinSide', 'chinSide jawFront', 'jawFront jawAngle', 'chinUnder jawUnder', 'lowerLip lipLow', 'ramus earLow']);
+  const MOUSTACHE = new Set(['philtrum nasolabial', 'subnasale philtrum']);
+
+  // Rings of points round the head, for hats, buns and ruffs: n points at height y, radius r,
+  // centred at (cx, cz), squashed front to back by k
+  function ring(n, y, r, cx = 0, cz = 0, k = 1) {
+    return Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2;
+      return [cx + Math.sin(a) * r, y, cz + Math.cos(a) * r * k];
+    });
+  }
+  // Faces joining two rings (a band), and a ring to a point (a cap)
+  function band(part, lo, hi, opts = {}) {
+    return lo.map((p, i) => ({ part, pts: [p, lo[(i + 1) % lo.length], hi[(i + 1) % hi.length], hi[i]], ...opts }));
+  }
+  function cap(part, rim, top, opts = {}) {
+    return rim.map((p, i) => ({ part, pts: [p, rim[(i + 1) % rim.length], top], ...opts }));
+  }
+
   /*
-   * Painters' palettes. Each part has a ramp from the edge of the light to full light, a shadow
-   * colour and a reflected-light colour that tints shadow planes facing the bounce. light: the
-   * lamp's direction in view space (x right, y up, z toward the viewer).
+   * Extra planes for a look: hats, a bun, a turban's tail, a ruff. Each is
+   * { part, pts (3D, unturned), twoSided, bias (drawn later), centre (inside point for the normal) }.
    */
-  const PORTRAIT_STYLES = {
+  function extras(look) {
+    const out = [];
+    if (look.hat === 'beret') {
+      // a soft beret, tilted to one side and pulled forward
+      const lo = ring(10, 0.5, 0.58, 0.06, 0.02, 0.95), mid = ring(10, 0.63, 0.5, 0.08, 0.0, 0.95);
+      const top = [0.1, 0.7, -0.02];
+      out.push(...band('hat', lo, mid, { centre: [0.08, 0.6, 0], bias: 3 }), ...cap('hat', mid, top, { centre: [0.08, 0.6, 0], bias: 3 }));
+    }
+    if (look.hat === 'brim' || look.hat === 'straw') {
+      const part = look.hat === 'straw' ? 'straw' : 'hat';
+      // a broad brim, tilted up at the front, and a crown
+      const tilt = (p) => [p[0], p[1] + p[2] * 0.12, p[2]];
+      const brimOut = ring(14, 0.48, 0.86, 0, 0.02).map(tilt), brimIn = ring(14, 0.48, 0.44, 0, 0.0).map(tilt);
+      const crownTop = ring(14, 0.84, 0.4, 0, -0.02).map(tilt);
+      out.push(...band(part, brimIn, brimOut, { twoSided: true, bias: 3 }));
+      out.push(...band(part, brimIn, crownTop, { centre: [0, 0.65, 0], bias: 3.2 }));
+      out.push(...cap(part, crownTop, tilt([0, 0.88, -0.02]), { centre: [0, 0.65, 0], bias: 3.2 }));
+    }
+    if (look.hat === 'turban') {
+      // Vermeer's turban: the cloth wound round the head, its knot on top, and a tail falling behind
+      out.push(...cap('turban', ring(9, 0.6, 0.3, 0, -0.12), [0, 0.8, -0.1], { centre: [0, 0.6, -0.1], bias: 2 }));
+      out.push({ part: 'tail', pts: [[0.12, 0.66, -0.3], [0.28, 0.6, -0.36], [0.36, -0.2, -0.32], [0.22, -0.18, -0.28]], twoSided: true });
+    }
+    if (look.hair === 'bun') {
+      const c = [0, 0.4, -0.66], r = 0.24;
+      const pts = [[c[0], c[1] + r, c[2]], [c[0], c[1] - r, c[2]], [c[0] + r, c[1], c[2]], [c[0] - r, c[1], c[2]], [c[0], c[1], c[2] - r], [c[0], c[1], c[2] + r]];
+      const [t, b, rr, l, bk, f] = pts;
+      [[t, rr, bk], [t, bk, l], [t, l, f], [t, f, rr], [b, bk, rr], [b, l, bk], [b, f, l], [b, rr, f]].forEach((tri) => out.push({ part: 'hair', pts: tri, centre: c }));
+    }
+    if (look.collar === 'ruff') {
+      // a stiff white ruff round the neck, under the chin
+      const up = ring(16, -0.64, 0.5, 0, -0.08, 0.85), down = ring(16, -0.84, 0.5, 0, -0.08, 0.85);
+      const inner = ring(16, -0.64, 0.28, 0, -0.08, 0.85);
+      out.push(...band('ruff', down, up, { centre: [0, -0.74, -0.08], bias: 0.2 }));
+      out.push(...band('ruff', up, inner, { twoSided: true, bias: 0.15 }));
+    }
+    return out;
+  }
+
+  // ---- Painters' palettes -------------------------------------------------------------
+  /*
+   * Each part has a ramp from the edge of the light to full light, a shadow colour and a reflected
+   * light colour that warms (or cools) shadow planes facing the bounce. light: the lamp's direction
+   * in view space (x right, y up, z toward the viewer); the side it comes from varies per portrait.
+   */
+  const p = (shadow, reflect, ramp) => ({ shadow, reflect, ramp });
+  const WHITE_LINEN = p('#4c4639', '#5f5747', ['#8a8170', '#b0a690', '#d2c9b2', '#e6dfcb', '#f1ebdb']);
+  const BLACK_CLOTH = p('#0c0b0b', '#141212', ['#181616', '#201d1c', '#2a2624', '#35302d', '#403a36']);
+
+  const STYLES = {
     rembrandt: {
-      painter: 'Rembrandt',
-      light: [-0.62, 0.55, 0.56], bounce: [0.5, -0.6, 0.4],
+      painter: 'Rembrandt', light: [0.62, 0.55, 0.56], bounce: [0.5, -0.6, 0.4],
       ground: '#1c140c', groundLight: '#33251a',
-      skin: { shadow: '#3c2416', reflect: '#5c3521', ramp: ['#6e4229', '#9c6644', '#c48d62', '#deaf82', '#efcda2'] },
-      lips: { shadow: '#3e2016', reflect: '#55301f', ramp: ['#6a3a28', '#8e5840', '#ad7254', '#c48a68', '#d49e7c'] },
-      eye: { shadow: '#20120b', reflect: '#2e1b11', ramp: ['#3a2216', '#523424', '#6a4632', '#7e5840', '#8e684e'] },
-      ear: { shadow: '#3e2216', reflect: '#5a3020', ramp: ['#6e4229', '#9c6444', '#c08660', '#d8a47a', '#e6b88e'] },
-      neck: { shadow: '#2e1a10', reflect: '#4a2a1a', ramp: ['#5e3822', '#86583a', '#ac7a54', '#c89670', '#d8ac86'] },
-      hair: { shadow: '#140d08', reflect: '#24180f', ramp: ['#2e2016', '#45311f', '#5e4429', '#755636', '#8a6844'] },
-      collar: { shadow: '#4a4234', reflect: '#5e5442', ramp: ['#8a8170', '#b0a690', '#d2c9b2', '#e6dfcb', '#f1ebdb'] },
-      clothes: { shadow: '#0c0806', reflect: '#140e0a', ramp: ['#18110c', '#221812', '#2e2118', '#3a2a1e', '#463326'] },
+      skin: p('#3c2416', '#5c3521', ['#6e4229', '#9c6644', '#c48d62', '#deaf82', '#efcda2']),
+      lips: p('#3e2016', '#55301f', ['#6a3a28', '#8e5840', '#ad7254', '#c48a68', '#d49e7c']),
+      eye: p('#20120b', '#2e1b11', ['#3a2216', '#523424', '#6a4632', '#7e5840', '#8e684e']),
+      ear: p('#3e2216', '#5a3020', ['#6e4229', '#9c6444', '#c08660', '#d8a47a', '#e6b88e']),
+      neck: p('#2e1a10', '#4a2a1a', ['#5e3822', '#86583a', '#ac7a54', '#c89670', '#d8ac86']),
+      hair: p('#140d08', '#24180f', ['#2e2016', '#45311f', '#5e4429', '#755636', '#8a6844']),
+      hat: p('#0a0705', '#120d09', ['#16100b', '#1e1610', '#281d15', '#33261b', '#3e2f22']),
+      collar: WHITE_LINEN, ruff: WHITE_LINEN,
+      clothes: p('#0c0806', '#140e0a', ['#18110c', '#221812', '#2e2118', '#3a2a1e', '#463326']),
     },
     zorn: {
-      painter: 'Zorn',
-      light: [-0.7, 0.35, 0.62], bounce: [0.6, -0.4, 0.5],
+      painter: 'Zorn', light: [0.7, 0.35, 0.62], bounce: [0.6, -0.4, 0.5],
       ground: '#2a2522', groundLight: '#3c3631',
-      skin: { shadow: '#5a3226', reflect: '#7a4232', ramp: ['#8a5a44', '#b07a5c', '#cf9a78', '#e6b996', '#f2d2b4'] },
-      lips: { shadow: '#5a2a24', reflect: '#76382e', ramp: ['#8a4838', '#aa5c48', '#c0705a', '#d0846c', '#dc9880'] },
-      eye: { shadow: '#33201a', reflect: '#462a22', ramp: ['#583a30', '#704c3e', '#86604e', '#98705e', '#a8806c'] },
-      ear: { shadow: '#5c2a22', reflect: '#7c3a2e', ramp: ['#94503e', '#b86852', '#d07e66', '#de947a', '#eaa88e'] },
-      neck: { shadow: '#4e2c22', reflect: '#6a3a2c', ramp: ['#7a5040', '#9e6e58', '#bc8a70', '#d2a486', '#e0b89c'] },
-      hair: { shadow: '#1c1614', reflect: '#2c2420', ramp: ['#382c24', '#4c3c30', '#62503e', '#76624c', '#8a765e'] },
-      collar: { shadow: '#5c544c', reflect: '#70675c', ramp: ['#9a9286', '#bab2a4', '#d6cfc2', '#e8e2d6', '#f4efe6'] },
-      clothes: { shadow: '#151110', reflect: '#2a1a16', ramp: ['#7a2a22', '#922f24', '#a83a2c', '#bc4a38', '#cc5c48'] },
+      skin: p('#5a3226', '#7a4232', ['#8a5a44', '#b07a5c', '#cf9a78', '#e6b996', '#f2d2b4']),
+      lips: p('#5a2a24', '#76382e', ['#8a4838', '#aa5c48', '#c0705a', '#d0846c', '#dc9880']),
+      eye: p('#33201a', '#462a22', ['#583a30', '#704c3e', '#86604e', '#98705e', '#a8806c']),
+      ear: p('#5c2a22', '#7c3a2e', ['#94503e', '#b86852', '#d07e66', '#de947a', '#eaa88e']),
+      neck: p('#4e2c22', '#6a3a2c', ['#7a5040', '#9e6e58', '#bc8a70', '#d2a486', '#e0b89c']),
+      hair: p('#1c1614', '#2c2420', ['#382c24', '#4c3c30', '#62503e', '#76624c', '#8a765e']),
+      hat: BLACK_CLOTH,
+      collar: p('#5c544c', '#70675c', ['#9a9286', '#bab2a4', '#d6cfc2', '#e8e2d6', '#f4efe6']), ruff: WHITE_LINEN,
+      clothes: p('#151110', '#2a1a16', ['#7a2a22', '#922f24', '#a83a2c', '#bc4a38', '#cc5c48']),
+    },
+    sargent: {
+      painter: 'Sargent', light: [0.55, 0.6, 0.6], bounce: [0.5, -0.3, 0.6],
+      ground: '#35343a', groundLight: '#4a4746',
+      skin: p('#5a4038', '#6e5048', ['#8e6c60', '#b08e80', '#cfae9e', '#e4c8b8', '#f2ddd0']),
+      lips: p('#5a3434', '#704444', ['#8a5452', '#a86a66', '#c0807a', '#d0948c', '#dca8a0']),
+      eye: p('#2e2422', '#3e302e', ['#4e3c38', '#665048', '#7c645a', '#8e746a', '#9e847a']),
+      ear: p('#5e3c36', '#744c44', ['#966a5e', '#b6887a', '#cea496', '#dcb8aa', '#e8cabe']),
+      neck: p('#4e3832', '#644840', ['#806258', '#a08074', '#bc9c90', '#d2b4a8', '#e0c6bc']),
+      hair: p('#16100e', '#241a16', ['#2e221c', '#3e2e26', '#523e32', '#644e40', '#76604e']),
+      hat: BLACK_CLOTH,
+      collar: p('#584a44', '#6a5a54', ['#8c766c', '#ae9488', '#cab0a4', '#dec6ba', '#ecd8ce']), ruff: WHITE_LINEN,
+      clothes: BLACK_CLOTH,
+    },
+    sorolla: {
+      painter: 'Sorolla', light: [0.45, 0.8, 0.4], bounce: [0.4, -0.7, 0.5],
+      ground: '#c9b48c', groundLight: '#e2d2ac',
+      skin: p('#7a5450', '#986860', ['#a8704e', '#c88e66', '#e0ac82', '#efc69c', '#f9dcb8']),
+      lips: p('#6e3e40', '#884e4c', ['#a05a4c', '#bc6e5c', '#d0846e', '#de9882', '#e8ac96']),
+      eye: p('#46302e', '#5a3e3a', ['#6a4a48', '#84604e', '#9c7660', '#b08a72', '#c09c84']),
+      ear: p('#7c5250', '#9a665e', ['#b8705a', '#d48a70', '#e4a486', '#f0ba9c', '#f8ccb0']),
+      neck: p('#6c4a4a', '#886058', ['#9c6a52', '#bc8668', '#d4a080', '#e4b898', '#f0caac']),
+      hair: p('#221814', '#32241c', ['#3a2a24', '#4e382c', '#644836', '#7a5a44', '#8e6e56']),
+      straw: p('#6e5a6a', '#8a7478', ['#b49a64', '#ccb478', '#e0ca8e', '#eedaa4', '#f8e8bc']),
+      hat: p('#6e5a6a', '#8a7478', ['#b49a64', '#ccb478', '#e0ca8e', '#eedaa4', '#f8e8bc']),
+      collar: p('#7a7698', '#9894b0', ['#c4c0c8', '#d8d2d4', '#eae4de', '#f4efe8', '#fffaf2']), ruff: WHITE_LINEN,
+      clothes: p('#7a7698', '#9894b0', ['#c4c0c8', '#d8d2d4', '#eae4de', '#f4efe8', '#fffaf2']),
+    },
+    velazquez: {
+      painter: 'Velázquez', light: [0.6, 0.5, 0.62], bounce: [0.5, -0.5, 0.5],
+      ground: '#3e3e34', groundLight: '#5a5848',
+      skin: p('#4a3426', '#5e4232', ['#7a5a44', '#9c765c', '#ba9276', '#d0aa8c', '#e0c0a2']),
+      lips: p('#4a2c24', '#5e3a2e', ['#76483a', '#94604c', '#ac7660', '#c08a72', '#cc9c84']),
+      eye: p('#261a14', '#34241c', ['#443024', '#5a4230', '#6e5440', '#80644e', '#8e725c']),
+      ear: p('#4c3024', '#623e2e', ['#7e5440', '#a07058', '#bc8a70', '#d0a086', '#dcb298']),
+      neck: p('#3e2a20', '#523628', ['#6c4e3c', '#8c6a54', '#a8846c', '#bc9a80', '#ccac94']),
+      hair: p('#120e0c', '#1e1814', ['#261e18', '#342820', '#44362a', '#544434', '#625240']),
+      hat: BLACK_CLOTH,
+      collar: p('#5a5650', '#6e6a62', ['#9a968c', '#bab6ac', '#d6d2c8', '#e8e4da', '#f4f1e8']), ruff: p('#5a5650', '#6e6a62', ['#9a968c', '#bab6ac', '#d6d2c8', '#e8e4da', '#f4f1e8']),
+      clothes: BLACK_CLOTH,
+    },
+    hals: {
+      painter: 'Frans Hals', light: [0.55, 0.6, 0.58], bounce: [0.5, -0.5, 0.5],
+      ground: '#4e4a3c', groundLight: '#6c6652',
+      skin: p('#5a3226', '#76422e', ['#9a5e44', '#c07e5e', '#da9c78', '#eab894', '#f4ceac']),
+      lips: p('#5a2a22', '#74382c', ['#94483a', '#b05e4a', '#c8745e', '#d88a72', '#e49e86']),
+      eye: p('#30201a', '#422c22', ['#56382c', '#6e4c3a', '#86604a', '#9a725a', '#aa8468']),
+      ear: p('#5c2e22', '#783c2c', ['#a05a42', '#c4785a', '#da9474', '#e8ac8c', '#f2c0a2']),
+      neck: p('#4c2c20', '#64382a', ['#86543e', '#a87058', '#c48c70', '#d8a488', '#e4b89c']),
+      hair: p('#24160e', '#342016', ['#46301e', '#5e4228', '#765434', '#8c6842', '#a07a50']),
+      hat: BLACK_CLOTH,
+      collar: p('#56585a', '#6a6c6e', ['#9a9c9a', '#b8bab6', '#d4d4ce', '#e6e6e0', '#f2f2ec']),
+      ruff: p('#56585a', '#6a6c6e', ['#9a9c9a', '#b8bab6', '#d4d4ce', '#e6e6e0', '#f2f2ec']),
+      clothes: BLACK_CLOTH,
+    },
+    vermeer: {
+      painter: 'Vermeer', light: [0.65, 0.45, 0.6], bounce: [0.5, -0.5, 0.5],
+      ground: '#101010', groundLight: '#1e1d18',
+      skin: p('#4a3a30', '#5a4a3e', ['#8a7060', '#b8987e', '#d8bc9e', '#ecd4b8', '#f8e8d2']),
+      lips: p('#5a2e2a', '#703a34', ['#904a40', '#ac5c4e', '#c27060', '#d28474', '#de9888']),
+      eye: p('#2c221c', '#3a2e26', ['#4c3c32', '#645044', '#7a6454', '#8e7664', '#9e8674']),
+      ear: p('#4e3a30', '#604a3e', ['#8e6e5c', '#b28c76', '#cea88e', '#e0bea6', '#ecd0ba']),
+      neck: p('#40322a', '#54443a', ['#7a6252', '#9e826e', '#bca088', '#d2b8a0', '#e0cab4']),
+      hair: p('#1a140e', '#281e16', ['#36281c', '#4a3826', '#5e4830', '#72583c', '#846a4a']),
+      turban: p('#101a3e', '#18264e', ['#24387a', '#304c98', '#4466b2', '#5c80c6', '#7c9cd6']),
+      tail: p('#4a3c14', '#5c4c1c', ['#9a7a2c', '#b8963a', '#d0ae4c', '#e2c262', '#eed480']),
+      hat: BLACK_CLOTH,
+      collar: WHITE_LINEN, ruff: WHITE_LINEN,
+      clothes: p('#2e2210', '#3e2e16', ['#6a4e22', '#8a6a30', '#a88440', '#c09c54', '#d2b06a']),
     },
   };
+  // A deeper skin tone, for portraits after Velázquez's Juan de Pareja and others
+  const DEEP = {
+    skin: p('#24140c', '#34200f', ['#4a2e1e', '#683f28', '#865436', '#9e6846', '#b07a56']),
+    lips: p('#2a140e', '#3a1e14', ['#4e281c', '#663626', '#7c4634', '#8e5642', '#9c6452']),
+    eye: p('#120a06', '#1a100a', ['#22140c', '#2e1c12', '#3a2418', '#462e1e', '#503626']),
+    ear: p('#26140c', '#36200f', ['#4e2e1e', '#6c4028', '#8a5434', '#a06644', '#b07654']),
+    neck: p('#1e100a', '#2c1a0e', ['#42281a', '#5e3a24', '#7a4e30', '#90603e', '#a0704c']),
+  };
+  const SAME = { socket: 'skin', under: 'skin' };
 
   const hexRgb = (h) => { const v = parseInt(h.slice(1), 16); return [v >> 16, (v >> 8) & 255, v & 255]; };
   const mixRgb = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
   const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
-  // The colour of a plane: the ramp by how squarely it faces the lamp, or the shadow colour
-  // warmed by bounce light for planes turned away
-  const SAME = { socket: 'skin', under: 'skin' };
-
+  // A plane's colour: the ramp by how squarely it faces the lamp, or the shadow colour tinted by the
+  // bounce light for planes turned away
   function planeColor(part, lam, bounce) {
     if (lam <= 0.02) return mixRgb(hexRgb(part.shadow), hexRgb(part.reflect), clamp01(bounce) * 0.9);
     const ramp = part.ramp, t = clamp01(lam) * (ramp.length - 1);
@@ -417,88 +325,100 @@
     return mixRgb(hexRgb(ramp[i]), hexRgb(ramp[i + 1]), t - i);
   }
 
-  function drawPortrait(styleId, seed) {
-    const s = PORTRAIT_STYLES[styleId];
+  /*
+   * Draws one portrait. look: { hair: 'short' | 'bun', beard, moustache, hat: 'beret' | 'brim' |
+   * 'straw' | 'turban', collar: 'flat' | 'ruff' | 'open' | 'none', clothes: a palette part name to
+   * use for the clothes, deep: true for a deeper skin tone }
+   */
+  function drawPortrait(styleId, seed, look = {}, size = 1) {
+    const base = STYLES[styleId];
+    const s = Object.assign({}, base, look.deep ? DEEP : {}, look.clothes ? { clothes: look.clothes === 'black' ? BLACK_CLOTH : look.clothes === 'white' ? WHITE_LINEN : base[look.clothes] } : {});
     const r = rng(seed);
-    const W = 600, H = 750;
-    const c = canvas(W, H);
+    const W = Math.round(600 * size), H = Math.round(750 * size);
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
     const g = c.getContext('2d');
+    g.scale(size, size);
     const side = r() < 0.65 ? 1 : -1;
-    const yaw = side * between(r, 0.28, 0.55);              // a three-quarter turn
-    const pitch = between(r, -0.1, 0.0);                    // level, or lifted a touch
+    const yaw = side * between(r, 0.25, 0.55);              // a three-quarter turn
+    const pitch = between(r, -0.1, 0.0);
     const roll = between(r, -0.06, 0.06);
-    const lightSide = r() < 0.75 ? -1 : 1;
-    const unit = between(r, 255, 275);
-    const ox = 300 + between(r, -20, 20), oy = 300 + between(r, -10, 15);
+    const lightSide = r() < 0.75 ? -1 : 1;                 // usually lit from the left
+    const unit = between(r, 250, 270) * (look.hat === 'brim' || look.hat === 'straw' ? 0.9 : 1);
+    const ox = 300 + between(r, -18, 18), oy = 300 + between(r, -8, 12) + (look.hat ? 30 : 0);
 
-    // background: flat, with a lighter block behind the head on the shadow side, as painters set it
+    // background: flat, with a lighter block on the face's shadow side, as painters set it to turn the head
     g.fillStyle = s.ground;
-    g.fillRect(0, 0, W, H);
-    // a lighter block of background on the face's shadow side, as painters set it to turn the head
+    g.fillRect(0, 0, 600, 750);
     g.fillStyle = s.groundLight;
     g.beginPath();
     const bx = ox - lightSide * between(r, 40, 80);
     g.moveTo(bx, 0);
-    g.lineTo(lightSide > 0 ? 0 : W, 0);
-    g.lineTo(lightSide > 0 ? 0 : W, H);
-    g.lineTo(bx - lightSide * between(r, 60, 140), H);
+    g.lineTo(lightSide > 0 ? 0 : 600, 0);
+    g.lineTo(lightSide > 0 ? 0 : 600, 750);
+    g.lineTo(bx - lightSide * between(r, 60, 140), 750);
     g.closePath();
     g.fill();
 
-    // rotate a point: roll, then pitch, then yaw
-    const cy0 = Math.cos(yaw), sy0 = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
-    const turnPoint = ([x, y, z]) => {
-      // the shoulders turn less than the head
-      return [x, y, z];
-    };
+    const cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
+    // roll, then pitch, then turn; the body (k < 1) turns less than the head
     const rot = ([x, y, z], k) => {
       const ya = yaw * k, cY = Math.cos(ya), sY = Math.sin(ya);
-      let x1 = x * cr - y * sr, y1 = x * sr + y * cr, z1 = z;
-      let y2 = y1 * cp - z1 * sp, z2 = y1 * sp + z1 * cp;
+      const x1 = x * cr - y * sr, y1 = x * sr + y * cr;
+      const y2 = y1 * cp - z * sp, z2 = y1 * sp + z * cp;
       return [x1 * cY + z2 * sY, y2, -x1 * sY + z2 * cY];
     };
-    const point = (name, mirror) => {
-      const p = P[name];
-      return [mirror ? -p[0] : p[0], p[1], p[2]];
-    };
-    let L = s.light.slice(); L[0] *= -lightSide === 1 ? 1 : -1;
-    L[0] = Math.abs(L[0]) * lightSide;
-    const ll = Math.hypot(...L); L = L.map((v) => v / ll);
-    let B = s.bounce.slice(); B[0] = -Math.abs(B[0]) * lightSide;
-    const bl = Math.hypot(...B); B = B.map((v) => v / bl);
+    const unitVec = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+    const L = unitVec([Math.abs(s.light[0]) * lightSide, s.light[1], s.light[2]]);
+    const B = unitVec([-Math.abs(s.bounce[0]) * lightSide, s.bounce[1], s.bounce[2]]);
+
+    const facets = [];
+    FACETS.forEach(([part0, ...names]) => {
+      [false, true].forEach((mirror) => {
+        let part = part0;
+        const key = names[0] + ' ' + names[1];
+        if (look.beard && BEARD.has(key)) part = 'hair';
+        if ((look.beard || look.moustache) && MOUSTACHE.has(key)) part = 'hair';
+        if (look.hat === 'turban' && part === 'hair') part = 'turban';
+        if (part === 'collar') part = look.collar === 'open' ? 'neck' : look.collar === 'none' || look.collar === 'ruff' ? 'clothes' : 'collar';
+        const body = part0 === 'clothes' || part0 === 'collar';
+        const k = body ? 0.45 : part0 === 'neck' ? 0.75 : 1;
+        const pts = names.map((n) => { const q = P[n]; return [mirror ? -q[0] : q[0], q[1], q[2]]; });
+        facets.push({ part, pts, k, centre: body ? [0, -1.4, -0.05] : part0 === 'neck' ? [0, -0.75, -0.08] : [0, 0, 0], bias: body ? -0.6 : 0 });
+      });
+    });
+    extras(look).forEach((e) => facets.push({ k: e.part === 'ruff' ? 0.75 : 1, centre: e.centre || [0, 0, 0], bias: 0, ...e }));
 
     const polys = [];
-    FACETS.forEach(([part, ...names]) => {
-      [false, true].forEach((mirror) => {
-        const body = part === 'clothes' || part === 'collar';
-        const k = body ? 0.45 : part === 'neck' ? 0.75 : 1;     // the body turns less than the head
-        const pts = names.map((n) => rot(turnPoint(point(n, mirror)), k));
-        // Newell's normal, pointed away from the inside of the form
-        let nx = 0, ny = 0, nz = 0;
-        for (let i = 0; i < pts.length; i++) {
-          const a = pts[i], b = pts[(i + 1) % pts.length];
-          nx += (a[1] - b[1]) * (a[2] + b[2]);
-          ny += (a[2] - b[2]) * (a[0] + b[0]);
-          nz += (a[0] - b[0]) * (a[1] + b[1]);
-        }
-        const centre = pts.reduce((m, p) => [m[0] + p[0] / pts.length, m[1] + p[1] / pts.length, m[2] + p[2] / pts.length], [0, 0, 0]);
-        const inside = rot(body ? [0, -1.4, -0.05] : part === 'neck' ? [0, -0.75, -0.08] : [0, 0, 0], k);
-        if (nx * (centre[0] - inside[0]) + ny * (centre[1] - inside[1]) + nz * (centre[2] - inside[2]) < 0) { nx = -nx; ny = -ny; nz = -nz; }
-        const nl = Math.hypot(nx, ny, nz);
-        nx /= nl; ny /= nl; nz /= nl;
-        if (nz <= 0.01) return;                       // facing away from the viewer
-        const lam = nx * L[0] + ny * L[1] + nz * L[2];
-        const bounce = nx * B[0] + ny * B[1] + nz * B[2];
-        polys.push({ pts, z: centre[2] + (body ? -0.6 : 0), color: planeColor(s[part] || s[SAME[part]], lam, bounce) });
-      });
+    facets.forEach((f) => {
+      const pts = f.pts.map((q) => rot(q, f.k));
+      // Newell's normal, pointed away from the inside of the form
+      let nx = 0, ny = 0, nz = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        nx += (a[1] - b[1]) * (a[2] + b[2]);
+        ny += (a[2] - b[2]) * (a[0] + b[0]);
+        nz += (a[0] - b[0]) * (a[1] + b[1]);
+      }
+      const mid = pts.reduce((m, q) => [m[0] + q[0] / pts.length, m[1] + q[1] / pts.length, m[2] + q[2] / pts.length], [0, 0, 0]);
+      const inside = rot(f.centre, f.k);
+      if (!f.twoSided && nx * (mid[0] - inside[0]) + ny * (mid[1] - inside[1]) + nz * (mid[2] - inside[2]) < 0) { nx = -nx; ny = -ny; nz = -nz; }
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      nx /= nl; ny /= nl; nz /= nl;
+      if (f.twoSided && nz < 0) { nx = -nx; ny = -ny; nz = -nz; }   // a brim or cloth seen from either side
+      if (nz <= 0.01) return;                                         // facing away from the viewer
+      const lam = nx * L[0] + ny * L[1] + nz * L[2];
+      const bounce = nx * B[0] + ny * B[1] + nz * B[2];
+      const pal = s[f.part] || s[SAME[f.part]] || s.hair;
+      polys.push({ pts, z: mid[2] + f.bias, color: planeColor(pal, lam, bounce) });
     });
     polys.sort((a, b) => a.z - b.z);
     g.lineJoin = 'round';
-    polys.forEach((p) => {
+    polys.forEach((q) => {
       g.beginPath();
-      p.pts.forEach(([x, y], i) => (i ? g.lineTo(ox + x * unit, oy - y * unit) : g.moveTo(ox + x * unit, oy - y * unit)));
+      q.pts.forEach(([x, y], i) => (i ? g.lineTo(ox + x * unit, oy - y * unit) : g.moveTo(ox + x * unit, oy - y * unit)));
       g.closePath();
-      g.fillStyle = g.strokeStyle = css(p.color);
+      g.fillStyle = g.strokeStyle = css(q.color);
       g.lineWidth = 1.2;
       g.fill();
       g.stroke();
@@ -506,173 +426,53 @@
     return c;
   }
 
-  // ---- Still lifes ----------------------------------------------------------------
+  // ---- The 25 portraits ------------------------------------------------------------------
 
-  const STILL_STYLES = {
-    dutch: {
-      painter: 'Dutch Golden Age',
-      wall: ['#3e3a28', '#0c0b08'],
-      tableTop: '#6a4a2c', tableFront: '#2a1a0e', cloth: '#ece6d6',
-      vessel: 'jug', vesselColor: '#5a3a22',
-      light: { dir: [-0.7, -0.62, 0.45], key: [1.2, 1.05, 0.85], ambient: [0.06, 0.055, 0.05], bounce: [0.03, 0.025, 0.02], shadowSoft: 3 },
-      vignette: 0.45,
-    },
-  };
+  const L = (painter, seed, look, title) => ({ id: `${painter}-${seed}`, painter, seed, look, title });
+  const PORTRAITS = [
+    L('rembrandt', 7, { hat: 'beret', moustache: true, collar: 'flat' }, 'Man in a beret'),
+    L('rembrandt', 21, { hat: 'beret', beard: true, collar: 'none' }, 'Bearded man in a beret'),
+    L('rembrandt', 33, { beard: true, collar: 'flat' }, 'Old man with a beard'),
+    L('rembrandt', 45, { hair: 'bun', collar: 'flat' }, 'Young woman'),
+    L('zorn', 11, { hair: 'bun', collar: 'open' }, 'Woman in red'),
+    L('zorn', 52, { moustache: true, collar: 'flat', clothes: 'black' }, 'Man with a moustache'),
+    L('zorn', 64, { hair: 'bun', collar: 'open', clothes: 'black' }, 'Woman in black'),
+    L('zorn', 70, { beard: true, collar: 'none', clothes: 'black' }, 'Bearded man'),
+    L('sargent', 81, { hair: 'bun', collar: 'open' }, 'Lady in a black gown'),
+    L('sargent', 92, { moustache: true, collar: 'flat' }, 'Gentleman'),
+    L('sargent', 103, { hair: 'bun', collar: 'open', clothes: 'white' }, 'Lady in white'),
+    L('sargent', 114, { collar: 'flat' }, 'Young man'),
+    L('sorolla', 125, { beard: true, collar: 'none' }, 'Man in white'),
+    L('sorolla', 136, { hair: 'bun', collar: 'open' }, 'Woman in the sun'),
+    L('sorolla', 147, { hat: 'straw', moustache: true, collar: 'none' }, 'Man in a straw hat'),
+    L('velazquez', 158, { moustache: true, collar: 'flat' }, 'Courtier'),
+    L('velazquez', 169, { beard: true, collar: 'flat', deep: true }, 'Man with a lace collar'),
+    L('velazquez', 180, { hair: 'bun', collar: 'ruff' }, 'Lady with a ruff'),
+    L('velazquez', 191, { beard: true, collar: 'ruff' }, 'Bearded man with a ruff'),
+    L('hals', 202, { hat: 'brim', beard: true, collar: 'ruff' }, 'Cavalier'),
+    L('hals', 213, { beard: true, collar: 'ruff' }, 'Burgher'),
+    L('hals', 224, { hair: 'bun', collar: 'ruff' }, 'Woman with a ruff'),
+    L('vermeer', 235, { hat: 'turban', collar: 'flat' }, 'Girl in a blue turban'),
+    L('vermeer', 246, { hair: 'bun', collar: 'flat' }, 'Woman in a yellow jacket'),
+    L('vermeer', 257, { hat: 'brim', collar: 'flat', clothes: 'black' }, 'Man in a hat'),
+  ];
 
-  const FRUITS = {
-    apple: { colors: ['#b8321e', '#9aa23a', '#c8642a'], r: [44, 52], squash: 0.9, spec: 0.25, gloss: 30 },
-    lemon: { colors: ['#e6c020'], r: [34, 38], squash: 0.8, spec: 0.2, gloss: 22, lemon: true },
-    peach: { colors: ['#e08a50'], r: [40, 46], squash: 0.95, spec: 0.05, gloss: 8 },
-    orange: { colors: ['#e0701a'], r: [40, 48], squash: 0.95, spec: 0.12, gloss: 14 },
-    pear: { colors: ['#b4a03a'], r: [36, 42], squash: 0.9, spec: 0.1, gloss: 14, pear: true },
-    plum: { colors: ['#4a2450'], r: [24, 28], squash: 0.9, spec: 0.2, gloss: 26 },
-    cherry: { colors: ['#9a1420'], r: [14, 16], squash: 1, spec: 0.5, gloss: 50 },
-  };
-
-  function drawStillLife(styleId, seed) {
-    const s = STILL_STYLES[styleId];
-    const r = rng(seed);
-    const W = 750, H = 600;
-    const c = canvas(W, H);
-    const g = c.getContext('2d');
-    const L = r() < 0.75 ? 1 : -1;
-    const backY = between(r, 300, 330);     // where the table meets the wall
-    const frontY = backY + 170;             // the table's front edge
-    // depth on the table: 0 at the back, 160 at the front edge
-    const tz = (y) => 20 + 160 * clamp01((y - backY) / (frontY - backY));
-
-    // the wall, lit from one side
-    g.fillStyle = s.wall[1];
-    g.fillRect(0, 0, W, H);
-    const gr = g.createRadialGradient(W / 2 - L * 220, 60, 20, W / 2 - L * 120, 150, 560);
-    gr.addColorStop(0, s.wall[0]);
-    gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr;
-    g.fillRect(0, 0, W, H);
-
-    const sc = new Scene(W, H);
-    // the wall itself as a form, so shadows can fall on it
-    sc.add(0, 0, W, backY, () => 0, (x, y, z, out) => {
-      const k = 0.35 + 0.65 * clamp01(1 - Math.hypot(x - (W / 2 - L * 200), y - 80) / 620);
-      const col = mixLin(lin(s.wall[1]), lin(s.wall[0]), k);
-      out[0] = col[0] * 3; out[1] = col[1] * 3; out[2] = col[2] * 3;
-    }, {});
-    // table top and front edge
-    const top = lin(s.tableTop), front = lin(s.tableFront);
-    sc.add(0, backY, W, frontY, (x, y) => tz(y), (x, y, z, out) => { out[0] = top[0]; out[1] = top[1]; out[2] = top[2]; }, { spec: 0.05, gloss: 8 });
-    sc.add(0, frontY, W, H, (x, y) => 180 - (y - frontY) * 0.05, flat(front), {});
-
-    // a white cloth on one side: lying on the table, then falling over the front edge in folds
-    const clothC = lin(s.cloth);
-    const cx0 = L > 0 ? between(r, 10, 50) : W - between(r, 10, 50) - 300, cx1 = cx0 + 300;
-    const ph = [between(r, 0, 6), between(r, 0, 6)];
-    sc.add(cx0, backY + 50, cx1, H, (x, y) => {
-      const k = (x - cx0) / (cx1 - cx0);
-      // the far edge is a soft curve; below the table edge the cloth narrows a little as it hangs
-      if (y < backY + 50 + 18 * Math.sin(k * Math.PI)) return null;
-      const inset = y > frontY ? (y - frontY) * 0.08 : 0;
-      if (x < cx0 + inset || x > cx1 - inset) return null;
-      if (y <= frontY) return tz(y) + 4 + 3 * Math.sin(k * 9 + ph[0]) * smooth(backY + 60, frontY, y);
-      // hanging folds: a few broad ones, deepening as the cloth falls
-      const hang = smooth(frontY, frontY + 60, y);
-      return 196 + hang * (8 * Math.sin(k * Math.PI * 3.5 + ph[0]) + 3 * Math.sin(k * Math.PI * 8 + ph[1]));
-    }, flat(clothC), { spec: 0.03, gloss: 6 });
-
-    // a stoneware jug standing at the back
-    const jx = W / 2 + L * between(r, 90, 140), jBase = backY + 55, jTop = jBase - 230;
-    const jugC = lin(s.vesselColor);
-    const profile = (y) => {
-      const t = (jBase - y) / (jBase - jTop);     // 0 at the foot, 1 at the lip
-      if (t < 0 || t > 1) return 0;
-      return 48 + 30 * Math.sin(Math.PI * clamp01(t / 0.7)) * (t < 0.7 ? 1 : 0) + (t > 0.7 ? 22 + 10 * smooth(0.85, 1, t) - 26 * (t - 0.7) : 0);
-    };
-    sc.add(jx - 90, jTop, jx + 90, jBase, (x, y) => {
-      const rad = profile(y);
-      const u = (x - jx) / rad;
-      if (!rad || Math.abs(u) >= 1) return null;
-      return tz(jBase) + 60 + rad * Math.sqrt(1 - u * u);
-    }, (x, y, z, out) => {
-      const t = (jBase - y) / (jBase - jTop);
-      const col = t > 0.62 && t < 0.66 ? mixLin(jugC, lin('#c8b896'), 0.6) : jugC;   // a pale band
-      out[0] = col[0]; out[1] = col[1]; out[2] = col[2];
-    }, { spec: 0.6, gloss: 40 });
-    // its handle
-    sc.add(jx - L * 130, jTop + 30, jx + L * 130, jBase - 60, (x, y) => {
-      const hx = jx - L * 70, hy = jTop + 110;
-      const d = Math.hypot((x - hx) / 1.1, y - hy);
-      const ring = Math.abs(d - 52);
-      if (ring > 9 || (x - jx) * -L < 40) return null;
-      return tz(jBase) + 70 + 9 * Math.sqrt(1 - (ring / 9) ** 2);
-    }, flat(jugC), { spec: 0.6, gloss: 40 });
-
-    // a pewter plate in front, and the fruit
-    const plate = { x: W / 2 - L * between(r, 20, 60), y: backY + 100, rx: 150, ry: 40 };
-    sc.add(plate.x - plate.rx, plate.y - plate.ry, plate.x + plate.rx, plate.y + plate.ry, (x, y) => {
-      const q = ((x - plate.x) / plate.rx) ** 2 + ((y - plate.y) / plate.ry) ** 2;
-      if (q >= 1) return null;
-      return tz(y) + 10 + (q > 0.6 ? 6 * smooth(0.6, 0.85, q) : 0);
-    }, flat(lin('#8a8a84')), { spec: 0.7, gloss: 30 });
-
-    const fruit = [];
-    const add = (type, x, y) => {
-      const f = FRUITS[type];
-      fruit.push({ type, x, y, rad: between(r, f.r[0], f.r[1]), col: lin(pick(r, f.colors)), ...f });
-    };
-    add('lemon', plate.x + L * 45, plate.y - 26);
-    add(pick(r, ['apple', 'peach', 'orange']), plate.x - L * 50, plate.y - 34);
-    add(pick(r, ['pear', 'apple']), plate.x - L * 120, plate.y - 22);
-    add('plum', plate.x + L * 190, backY + 112);
-    add('cherry', plate.x + L * 150, backY + 138);
-    add('cherry', plate.x + L * 172, backY + 144);
-    add(pick(r, ['apple', 'orange', 'peach']), plate.x - L * 230, backY + 120);
-    fruit.forEach((f) => {
-      const ry = f.rad * f.squash;
-      const base = tz(f.y + ry) + (Math.abs(f.y - plate.y) < 40 && Math.abs(f.x - plate.x) < plate.rx ? 10 : 0);
-      sc.add(f.x - f.rad * 1.4, f.y - ry * 2.2, f.x + f.rad * 1.4, f.y + ry, (x, y) => {
-        let q;
-        if (f.lemon) {
-          const dx = (x - f.x) / (f.rad * 1.18), dy = (y - f.y) / ry;
-          q = dx * dx + dy * dy * (1 + 0.5 * dx * dx) - 0.12 * gauss((Math.abs(dx) - 1) / 0.08, dy / 0.2);
-        } else {
-          const dy = (y - f.y) / ry;
-          // a pear narrows smoothly toward its stalk
-          const wdt = f.pear ? (dy < 0 ? 1 - 0.42 * smooth(0, 1.6, -dy) : 1) : 1;
-          const span = f.pear ? (dy < 0 ? 1.9 : 1) : 1;
-          q = ((x - f.x) / (f.rad * wdt)) ** 2 + (dy / span) ** 2;
-        }
-        return q < 1 ? base + f.rad * Math.sqrt(1 - q) : null;
-      }, flat(f.col), { spec: f.spec, gloss: f.gloss });
-    });
-    // grapes, hanging over the plate's edge toward the viewer
-    const gx = plate.x + L * 110, gy = plate.y - 6;
-    const grapeC = lin('#3a2a4a');
-    const grapes = [];
-    for (let i = 0; i < 22; i++) {
-      const row = Math.floor(i / 4);
-      grapes.push({ x: gx + (i % 4 - 1.5) * 20 * (1 - row * 0.12) + between(r, -4, 4), y: gy + row * 17 + between(r, -3, 3), r: between(r, 12, 14) });
+  // The portrait's picture, at size (1 = 600 x 750); kept so it is drawn only once
+  const cache = new Map();
+  function picture(id, size = 1) {
+    const key = id + '@' + size;
+    if (!cache.has(key)) {
+      const pt = PORTRAITS.find((x) => x.id === id);
+      if (!pt) return null;
+      cache.set(key, drawPortrait(pt.painter, pt.seed, pt.look, size));
     }
-    sc.add(gx - 60, gy - 20, gx + 60, gy + 120, (x, y) => {
-      let best = null;
-      for (const gp of grapes) {
-        const q = ((x - gp.x) / gp.r) ** 2 + ((y - gp.y) / gp.r) ** 2;
-        if (q < 1) { const hh = tz(plate.y) + 30 + (gp.y - gy) * 0.4 + gp.r * Math.sqrt(1 - q); if (best === null || hh > best) best = hh; }
-      }
-      return best;
-    }, flat(grapeC), { spec: 0.45, gloss: 40 });
-
-    sc.render(g, { ...s.light, dir: [s.light.dir[0] * L, s.light.dir[1], s.light.dir[2]] });
-    // stalks on the cherries
-    g.strokeStyle = '#3a2614';
-    g.lineWidth = 2.5;
-    fruit.filter((f) => f.type === 'cherry').forEach((f) => {
-      g.beginPath();
-      g.moveTo(f.x, f.y - f.rad);
-      g.quadraticCurveTo(f.x - L * 10, f.y - f.rad - 28, f.x + 8, f.y - f.rad - 44);
-      g.stroke();
-    });
-    finish(c, r, s.vignette);
-    return c;
+    return cache.get(key);
   }
 
-  window.Subjects = { drawPortrait, drawStillLife, PORTRAIT_STYLES, STILL_STYLES };
+  window.Subjects = {
+    PORTRAITS,
+    painterOf: (id) => { const pt = PORTRAITS.find((x) => x.id === id); return pt ? STYLES[pt.painter].painter : ''; },
+    picture,
+    drawPortrait,
+  };
 })();

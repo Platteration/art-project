@@ -343,7 +343,25 @@
         <div class="game-setup" id="gameSetup">
           <div class="game-card">
             <h2 class="game-title">Paint by numbers</h2>
-            <p class="game-lede">Your reference becomes a numbered study, outlined in black. Choose a number, then tap paints to mix its color: every tap adds one part. Match the photo before the time runs out, then lock in your portrait for a score.</p>
+            <p class="game-lede">Your reference becomes a numbered study, outlined in black. Choose a number, then tap paints to mix its color: every tap adds one part. Match the reference before the time runs out, then lock in your portrait for a score.</p>
+            <fieldset class="field">
+              <legend>Paint from</legend>
+              <div class="seg seg-full" role="radiogroup" aria-label="Paint from">
+                <input type="radio" name="gameSubject" id="gameFromPhoto" value="photo" checked><label for="gameFromPhoto">My photo</label>
+                <input type="radio" name="gameSubject" id="gameFromPainting" value="painting"><label for="gameFromPainting">A painting</label>
+              </div>
+              <div class="game-from" id="gameFromPhotoPane">
+                <p class="hint" id="gamePhotoName"></p>
+                <label for="file" class="btn btn-small">Load another photo</label>
+              </div>
+              <div class="game-from" id="gameFromPaintingPane" hidden>
+                <div class="game-gallery" id="gameGallery" role="radiogroup" aria-label="Paintings"></div>
+                <div class="game-gallery-foot">
+                  <p class="hint" id="gamePaintingName"></p>
+                  <button type="button" class="btn btn-small" id="gameSurprise">Surprise me</button>
+                </div>
+              </div>
+            </fieldset>
             <fieldset class="field">
               <legend>Difficulty</legend>
               <div class="seg seg-full game-levels" role="radiogroup" aria-label="Difficulty">
@@ -381,7 +399,7 @@
             </figure>
             <figure class="game-ref" id="gameRefFig">
               <button type="button" class="game-ref-toggle" id="gameRefToggle" aria-expanded="true" aria-controls="gameRef">Reference</button>
-              <div class="matte"><canvas id="gameRef" aria-label="Reference photo"></canvas></div>
+              <div class="matte"><canvas id="gameRef" aria-label="The reference"></canvas></div>
             </figure>
           </div>
           <div class="game-mixer">
@@ -456,7 +474,7 @@
             <div class="game-compare">
               <figure><figcaption>Your portrait</figcaption><div class="matte"><canvas id="gameYours"></canvas></div></figure>
               <figure><figcaption>The study's colors</figcaption><div class="matte"><canvas id="gameTarget"></canvas></div></figure>
-              <figure><figcaption>The photo</figcaption><div class="matte"><canvas id="gamePhoto"></canvas></div></figure>
+              <figure><figcaption>The reference</figcaption><div class="matte"><canvas id="gamePhoto"></canvas></div></figure>
             </div>
             <h3 class="game-zones-title">Number by number, furthest off first</h3>
             <ol class="game-zones" id="gameZones"></ol>
@@ -506,6 +524,7 @@
 <script src="js/paints.js"></script>
 <script src="js/app.js"></script>
 <script src="js/palette.js"></script>
+<script src="js/subjects.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>
