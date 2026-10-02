@@ -314,6 +314,29 @@
     neck: p('#1e100a', '#2c1a0e', ['#42281a', '#5e3a24', '#7a4e30', '#90603e', '#a0704c']),
   };
   const SAME = { socket: 'skin', under: 'skin' };
+  // more cloth colors, muted as the painters kept them; a look names one as `clothes`
+  const CLOTHES = {
+    black: BLACK_CLOTH,
+    white: WHITE_LINEN,
+    navy: p('#0a0e1c', '#121a30', ['#121a30', '#1a2642', '#243456', '#2f4268', '#3d527c']),
+    green: p('#0c1610', '#14241a', ['#16281c', '#1f3a28', '#2b4e36', '#386244', '#487a55']),
+    wine: p('#1c0a0c', '#2a1014', ['#2e1216', '#451a20', '#5c2229', '#742c34', '#8a3a42']),
+    ochre: p('#2a2010', '#3c2e16', ['#4a3818', '#6a5222', '#8c6e2e', '#a98a3e', '#c4a458']),
+    slate: p('#16181c', '#20242a', ['#262a32', '#363c46', '#485060', '#5c6678', '#727e92']),
+  };
+  // white hair, for the old
+  const GREY_HAIR = p('#2a2826', '#3a3836', ['#4a4846', '#7a7773', '#a9a59f', '#cac6bf', '#e6e2da']);
+  // An older face, as shifts of the head's points: hollower cheeks and temples, deeper eye sockets
+  // under a heavier brow, thinner lips, a longer nose, a lower jaw and chin and a slacker throat
+  const AGE = {
+    cheek: [-0.01, -0.012, -0.02], hollow: [-0.035, 0.0, -0.04], nasolabial: [0, -0.01, -0.012], cheekbone: [0.005, -0.01, 0.012],
+    temple: [-0.025, 0, -0.025], templeTop: [-0.015, 0, -0.012],
+    orbitLow: [0, -0.015, -0.022], orbitOut: [0, -0.01, -0.015], browMid: [0, 0, 0.012], browOut: [0, 0, 0.01], browIn: [0, 0, 0.008],
+    lipUp: [0, 0, -0.014], lipLow: [0, 0, -0.016], upperLip: [0, 0, -0.01], lowerLip: [0, 0, -0.012], stomion: [0, 0, -0.008],
+    tip: [0, -0.022, 0.022], columella: [0, -0.016, 0.01], bridge: [0, 0, 0.01], tipSide: [0, -0.016, 0.01],
+    jawFront: [0, -0.03, -0.01], jawUnder: [0, -0.04, 0], chinUnder: [0, -0.04, 0], chin: [0, -0.012, 0.01], menton: [0, -0.05, 0.0],
+    throat: [0, -0.035, 0.01], earLow: [0, -0.03, 0], earBackLow: [0, -0.03, 0],
+  };
   const PEARL = p('#4a4a50', '#6a6a72', ['#8e8e96', '#b4b4ba', '#d6d6da', '#eeeef0', '#ffffff']);
 
   const hexRgb = (h) => { const v = parseInt(h.slice(1), 16); return [v >> 16, (v >> 8) & 255, v & 255]; };
@@ -329,14 +352,25 @@
     return mixRgb(hexRgb(ramp[i]), hexRgb(ramp[i + 1]), t - i);
   }
 
+  // A background color, shifted by the portrait's tint and shade
+  function bgColor(hex, look) {
+    let c = hexRgb(hex);
+    if (look.bgTint) c = mixRgb(c, hexRgb(look.bgTint.c), look.bgTint.k);
+    const sh = look.bgShade || 0;
+    return css(sh >= 0 ? mixRgb(c, [255, 255, 255], sh) : mixRgb(c, [0, 0, 0], -sh));
+  }
+
   /*
    * Draws one portrait. look: { woman, hair: 'short' | 'bun' | 'long', beard, moustache, pearl,
    * collar: 'flat' | 'ruff' | 'open' | 'none', clothes: 'black', 'white' or a palette part name,
-   * deep: true for a deeper skin tone }
+   * deep: true for a deeper skin tone, age: 'old', view: 'profile' | 'front' | 'three-quarter',
+   * light: 'side' | 'soft' | 'dramatic' | 'top', bg: 'block' | 'wedge' | 'band' | 'window' | 'plain',
+   * bgTint, bgShade }
    */
   function drawPortrait(styleId, seed, look = {}, size = 1) {
     const base = STYLES[styleId];
-    const s = Object.assign({}, base, look.deep ? DEEP : {}, look.clothes ? { clothes: look.clothes === 'black' ? BLACK_CLOTH : look.clothes === 'white' ? WHITE_LINEN : base[look.clothes] } : {});
+    const old = look.age === 'old';
+    const s = Object.assign({}, base, look.deep ? DEEP : {}, old ? { hair: GREY_HAIR } : {}, look.clothes ? { clothes: CLOTHES[look.clothes] || base[look.clothes] || base.clothes } : {});
     const r = rng(seed);
     const W = Math.round(600 * size), H = Math.round(750 * size);
     const c = document.createElement('canvas');
@@ -344,25 +378,49 @@
     const g = c.getContext('2d');
     g.scale(size, size);
     const side = r() < 0.65 ? 1 : -1;
-    const yaw = side * between(r, 0.25, 0.55);              // a three-quarter turn
+    const view = look.view || 'three-quarter';
+    // the turn of the head: three-quarter, nearly full face, or in profile
+    const yaw = side * (view === 'profile' ? between(r, 1.05, 1.3) : view === 'front' ? between(r, 0.04, 0.2) : between(r, 0.25, 0.6));
     const pitch = between(r, -0.1, 0.0);
     const roll = between(r, -0.06, 0.06);
     const lightSide = r() < 0.75 ? -1 : 1;                 // usually lit from the left
     const unit = between(r, 250, 270);
-    const ox = 300 + between(r, -18, 18), oy = 300 + between(r, -8, 12);
+    // a head in profile sits off-centre toward where it faces, so shift it back
+    const ox = 300 + between(r, -18, 18) - (view === 'profile' ? side * 45 : 0), oy = 300 + between(r, -8, 12);
 
-    // background: flat, with a lighter block on the face's shadow side, as painters set it to turn the head
-    g.fillStyle = s.ground;
+    // background: flat colors, set against the head as painters do to turn it
+    const ground = bgColor(s.ground, look), groundLight = bgColor(s.groundLight, look);
+    const dark = bgColor(s.ground, Object.assign({}, look, { bgShade: (look.bgShade || 0) - 0.4 }));
+    const away = -lightSide;                                // the side the head's shadow falls toward
+    const edge = away > 0 ? 600 : 0;
+    g.fillStyle = ground;
     g.fillRect(0, 0, 600, 750);
-    g.fillStyle = s.groundLight;
-    g.beginPath();
-    const bx = ox - lightSide * between(r, 40, 80);
-    g.moveTo(bx, 0);
-    g.lineTo(lightSide > 0 ? 0 : 600, 0);
-    g.lineTo(lightSide > 0 ? 0 : 600, 750);
-    g.lineTo(bx - lightSide * between(r, 60, 140), 750);
-    g.closePath();
-    g.fill();
+    const bgKind = look.bg || 'block';
+    g.fillStyle = groundLight;
+    if (bgKind === 'block') {
+      // a lighter block on the shadow side
+      const bx = ox + away * between(r, 40, 80);
+      g.beginPath();
+      g.moveTo(bx, 0); g.lineTo(edge, 0); g.lineTo(edge, 750); g.lineTo(bx + away * between(r, 60, 140), 750);
+      g.closePath(); g.fill();
+    } else if (bgKind === 'wedge') {
+      // a lighter wedge from the top corner
+      g.beginPath();
+      g.moveTo(ox + away * between(r, -10, 50), 0); g.lineTo(edge, 0); g.lineTo(edge, between(r, 380, 560));
+      g.closePath(); g.fill();
+    } else if (bgKind === 'band') {
+      // a darker table or floor across the bottom
+      g.fillStyle = dark;
+      g.fillRect(0, between(r, 520, 590), 600, 230);
+    } else if (bgKind === 'window') {
+      // a pale window pane behind the shadow side, with its bars
+      const ww = between(r, 150, 210), x0 = away > 0 ? ox + between(r, 50, 100) : ox - between(r, 50, 100) - ww;
+      const y0 = between(r, 20, 90), y1 = between(r, 380, 470);
+      g.fillRect(x0, y0, ww, y1 - y0);
+      g.fillStyle = ground;
+      g.fillRect(x0 + ww / 2 - 3, y0, 6, y1 - y0);
+      g.fillRect(x0, y0 + (y1 - y0) * 0.42, ww, 6);
+    }
 
     const cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
     // roll, then pitch, then turn; the body (k < 1) turns less than the head
@@ -373,7 +431,10 @@
       return [x1 * cY + z2 * sY, y2, -x1 * sY + z2 * cY];
     };
     const unitVec = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
-    const L = unitVec([Math.abs(s.light[0]) * lightSide, s.light[1], s.light[2]]);
+    // the lamp: the painter's, made more sideways, frontal or overhead, and nudged a little
+    const [kx, ky, kz] = { side: [1, 1, 1], dramatic: [1.5, 0.9, 0.35], soft: [0.45, 0.9, 1.35], top: [0.7, 1.9, 0.8] }[look.light || 'side'];
+    const nudge = () => between(r, -0.1, 0.1);
+    const L = unitVec([Math.abs(s.light[0]) * kx * lightSide + nudge(), s.light[1] * ky + nudge(), s.light[2] * kz + nudge()]);
     const B = unitVec([-Math.abs(s.bounce[0]) * lightSide, s.bounce[1], s.bounce[2]]);
 
     const facets = [];
@@ -387,7 +448,10 @@
         if (part === 'collar') part = look.collar === 'open' ? 'neck' : look.collar === 'none' || look.collar === 'ruff' ? 'clothes' : 'collar';
         const body = part0 === 'clothes' || part0 === 'collar';
         const k = body ? 0.45 : part0 === 'neck' ? 0.75 : 1;
-        const pts = names.map((n) => { const q = (look.woman && WOMAN[n]) || P[n]; return [mirror ? -q[0] : q[0], q[1], q[2]]; });
+        const pts = names.map((n) => {
+          const q = (look.woman && WOMAN[n]) || P[n], d = old && AGE[n] || [0, 0, 0];
+          return [(mirror ? -1 : 1) * (q[0] + d[0]), q[1] + d[1], q[2] + d[2]];
+        });
         facets.push({ part, pts, k, centre: body ? [0, -1.4, -0.05] : part0 === 'neck' ? [0, -0.75, -0.08] : [0, 0, 0], bias: body ? -0.6 : 0 });
       });
     });
@@ -441,13 +505,13 @@
   const PAINTERS = Object.keys(STYLES);
   // what each painter tends to put on a sitter: collars and clothes, for men and for women
   const HABITS = {
-    rembrandt: { collar: ['flat', 'flat', 'none', 'open'], clothes: { man: [undefined], woman: [undefined] } },
-    zorn: { collar: ['open', 'flat', 'none'], clothes: { man: ['black', 'black', undefined], woman: [undefined, 'black'] } },
-    sargent: { collar: ['open', 'flat', 'flat'], clothes: { man: [undefined], woman: [undefined, 'white'] } },
-    sorolla: { collar: ['open', 'none', 'open'], clothes: { man: [undefined], woman: [undefined] } },
-    velazquez: { collar: ['flat', 'ruff', 'flat'], clothes: { man: [undefined], woman: [undefined] } },
-    hals: { collar: ['ruff', 'ruff', 'flat'], clothes: { man: [undefined], woman: [undefined] } },
-    vermeer: { collar: ['flat', 'flat', 'open'], clothes: { man: [undefined, 'black'], woman: [undefined, 'blue'] } },
+    rembrandt: { collar: ['flat', 'flat', 'none', 'open'], clothes: { man: [undefined, undefined, 'wine'], woman: [undefined, 'wine', 'green'] } },
+    zorn: { collar: ['open', 'flat', 'none'], clothes: { man: ['black', 'black', undefined, 'slate'], woman: [undefined, 'black', 'ochre'] } },
+    sargent: { collar: ['open', 'flat', 'flat'], clothes: { man: [undefined, 'slate', 'navy'], woman: [undefined, 'white', 'navy', 'wine'] } },
+    sorolla: { collar: ['open', 'none', 'open'], clothes: { man: [undefined, 'slate'], woman: [undefined, 'ochre', 'green'] } },
+    velazquez: { collar: ['flat', 'ruff', 'flat'], clothes: { man: [undefined, 'slate'], woman: [undefined, 'wine', 'green'] } },
+    hals: { collar: ['ruff', 'ruff', 'flat'], clothes: { man: [undefined, 'slate'], woman: [undefined, 'wine'] } },
+    vermeer: { collar: ['flat', 'flat', 'open'], clothes: { man: [undefined, 'black', 'green'], woman: [undefined, 'blue', 'wine'] } },
   };
   const pickOf = (r, list) => list[Math.floor(r() * list.length)];
 
@@ -470,14 +534,23 @@
     const clothes = pickOf(r, h.clothes[woman ? 'woman' : 'man']);
     if (clothes) look.clothes = clothes;
     if (painter === 'velazquez' && r() < 0.14) look.deep = true;
+    // age, the turn of the head, the lamp and the wall behind
+    if (r() < 0.26) look.age = 'old';
+    const v = r();
+    look.view = v < 0.13 ? 'profile' : v < 0.3 ? 'front' : 'three-quarter';
+    const lt = r();
+    look.light = lt < 0.5 ? 'side' : lt < 0.72 ? 'soft' : lt < 0.92 ? 'dramatic' : 'top';
+    const bg = r();
+    look.bg = bg < 0.34 ? 'block' : bg < 0.5 ? 'wedge' : bg < 0.66 ? 'band' : bg < 0.84 ? 'window' : 'plain';
+    look.bgShade = between(r, -0.18, 0.16);
+    if (r() < 0.55) look.bgTint = { c: pickOf(r, ['#3a4a5c', '#5a3a2a', '#3c4a3a', '#4a3a52']), k: between(r, 0.08, 0.28) };
     return look;
   }
 
-  function titleFor(look, painter) {
-    const who = look.woman ? 'Woman' : 'Man';
-    const extra = look.beard ? 'with a beard' : look.moustache ? 'with a moustache' : look.pearl ? 'with a pearl earring' : look.hair === 'long' ? 'with loose hair' : '';
-    const dress = look.collar === 'ruff' ? 'in a ruff' : '';
-    return [who, extra || dress].filter(Boolean).join(' ');
+  function titleFor(look) {
+    const who = look.age === 'old' ? (look.woman ? 'Old woman' : 'Old man') : look.woman ? 'Woman' : 'Man';
+    const extra = look.beard ? 'with a beard' : look.moustache ? 'with a moustache' : look.pearl ? 'with a pearl earring' : look.hair === 'long' ? 'with loose hair' : look.collar === 'ruff' ? 'in a ruff' : '';
+    return [who, extra, look.view === 'profile' ? 'in profile' : ''].filter(Boolean).join(' ');
   }
 
   // The portrait an id names, or null if the painter is unknown
@@ -486,7 +559,7 @@
     if (!m || !STYLES[m[1]]) return null;
     const seed = +m[2];
     const look = lookFor(m[1], seed);
-    return { id, painter: m[1], seed, look, title: titleFor(look, m[1]) };
+    return { id, painter: m[1], seed, look, title: titleFor(look) };
   }
 
   // A new id: a random painter and seed, never the one given
