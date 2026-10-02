@@ -789,6 +789,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-numbers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .game-number {
   appearance: none;
+  -webkit-tap-highlight-color: transparent;
   width: 40px; height: 40px;
   font: 700 0.95rem var(--display);
   color: var(--ink);
@@ -846,6 +847,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent; /* the paint's own pop is the feedback */
 }
 .game-paint:hover { border-color: var(--muted); }
 .game-paint:active { transform: scale(0.96); }
@@ -922,7 +924,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-focus .work { gap: 0; }
   .game-play {
     --bar-h: 50px;
-    --paints-h: 64px;
+    --paints-h: 92px;
     --amount-h: 36px;
     --gap: 6px;
     grid-template-columns: minmax(0, 1fr);
@@ -948,10 +950,12 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
     border: 1px solid var(--line);
     border-radius: var(--r);
   }
-  .game-paints li { flex: 1 0 52px; max-width: 86px; }
-  .game-paint { height: 100%; padding: 4px 2px 3px; gap: 2px; }
-  .game-paint-dot { width: 32px; height: 32px; }
-  .game-paint-code { font-size: 0.6rem; }
+  /* big paints, easy to hit with a thumb; a long palette scrolls sideways */
+  .game-paints li { flex: 1 0 74px; max-width: 120px; }
+  .game-paint { height: 100%; padding: 6px 2px 4px; gap: 3px; align-content: center; }
+  .game-paint-dot { width: 54px; height: 54px; }
+  .game-paint-code { font-size: 0.72rem; }
+  .game-paint-count { top: 3px; right: 3px; min-width: 22px; font-size: 0.74rem; }
   .game-amount {
     grid-area: amount;
     display: grid;
