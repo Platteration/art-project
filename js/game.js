@@ -53,6 +53,7 @@
   const PALETTE_KEY = 'portrait-value-studio.gamePalette';
   const SUBJECT_KEY = 'portrait-value-studio.gameSubject';
   const LAST_PAINTING_KEY = 'portrait-value-studio.gamePainting';
+  const REF_VIEW_KEY = 'portrait-value-studio.gameRefView';
 
   function load(key, fallback) {
     try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (err) { return fallback; }
@@ -208,7 +209,7 @@
     for (let i = 0, p = 0; i < w * h; i++, p += 4) {
       const v = cell[i];
       let c = fills[v] || PAPER;
-      if (edge[i]) {
+      if (edge[i] && opts.edges !== false) {
         c = v === sel || (sel >= 0 && neighbourIs(cell, i, w, h, sel)) ? [164, 71, 47] : EDGE;
       } else if (v === sel && !fills[v]) {
         c = [226, 234, 216];
@@ -357,7 +358,7 @@
     unlockAudio(); // the Start button is a tap, which lets the page make sound from now on
     setFocus(true);
     endCopy();
-    drawRef(els.ref);
+    drawRef(els.ref, refView);
     renderPaints();
     renderNumbers();
     els.paints.scrollLeft = 0;
@@ -369,7 +370,12 @@
     els.lock.focus();
   }
 
-  function drawRef(canvas) {
+  // The reference: the photo itself, or its color-block study (the colors each number is scored against)
+  function drawRef(canvas, view = 'photo') {
+    if (view === 'blocks') {
+      drawBoard(canvas, game.board, game.board.groups.map((g) => g.rgb), { selected: -1, numbers: false, edges: false });
+      return;
+    }
     const { w, h, rgba } = game.board.prep;
     canvas.width = w;
     canvas.height = h;
@@ -741,6 +747,21 @@
     if (x < 0 || y < 0 || x >= game.board.w || y >= game.board.h) return;
     select(game.board.cell[y * game.board.w + x]);
   });
+
+  // Photo or Blocks: how the reference beside the board is shown, remembered between games
+  let refView = load(REF_VIEW_KEY, 'photo') === 'blocks' ? 'blocks' : 'photo';
+  const refViewButtons = document.querySelectorAll('[data-ref-view]');
+  function showRefView() {
+    refViewButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.refView === refView)));
+    els.ref.setAttribute('aria-label', refView === 'blocks' ? 'The reference as a color-block study' : 'The reference photo');
+    if (game) drawRef(els.ref, refView);
+  }
+  refViewButtons.forEach((b) => b.addEventListener('click', () => {
+    refView = b.dataset.refView;
+    save(REF_VIEW_KEY, refView);
+    showRefView();
+  }));
+  showRefView();
 
   els.refToggle.addEventListener('click', () => {
     const open = els.refFig.classList.toggle('is-collapsed') === false;

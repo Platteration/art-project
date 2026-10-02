@@ -797,6 +797,16 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
   padding: 4px 10px; cursor: pointer;
 }
+.game-ref-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.game-ref-view { display: inline-flex; padding: 2px; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
+.game-ref-view button {
+  appearance: none; border: 0; background: none; border-radius: 999px; cursor: pointer;
+  padding: 3px 9px; font: 600 0.72rem var(--body); color: var(--muted);
+}
+.game-ref-view button:hover { color: var(--ink); }
+.game-ref-view button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.game-ref-view button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.game-ref.is-collapsed .game-ref-view { display: none; }
 .game-ref-toggle::after { content: " · hide"; color: var(--muted); font-weight: 500; }
 .game-ref.is-collapsed .game-ref-toggle::after { content: " · show"; }
 .game-ref.is-collapsed .matte { display: none; }
@@ -811,6 +821,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
     justify-items: end;
   }
   .game-ref .matte { padding: 4px; box-shadow: 0 2px 8px var(--shadow); }
+  .game-ref-head { justify-content: flex-end; }
+  .game-ref-head > * { box-shadow: 0 1px 4px var(--shadow); }
   .game-ref canvas { cursor: grab; touch-action: none; }
   .game-ref.is-moving canvas { cursor: grabbing; }
   .game-ref.is-moving .matte { box-shadow: 0 6px 18px var(--shadow); }

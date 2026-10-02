@@ -396,7 +396,13 @@
               <div class="matte"><canvas id="gameCanvas" aria-label="Numbered portrait. Choose a number below, or tap a shape."></canvas></div>
             </figure>
             <figure class="game-ref" id="gameRefFig">
-              <button type="button" class="game-ref-toggle" id="gameRefToggle" aria-expanded="true" aria-controls="gameRef">Reference</button>
+              <div class="game-ref-head">
+                <button type="button" class="game-ref-toggle" id="gameRefToggle" aria-expanded="true" aria-controls="gameRef">Reference</button>
+                <div class="game-ref-view" role="group" aria-label="Show the reference as">
+                  <button type="button" data-ref-view="photo" aria-pressed="true">Photo</button>
+                  <button type="button" data-ref-view="blocks" aria-pressed="false">Blocks</button>
+                </div>
+              </div>
               <div class="matte"><canvas id="gameRef" aria-label="The reference"></canvas></div>
             </figure>
           </div>
