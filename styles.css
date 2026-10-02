@@ -911,6 +911,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 #gameSound[aria-pressed="true"] .icon-off, #gameSound[aria-pressed="false"] .icon-on { display: none; }
 #gameSound[aria-pressed="false"] { color: var(--muted); }
 .game-quick-undo { display: none; }
+.game-amount-ticks { display: none; }
 @media (max-width: 999px) { .wide-only { display: none; } }
 
 @media (max-width: 999px) {
@@ -923,7 +924,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-play {
     --bar-h: 50px;
     --paints-h: 64px;
-    --amount-h: 36px;
+    --amount-h: 62px;
     --gap: 6px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "bar" "board" "paints" "amount" "head" "copy" "numbers" "hint";
@@ -952,23 +953,69 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-paint { height: 100%; padding: 4px 2px 3px; gap: 2px; }
   .game-paint-dot { width: 32px; height: 32px; }
   .game-paint-code { font-size: 0.6rem; }
+  /* a big slider for thumbs: thick track filled up to the thumb, tappable marks under it */
   .game-amount {
     grid-area: amount;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 30px 22px;
     align-items: center;
-    gap: 10px;
-    padding: 0 4px 0 12px;
+    column-gap: 8px;
+    padding: 4px 6px 4px 8px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r);
   }
   .game-amount .field-head { display: contents; }
-  .game-amount label { grid-column: 1; grid-row: 1; font-size: 0.75rem; }
-  .game-amount input { grid-column: 2; grid-row: 1; }
-  .game-amount output { grid-column: 3; grid-row: 1; font-size: 0.72rem; }
-  .game-quick-undo { display: inline-grid; grid-column: 4; grid-row: 1; width: 30px; height: 30px; }
-  .game-quick-undo svg { width: 17px; height: 17px; }
+  .game-amount label, .game-amount output { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .game-amount input {
+    grid-column: 1; grid-row: 1;
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 30px; margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .game-amount input::-webkit-slider-runnable-track {
+    height: 10px; border-radius: 5px;
+    background: linear-gradient(90deg, var(--accent) var(--pct, 50%), var(--line) var(--pct, 50%));
+  }
+  .game-amount input::-moz-range-track { height: 10px; border-radius: 5px; background: var(--line); }
+  .game-amount input::-moz-range-progress { height: 10px; border-radius: 5px; background: var(--accent); }
+  .game-amount input::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 30px; height: 30px; margin-top: -10px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--surface);
+    box-shadow: 0 1px 4px var(--shadow), 0 0 0 1px var(--accent);
+  }
+  .game-amount input::-moz-range-thumb {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--surface);
+    box-shadow: 0 1px 4px var(--shadow), 0 0 0 1px var(--accent);
+  }
+  .game-amount input:focus-visible { outline: none; }
+  .game-amount input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--earth); }
+  .game-amount-ticks {
+    grid-column: 1; grid-row: 2;
+    display: flex; justify-content: space-between;
+    padding: 0;            /* 30px marks sit under the 30px thumb's centre at each step */
+  }
+  .game-amount-ticks button {
+    appearance: none;
+    width: 30px; height: 22px; padding: 0;
+    font: 500 0.9rem/1 var(--body);
+    color: var(--muted);
+    background: transparent; border: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .game-amount-ticks button:focus { outline: none; }
+  .game-amount-ticks button.is-on { color: var(--ink); font-weight: 700; }
+  .game-quick-undo { display: inline-grid; grid-column: 2; grid-row: 1 / span 2; width: 44px; height: 44px; }
+  .game-quick-undo svg { width: 22px; height: 22px; }
   .game-mix-head {
     grid-area: head;
     margin-top: 6px;

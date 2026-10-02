@@ -406,6 +406,13 @@
               <div class="field game-amount">
                 <div class="field-head"><label for="gameAmount">Amount<span class="wide-only"> per tap</span></label><output id="gameAmountOut" for="gameAmount"></output></div>
                 <input type="range" id="gameAmount" min="0" max="4" step="1" value="2">
+                <div class="game-amount-ticks" id="gameAmountTicks" aria-hidden="true">
+                  <button type="button" tabindex="-1" data-step="0">¼</button>
+                  <button type="button" tabindex="-1" data-step="1">½</button>
+                  <button type="button" tabindex="-1" data-step="2">1</button>
+                  <button type="button" tabindex="-1" data-step="3">2</button>
+                  <button type="button" tabindex="-1" data-step="4">4</button>
+                </div>
                 <button type="button" class="game-icon-btn game-quick-undo" id="gameQuickUndo" aria-label="Undo the last tap" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
               </div>
               <ul class="game-paints" id="gamePaints" aria-label="Paints: each tap adds the amount above"></ul>

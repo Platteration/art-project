@@ -653,7 +653,16 @@
   function showAmount() {
     const a = perTap();
     els.amountOut.textContent = `${fmtParts(a)} part${a > 1 ? 's' : ''} per tap`;
+    els.amount.setAttribute('aria-valuetext', els.amountOut.textContent);
+    els.amount.style.setProperty('--pct', `${(+els.amount.value / 4) * 100}%`);
+    ticks.forEach((t) => t.classList.toggle('is-on', t.dataset.step === els.amount.value));
   }
+  // the marks under the slider jump straight to their amount
+  const ticks = [...document.querySelectorAll('#gameAmountTicks button')];
+  ticks.forEach((t) => t.addEventListener('click', () => {
+    els.amount.value = t.dataset.step;
+    els.amount.dispatchEvent(new Event('input', { bubbles: true }));
+  }));
   els.amount.value = Math.max(0, AMOUNTS.indexOf(load(AMOUNT_KEY, 1)));
   els.amount.addEventListener('input', () => { save(AMOUNT_KEY, perTap()); showAmount(); });
   showAmount();
