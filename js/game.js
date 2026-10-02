@@ -24,6 +24,7 @@
     copy: $('gameCopy'), copyBar: $('gameCopyBar'), copyText: $('gameCopyText'), copyDone: $('gameCopyDone'),
     amount: $('gameAmount'), amountOut: $('gameAmountOut'), board: document.querySelector('.game-board'),
     sound: $('gameSound'), quit: $('gameQuit'), quickUndo: $('gameQuickUndo'),
+    paintScroll: $('gamePaintScroll'),
     grade: $('gameGrade'), points: $('gamePoints'), breakdown: $('gameBreakdown'),
     final: $('gameFinal'), popup: $('gamePopup'), popupClose: $('gamePopupClose'), showScore: $('gameShowScore'),
     kicker: $('gameKicker'), pct: $('gamePct'), stars: $('gameStars'), newBest: $('gameNewBest'),
@@ -309,6 +310,8 @@
     drawRef(els.ref);
     renderPaints();
     renderNumbers();
+    els.paints.scrollLeft = 0;
+    requestAnimationFrame(syncPaintScroll);
     select(0);
     tick();
     clearInterval(timer);
@@ -377,6 +380,52 @@
       els.paints.append(li);
     });
   }
+
+  // ---- The paints' scroll bar on phones ------------------------------------------
+
+  // A palette too long for a phone's width scrolls sideways; a big bar under it shows where you
+  // are and slides through the paints: drag its handle, or tap the track to jump there
+  const phone = window.matchMedia('(max-width: 999px)');
+  const scrollThumb = els.paintScroll.firstElementChild;
+  function syncPaintScroll() {
+    const ul = els.paints;
+    const over = ul.scrollWidth - ul.clientWidth;
+    const show = phone.matches && over > 2;
+    els.play.classList.toggle('has-scroll', show);
+    if (!show) return;
+    const track = els.paintScroll.clientWidth;
+    const tw = Math.max(48, (track * ul.clientWidth) / ul.scrollWidth);
+    scrollThumb.style.width = `${tw}px`;
+    scrollThumb.style.transform = `translateX(${((track - tw) * ul.scrollLeft) / over}px)`;
+  }
+  els.paints.addEventListener('scroll', syncPaintScroll, { passive: true });
+  window.addEventListener('resize', syncPaintScroll);
+  els.paintScroll.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    els.paintScroll.setPointerCapture(e.pointerId);
+    els.paintScroll.classList.add('is-dragging');
+    const r = els.paintScroll.getBoundingClientRect();
+    const t = scrollThumb.getBoundingClientRect();
+    // grabbed on the handle: keep hold where it was taken; on the track: centre the handle there
+    const grab = e.clientX >= t.left && e.clientX <= t.right ? e.clientX - t.left : t.width / 2;
+    const to = (x) => {
+      const ul = els.paints;
+      const k = Math.min(1, Math.max(0, (x - r.left - grab) / (r.width - t.width)));
+      ul.scrollLeft = k * (ul.scrollWidth - ul.clientWidth);
+    };
+    to(e.clientX);
+    const move = (ev) => to(ev.clientX);
+    const end = () => {
+      els.paintScroll.classList.remove('is-dragging');
+      els.paintScroll.removeEventListener('pointermove', move);
+      els.paintScroll.removeEventListener('pointerup', end);
+      els.paintScroll.removeEventListener('pointercancel', end);
+    };
+    els.paintScroll.addEventListener('pointermove', move);
+    els.paintScroll.addEventListener('pointerup', end);
+    els.paintScroll.addEventListener('pointercancel', end);
+  });
 
   function renderNumbers() {
     els.numbers.innerHTML = '';

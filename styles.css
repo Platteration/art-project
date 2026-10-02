@@ -913,6 +913,32 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 #gameSound[aria-pressed="true"] .icon-off, #gameSound[aria-pressed="false"] .icon-on { display: none; }
 #gameSound[aria-pressed="false"] { color: var(--muted); }
 .game-quick-undo { display: none; }
+.game-paint-scroll {
+  display: none;
+  position: relative;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--line);
+  touch-action: none;
+  cursor: pointer;
+}
+.game-paint-scroll-thumb {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  min-width: 48px;
+  border-radius: 10px;
+  background: var(--accent);
+  box-shadow: 0 1px 3px var(--shadow);
+}
+/* grip lines on the handle */
+.game-paint-scroll-thumb::after {
+  content: "";
+  position: absolute; left: 50%; top: 5px; bottom: 5px;
+  width: 12px;
+  translate: -50% 0;
+  background: repeating-linear-gradient(90deg, var(--accent-ink) 0 2px, transparent 2px 5px);
+  opacity: 0.7;
+}
+.game-paint-scroll.is-dragging .game-paint-scroll-thumb { filter: brightness(1.1); }
 @media (max-width: 999px) { .wide-only { display: none; } }
 
 @media (max-width: 999px) {
@@ -924,7 +950,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-focus .work { gap: 0; }
   .game-play {
     --bar-h: 50px;
-    --paints-h: 92px;
+    --paints-h: 64px;
     --amount-h: 36px;
     --gap: 6px;
     grid-template-columns: minmax(0, 1fr);
@@ -950,12 +976,22 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
     border: 1px solid var(--line);
     border-radius: var(--r);
   }
-  /* big paints, easy to hit with a thumb; a long palette scrolls sideways */
-  .game-paints li { flex: 1 0 74px; max-width: 120px; }
-  .game-paint { height: 100%; padding: 6px 2px 4px; gap: 3px; align-content: center; }
-  .game-paint-dot { width: 54px; height: 54px; }
-  .game-paint-code { font-size: 0.72rem; }
-  .game-paint-count { top: 3px; right: 3px; min-width: 22px; font-size: 0.74rem; }
+  .game-paints li { flex: 1 0 52px; max-width: 86px; }
+  .game-paint { height: 100%; padding: 4px 2px 3px; gap: 2px; }
+  .game-paint-dot { width: 32px; height: 32px; }
+  .game-paint-code { font-size: 0.6rem; }
+  /* a palette too long for the screen gets a big scroll bar under the paints */
+  .game-paints { scrollbar-width: none; }
+  .game-paints::-webkit-scrollbar { display: none; }
+  .game-play.has-scroll { --paints-h: 94px; }
+  .has-scroll .game-paints { padding-bottom: 32px; }
+  .has-scroll .game-paint-scroll {
+    display: block;
+    grid-area: paints;
+    align-self: end;
+    z-index: 1;
+    margin: 0 8px 8px;
+  }
   .game-amount {
     grid-area: amount;
     display: grid;
