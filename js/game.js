@@ -31,7 +31,7 @@
     analyze: $('gameAnalyze'), analysis: $('gameAnalysis'),
     yours: $('gameYours'), target: $('gameTarget'), photo: $('gamePhoto'), zones: $('gameZones'),
     photoPane: $('gameFromPhotoPane'), photoName: $('gamePhotoName'),
-    paintingPane: $('gameFromPaintingPane'), gallery: $('gameGallery'), paintingName: $('gamePaintingName'), surprise: $('gameSurprise'),
+    paintingPane: $('gameFromPaintingPane'), paintingName: $('gamePaintingName'), reroll: $('gameReroll'),
   };
 
   const LEVELS = {
@@ -249,50 +249,22 @@
   const level = () => document.querySelector('input[name="gameLevel"]:checked').value;
   const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${els.palette.value}`;
 
-  // ---- What to paint: the player's photo or one of the generated paintings ----
+  // ---- What to paint: the player's photo or a generated painting, dealt at random ----
 
   const PAINTINGS = Subjects.PORTRAITS;
-  let subject = load(SUBJECT_KEY, { kind: 'photo' });
-  if (subject.kind === 'painting' && !PAINTINGS.some((p) => p.id === subject.id)) subject = { kind: 'photo' };
+  // a painting at random, never the one just played
+  const deal = () => {
+    const last = subject && subject.id || load(LAST_PAINTING_KEY, null);
+    const others = PAINTINGS.filter((p) => p.id !== last);
+    return others[Math.floor(Math.random() * others.length)].id;
+  };
+  let subject = null;
+  subject = load(SUBJECT_KEY, { kind: 'photo' }).kind === 'painting' ? { kind: 'painting', id: deal() } : { kind: 'photo' };
+  if (subject.id) save(LAST_PAINTING_KEY, subject.id);
 
   const subjectSource = () => (subject.kind === 'painting' ? Subjects.picture(subject.id) : Studio.source());
   // the board is rebuilt when this changes: the photo's study (photo or settings), or the painting
   const subjectStamp = () => (subject.kind === 'painting' ? subject.id : Studio.result());
-  const paintingTitle = (p) => `${p.title}, after ${Subjects.painterOf(p.id)}`;
-
-  // The gallery: small pictures of all the paintings, drawn a few at a time so the tab opens at once
-  let galleryBuilt = false;
-  function buildGallery() {
-    if (galleryBuilt) return;
-    galleryBuilt = true;
-    const buttons = PAINTINGS.map((p) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'game-thumb';
-      b.dataset.id = p.id;
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-label', paintingTitle(p));
-      b.title = paintingTitle(p);
-      b.addEventListener('click', () => choosePainting(p.id));
-      els.gallery.append(b);
-      return b;
-    });
-    let i = 0;
-    const next = () => {
-      const end = Math.min(buttons.length, i + 5);
-      for (; i < end; i++) buttons[i].append(Subjects.picture(PAINTINGS[i].id, 0.16));
-      if (i < buttons.length) requestAnimationFrame(next);
-    };
-    next();
-    markPainting();
-  }
-
-  function markPainting() {
-    const id = subject.kind === 'painting' ? subject.id : null;
-    els.gallery.querySelectorAll('.game-thumb').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.id === id)));
-    const p = PAINTINGS.find((x) => x.id === id);
-    els.paintingName.textContent = p ? paintingTitle(p) : 'Choose a painting, or let the game pick one.';
-  }
 
   function showSubject() {
     const painting = subject.kind === 'painting';
@@ -303,18 +275,16 @@
     els.photoName.textContent = !key ? 'Load a photo to paint from it.'
       : key.startsWith('sample-study:') ? 'Painting from the sample portrait. Load your own photo to paint from it.'
       : `Painting from ${key.replace(/:\d+x\d+$/, '')}.`;
-    if (painting) { buildGallery(); markPainting(); }
+    if (painting) els.paintingName.textContent = `You've been dealt a portrait after ${Subjects.painterOf(subject.id)}.`;
   }
 
   function setSubject(next, refresh = true) {
     subject = next;
-    save(SUBJECT_KEY, subject);
+    save(SUBJECT_KEY, { kind: subject.kind });
     if (subject.kind === 'painting') save(LAST_PAINTING_KEY, subject.id);
     showSubject();
     if (refresh) refreshSetup();
   }
-
-  function choosePainting(id) { setSubject({ kind: 'painting', id }); }
 
   function renderPalettes() {
     const keep = els.palette.value || load(PALETTE_KEY, 'zorn');
@@ -348,7 +318,7 @@
 
   function refreshSetup() {
     showSubject();
-    if (subject.kind === 'painting' ? !subject.id : !Studio.source() || !Studio.result()) return;
+    if (subject.kind === 'photo' && (!Studio.source() || !Studio.result())) return;
     // a new board whenever the reference (photo, its settings, or the painting) or the level changes
     if (board && setupFor && setupFor.from === subjectStamp() && setupFor.level === level()) { showPalette(); return; }
     setupFor = { from: subjectStamp(), level: level() };
@@ -1034,17 +1004,9 @@
   });
   els.palette.addEventListener('change', showPalette);
   document.querySelectorAll('input[name="gameSubject"]').forEach((r) => r.addEventListener('change', () => {
-    if (r.value === 'photo') setSubject({ kind: 'photo' });
-    else if (subject.kind !== 'painting') {
-      // the last painting chosen, or a first one at random
-      const last = load(LAST_PAINTING_KEY, null);
-      setSubject({ kind: 'painting', id: PAINTINGS.some((p) => p.id === last) ? last : PAINTINGS[Math.floor(Math.random() * PAINTINGS.length)].id });
-    }
+    setSubject(r.value === 'photo' ? { kind: 'photo' } : { kind: 'painting', id: deal() });
   }));
-  els.surprise.addEventListener('click', () => {
-    const others = PAINTINGS.filter((p) => p.id !== subject.id);
-    choosePainting(others[Math.floor(Math.random() * others.length)].id);
-  });
+  els.reroll.addEventListener('click', () => setSubject({ kind: 'painting', id: deal() }));
 
   // the setup shows the current reference; a game in progress keeps the one it started with
   window.addEventListener('studio:result', () => { if (Studio.tab() === 'game' && !game) refreshSetup(); });

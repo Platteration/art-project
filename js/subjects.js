@@ -5,7 +5,7 @@
  * ridge, sides and underside, cheekbones, muzzle, lips, chin, jaw, ear), turned and tilted, then
  * lit by one lamp. Each facet is filled with a single colour from the painter's palette for how
  * much light it catches, so a portrait reads like a colour-block study: big flat planes of light,
- * half tone and shadow. Hair, beards, hats, collars and clothes are planes too. Every portrait is
+ * half tone and shadow. Hair, beards, collars and clothes are planes too. Every portrait is
  * drawn from a seed, so it comes out the same each time.
  */
 (function () {
@@ -136,7 +136,25 @@
   const BEARD = new Set(['labiomental chinSide', 'lipLow corner', 'nasolabial hollow', 'hollow ramus', 'chin chinSide', 'chinSide jawFront', 'jawFront jawAngle', 'chinUnder jawUnder', 'lowerLip lipLow', 'ramus earLow']);
   const MOUSTACHE = new Set(['philtrum nasolabial', 'subnasale philtrum']);
 
-  // Rings of points round the head, for hats, buns and ruffs: n points at height y, radius r,
+  // A woman's head: a smaller, narrower jaw and chin, a smaller nose, a softer brow, fuller lips,
+  // larger eyes, a slimmer neck and narrower shoulders. Each entry moves a point to [x, y, z].
+  const WOMAN = {
+    glabella: [0, 0.135, 0.535], browMid: [0.18, 0.165, 0.48], browOut: [0.29, 0.135, 0.38],
+    lidUpIn: [0.07, 0.065, 0.475], lidUpOut: [0.245, 0.058, 0.405], lidLowIn: [0.08, -0.008, 0.475], lidLowOut: [0.235, -0.008, 0.415],
+    bridge: [0, -0.03, 0.55], tip: [0, -0.155, 0.645], tipSide: [0.036, -0.15, 0.615], noseLow: [0.055, -0.115, 0.565],
+    columella: [0, -0.2, 0.59], nostril: [0.045, -0.2, 0.565], wing: [0.095, -0.195, 0.525], wingTop: [0.085, -0.135, 0.52],
+    upperLip: [0, -0.32, 0.6], lipUp: [0.08, -0.33, 0.565], corner: [0.125, -0.368, 0.49], stomion: [0, -0.368, 0.57],
+    lowerLip: [0, -0.418, 0.586], lipLow: [0.08, -0.42, 0.556], labiomental: [0, -0.462, 0.54],
+    chin: [0, -0.51, 0.545], menton: [0, -0.575, 0.45], chinSide: [0.085, -0.49, 0.5], chinUnder: [0.1, -0.575, 0.37],
+    jawFront: [0.19, -0.465, 0.33], jawAngle: [0.3, -0.36, 0.03], jawUnder: [0.22, -0.5, 0.14], hollow: [0.26, -0.24, 0.34],
+    neckTop: [0.22, -0.46, -0.12], neckSide: [0.24, -0.93, -0.06], neckSideBack: [0.2, -0.9, -0.26], throat: [0, -0.6, 0.14], neckFront: [0, -0.97, 0.15],
+    collarbone: [0.32, -1.02, 0.15], shoulder: [0.66, -1.1, -0.06], shoulderBack: [0.58, -1.1, -0.32],
+    chestSide: [0.4, -1.75, 0.22], arm: [0.74, -1.75, -0.1], armBack: [0.66, -1.75, -0.36],
+  };
+  // ...and her hair, drawn down over the temples and the top of the ears from a centre parting
+  const HAIR_OVER = new Set(['foreheadTop templeTop', 'temple earTop', 'temple zygoma', 'zygoma earTop', 'earTop earBackTop']);
+
+  // Rings of points round the neck, for ruffs: n points at height y, radius r,
   // centred at (cx, cz), squashed front to back by k
   function ring(n, y, r, cx = 0, cz = 0, k = 1) {
     return Array.from({ length: n }, (_, i) => {
@@ -144,40 +162,34 @@
       return [cx + Math.sin(a) * r, y, cz + Math.cos(a) * r * k];
     });
   }
-  // Faces joining two rings (a band), and a ring to a point (a cap)
+  // Faces joining two rings
   function band(part, lo, hi, opts = {}) {
     return lo.map((p, i) => ({ part, pts: [p, lo[(i + 1) % lo.length], hi[(i + 1) % hi.length], hi[i]], ...opts }));
   }
-  function cap(part, rim, top, opts = {}) {
-    return rim.map((p, i) => ({ part, pts: [p, rim[(i + 1) % rim.length], top], ...opts }));
-  }
 
   /*
-   * Extra planes for a look: hats, a bun, a turban's tail, a ruff. Each is
+   * Extra planes for a look: a bun, long hair, a pearl, a ruff. Each is
    * { part, pts (3D, unturned), twoSided, bias (drawn later), centre (inside point for the normal) }.
    */
-  function extras(look) {
+  function extras(look, side) {
     const out = [];
-    if (look.hat === 'beret') {
-      // a soft beret, tilted to one side and pulled forward
-      const lo = ring(10, 0.5, 0.58, 0.06, 0.02, 0.95), mid = ring(10, 0.63, 0.5, 0.08, 0.0, 0.95);
-      const top = [0.1, 0.7, -0.02];
-      out.push(...band('hat', lo, mid, { centre: [0.08, 0.6, 0], bias: 3 }), ...cap('hat', mid, top, { centre: [0.08, 0.6, 0], bias: 3 }));
+    if (look.hair === 'long') {
+      // hair falling behind the ears to the shoulders: a curved sheet round the back of the head
+      const arc = (y, r, cz) => Array.from({ length: 9 }, (_, i) => {
+        const a = Math.PI * (0.42 + (i / 8) * 1.16);
+        return [Math.sin(a) * r, y, cz + Math.cos(a) * r * 0.9];
+      });
+      const top = arc(0.1, 0.47, -0.1), mid = arc(-0.45, 0.45, -0.16), low = arc(-0.98, 0.5, -0.2);
+      const sheet = (lo, hi) => lo.slice(0, -1).map((q, i) => ({ part: 'hair', pts: [q, lo[i + 1], hi[i + 1], hi[i]], twoSided: true, bias: -0.35 }));
+      out.push(...sheet(mid, top), ...sheet(low, mid));
     }
-    if (look.hat === 'brim' || look.hat === 'straw') {
-      const part = look.hat === 'straw' ? 'straw' : 'hat';
-      // a broad brim, tilted up at the front, and a crown
-      const tilt = (p) => [p[0], p[1] + p[2] * 0.12, p[2]];
-      const brimOut = ring(14, 0.48, 0.86, 0, 0.02).map(tilt), brimIn = ring(14, 0.48, 0.44, 0, 0.0).map(tilt);
-      const crownTop = ring(14, 0.84, 0.4, 0, -0.02).map(tilt);
-      out.push(...band(part, brimIn, brimOut, { twoSided: true, bias: 3 }));
-      out.push(...band(part, brimIn, crownTop, { centre: [0, 0.65, 0], bias: 3.2 }));
-      out.push(...cap(part, crownTop, tilt([0, 0.88, -0.02]), { centre: [0, 0.65, 0], bias: 3.2 }));
-    }
-    if (look.hat === 'turban') {
-      // Vermeer's turban: the cloth wound round the head, its knot on top, and a tail falling behind
-      out.push(...cap('turban', ring(9, 0.6, 0.3, 0, -0.12), [0, 0.8, -0.1], { centre: [0, 0.6, -0.1], bias: 2 }));
-      out.push({ part: 'tail', pts: [[0.12, 0.66, -0.3], [0.28, 0.6, -0.36], [0.36, -0.2, -0.32], [0.22, -0.18, -0.28]], twoSided: true });
+    if (look.pearl) {
+      // a pearl under the ear lobe nearer the viewer (the head turns away from it)
+      [-side].forEach((m) => {
+        const c = [0.39 * m, -0.3, -0.02], r = 0.04;
+        const t = [c[0], c[1] + r, c[2]], b = [c[0], c[1] - r, c[2]], l = [c[0] - r, c[1], c[2]], rr = [c[0] + r, c[1], c[2]], f = [c[0], c[1], c[2] + r], k = [c[0], c[1], c[2] - r];
+        [[t, rr, f], [t, f, l], [t, l, k], [t, k, rr], [b, f, rr], [b, l, f], [b, k, l], [b, rr, k]].forEach((tri) => out.push({ part: 'pearl', pts: tri, centre: c, bias: 0.3 }));
+      });
     }
     if (look.hair === 'bun') {
       const c = [0, 0.4, -0.66], r = 0.24;
@@ -215,7 +227,6 @@
       ear: p('#3e2216', '#5a3020', ['#6e4229', '#9c6444', '#c08660', '#d8a47a', '#e6b88e']),
       neck: p('#2e1a10', '#4a2a1a', ['#5e3822', '#86583a', '#ac7a54', '#c89670', '#d8ac86']),
       hair: p('#140d08', '#24180f', ['#2e2016', '#45311f', '#5e4429', '#755636', '#8a6844']),
-      hat: p('#0a0705', '#120d09', ['#16100b', '#1e1610', '#281d15', '#33261b', '#3e2f22']),
       collar: WHITE_LINEN, ruff: WHITE_LINEN,
       clothes: p('#0c0806', '#140e0a', ['#18110c', '#221812', '#2e2118', '#3a2a1e', '#463326']),
     },
@@ -228,7 +239,6 @@
       ear: p('#5c2a22', '#7c3a2e', ['#94503e', '#b86852', '#d07e66', '#de947a', '#eaa88e']),
       neck: p('#4e2c22', '#6a3a2c', ['#7a5040', '#9e6e58', '#bc8a70', '#d2a486', '#e0b89c']),
       hair: p('#1c1614', '#2c2420', ['#382c24', '#4c3c30', '#62503e', '#76624c', '#8a765e']),
-      hat: BLACK_CLOTH,
       collar: p('#5c544c', '#70675c', ['#9a9286', '#bab2a4', '#d6cfc2', '#e8e2d6', '#f4efe6']), ruff: WHITE_LINEN,
       clothes: p('#151110', '#2a1a16', ['#7a2a22', '#922f24', '#a83a2c', '#bc4a38', '#cc5c48']),
     },
@@ -241,7 +251,6 @@
       ear: p('#5e3c36', '#744c44', ['#966a5e', '#b6887a', '#cea496', '#dcb8aa', '#e8cabe']),
       neck: p('#4e3832', '#644840', ['#806258', '#a08074', '#bc9c90', '#d2b4a8', '#e0c6bc']),
       hair: p('#16100e', '#241a16', ['#2e221c', '#3e2e26', '#523e32', '#644e40', '#76604e']),
-      hat: BLACK_CLOTH,
       collar: p('#584a44', '#6a5a54', ['#8c766c', '#ae9488', '#cab0a4', '#dec6ba', '#ecd8ce']), ruff: WHITE_LINEN,
       clothes: BLACK_CLOTH,
     },
@@ -254,8 +263,6 @@
       ear: p('#7c5250', '#9a665e', ['#b8705a', '#d48a70', '#e4a486', '#f0ba9c', '#f8ccb0']),
       neck: p('#6c4a4a', '#886058', ['#9c6a52', '#bc8668', '#d4a080', '#e4b898', '#f0caac']),
       hair: p('#221814', '#32241c', ['#3a2a24', '#4e382c', '#644836', '#7a5a44', '#8e6e56']),
-      straw: p('#6e5a6a', '#8a7478', ['#b49a64', '#ccb478', '#e0ca8e', '#eedaa4', '#f8e8bc']),
-      hat: p('#6e5a6a', '#8a7478', ['#b49a64', '#ccb478', '#e0ca8e', '#eedaa4', '#f8e8bc']),
       collar: p('#7a7698', '#9894b0', ['#c4c0c8', '#d8d2d4', '#eae4de', '#f4efe8', '#fffaf2']), ruff: WHITE_LINEN,
       clothes: p('#7a7698', '#9894b0', ['#c4c0c8', '#d8d2d4', '#eae4de', '#f4efe8', '#fffaf2']),
     },
@@ -268,7 +275,6 @@
       ear: p('#4c3024', '#623e2e', ['#7e5440', '#a07058', '#bc8a70', '#d0a086', '#dcb298']),
       neck: p('#3e2a20', '#523628', ['#6c4e3c', '#8c6a54', '#a8846c', '#bc9a80', '#ccac94']),
       hair: p('#120e0c', '#1e1814', ['#261e18', '#342820', '#44362a', '#544434', '#625240']),
-      hat: BLACK_CLOTH,
       collar: p('#5a5650', '#6e6a62', ['#9a968c', '#bab6ac', '#d6d2c8', '#e8e4da', '#f4f1e8']), ruff: p('#5a5650', '#6e6a62', ['#9a968c', '#bab6ac', '#d6d2c8', '#e8e4da', '#f4f1e8']),
       clothes: BLACK_CLOTH,
     },
@@ -281,7 +287,6 @@
       ear: p('#5c2e22', '#783c2c', ['#a05a42', '#c4785a', '#da9474', '#e8ac8c', '#f2c0a2']),
       neck: p('#4c2c20', '#64382a', ['#86543e', '#a87058', '#c48c70', '#d8a488', '#e4b89c']),
       hair: p('#24160e', '#342016', ['#46301e', '#5e4228', '#765434', '#8c6842', '#a07a50']),
-      hat: BLACK_CLOTH,
       collar: p('#56585a', '#6a6c6e', ['#9a9c9a', '#b8bab6', '#d4d4ce', '#e6e6e0', '#f2f2ec']),
       ruff: p('#56585a', '#6a6c6e', ['#9a9c9a', '#b8bab6', '#d4d4ce', '#e6e6e0', '#f2f2ec']),
       clothes: BLACK_CLOTH,
@@ -295,9 +300,7 @@
       ear: p('#4e3a30', '#604a3e', ['#8e6e5c', '#b28c76', '#cea88e', '#e0bea6', '#ecd0ba']),
       neck: p('#40322a', '#54443a', ['#7a6252', '#9e826e', '#bca088', '#d2b8a0', '#e0cab4']),
       hair: p('#1a140e', '#281e16', ['#36281c', '#4a3826', '#5e4830', '#72583c', '#846a4a']),
-      turban: p('#101a3e', '#18264e', ['#24387a', '#304c98', '#4466b2', '#5c80c6', '#7c9cd6']),
-      tail: p('#4a3c14', '#5c4c1c', ['#9a7a2c', '#b8963a', '#d0ae4c', '#e2c262', '#eed480']),
-      hat: BLACK_CLOTH,
+      blue: p('#101a3e', '#18264e', ['#24387a', '#304c98', '#4466b2', '#5c80c6', '#7c9cd6']),
       collar: WHITE_LINEN, ruff: WHITE_LINEN,
       clothes: p('#2e2210', '#3e2e16', ['#6a4e22', '#8a6a30', '#a88440', '#c09c54', '#d2b06a']),
     },
@@ -311,6 +314,7 @@
     neck: p('#1e100a', '#2c1a0e', ['#42281a', '#5e3a24', '#7a4e30', '#90603e', '#a0704c']),
   };
   const SAME = { socket: 'skin', under: 'skin' };
+  const PEARL = p('#4a4a50', '#6a6a72', ['#8e8e96', '#b4b4ba', '#d6d6da', '#eeeef0', '#ffffff']);
 
   const hexRgb = (h) => { const v = parseInt(h.slice(1), 16); return [v >> 16, (v >> 8) & 255, v & 255]; };
   const mixRgb = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
@@ -326,9 +330,9 @@
   }
 
   /*
-   * Draws one portrait. look: { hair: 'short' | 'bun', beard, moustache, hat: 'beret' | 'brim' |
-   * 'straw' | 'turban', collar: 'flat' | 'ruff' | 'open' | 'none', clothes: a palette part name to
-   * use for the clothes, deep: true for a deeper skin tone }
+   * Draws one portrait. look: { woman, hair: 'short' | 'bun' | 'long', beard, moustache, pearl,
+   * collar: 'flat' | 'ruff' | 'open' | 'none', clothes: 'black', 'white' or a palette part name,
+   * deep: true for a deeper skin tone }
    */
   function drawPortrait(styleId, seed, look = {}, size = 1) {
     const base = STYLES[styleId];
@@ -344,8 +348,8 @@
     const pitch = between(r, -0.1, 0.0);
     const roll = between(r, -0.06, 0.06);
     const lightSide = r() < 0.75 ? -1 : 1;                 // usually lit from the left
-    const unit = between(r, 250, 270) * (look.hat === 'brim' || look.hat === 'straw' ? 0.9 : 1);
-    const ox = 300 + between(r, -18, 18), oy = 300 + between(r, -8, 12) + (look.hat ? 30 : 0);
+    const unit = between(r, 250, 270);
+    const ox = 300 + between(r, -18, 18), oy = 300 + between(r, -8, 12);
 
     // background: flat, with a lighter block on the face's shadow side, as painters set it to turn the head
     g.fillStyle = s.ground;
@@ -379,15 +383,15 @@
         const key = names[0] + ' ' + names[1];
         if (look.beard && BEARD.has(key)) part = 'hair';
         if ((look.beard || look.moustache) && MOUSTACHE.has(key)) part = 'hair';
-        if (look.hat === 'turban' && part === 'hair') part = 'turban';
+        if (look.woman && HAIR_OVER.has(key)) part = 'hair';
         if (part === 'collar') part = look.collar === 'open' ? 'neck' : look.collar === 'none' || look.collar === 'ruff' ? 'clothes' : 'collar';
         const body = part0 === 'clothes' || part0 === 'collar';
         const k = body ? 0.45 : part0 === 'neck' ? 0.75 : 1;
-        const pts = names.map((n) => { const q = P[n]; return [mirror ? -q[0] : q[0], q[1], q[2]]; });
+        const pts = names.map((n) => { const q = (look.woman && WOMAN[n]) || P[n]; return [mirror ? -q[0] : q[0], q[1], q[2]]; });
         facets.push({ part, pts, k, centre: body ? [0, -1.4, -0.05] : part0 === 'neck' ? [0, -0.75, -0.08] : [0, 0, 0], bias: body ? -0.6 : 0 });
       });
     });
-    extras(look).forEach((e) => facets.push({ k: e.part === 'ruff' ? 0.75 : 1, centre: e.centre || [0, 0, 0], bias: 0, ...e }));
+    extras(look, side).forEach((e) => facets.push({ k: e.part === 'ruff' ? 0.75 : 1, centre: e.centre || [0, 0, 0], bias: 0, ...e }));
 
     const polys = [];
     facets.forEach((f) => {
@@ -409,7 +413,7 @@
       if (nz <= 0.01) return;                                         // facing away from the viewer
       const lam = nx * L[0] + ny * L[1] + nz * L[2];
       const bounce = nx * B[0] + ny * B[1] + nz * B[2];
-      const pal = s[f.part] || s[SAME[f.part]] || s.hair;
+      const pal = f.part === 'pearl' ? PEARL : s[f.part] || s[SAME[f.part]] || s.hair;
       polys.push({ pts, z: mid[2] + f.bias, color: planeColor(pal, lam, bounce) });
     });
     polys.sort((a, b) => a.z - b.z);
@@ -429,33 +433,35 @@
   // ---- The 25 portraits ------------------------------------------------------------------
 
   const L = (painter, seed, look, title) => ({ id: `${painter}-${seed}`, painter, seed, look, title });
+  const W = { woman: true };
   const PORTRAITS = [
-    L('rembrandt', 7, { hat: 'beret', moustache: true, collar: 'flat' }, 'Man in a beret'),
-    L('rembrandt', 21, { hat: 'beret', beard: true, collar: 'none' }, 'Bearded man in a beret'),
+    L('rembrandt', 7, { moustache: true, collar: 'flat' }, 'Man with a moustache'),
+    L('rembrandt', 21, { ...W, hair: 'long', collar: 'flat' }, 'Young woman with loose hair'),
     L('rembrandt', 33, { beard: true, collar: 'flat' }, 'Old man with a beard'),
-    L('rembrandt', 45, { hair: 'bun', collar: 'flat' }, 'Young woman'),
-    L('zorn', 11, { hair: 'bun', collar: 'open' }, 'Woman in red'),
+    L('rembrandt', 45, { ...W, hair: 'bun', collar: 'flat', pearl: true }, 'Woman in a white collar'),
+    L('zorn', 11, { ...W, hair: 'bun', collar: 'open' }, 'Woman in red'),
     L('zorn', 52, { moustache: true, collar: 'flat', clothes: 'black' }, 'Man with a moustache'),
-    L('zorn', 64, { hair: 'bun', collar: 'open', clothes: 'black' }, 'Woman in black'),
+    L('zorn', 64, { ...W, hair: 'long', collar: 'open', clothes: 'black' }, 'Woman in black'),
     L('zorn', 70, { beard: true, collar: 'none', clothes: 'black' }, 'Bearded man'),
-    L('sargent', 81, { hair: 'bun', collar: 'open' }, 'Lady in a black gown'),
+    L('sargent', 81, { ...W, hair: 'bun', collar: 'open', pearl: true }, 'Lady in a black gown'),
     L('sargent', 92, { moustache: true, collar: 'flat' }, 'Gentleman'),
-    L('sargent', 103, { hair: 'bun', collar: 'open', clothes: 'white' }, 'Lady in white'),
+    L('sargent', 103, { ...W, hair: 'long', collar: 'open', clothes: 'white' }, 'Lady in white'),
     L('sargent', 114, { collar: 'flat' }, 'Young man'),
     L('sorolla', 125, { beard: true, collar: 'none' }, 'Man in white'),
-    L('sorolla', 136, { hair: 'bun', collar: 'open' }, 'Woman in the sun'),
-    L('sorolla', 147, { hat: 'straw', moustache: true, collar: 'none' }, 'Man in a straw hat'),
+    L('sorolla', 136, { ...W, hair: 'bun', collar: 'open' }, 'Woman in the sun'),
+    L('sorolla', 147, { ...W, hair: 'long', collar: 'open' }, 'Girl on the beach'),
     L('velazquez', 158, { moustache: true, collar: 'flat' }, 'Courtier'),
     L('velazquez', 169, { beard: true, collar: 'flat', deep: true }, 'Man with a lace collar'),
-    L('velazquez', 180, { hair: 'bun', collar: 'ruff' }, 'Lady with a ruff'),
+    L('velazquez', 180, { ...W, hair: 'bun', collar: 'ruff' }, 'Lady with a ruff'),
     L('velazquez', 191, { beard: true, collar: 'ruff' }, 'Bearded man with a ruff'),
-    L('hals', 202, { hat: 'brim', beard: true, collar: 'ruff' }, 'Cavalier'),
-    L('hals', 213, { beard: true, collar: 'ruff' }, 'Burgher'),
-    L('hals', 224, { hair: 'bun', collar: 'ruff' }, 'Woman with a ruff'),
-    L('vermeer', 235, { hat: 'turban', collar: 'flat' }, 'Girl in a blue turban'),
-    L('vermeer', 246, { hair: 'bun', collar: 'flat' }, 'Woman in a yellow jacket'),
-    L('vermeer', 257, { hat: 'brim', collar: 'flat', clothes: 'black' }, 'Man in a hat'),
+    L('hals', 202, { beard: true, moustache: true, collar: 'ruff' }, 'Gentleman with a ruff'),
+    L('hals', 213, { beard: true, collar: 'flat' }, 'Burgher'),
+    L('hals', 224, { ...W, hair: 'bun', collar: 'ruff' }, 'Woman with a ruff'),
+    L('vermeer', 235, { ...W, hair: 'bun', collar: 'flat', pearl: true, clothes: 'blue' }, 'Girl with a pearl'),
+    L('vermeer', 246, { ...W, hair: 'long', collar: 'flat' }, 'Woman in a yellow jacket'),
+    L('vermeer', 257, { ...W, hair: 'bun', collar: 'flat', pearl: true }, 'Woman reading a letter'),
   ];
+
 
   // The portrait's picture, at size (1 = 600 x 750); kept so it is drawn only once
   const cache = new Map();
