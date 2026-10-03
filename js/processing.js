@@ -553,8 +553,14 @@
    * its busiest neighbour can't win, so a nearly empty bin between two busy ones doesn't
    * outscore them both. Returns linear RGB per label (lin[l * 3 ...]) and how many pixels
    * each label has.
+   *
+   * lean (0 to 1) moves the choice toward the lighter tones, without changing the hue. In a lit face most pixels of a group
+   * sit on its darker side, with only a few highlights above them, so the busiest bin reads dark.
+   * With lean above 0, the lightest bin of nearly the same hue that is still busy enough wins
+   * instead: one with at least (1 - 0.75 * lean) of the busiest bin's score, so lean 1 reaches
+   * into bins a quarter as busy, and a color that is only noise or a glint still can't win.
    */
-  function dominantColors(prep, labels, nLabels, mask) {
+  function dominantColors(prep, labels, nLabels, mask, lean) {
     const keys = binKeys(prep);
     const rgba = prep.rgba;
     const n = labels.length;
@@ -569,6 +575,7 @@
     }
     const best = new Int32Array(nLabels).fill(-1);
     const bestScore = new Float64Array(nLabels);
+    const options = lean > 0 ? [] : null;      // every bin that qualifies, for the lean pass
     counts.forEach((c, k) => {
       const l = Math.floor(k / SPAN);
       const key = k % SPAN;
@@ -588,7 +595,26 @@
       }
       // the label's busiest bin always qualifies, so every label gets a winner
       if (2 * c >= busiest && score > bestScore[l]) { bestScore[l] = score; best[l] = key; }
+      if (options && 2 * c >= busiest) options.push([l, key, score, kl, ka, kb]);
     });
+    if (options) {
+      const floor = 1 - 0.75 * Math.min(1, lean);
+      const top = best.slice(), topScore = bestScore.slice();
+      const lightest = new Int32Array(nLabels).fill(-1);
+      options.forEach(([l, key, score, kl, ka, kb]) => {
+        if (top[l] < 0 || score < floor * topScore[l]) return;
+        const kl0 = Math.floor(top[l] / (AB_BINS * AB_BINS)), ka0 = Math.floor(top[l] / AB_BINS) % AB_BINS, kb0 = top[l] % AB_BINS;
+        // lighter than the busiest bin, and the same hue: within 12 degrees, and about as strong
+        if (kl <= kl0 || Math.abs(ka - ka0) > 2 || Math.abs(kb - kb0) > 2) return;
+        const a0 = ka0 * BIN_AB - AB_OFFSET, b0 = kb0 * BIN_AB - AB_OFFSET, a1 = ka * BIN_AB - AB_OFFSET, b1 = kb * BIN_AB - AB_OFFSET;
+        const c0 = Math.hypot(a0, b0), c1 = Math.hypot(a1, b1);
+        let dh = Math.abs(Math.atan2(b1, a1) - Math.atan2(b0, a0));
+        if (dh > Math.PI) dh = 2 * Math.PI - dh;
+        if (Math.abs(c1 - c0) > 10 || (Math.min(c0, c1) > 8 && dh > 0.21)) return;
+        if (lightest[l] < 0 || kl > Math.floor(lightest[l] / (AB_BINS * AB_BINS))) lightest[l] = key;
+      });
+      for (let l = 0; l < nLabels; l++) if (lightest[l] >= 0) best[l] = lightest[l];
+    }
     const lin = new Float64Array(nLabels * 3);
     const m = new Float64Array(nLabels);
     for (let i = 0, p = 0; i < n; i++, p += 4) {
@@ -683,7 +709,8 @@
 
     // 3. Each block group is painted with its most prominent photo color, not a mix
     const nb = 3 * K;
-    const dom = dominantColors(prep, block, nb, null);
+    const lean = opts.lighter || 0;
+    const dom = dominantColors(prep, block, nb, null, lean);
     const sc = dom.total;
     const blockRGB = new Uint8Array(nb * 3);
     const blockColors = [];
@@ -720,6 +747,7 @@
       zone,    // value zone (0-2) per pixel
       block,   // color group per pixel: zone * K + cluster
       K,
+      lean,    // how far the group colors lean toward the lighter tones (0 to 1)
     };
   }
 
@@ -837,8 +865,9 @@
 
     // Each shape's most prominent color in the reference and in the painting
     const { comp, count } = components(refRes.block, w, h);
-    const refDom = dominantColors(ref, comp, count, mask).lin;
-    const artDom = dominantColors(art, comp, count, mask).lin;
+    const lean = refRes.lean || 0;   // both are read the same way, so a lean doesn't count as a miss
+    const refDom = dominantColors(ref, comp, count, mask, lean).lin;
+    const artDom = dominantColors(art, comp, count, mask, lean).lin;
     const cnt = new Float64Array(count), sx = new Float64Array(count), sy = new Float64Array(count);
     const first = new Int32Array(count);
     for (let i = 0; i < n; i++) {

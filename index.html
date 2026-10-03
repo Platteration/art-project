@@ -105,7 +105,12 @@
           <div class="field">
             <div class="field-head"><label for="colors">Colors per value</label><output id="colorsOut" for="colors"></output></div>
             <input type="range" id="colors" min="1" max="6" step="1" value="3">
-            <p class="hint">How many color groups each of the three values is split into. Each group is painted with its most prominent color, not a mix.</p>
+            <p class="hint">How many color groups each of the three values is split into. Each group is painted with a color that is really in the photo, not a mix.</p>
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="lean">Lean toward lighter tones</label><output id="leanOut" for="lean"></output></div>
+            <input type="range" id="lean" min="0" max="100" step="10" value="60">
+            <p class="hint">At Off, each group takes its most common color, which in a lit face sits on the darker side of the group. Slide up to take it from the group's lighter tones instead, so lit skin keeps its lights. Applies to the game and to Check my painting too.</p>
           </div>
           <button type="button" class="btn" id="addBlocks">Add block colors to picked colors</button>
           <div class="paints" id="paints">

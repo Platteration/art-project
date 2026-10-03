@@ -127,6 +127,7 @@
     opts.colorsPerZone = level.colors;
     opts.outlines = false;
     if (painting) {
+      opts.lighter = 0;                 // flat planes: nothing to lean toward
       opts.blurRadius = 0;
       opts.minSize = Math.round(w * h * 0.004 * Math.pow(level.merge / 10, 2));
       [opts.t1, opts.t2] = Study.autoThresholds(prep, opts.blurRadius, opts.smoothing);

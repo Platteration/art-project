@@ -16,6 +16,7 @@
     g: [$('g0'), $('g1'), $('g2')],
     gOut: [$('g0Out'), $('g1Out'), $('g2Out')],
     colors: $('colors'), colorsOut: $('colorsOut'),
+    lean: $('lean'), leanOut: $('leanOut'),
     outlines: $('outlines'),
     addBlocks: $('addBlocks'),
     hist: $('hist'),
@@ -99,6 +100,7 @@
   const CANVAS_KEY = 'portrait-value-studio.canvasUnit';
   const SMOOTHING_KEY = 'portrait-value-studio.smoothing';
   const BLOCK_VIEW_KEY = 'portrait-value-studio.blockView';
+  const LEAN_KEY = 'portrait-value-studio.lean';
   const DRAWERS_KEY = 'portrait-value-studio.drawers';
 
   const state = {
@@ -206,6 +208,7 @@
       grayMode: document.querySelector('input[name="grayMode"]:checked').value,
       customL: els.g.map((el) => +el.value),
       colorsPerZone: +els.colors.value,
+      lighter: +els.lean.value / 100,
       outlines: els.outlines.checked,
     };
   }
@@ -224,6 +227,7 @@
     els.t2Out.value = 'V ' + valueLabel(+els.t2.value);
     els.g.forEach((el, i) => { els.gOut[i].value = 'V ' + valueLabel(+el.value); });
     els.colorsOut.value = els.colors.value;
+    els.leanOut.value = els.lean.value === '0' ? 'Off' : els.lean.value + '%';
   }
 
   function autoSplit() {
@@ -509,6 +513,14 @@
   els.simplify.addEventListener('input', () => { updateOutputs(); runSoon(); });
   els.merge.addEventListener('input', () => { updateOutputs(); runSoon(); });
   els.colors.addEventListener('input', () => { updateOutputs(); runSoon(); });
+  // the lean toward lighter tones is a preference, so it is kept between visits
+  try { const saved = localStorage.getItem(LEAN_KEY); if (saved !== null && /^\d+$/.test(saved) && +saved <= 100) els.lean.value = saved; } catch (err) { /* the default stays */ }
+  updateOutputs();
+  els.lean.addEventListener('input', () => {
+    updateOutputs();
+    try { localStorage.setItem(LEAN_KEY, els.lean.value); } catch (err) { /* kept for this visit only */ }
+    runSoon();
+  });
   els.outlines.addEventListener('change', () => runSoon(0));
   els.detail.addEventListener('change', () => { if (state.source) prepareAndRun(false); });
 
