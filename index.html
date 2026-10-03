@@ -386,6 +386,11 @@
                 <input type="range" id="ps-roundSize" min="3" max="64" value="18" aria-label="Round brush size">
               </div>
               <div class="ps-opts" id="ps-pencilOpts" hidden>
+                <span class="ps-label">Color</span>
+                <div class="ps-seg" role="group" aria-label="Pencil color">
+                  <button type="button" data-pcolor="black" aria-pressed="true">Black</button>
+                  <button type="button" data-pcolor="white" aria-pressed="false">White</button>
+                </div>
                 <span class="ps-label">Lead</span>
                 <div class="ps-seg" role="group" aria-label="Lead">
                   <button type="button" data-lead="graphite" aria-pressed="true">Graphite</button>
@@ -403,6 +408,8 @@
               </div>
               <div class="ps-opts" id="ps-sketchOpts" hidden>
                 <p class="hint">The underdrawing is on its own layer beneath the paint. Paint over it freely; it never mixes with the painting.</p>
+                <span class="ps-label">Color</span>
+                <div class="ps-seg" role="group" aria-label="Underdrawing color"><button type="button" data-scolor="black" aria-pressed="true">Black</button><button type="button" data-scolor="white" aria-pressed="false">White</button></div>
                 <span class="ps-label">Lead</span>
                 <div class="ps-seg" role="group" aria-label="Lead"><button type="button" data-slead="graphite" aria-pressed="true">Graphite</button><button type="button" data-slead="charcoal" aria-pressed="false">Charcoal</button></div>
                 <span class="ps-label">Hardness</span>

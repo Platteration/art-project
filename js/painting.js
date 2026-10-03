@@ -60,13 +60,15 @@
   const paletteNow = () => paletteList.find((p) => p.id === $('palette').value) || paletteList[0];
   const codesNow = () => paletteNow().codes;
 
-  const state = { tool: 'chisel', chisel: 'm', round: 18, hard: 'medium', pencil: 3, lead: 'graphite', sketch: 3, slead: 'graphite', shard: 'medium', lastLayer: 'paint', lastBrush: 'chisel', blend: 60, blendStr: 0.4, eraser: 24, color: hexOf('#7A3B24'), name: 'Burnt Sienna', well: [], mixes: [] };
+  const state = { tool: 'chisel', chisel: 'm', round: 18, hard: 'medium', pencil: 3, lead: 'graphite', pcolor: 'black', sketch: 3, slead: 'graphite', shard: 'medium', scolor: 'black', lastLayer: 'paint', lastBrush: 'chisel', blend: 60, blendStr: 0.4, eraser: 24, color: hexOf('#7A3B24'), name: 'Burnt Sienna', well: [], mixes: [] };
   const CHISEL = { s: 20, m: 40, l: 72 };
   const HARD = { hard: { alpha: 0.16, dots: 3, grow: 0.85, grey: 0.45, label: '2H' }, medium: { alpha: 0.3, dots: 7, grow: 1, grey: 0.2, label: 'HB' }, soft: { alpha: 0.5, dots: 14, grow: 1.35, grey: 0, label: '4B' } };
   // Graphite: fine grains, pale when hard. Charcoal: coarser, darker, with a soft dusty edge; a
   // hard stick keeps a crisper line, a soft one spreads and blackens.
   const CHAR = { hard: { alpha: 0.28, dots: 10, grow: 1.0, grey: 0.12, spread: 0.55, label: 'Hard' }, medium: { alpha: 0.42, dots: 18, grow: 1.25, grey: 0.05, spread: 0.75, label: 'Medium' }, soft: { alpha: 0.6, dots: 30, grow: 1.6, grey: 0, spread: 1, label: 'Soft' } };
   const BRUSHES = ['chisel', 'round', 'pencil', 'sketch', 'blend'];
+  // the pencils draw in black or white only: graphite and charcoal, or a white chalk
+  const LEAD_COLOR = { black: [28, 28, 30], white: [255, 255, 255] };
 
   // ---- The paper -----------------------------------------------------------------------------
   const paper = $('paper'), sketch = $('sketch'), wrap = $('paperWrap'), ground = $('ground'), weave = $('weave');
@@ -278,14 +280,15 @@
     const c = state.color;
     if (state.tool === 'chisel') stampChisel(x, y, CHISEL[state.chisel], c);
     else if (state.tool === 'round') stampRound(x, y, state.round / 2, c);
-    else if (state.tool === 'pencil') stampPencil(x, y, state.pencil, pressure, c, state.lead, state.hard);
-    else if (state.tool === 'sketch') stampPencil(x, y, state.sketch, pressure, c, state.slead, state.shard);
+    else if (state.tool === 'pencil') stampPencil(x, y, state.pencil, pressure, LEAD_COLOR[state.pcolor], state.lead, state.hard);
+    else if (state.tool === 'sketch') stampPencil(x, y, state.sketch, pressure, LEAD_COLOR[state.scolor], state.slead, state.shard);
     else if (state.tool === 'blend') stampBlend(x, y, dir);
     else stampEraser(x, y, state.eraser / 2);
   }
   const spacing = () => state.tool === 'chisel' ? 1.5 : state.tool === 'round' ? Math.max(1, state.round * 0.12) : state.tool === 'blend' ? Math.max(2, state.blend * 0.12) : state.tool === 'eraser' ? Math.max(1, state.eraser * 0.12) : 1;
   function segment(a, b, pressure) {
-    g.globalCompositeOperation = state.tool === 'pencil' || state.tool === 'sketch' ? 'multiply' : 'source-over';
+    const leadColor = state.tool === 'pencil' ? state.pcolor : state.tool === 'sketch' ? state.scolor : null;
+    g.globalCompositeOperation = leadColor ? (leadColor === 'white' ? 'screen' : 'multiply') : 'source-over';
     const d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / spacing()));
     const dir = Math.atan2(b.y - a.y, b.x - a.x);
     for (let i = 1; i <= n; i++) stamp(a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n, pressure, dir);
@@ -437,7 +440,7 @@
   // ---- Tools -----------------------------------------------------------------------------------
   function showStatus() {
     const leadLabel = (lead, hard) => (lead === 'charcoal' ? `Charcoal · ${CHAR[hard].label}` : HARD[hard].label);
-    const t = { chisel: `Chisel · ${state.chisel.toUpperCase()}`, round: `Round · ${state.round} px`, pencil: `Pencil · ${leadLabel(state.lead, state.hard)} · ${state.pencil} px`, sketch: `Underdrawing · ${leadLabel(state.slead, state.shard)} · ${state.sketch} px`, blend: `Blend · ${state.blend} px · ${Math.round(state.blendStr * 100)}%`, eraser: `Eraser · ${state.eraser} px · ${state.lastLayer === 'sketch' ? 'underdrawing' : 'paint'}` }[state.tool];
+    const t = { chisel: `Chisel · ${state.chisel.toUpperCase()}`, round: `Round · ${state.round} px`, pencil: `Pencil · ${state.pcolor} · ${leadLabel(state.lead, state.hard)} · ${state.pencil} px`, sketch: `Underdrawing · ${state.scolor} · ${leadLabel(state.slead, state.shard)} · ${state.sketch} px`, blend: `Blend · ${state.blend} px · ${Math.round(state.blendStr * 100)}%`, eraser: `Eraser · ${state.eraser} px · ${state.lastLayer === 'sketch' ? 'underdrawing' : 'paint'}` }[state.tool];
     $('status').textContent = `${t} · ${paper.width} × ${paper.height}`;
     const subs = { chisel: state.chisel.toUpperCase(), round: state.round, pencil: state.lead === 'charcoal' ? 'Ch' : HARD[state.hard].label, sketch: state.slead === 'charcoal' ? 'Ch' : HARD[state.shard].label, blend: state.blend };
     $('chiselSub').textContent = subs.chisel; $('roundSub').textContent = subs.round; $('pencilSub').textContent = subs.pencil; $('sketchSub').textContent = subs.sketch; $('blendSub').textContent = subs.blend;
@@ -473,7 +476,7 @@
     q(`[data-${attr}]`).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     showStatus();
   }));
-  pick('chisel', 'chisel'); pick('hard', 'hard'); pick('lead', 'lead'); pick('slead', 'slead'); pick('shard', 'shard');
+  pick('chisel', 'chisel'); pick('hard', 'hard'); pick('lead', 'lead'); pick('slead', 'slead'); pick('shard', 'shard'); pick('pcolor', 'pcolor'); pick('scolor', 'scolor');
   const slide = (id, key, out, suffix = ' px', scale = 1) => $(id).addEventListener('input', () => { state[key] = +$(id).value * scale; $(out).textContent = $(id).value + suffix; showStatus(); });
   slide('roundSize', 'round', 'roundOut'); slide('pencilSize', 'pencil', 'pencilOut'); slide('sketchSize', 'sketch', 'sketchOut');
   slide('blendSize', 'blend', 'blendOut'); slide('blendStr', 'blendStr', 'blendStrOut', '%', 0.01); slide('eraserSize', 'eraser', 'eraserOut');
