@@ -27,8 +27,8 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn'), game: $('tabGameBtn'), paint: $('tabPaintBtn') },
-    tabPanels: { study: $('tab-study'), check: $('tab-check'), game: $('tab-game'), paint: $('tab-paint') },
+    tabs: { study: $('tabStudyBtn'), game: $('tabGameBtn'), paint: $('tabPaintBtn') },
+    tabPanels: { study: $('tab-study'), game: $('tab-game'), paint: $('tab-paint') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -45,6 +45,8 @@
     checkEmpty: $('checkEmpty'),
     checkBody: $('checkBody'),
     checkPanels: $('checkPanels'),
+    checkSection: $('checkSection'),
+    artFromStudio: $('artFromStudio'),
     scoreColor: $('scoreColor'),
     scoreGrade: $('scoreGrade'),
     scoreValue: $('scoreValue'),
@@ -87,11 +89,11 @@
     saveClose: $('saveClose'),
     drawers: {
       values: $('drawer-values'),
-      colors: $('drawer-colors'), swatches: $('drawer-swatches'),
+      colors: $('drawer-colors'), swatches: $('drawer-swatches'), check: $('drawer-check'),
     },
     drawerState: {
       values: $('valuesState'),
-      colors: $('colorsState'), swatches: $('swatchesState'),
+      colors: $('colorsState'), swatches: $('swatchesState'), check: $('checkState'),
     },
   };
 
@@ -102,6 +104,8 @@
   const BLOCK_VIEW_KEY = 'portrait-value-studio.blockView';
   const LEAN_KEY = 'portrait-value-studio.lean';
   const DRAWERS_KEY = 'portrait-value-studio.drawers';
+  // Check my painting is a drawer of the Study tab: its results show below the studies while it is open
+  const checking = () => state.tab === 'study' && els.drawers.check.open;
 
   const state = {
     source: null,      // HTMLImageElement or canvas
@@ -258,7 +262,7 @@
     drawHistogram();
     els.drawerState.values.textContent = `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
     state.art.dirty = true;
-    if (state.tab === 'check') runCheck();
+    if (checking()) runCheck();
     els.busy.hidden = true;
     window.dispatchEvent(new CustomEvent('studio:result'));
   }
@@ -435,21 +439,24 @@
   }
 
   function loadFile(file) {
-    readImage(file, (img) => {
-      state.source = img;
-      state.baseName = (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait';
-      setSourceLabel(file.name || 'Pasted image', img.naturalWidth, img.naturalHeight, false);
-      const marks = [
-        state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
-      ].filter(Boolean);
-      clearMarks();
-      if (marks.length) {
-        const list = marks.length > 1 ? marks.slice(0, -1).join(', ') + ' and ' + marks[marks.length - 1] : marks[0];
-        toast(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo`);
-      }
-      if (state.art.isExample) setArt(null);
-      prepareAndRun(true);
-    });
+    readImage(file, (img) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait'));
+  }
+
+  // Takes an image (or canvas) as the reference, keeping an example painting out of the way
+  function useSource(img, name, baseName) {
+    state.source = img;
+    state.baseName = baseName || 'portrait';
+    setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
+    const marks = [
+      state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
+    ].filter(Boolean);
+    clearMarks();
+    if (marks.length) {
+      const list = marks.length > 1 ? marks.slice(0, -1).join(', ') + ' and ' + marks[marks.length - 1] : marks[0];
+      toast(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo`);
+    }
+    if (state.art.isExample) setArt(null);
+    prepareAndRun(true);
   }
 
   function loadArtFile(file) {
@@ -460,7 +467,7 @@
   }
 
   // Loads whichever image the open tab is about
-  const loadForTab = (file) => (state.tab === 'check' ? loadArtFile(file) : loadFile(file));
+  const loadForTab = (file) => (checking() ? loadArtFile(file) : loadFile(file));
 
   function setSourceLabel(name, w, h, isSample) {
     state.isSample = isSample;
@@ -488,7 +495,7 @@
     e.preventDefault();
     dragDepth++;
     els.dropHint.firstElementChild.textContent =
-      state.tab === 'check' ? 'Drop your painting to check it' : 'Drop the portrait to load it';
+      checking() ? 'Drop your painting to check it' : 'Drop the portrait to load it';
     els.dropHint.hidden = false;
   });
   window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
@@ -2031,7 +2038,7 @@
 
   function switchTab(name, focus) {
     state.tab = name;
-    if (name !== 'check') setPicking(false); // picking a neutral spot only works on Your painting
+    if (name !== 'study') setPicking(false); // picking a neutral spot only works on Your painting
     Object.entries(els.tabs).forEach(([key, btn]) => {
       const on = key === name;
       btn.setAttribute('aria-selected', on);
@@ -2039,7 +2046,7 @@
       els.tabPanels[key].hidden = !on;
       if (on && focus) btn.focus();
     });
-    if (name === 'check' && state.art.dirty) runCheck();
+    if (checking() && state.art.dirty) runCheck();
     // the game has its own board and controls: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
     if (name === 'game' || name === 'paint') els.loupe.hidden = true;
@@ -2175,7 +2182,7 @@
     els.checkBody.hidden = !ready;
     els.checkPanels.hidden = !ready;
     els.alignPanel.hidden = !ready;
-    if (!ready) return;
+    if (!ready) { els.drawerState.check.textContent = state.art.source ? '' : 'No painting yet'; return; }
 
     const a = align();
     const key = [state.prep.w, state.prep.h, els.artFit.value, a.x, a.y, a.scale, a.rot, state.art.gains.join(',')].join(':');
@@ -2243,6 +2250,7 @@
 
   function renderScore(cmp) {
     els.scoreColor.textContent = cmp.colorScore;
+    els.drawerState.check.textContent = `Color ${cmp.colorScore} · Value ${cmp.valueScore}`;
     els.scoreGrade.textContent =
       cmp.colorScore >= 90 ? 'Very close to the reference'
         : cmp.colorScore >= 75 ? 'Close, with a few shapes off'
@@ -2387,7 +2395,18 @@
     loadArtFile(els.artFile.files[0]);
     els.artFile.value = '';
   });
-  els.artFit.addEventListener('change', () => { state.art.key = ''; if (state.tab === 'check') runSoon(0); });
+  // The painting on the Studio tab, scored against what it was painted from: the Study reference,
+  // or the portrait the Studio dealt, which then becomes the reference here
+  els.artFromStudio.addEventListener('click', () => {
+    const ps = window.PaintStudio;
+    if (!ps) return;
+    const r = ps.reference();
+    if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
+    setArt(ps.composite(), 'Studio painting', false);
+    els.drawers.check.open = true;
+    runSoon(0);
+  });
+  els.artFit.addEventListener('change', () => { state.art.key = ''; if (checking()) runSoon(0); });
 
   // A plausible student attempt at the sample: shadows lifted, colors warmer, edges softened
   function makeExamplePainting(src) {
@@ -2429,6 +2448,7 @@
         const now = Object.keys(els.drawers).filter((k) => els.drawers[k].open);
         try { localStorage.setItem(DRAWERS_KEY, JSON.stringify(now)); } catch (err) { /* not remembered */ }
         if (key === 'values' && d.open) drawHistogram();
+        if (key === 'check') { els.checkSection.hidden = !d.open; if (d.open && state.art.dirty) runCheck(); if (!d.open) setPicking(false); }
       });
     });
   }
@@ -2450,6 +2470,7 @@
 
   function start() {
     restoreDrawers();
+    els.checkSection.hidden = !els.drawers.check.open;
     updateToolbar();
     restoreSmoothing();
     updateOutputs();
@@ -2460,7 +2481,7 @@
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true);
-    if (location.hash === '#check') switchTab('check');
+    if (location.hash === '#check') { switchTab('study'); els.drawers.check.open = true; }
     if (location.hash === '#game') switchTab('game');
     if (location.hash === '#paint') switchTab('paint');
   }

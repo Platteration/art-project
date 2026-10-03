@@ -337,7 +337,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 /* ---- Tabs: three big buttons ---- */
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 .tab {
@@ -466,10 +466,10 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .line-colors input:checked + label { outline: 2px solid var(--ink); outline-offset: 2px; }
 .line-colors input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ---- Check my painting ---- */
-.check-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 12px 24px; }
-.check-intro { display: grid; gap: 4px; max-width: 70ch; min-width: 0; }
+/* ---- Check my painting: a drawer of the Study tab, its results below the studies ---- */
 .check-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.check-section { display: grid; gap: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.drawer-body .align-grid { grid-template-columns: 1fr; }
 .inline-field { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .inline-field select { width: auto; }
 

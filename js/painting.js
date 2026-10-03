@@ -624,5 +624,11 @@
   if (Studio.tab() === 'paint') window.dispatchEvent(new CustomEvent('studio:tab', { detail: 'paint' }));
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
 
-  window.PaintStudio = { composite, state };
+  // what the painting is of, for Check my painting on the Study tab
+  function reference() {
+    if (ref.kind !== 'painting' || !ref.id) return { kind: 'studio' };
+    const e = Subjects.entry(ref.id), picture = Subjects.picture(ref.id, 1);
+    return { kind: 'painting', id: ref.id, picture, width: picture.width, height: picture.height, title: `${e.title}, after ${Subjects.painterOf(ref.id)}` };
+  }
+  window.PaintStudio = { composite, reference, state };
 })();

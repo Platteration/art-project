@@ -1,6 +1,6 @@
 # Portrait Value Studio
 
-A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original (a Paint by numbers game and a Studio to paint in follow, in their own tabs):
+A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original (a Paint by numbers game and a Studio to paint in follow, in their own tabs, and a drawer checks your painting against the reference):
 
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
 - **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it. **Lean toward lighter tones** (in Colors and paints, 60% by default) corrects a dark bias in that choice: in a lit face most pixels of a group sit on its darker side, so the busiest color reads dark and a few lighter highlights lose. With the lean up, a group takes the lightest color of the same hue that is still common enough in it (at 100%, one a quarter as common as the busiest), so lit skin keeps its lights; at Off it takes the most common color as before. The same setting applies to the game board and to Check my painting, which reads both pictures the same way, so it doesn't count as a miss. It is remembered between visits. The switch above it shows the blocks in the photo's colors (**Photo**) or as your palette mixes them (for example **Zorn**): each block is repainted with the closest mix the palette makes, so you can see the painting your paints would give. The palette is the one chosen under **Colors and paints**, or, until you choose one, the known palette that mixes the study best. The choice is remembered, and the magnifier and **Save PNG** use the colors shown.
@@ -84,7 +84,7 @@ The score is out of 1,200. Color accuracy gives up to 1,000: each number scores 
 
 ### Studio
 
-The fourth tab is a paper to paint on, with the studio's own paints and mixing model. The paper fills the screen; one strip of small icons holds every tool, at the bottom on a phone and down the left on a wider screen. A tool's options, the paints, the reference, the canvas and the zoom open as small sheets over the paper and close when you paint. On a phone the page header and tabs step aside while you paint; the first icon on the strip leads back.
+The third tab is a paper to paint on, with the studio's own paints and mixing model. The paper fills the screen; one strip of small icons holds every tool, at the bottom on a phone and down the left on a wider screen. A tool's options, the paints, the reference, the canvas and the zoom open as small sheets over the paper and close when you paint. On a phone the page header and tabs step aside while you paint; the first icon on the strip leads back.
 
 - **Brushes**: the chisel (a flat tip at a fixed angle, in small, medium and large), the round brush (with a scale slider), the pencil (graphite in 2H, HB and 4B, or charcoal in hard, medium and soft, both with a size slider; pen pressure counts), the underdrawing brush (the same pencil on its own layer beneath the paint, which can be shown, hidden or cleared and never mixes with the painting) and the blend fan brush (drags the paint already on the paper, with size and strength). The brushes share one icon: tap it after another tool to get the last brush back as it was, or while a brush is in hand to open the row of brushes and their options.
 - **Eraser**: tap to use it, tap again for its size. It rubs out whichever layer was drawn on last.
@@ -96,9 +96,9 @@ The fourth tab is a paper to paint on, with the studio's own paints and mixing m
 
 ### Check my painting
 
-The second tab scores a photo of your finished piece against the reference.
+**Check my painting**, the last drawer of the Study tab, scores your finished piece against the reference. Open it and the results appear below the studies; its badge keeps the score.
 
-1. Load, drop or paste a photo of your painting. Shoot it straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
+1. Load, drop or paste a photo of your painting, or press **Use my Studio painting** to score the paper on the Studio tab as it stands (if the Studio was painting from a dealt portrait, that portrait becomes the reference here). Shoot a photo straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
 2. For each shape in the reference's color-block map, the most prominent reference color is compared with the most prominent color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
 3. You get:
    - **Color accuracy** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
@@ -113,7 +113,7 @@ The second tab scores a photo of your finished piece against the reference.
 - **Move**, **Size** and **Rotate** shift your photo until it lines up. Any part of the reference your photo no longer covers is left out of the score. It shows hatched on the accuracy-by-shape view, and the panel says how much was left out.
 - **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. Spots that are clearly a color rather than a white tinted by the light (skin, brick red, leaf green, orange) are refused, and the fix goes no further than ordinary lamps and daylight need: no channel halved, red or green at most doubled, blue at most tripled. Picking again replaces the earlier fix. **Remove color fix** undoes it. It corrects tint only, not exposure.
 
-With the built-in sample, the tab opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
+With the built-in sample, the drawer opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
 ## Running it
 

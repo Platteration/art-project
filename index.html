@@ -24,7 +24,6 @@
 
   <div class="tabs" role="tablist" aria-label="Mode">
     <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span>Study the reference</span></button>
-    <button type="button" role="tab" class="tab" id="tabCheckBtn" aria-selected="false" aria-controls="tab-check" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M8.5 13.5l2.5 2.5 5-5.5"/></svg><span>Check my painting</span></button>
     <button type="button" role="tab" class="tab" id="tabGameBtn" aria-selected="false" aria-controls="tab-game" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span>Paint by numbers</span></button>
     <button type="button" role="tab" class="tab" id="tabPaintBtn" aria-selected="false" aria-controls="tab-paint" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span>Studio</span></button>
   </div>
@@ -167,6 +166,58 @@
           <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
         </div>
       </details>
+      <details class="drawer" id="drawer-check" data-drawer="check">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M8.5 13.5l2.5 2.5 5-5.5"/></svg><span class="drawer-name">Check my painting</span></span><span class="drawer-state" id="checkState"></span></summary>
+        <div class="drawer-body">
+          <p class="source" id="artSource"></p>
+          <p class="hint">Photograph your finished piece straight on, in even daylight, framed the same way as the reference, or use the painting on the Studio tab. It is broken into color blocks with the same settings and compared shape by shape below the studies.</p>
+          <div class="check-actions">
+            <input type="file" id="artFile" accept="image/*" class="visually-hidden">
+            <label for="artFile" class="btn btn-primary">Load my painting</label>
+            <button type="button" class="btn" id="artFromStudio">Use my Studio painting</button>
+            <label class="inline-field" for="artFit">Fit
+              <select id="artFit">
+                <option value="crop" selected>Crop to match</option>
+                <option value="stretch">Stretch to match</option>
+              </select>
+            </label>
+          </div>
+          <details class="align" id="alignPanel" hidden>
+            <summary>Line up and color-correct your photo <span class="align-state" id="alignState"></span></summary>
+            <div class="align-body">
+              <div class="align-grid">
+                <div class="field">
+                  <div class="field-head"><label for="onion">Show reference on top</label><output id="onionOut" for="onion"></output></div>
+                  <input type="range" id="onion" min="0" max="100" step="5" value="0">
+                  <p class="hint">Fade the reference over your painting and move it until they line up.</p>
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignX">Move left / right</label><output id="alignXOut" for="alignX"></output></div>
+                  <input type="range" id="alignX" min="-20" max="20" step="0.2" value="0">
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignY">Move up / down</label><output id="alignYOut" for="alignY"></output></div>
+                  <input type="range" id="alignY" min="-20" max="20" step="0.2" value="0">
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignScale">Size</label><output id="alignScaleOut" for="alignScale"></output></div>
+                  <input type="range" id="alignScale" min="80" max="125" step="0.5" value="100">
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignRot">Rotate</label><output id="alignRotOut" for="alignRot"></output></div>
+                  <input type="range" id="alignRot" min="-15" max="15" step="0.25" value="0">
+                </div>
+              </div>
+              <div class="align-actions">
+                <button type="button" class="btn btn-small" id="alignReset">Reset position</button>
+                <button type="button" class="btn btn-small" id="wbPick">Fix color cast</button>
+                <button type="button" class="btn btn-small" id="wbUndo" hidden>Remove color fix</button>
+                <p class="hint" id="wbStatus">Photos taken under warm or cool light shift every color. Click <strong>Fix color cast</strong>, then click a spot on your painting that should be white or neutral gray, such as the paper edge.</p>
+              </div>
+            </div>
+          </details>
+        </div>
+      </details>
     </aside>
 
     <nav class="toolstrip" aria-label="Tools">
@@ -239,112 +290,59 @@
             <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
           </figure>
         </div>
+
+        <section class="check-section" id="checkSection" hidden aria-label="Check my painting">
+          <div class="check-empty" id="checkEmpty">
+            <h3>No painting loaded yet</h3>
+            <p>Load a photo of your finished painting or drawing, or score the painting on the Studio tab. You can also drop or paste a photo while this drawer is open.</p>
+          </div>
+
+          <div class="check-body" id="checkBody" hidden>
+            <div class="scorecard">
+              <div class="score-main">
+                <span class="score-label">Color accuracy</span>
+                <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
+                <span class="score-grade" id="scoreGrade"></span>
+              </div>
+              <dl class="score-sub">
+                <div>
+                  <dt>Value accuracy</dt>
+                  <dd><span id="scoreValue">0</span><span class="meter"><span id="meterValue"></span></span></dd>
+                </div>
+                <div>
+                  <dt>Value shapes match</dt>
+                  <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
+                </div>
+              </dl>
+              <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
+            </div>
+            <div class="fixes">
+              <h3>Biggest differences</h3>
+              <ol class="fix-list" id="fixList"></ol>
+            </div>
+          </div>
+
+          <div class="panels panels-check" id="checkPanels" hidden>
+            <figure class="panel">
+              <figcaption><span>Reference blocks</span></figcaption>
+              <div class="matte"><canvas id="cv-refblock" class="view" aria-label="Reference color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            </figure>
+            <figure class="panel">
+              <figcaption><span>Your painting</span></figcaption>
+              <div class="matte"><canvas id="cv-art" class="view" aria-label="Your painting, aligned to the reference"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            </figure>
+            <figure class="panel">
+              <figcaption><span>Your blocks</span><button type="button" class="btn btn-ghost" data-save="artblock">Save PNG</button></figcaption>
+              <div class="matte"><canvas id="cv-artblock" class="view" aria-label="Your painting as color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            </figure>
+            <figure class="panel">
+              <figcaption><span>Accuracy by shape</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
+              <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+              <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
+            </figure>
+          </div>
+        </section>
       </section>
-
-      <section class="tabpanel" id="tab-check" role="tabpanel" aria-labelledby="tabCheckBtn" hidden>
-        <div class="check-head">
-          <div class="check-intro">
-            <p class="source" id="artSource"></p>
-            <p class="hint">Photograph your finished piece straight on, in even daylight, framed the same way as the reference. It is broken into color blocks with the same settings and compared shape by shape.</p>
-          </div>
-          <div class="check-actions">
-            <input type="file" id="artFile" accept="image/*" class="visually-hidden">
-            <label for="artFile" class="btn btn-primary">Load my painting</label>
-            <label class="inline-field" for="artFit">Fit
-              <select id="artFit">
-                <option value="crop" selected>Crop to match</option>
-                <option value="stretch">Stretch to match</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <details class="align" id="alignPanel" hidden>
-          <summary>Line up and color-correct your photo <span class="align-state" id="alignState"></span></summary>
-          <div class="align-body">
-            <div class="align-grid">
-              <div class="field">
-                <div class="field-head"><label for="onion">Show reference on top</label><output id="onionOut" for="onion"></output></div>
-                <input type="range" id="onion" min="0" max="100" step="5" value="0">
-                <p class="hint">Fade the reference over your painting and move it until they line up.</p>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="alignX">Move left / right</label><output id="alignXOut" for="alignX"></output></div>
-                <input type="range" id="alignX" min="-20" max="20" step="0.2" value="0">
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="alignY">Move up / down</label><output id="alignYOut" for="alignY"></output></div>
-                <input type="range" id="alignY" min="-20" max="20" step="0.2" value="0">
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="alignScale">Size</label><output id="alignScaleOut" for="alignScale"></output></div>
-                <input type="range" id="alignScale" min="80" max="125" step="0.5" value="100">
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="alignRot">Rotate</label><output id="alignRotOut" for="alignRot"></output></div>
-                <input type="range" id="alignRot" min="-15" max="15" step="0.25" value="0">
-              </div>
-            </div>
-            <div class="align-actions">
-              <button type="button" class="btn btn-small" id="alignReset">Reset position</button>
-              <button type="button" class="btn btn-small" id="wbPick">Fix color cast</button>
-              <button type="button" class="btn btn-small" id="wbUndo" hidden>Remove color fix</button>
-              <p class="hint" id="wbStatus">Photos taken under warm or cool light shift every color. Click <strong>Fix color cast</strong>, then click a spot on your painting that should be white or neutral gray, such as the paper edge.</p>
-            </div>
-          </div>
-        </details>
-
-        <div class="check-empty" id="checkEmpty">
-          <h3>No painting loaded yet</h3>
-          <p>Load a photo of your finished painting or drawing. You can also drop or paste it while this tab is open.</p>
-        </div>
-
-        <div class="check-body" id="checkBody" hidden>
-          <div class="scorecard">
-            <div class="score-main">
-              <span class="score-label">Color accuracy</span>
-              <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
-              <span class="score-grade" id="scoreGrade"></span>
-            </div>
-            <dl class="score-sub">
-              <div>
-                <dt>Value accuracy</dt>
-                <dd><span id="scoreValue">0</span><span class="meter"><span id="meterValue"></span></span></dd>
-              </div>
-              <div>
-                <dt>Value shapes match</dt>
-                <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
-              </div>
-            </dl>
-            <p class="hint">Color accuracy compares the most prominent color of every shape in the reference's color blocks with the most prominent color your painting has in the same place, using the CIEDE2000 color difference (ΔE). Value accuracy looks at lightness only. Value shapes match is the share of the picture that falls in the same shadow, middle or light mass.</p>
-          </div>
-          <div class="fixes">
-            <h3>Biggest differences</h3>
-            <ol class="fix-list" id="fixList"></ol>
-          </div>
-        </div>
-
-        <div class="panels panels-check" id="checkPanels" hidden>
-          <figure class="panel">
-            <figcaption><span>Reference blocks</span></figcaption>
-            <div class="matte"><canvas id="cv-refblock" class="view" aria-label="Reference color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-          </figure>
-          <figure class="panel">
-            <figcaption><span>Your painting</span></figcaption>
-            <div class="matte"><canvas id="cv-art" class="view" aria-label="Your painting, aligned to the reference"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-          </figure>
-          <figure class="panel">
-            <figcaption><span>Your blocks</span><button type="button" class="btn btn-ghost" data-save="artblock">Save PNG</button></figcaption>
-            <div class="matte"><canvas id="cv-artblock" class="view" aria-label="Your painting as color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-          </figure>
-          <figure class="panel">
-            <figcaption><span>Accuracy by shape</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
-            <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
-            <p class="hint">Each color zone shows how closely your painting matches it: 100% is an exact match, and each point of ΔE costs 2.5%. White labels are the biggest differences, numbered as in the list. Hover a zone to compare the two colors.</p>
-          </figure>
-        </div>
-      </section>
-
 
       <section class="tabpanel" id="tab-game" role="tabpanel" aria-labelledby="tabGameBtn" hidden>
         <div class="game-setup" id="gameSetup">
