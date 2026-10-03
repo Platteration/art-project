@@ -1,6 +1,6 @@
 # Portrait Value Studio
 
-A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original (a Paint by numbers game and a Painting studio follow, in their own tabs):
+A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original (a Paint by numbers game and a Studio to paint in follow, in their own tabs):
 
 - **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
 - **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it. **Lean toward lighter tones** (in Colors and paints, 60% by default) corrects a dark bias in that choice: in a lit face most pixels of a group sit on its darker side, so the busiest color reads dark and a few lighter highlights lose. With the lean up, a group takes the lightest color of the same hue that is still common enough in it (at 100%, one a quarter as common as the busiest), so lit skin keeps its lights; at Off it takes the most common color as before. The same setting applies to the game board and to Check my painting, which reads both pictures the same way, so it doesn't count as a miss. It is remembered between visits. The switch above it shows the blocks in the photo's colors (**Photo**) or as your palette mixes them (for example **Zorn**): each block is repainted with the closest mix the palette makes, so you can see the painting your paints would give. The palette is the one chosen under **Colors and paints**, or, until you choose one, the known palette that mixes the study best. The choice is remembered, and the magnifier and **Save PNG** use the colors shown.
@@ -82,7 +82,7 @@ The third tab is a timed game on the color-block study. The reference becomes a 
 
 The score is out of 1,200. Color accuracy gives up to 1,000: each number scores `100 − 2.5 × ΔE` (CIEDE2000) against its color as mixed from your palette, weighted by its area, and an unpainted number scores 0. If every number is painted, the time left adds up to 200 more, scaled by your accuracy, so speed only pays when the colors are right. When the portrait locks in, the score pops up over it, arcade style: your color match counting up to its percentage, a rating out of five stars (one star from 30%, two from 50%, three from 65%, four from 78%, five from 88%) and a flashing **New best!** when you beat your score. Close it with × to look at your portrait. **Analyze** opens the details below: the points, your portrait beside the colors to match and the photo, and every number from furthest off to closest with what was wrong (such as "too light by 0.6 value, too warm") and the recipe its color was mixed from. Your best score for each portrait, level and palette is kept in your browser.
 
-### Painting studio
+### Studio
 
 The fourth tab is a paper to paint on, with the studio's own paints and mixing model. The paper fills the screen; one strip of small icons holds every tool, at the bottom on a phone and down the left on a wider screen. A tool's options, the paints, the reference, the canvas and the zoom open as small sheets over the paper and close when you paint. On a phone the page header and tabs step aside while you paint; the first icon on the strip leads back.
 
@@ -159,6 +159,6 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `js/palette.js`: the paints part of the Colors and paints drawer
 - `js/subjects.js`: the generated portraits for the game (a planar head painted after seven masters)
 - `js/game.js`: the Paint by numbers game
-- `js/painting.js`: the Painting studio
+- `js/painting.js`: the Studio tab
 
 Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html). The spectral data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) (MIT license).
