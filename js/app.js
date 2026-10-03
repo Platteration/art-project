@@ -27,8 +27,8 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn'), game: $('tabGameBtn') },
-    tabPanels: { study: $('tab-study'), check: $('tab-check'), game: $('tab-game') },
+    tabs: { study: $('tabStudyBtn'), check: $('tabCheckBtn'), game: $('tabGameBtn'), paint: $('tabPaintBtn') },
+    tabPanels: { study: $('tab-study'), check: $('tab-check'), game: $('tab-game'), paint: $('tab-paint') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -2042,7 +2042,7 @@
     if (name === 'check' && state.art.dirty) runCheck();
     // the game has its own board and controls: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
-    if (name === 'game') els.loupe.hidden = true;
+    if (name === 'game' || name === 'paint') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
   }
@@ -2462,6 +2462,7 @@
     prepareAndRun(true);
     if (location.hash === '#check') switchTab('check');
     if (location.hash === '#game') switchTab('game');
+    if (location.hash === '#paint') switchTab('paint');
   }
 
   const redrawHist = () => drawHistogram();
