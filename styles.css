@@ -330,16 +330,17 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   top: 0;
   pointer-events: none;
 }
-.tool-line .view, .tool-measure .view, .tool-plumb .view, .tool-loomis .view { cursor: crosshair; touch-action: none; }
+.tool-line .view, .tool-measure .view, .tool-plumb .view { cursor: crosshair; touch-action: none; }
 .tool-plumb .view.on-ring { cursor: grab; }
 .tool-plumb .view.is-dragging { cursor: grabbing; }
 
 /* ---- Tabs: three big buttons ---- */
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 10px;
 }
+.tab { grid-column: span 2; }
 .tab {
   appearance: none;
   display: flex;
@@ -364,7 +365,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 6px var(--shadow); }
 @media (max-width: 640px) {
-  .tabs { gap: 8px; }
+  .tabs { gap: 8px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tab { grid-column: span 2; }
+  .tab:nth-child(n+4) { grid-column: span 3; }
   .tab { flex-direction: column; gap: 6px; min-height: 76px; padding: 10px 4px; font-size: 0.78rem; }
   .tab-icon { width: 24px; height: 24px; }
 }
@@ -435,16 +438,13 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   border: 1px solid var(--line);
   border-radius: var(--r);
 }
-.tool-line .tool-options, .tool-measure .tool-options, .tool-plumb .tool-options, .tool-loomis .tool-options, .tool-none .tool-options { display: grid; }
+.tool-line .tool-options, .tool-measure .tool-options, .tool-plumb .tool-options, .tool-none .tool-options { display: grid; }
 .tool-none .view { cursor: default; }
 .tool-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tool-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .tool-hint { margin: 0; font-size: 0.8rem; color: var(--muted); }
-.line-tools, .measure-tools, .plumb-tools, .loomis-tools { display: none; }
+.line-tools, .measure-tools, .plumb-tools { display: none; }
 .tool-line .line-tools, .tool-measure .measure-tools, .tool-plumb .plumb-tools { display: flex; }
-.tool-loomis .loomis-tools { display: grid; gap: 8px; }
-.loomis-prompt { margin: 0; min-height: 2.7em; font: 600 0.95rem/1.35 var(--display); }
-.loomis-acts { display: flex; flex-wrap: wrap; gap: 6px; }
 .canvas-unit { display: flex; align-items: center; gap: 6px; }
 .canvas-unit input {
   width: 5.5em;
@@ -752,7 +752,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 
 /* ---- Paint by numbers ---- */
 .tab-game .rail, .tab-game .toolstrip, .tab-game .tool-options,
-.tab-help .rail, .tab-help .toolstrip, .tab-help .tool-options { display: none !important; }
+.tab-help .rail, .tab-help .toolstrip, .tab-help .tool-options,
+.tab-loomis .rail, .tab-loomis .toolstrip, .tab-loomis .tool-options { display: none !important; }
 @media (min-width: 960px) { .tab-game .layout, .tab-help .layout { grid-template-columns: minmax(0, 1fr); } }
 
 .game-title { font: 700 1.6rem/1.1 var(--display); letter-spacing: -0.01em; text-transform: none; }
@@ -1344,8 +1345,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
    paints, the reference, the canvas and the zoom open as small sheets over the paper. Everything
    here is named ps-, so nothing meets the rest of the page. */
 .tab-paint .rail, .tab-paint .toolstrip, .tab-paint .tool-options { display: none !important; }
-.tab-paint { overflow: hidden; }
-.tab-paint .app { padding-bottom: 0; }
+.tab-paint, .tab-loomis { overflow: hidden; }
+.tab-paint .app, .tab-loomis .app { padding-bottom: 0; }
 .ps { --paper: #f3eee2; position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 20; display: grid; grid-template-rows: minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; background: var(--well); touch-action: manipulation; }
 .ps, .ps * { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 .ps button, .ps input, .ps select { touch-action: manipulation; }
@@ -1440,7 +1441,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 }
 /* phones: the studio fills the screen, so the header and tabs step aside and the strip has a way back */
 @media (max-width: 759px) {
-  .tab-paint .topbar, .tab-paint .tabs { display: none; }
+  .tab-paint .topbar, .tab-paint .tabs, .tab-loomis .topbar, .tab-loomis .tabs { display: none; }
   .ps-exit { display: grid; }
 }
 @media (max-width: 480px) { .ps-strip { gap: 2px; padding-inline: 4px; } .ps-ic svg { width: 22px; height: 22px; } .ps-sep { margin: 0; } .ps-ic .ps-sub { right: 0; } }
@@ -1478,4 +1479,20 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .help-part { grid-template-columns: minmax(260px, 1fr) minmax(0, 1.4fr); }
   .help-shots { flex-wrap: wrap; overflow: visible; }
   .phone { flex: 0 0 180px; }
+}
+
+/* ---- Loomis head: the photo fills the stage, a card asks for one feature at a time ---- */
+.lh-wrap { position: relative; box-shadow: 0 3px 14px rgba(0, 0, 0, 0.4); background: #222; }
+.lh-wrap > canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#lh-overlay { touch-action: none; cursor: crosshair; }
+.lh-card { position: absolute; left: 50%; top: 12px; translate: -50% 0; z-index: 4; width: min(440px, calc(100% - 24px)); display: grid; gap: 6px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
+.lh-step { margin: 0; font: 600 0.68rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.lh-ask { margin: 0; font: 600 1rem/1.35 var(--display); }
+.lh-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.lh .ps-ic[aria-pressed="true"] { background: none; color: var(--ink); border-color: var(--line); }
+.lh .ps-ic[aria-pressed="false"] { opacity: 0.55; }
+.lh label.ps-ic { cursor: pointer; }
+@media (min-width: 760px) {
+  .lh-card { left: calc(50% + 44px); }
+  .lh .ps-stage { padding: 18px 88px; }
 }

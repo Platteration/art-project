@@ -95,8 +95,9 @@
    * it fills the window below the tabs, which stay in view to leave by.
    */
   let active = false;
-  function layout() {
-    if (!active) return;
+  // pins an element to the screen the studio's way: the whole visual viewport on a phone, the
+  // window below the tabs on a wide screen. Shared with the Loomis head tab.
+  function pin(el) {
     const vv = window.visualViewport;
     let W = window.innerWidth, H = window.innerHeight, left = 0, top = 0;
     if (vv && Math.abs(vv.scale - 1) < 0.02) { W = vv.width; H = vv.height; left = vv.offsetLeft; top = vv.offsetTop; }
@@ -108,12 +109,16 @@
     if (matchMedia('(min-width: 760px)').matches) {
       const tabs = document.querySelector('.tabs').getBoundingClientRect();
       const inset = Math.max(0, Math.round(tabs.bottom + 14 - top));
-      root.style.left = `${Math.round(tabs.left)}px`; root.style.top = `${Math.round(top + inset)}px`;
-      root.style.width = `${Math.round(tabs.width)}px`; root.style.height = `${Math.max(240, Math.round(H - inset - 16))}px`;
+      el.style.left = `${Math.round(tabs.left)}px`; el.style.top = `${Math.round(top + inset)}px`;
+      el.style.width = `${Math.round(tabs.width)}px`; el.style.height = `${Math.max(240, Math.round(H - inset - 16))}px`;
     } else {
-      root.style.left = `${left}px`; root.style.top = `${top}px`;
-      root.style.width = `${W}px`; root.style.height = `${Math.max(240, H)}px`;
+      el.style.left = `${left}px`; el.style.top = `${top}px`;
+      el.style.width = `${W}px`; el.style.height = `${Math.max(240, H)}px`;
     }
+  }
+  function layout() {
+    if (!active) return;
+    pin(root);
     fit();
   }
   window.addEventListener('resize', layout);
@@ -722,5 +727,5 @@
     const e = Subjects.entry(ref.id), picture = Subjects.picture(ref.id, 1);
     return { kind: 'painting', id: ref.id, picture, width: picture.width, height: picture.height, title: `${e.title}, after ${Subjects.painterOf(ref.id)}` };
   }
-  window.PaintStudio = { composite, reference, state, saveNow, ready: () => ready };
+  window.PaintStudio = { composite, reference, state, saveNow, ready: () => ready, pin };
 })();

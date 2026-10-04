@@ -27,8 +27,8 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), paint: $('tabPaintBtn'), game: $('tabGameBtn'), help: $('tabHelpBtn') },
-    tabPanels: { study: $('tab-study'), paint: $('tab-paint'), game: $('tab-game'), help: $('tab-help') },
+    tabs: { study: $('tabStudyBtn'), loomis: $('tabLoomisBtn'), paint: $('tabPaintBtn'), game: $('tabGameBtn'), help: $('tabHelpBtn') },
+    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), paint: $('tab-paint'), game: $('tab-game'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -768,13 +768,6 @@
         return;
       }
       const p = state.dragging;
-      if (p && p.canvas === canvas && p.loomis) {
-        const pt = pointOn(canvas, e);
-        p.x = clamp01(pt.x); p.y = clamp01(pt.y);
-        Loomis.drag(p.x, p.y);
-        loupeAt(canvas, p.x, p.y, e.pointerType);
-        return;
-      }
       if (p && p.canvas === canvas) {
         const pt = pointOn(canvas, e);
         p.far = p.far || Math.hypot(e.clientX - p.downX, e.clientY - p.downY) >= tapSlop(e);
@@ -810,17 +803,6 @@
         const pt = pointOn(canvas, e);
         state.drawing = { canvas, kind: state.tool, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, color: state.lineColor };
         showLoupeFor(canvas, e);
-        return;
-      }
-      if (state.tool === 'loomis' && window.Loomis) {
-        if (!canvas.width) return;
-        e.preventDefault();
-        releaseFocus();
-        canvas.setPointerCapture(e.pointerId);
-        const pt = pointOn(canvas, e);
-        state.dragging = { canvas, loomis: true, x: pt.x, y: pt.y };
-        Loomis.place(clamp01(pt.x), clamp01(pt.y));
-        loupeAt(canvas, pt.x, pt.y, e.pointerType);
         return;
       }
       if (state.tool === 'plumb') {
@@ -876,12 +858,6 @@
         return;
       }
       const p = state.dragging;
-      if (p && p.canvas === canvas && p.loomis) {
-        state.dragging = null;
-        Loomis.release();
-        if (e.pointerType === 'touch') els.loupe.hidden = true;
-        return;
-      }
       if (p && p.canvas === canvas) {
         state.dragging = null;
         canvas.classList.remove('is-dragging');
@@ -1347,7 +1323,7 @@
 
   function setTool(tool) {
     state.tool = tool;
-    ['line', 'measure', 'plumb', 'loomis', 'none'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
+    ['line', 'measure', 'plumb', 'none'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
     if (!magnifying()) els.loupe.hidden = true;
     updateToolHint();
     updateToolbar();
@@ -1932,7 +1908,6 @@
     line: 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.',
     measure: 'Choose a unit you can see on the sitter, such as eye line to chin, and drag across it first: it becomes 1 U. Then drag across any other length to compare it with the unit. Hold Shift to snap to 15°.',
     plumb: 'Click an image to drop a plumb line and a level through that point, on every image, and see what lines up with it. Drag a ring to move it; click a ring to remove it.',
-    loomis: 'Mark the eyes, brows, nose and mouth one at a time, and a Loomis head is fitted over the face: the ball, the flat side, the centre line and the lines for the brow, eyes, nose and mouth. Then draw it on your paper.',
   };
 
   function updateToolHint() {
@@ -2564,6 +2539,7 @@
     if (location.hash === '#game') switchTab('game');
     if (location.hash === '#paint') switchTab('paint');
     if (location.hash === '#help') switchTab('help');
+    if (location.hash === '#loomis') switchTab('loomis');
   }
 
   const redrawHist = () => drawHistogram();

@@ -25,6 +25,7 @@
 
   <div class="tabs" role="tablist" aria-label="Mode">
     <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span>Study the photo</span></button>
+    <button type="button" role="tab" class="tab" id="tabLoomisBtn" aria-selected="false" aria-controls="tab-loomis" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9.5" r="6.5"/><path d="M5.5 9.5h13M12 3v18M7.5 14.5 9 20h6l1.5-5.5"/><path d="M8.5 11.5h2M13.5 11.5h2"/></svg><span>Loomis head</span></button>
     <button type="button" role="tab" class="tab" id="tabPaintBtn" aria-selected="false" aria-controls="tab-paint" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span>Studio</span></button>
     <button type="button" role="tab" class="tab" id="tabGameBtn" aria-selected="false" aria-controls="tab-game" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span>Paint by numbers</span></button>
     <button type="button" role="tab" class="tab" id="tabHelpBtn" aria-selected="false" aria-controls="tab-help" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.5v.4"/><circle cx="12" cy="17" r="1" fill="currentColor"/></svg><span>How to use</span></button>
@@ -238,7 +239,6 @@
       <button type="button" class="tool-btn" data-tool="line" aria-pressed="false" title="Draw lines"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19 20 5"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="20" cy="5" r="1.8" fill="currentColor"/></svg><span class="tool-name">Lines</span></button>
       <button type="button" class="tool-btn" data-tool="measure" aria-pressed="false" title="Measure in units"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg><span class="tool-name">Measure</span></button>
       <button type="button" class="tool-btn" data-tool="plumb" aria-pressed="false" title="Plumb lines and levels"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M3 15h18" stroke-dasharray="2.5 2"/><path d="M12 11c-2.2 2.4-3 4-3 5.5a3 3 0 0 0 6 0c0-1.5-.8-3.1-3-5.5z" fill="currentColor"/></svg><span class="tool-name">Plumb</span></button>
-      <button type="button" class="tool-btn" data-tool="loomis" aria-pressed="false" title="Loomis head: mark the features, get the construction"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9.5" r="6.5"/><path d="M5.5 9.5h13M12 3v18M7.5 14.5 9 20h6l1.5-5.5"/><path d="M8.5 11.5h2M13.5 11.5h2"/></svg><span class="tool-name">Loomis</span></button>
       <span class="tool-sep" aria-hidden="true"></span>
       <button type="button" class="tool-btn" id="gridBtn" aria-label="Grid: off" title="Grid: off, 3 × 3, 4 × 4"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg><span class="tool-name">Grid</span><span class="tool-badge" id="gridBadge" hidden></span></button>
     </nav>
@@ -273,16 +273,6 @@
         <div class="tool-group plumb-tools">
           <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
           <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
-        </div>
-        <div class="tool-group loomis-tools">
-          <p class="loomis-prompt" id="loomisPrompt" aria-live="polite"></p>
-          <div class="loomis-acts">
-            <button type="button" class="btn btn-small btn-primary" id="loomisLock" disabled>Lock in</button>
-            <button type="button" class="btn btn-small" id="loomisBack" disabled>Back</button>
-            <button type="button" class="btn btn-small" id="loomisReset" disabled>Start over</button>
-            <button type="button" class="btn btn-small" id="loomisShow" hidden>Hide the head</button>
-            <button type="button" class="btn btn-small" id="loomisToStudio" hidden>Draw it in the Studio</button>
-          </div>
         </div>
         <p class="tool-hint" id="toolHint"></p>
       </div>
@@ -367,6 +357,57 @@
             </figure>
           </div>
         </section>
+      </section>
+
+      <section class="tabpanel" id="tab-loomis" role="tabpanel" aria-labelledby="tabLoomisBtn" hidden>
+        <div class="ps lh" id="lh-root">
+          <div class="ps-stage" id="lh-stage">
+            <div class="lh-wrap" id="lh-wrap">
+              <canvas id="lh-photo" aria-hidden="true"></canvas>
+              <canvas id="lh-overlay" aria-label="The photo: tap the feature asked for"></canvas>
+            </div>
+            <div class="lh-card" id="lh-card">
+              <p class="lh-step" id="lh-stepLabel">1 of 8</p>
+              <p class="lh-ask" id="lh-ask"></p>
+              <div class="lh-acts">
+                <button type="button" class="btn btn-primary" id="lh-lock" disabled>Lock in</button>
+                <button type="button" class="btn" id="lh-skip" hidden>Skip</button>
+                <button type="button" class="btn" id="lh-back" disabled>Back</button>
+                <button type="button" class="btn btn-primary" id="lh-cardStudio" hidden>Draw it in the Studio</button>
+              </div>
+            </div>
+            <section class="ps-sheet ps-sheet-small" id="lh-adjustSheet" hidden aria-label="Adjust the head">
+              <h2>Adjust the head <button type="button" class="ps-x" data-lh-close aria-label="Close">×</button></h2>
+              <div class="ps-row"><span class="ps-label">Turn</span><output id="lh-turnOut">0°</output></div>
+              <input type="range" id="lh-turn" min="-90" max="90" step="1" value="0" aria-label="Turn the head left or right">
+              <div class="ps-row"><span class="ps-label">Nod</span><output id="lh-nodOut">0°</output></div>
+              <input type="range" id="lh-nod" min="-45" max="45" step="1" value="0" aria-label="Nod the head up or down">
+              <div class="ps-row"><span class="ps-label">Tilt</span><output id="lh-tiltOut">0°</output></div>
+              <input type="range" id="lh-tilt" min="-45" max="45" step="1" value="0" aria-label="Tilt the head">
+              <div class="ps-row"><span class="ps-label">Size</span><output id="lh-sizeOut">100%</output></div>
+              <input type="range" id="lh-size" min="70" max="130" step="1" value="100" aria-label="Size of the ball">
+              <div class="ps-row"><span class="ps-label">Across</span><output id="lh-acrossOut">0</output></div>
+              <input type="range" id="lh-across" min="-15" max="15" step="0.5" value="0" aria-label="Move left or right">
+              <div class="ps-row"><span class="ps-label">Up and down</span><output id="lh-updownOut">0</output></div>
+              <input type="range" id="lh-updown" min="-15" max="15" step="0.5" value="0" aria-label="Move up or down">
+              <div class="ps-row"><span class="ps-label">Face length</span><output id="lh-lengthOut">100%</output></div>
+              <input type="range" id="lh-length" min="75" max="130" step="1" value="100" aria-label="Face length">
+              <div class="ps-row"><button type="button" class="btn" id="lh-refit">Back to the fit</button><p class="hint">Moving a dot refits the head and resets these.</p></div>
+            </section>
+          </div>
+          <nav class="ps-strip" aria-label="Loomis head tools">
+            <button type="button" class="ps-ic ps-exit" id="lh-exit" title="Leave" aria-label="Leave the Loomis head"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <label class="ps-ic" for="file" title="Load a photo" aria-label="Load a photo"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg></label>
+            <span class="ps-sep"></span>
+            <button type="button" class="ps-ic" id="lh-undo" title="Back one mark" aria-label="Back one mark" disabled><svg viewBox="0 0 24 24"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-reset" title="Start over" aria-label="Start over" disabled><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-show" title="Show or hide the head" aria-label="Show or hide the head" aria-pressed="true" disabled><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-adjust" title="Adjust the head" aria-label="Adjust the head" aria-expanded="false" disabled><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="7" cy="17" r="2" fill="currentColor"/></svg></button>
+            <span class="ps-sep"></span>
+            <button type="button" class="ps-ic" id="lh-studio" title="Draw it in the Studio" aria-label="Draw it in the Studio" disabled><svg viewBox="0 0 24 24"><path d="M5 19l1-4L16 5l3 3L9 18l-4 1z"/><path d="M14 7l3 3"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-save" title="Save as PNG" aria-label="Save as PNG" disabled><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 19h16"/></svg></button>
+          </nav>
+        </div>
       </section>
 
       <section class="tabpanel" id="tab-paint" role="tabpanel" aria-labelledby="tabPaintBtn" hidden>
@@ -748,7 +789,7 @@
             <ol>
               <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
               <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
-              <li>The big buttons are the tabs: <strong>Study the photo</strong>, <strong>Studio</strong>, <strong>Paint by numbers</strong>, and this guide.</li>
+              <li>The big buttons are the tabs: <strong>Study the photo</strong>, <strong>Loomis head</strong>, <strong>Studio</strong>, <strong>Paint by numbers</strong>, and this guide.</li>
             </ol>
           </div>
           <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo and the four tabs" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
@@ -780,7 +821,6 @@
               <li><strong>Lines</strong> draws straight lines, like a line through both eyes. They show on all three pictures.</li>
               <li><strong>Measure</strong> compares lengths. Make one line the unit, and every other line says how many units it is.</li>
               <li><strong>Plumb</strong> drops a straight-down line and a level line through a point, to see what lines up.</li>
-              <li><strong>Loomis</strong> fits a Loomis head over the face from six taps. See below.</li>
               <li><strong>Grid</strong> lays a 3 × 3 or 4 × 4 grid over the picture, for drawing it square by square.</li>
             </ol>
           </div>
@@ -789,18 +829,19 @@
 
         <section class="help-part" id="help-loomis">
           <div class="help-text">
-            <h3>The Loomis head</h3>
-            <p>Artists start a head with a ball and a few lines, the way Andrew Loomis taught. This tool fits that construction over any face so you can see where the lines go, then draw them yourself.</p>
+            <h3>Loomis head</h3>
+            <p>Artists start a head with a ball and a few lines, the way Andrew Loomis taught. This tab fits that construction over any face so you can see where the lines go, then draw them yourself.</p>
             <ol>
-              <li>Tap the <strong>Loomis</strong> tool. It asks for one feature at a time: each eye, each eyebrow, the bottom of the nose, the middle of the mouth.</li>
-              <li>Tap the feature on the photo, then press <strong>Lock in</strong>. <strong>Back</strong> undoes the last one.</li>
-              <li>After the last one, the head appears: the <strong>ball</strong> (red), the <strong>flat side</strong>, the <strong>centre line</strong> and <strong>brow line</strong> (blue), and the <strong>eye, nose, mouth and chin lines</strong> (yellow). Lines on the far side of the head are faint and dashed. Drag a dot to move it.</li>
-              <li>Draw them on your paper in that order, or press <strong>Draw it in the Studio</strong> to get them in pencil on the Studio's underdrawing.</li>
+              <li>The card asks for one feature at a time: each eye, each eyebrow, the bottom of the nose, the middle of the mouth, the bottom of the chin and the top of the forehead. Tap it on the photo, then press <strong>Lock in</strong>. <strong>Back</strong> undoes the last one. Eyebrows and forehead can be skipped.</li>
+              <li>After the last one, the head appears: the <strong>ball</strong> (red), the <strong>flat side</strong>, the <strong>centre line</strong> and <strong>brow line</strong> (blue), and the <strong>eye, nose, mouth and chin lines</strong> (yellow). Lines on the far side of the head are faint and dashed.</li>
+              <li>Drag a dot to move a mark, or open <strong>Adjust</strong> on the strip to turn, nod, tilt, size and move the head, or change the face length, with sliders.</li>
+              <li>Draw it on your paper in order, or press <strong>Draw it in the Studio</strong> to get it in pencil on the Studio's underdrawing. The head also shows on the Study tab's pictures.</li>
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="Marking the features: two eyes locked in, the prompt asking for the left eyebrow" loading="lazy"><figcaption>Marking the features</figcaption></figure>
-            <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face: ball, side plane, centre and brow lines, eye, nose and mouth lines" loading="lazy"><figcaption>The head over the face</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="The Loomis head tab: the photo fills the screen and a card asks for the left eyebrow" loading="lazy"><figcaption>Marking the features</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face: ball, side plane, centre and brow lines, eye, nose, mouth and chin lines" loading="lazy"><figcaption>The head over the face</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-adjust.jpg" alt="The Adjust sheet with sliders for turn, nod, tilt, size, position and face length" loading="lazy"><figcaption>Dialing it in</figcaption></figure>
           </div>
         </section>
 
