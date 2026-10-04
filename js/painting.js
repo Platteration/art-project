@@ -313,22 +313,24 @@
   $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; });
   $('clear').addEventListener('click', () => { useLayer(paper); snapshot(); blank(); closeSheets(); });
   $('sketchClear').addEventListener('click', () => { useLayer(sketch); snapshot(); blank(); });
-  // The grid, lines, measures and plumb lines from the Study tab, laid onto the underdrawing. They
-  // were drawn over the reference, so they are fitted to the paper the way the reference would be:
-  // as large as fits, centred.
+  // The grid, lines, measures and plumb lines from the Study tab, drawn on the underdrawing in
+  // pencil, with the underdrawing brush as it is set. They were drawn over the reference, so they
+  // are fitted to the paper the way the reference would be: as large as fits, centred.
   $('sketchFromStudy').addEventListener('click', () => {
-    const prep = Studio.prep();
+    const prep = Studio.prep(), segs = Studio.marks();
     if (!prep) return;
+    if (!segs.length) { Studio.toast('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); return; }
     const k = Math.min(paper.width / prep.w, paper.height / prep.h);
-    const w = Math.round(prep.w * k), h = Math.round(prep.h * k);
-    const marks = Studio.marksLayer(w, h);
-    if (!marks) { Studio.toast('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); return; }
+    const w = prep.w * k, h = prep.h * k, ox = (paper.width - w) / 2, oy = (paper.height - h) / 2;
     useLayer(sketch); snapshot();
-    g.drawImage(marks, Math.round((paper.width - w) / 2), Math.round((paper.height - h) / 2));
+    const was = state.tool;
+    state.tool = 'sketch';
+    segs.forEach(([x1, y1, x2, y2]) => segment({ x: ox + x1 * w, y: oy + y1 * h }, { x: ox + x2 * w, y: oy + y2 * h }, 0.5));
+    state.tool = was;
     showSketch(true);
     state.lastLayer = 'sketch';
     closeSheets();
-    Studio.toast('The Study lines are on the underdrawing');
+    Studio.toast('The Study lines are on the underdrawing, in pencil');
   });
   function showSketch(on) {
     wrap.classList.toggle('ps-no-sketch', !on);

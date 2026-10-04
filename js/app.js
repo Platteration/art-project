@@ -2454,18 +2454,19 @@
   }
 
   // What palette.js needs from the page
-  // The grid, lines, measures and plumb lines drawn over the reference, as a transparent layer
-  // of the given size, for the Studio's underdrawing. Null when nothing has been drawn.
-  function marksLayer(W, H) {
-    if (!state.grid && !state.lines.length && !state.measures.length && !state.plumbs.length) return null;
-    const layer = document.createElement('canvas');
-    layer.width = W; layer.height = H;
-    drawOverlayContent(layer.getContext('2d'), W, H, Math.max(1, Math.max(W, H) / 500), null);
-    return layer;
+  // The grid, lines, measures and plumb lines drawn over the reference, as straight segments in
+  // image fractions (0-1), for the Studio to draw in pencil on its underdrawing. Grid lines and plumb
+  // lines run edge to edge; a plumb point's horizontal is its level.
+  function marks() {
+    const segs = [];
+    if (state.grid) for (let k = 1; k < state.grid; k++) { const t = k / state.grid; segs.push([t, 0, t, 1], [0, t, 1, t]); }
+    state.plumbs.forEach((p) => segs.push([p.x, 0, p.x, 1], [0, p.y, 1, p.y]));
+    state.lines.concat(state.measures).forEach((l) => segs.push([l.x1, l.y1, l.x2, l.y2]));
+    return segs;
   }
 
   window.Studio = {
-    marksLayer,
+    marks,
     result: () => state.result,
     source: () => state.source,
     prep: () => state.prep,
