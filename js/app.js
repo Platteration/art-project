@@ -2454,7 +2454,18 @@
   }
 
   // What palette.js needs from the page
+  // The grid, lines, measures and plumb lines drawn over the reference, as a transparent layer
+  // of the given size, for the Studio's underdrawing. Null when nothing has been drawn.
+  function marksLayer(W, H) {
+    if (!state.grid && !state.lines.length && !state.measures.length && !state.plumbs.length) return null;
+    const layer = document.createElement('canvas');
+    layer.width = W; layer.height = H;
+    drawOverlayContent(layer.getContext('2d'), W, H, Math.max(1, Math.max(W, H) / 500), null);
+    return layer;
+  }
+
   window.Studio = {
+    marksLayer,
     result: () => state.result,
     source: () => state.source,
     prep: () => state.prep,

@@ -313,6 +313,23 @@
   $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; });
   $('clear').addEventListener('click', () => { useLayer(paper); snapshot(); blank(); closeSheets(); });
   $('sketchClear').addEventListener('click', () => { useLayer(sketch); snapshot(); blank(); });
+  // The grid, lines, measures and plumb lines from the Study tab, laid onto the underdrawing. They
+  // were drawn over the reference, so they are fitted to the paper the way the reference would be:
+  // as large as fits, centred.
+  $('sketchFromStudy').addEventListener('click', () => {
+    const prep = Studio.prep();
+    if (!prep) return;
+    const k = Math.min(paper.width / prep.w, paper.height / prep.h);
+    const w = Math.round(prep.w * k), h = Math.round(prep.h * k);
+    const marks = Studio.marksLayer(w, h);
+    if (!marks) { Studio.toast('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); return; }
+    useLayer(sketch); snapshot();
+    g.drawImage(marks, Math.round((paper.width - w) / 2), Math.round((paper.height - h) / 2));
+    showSketch(true);
+    state.lastLayer = 'sketch';
+    closeSheets();
+    Studio.toast('The Study lines are on the underdrawing');
+  });
   function showSketch(on) {
     wrap.classList.toggle('ps-no-sketch', !on);
     q('[data-sketch-show]').forEach((x) => x.setAttribute('aria-pressed', String(!!+x.dataset.sketchShow === on)));
