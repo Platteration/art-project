@@ -27,8 +27,8 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), paint: $('tabPaintBtn'), game: $('tabGameBtn') },
-    tabPanels: { study: $('tab-study'), paint: $('tab-paint'), game: $('tab-game') },
+    tabs: { study: $('tabStudyBtn'), paint: $('tabPaintBtn'), game: $('tabGameBtn'), help: $('tabHelpBtn') },
+    tabPanels: { study: $('tab-study'), paint: $('tab-paint'), game: $('tab-game'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -2053,7 +2053,8 @@
     if (checking() && state.art.dirty) runCheck();
     // the game has its own board and controls: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
-    if (name === 'game' || name === 'paint') els.loupe.hidden = true;
+    document.body.classList.toggle('tab-help', name === 'help');
+    if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
   }
@@ -2441,6 +2442,14 @@
 
   // ---- Start --------------------------------------------------------------
 
+  // the guide's Try it buttons lead to the part they describe
+  document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
+    const go = b.dataset.go;
+    switchTab(go === 'check' ? 'study' : go);
+    if (go === 'check') { els.drawers.check.open = true; els.drawers.check.scrollIntoView({ block: 'start' }); }
+    else window.scrollTo(0, 0);
+  }));
+
   // ---- Simple and advanced ------------------------------------------------
 
   // Simple shows the few controls a beginner needs and presets for the rest; Advanced shows every
@@ -2523,6 +2532,7 @@
     if (location.hash === '#check') { switchTab('study'); els.drawers.check.open = true; }
     if (location.hash === '#game') switchTab('game');
     if (location.hash === '#paint') switchTab('paint');
+    if (location.hash === '#help') switchTab('help');
   }
 
   const redrawHist = () => drawHistogram();

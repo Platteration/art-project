@@ -27,6 +27,7 @@
     <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span>Study the photo</span></button>
     <button type="button" role="tab" class="tab" id="tabPaintBtn" aria-selected="false" aria-controls="tab-paint" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span>Studio</span></button>
     <button type="button" role="tab" class="tab" id="tabGameBtn" aria-selected="false" aria-controls="tab-game" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span>Paint by numbers</span></button>
+    <button type="button" role="tab" class="tab" id="tabHelpBtn" aria-selected="false" aria-controls="tab-help" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.5v.4"/><circle cx="12" cy="17" r="1" fill="currentColor"/></svg><span>How to use</span></button>
   </div>
 
   <div class="layout">
@@ -716,6 +717,149 @@
             <ol class="game-zones" id="gameZones"></ol>
           </div>
         </div>
+      </section>
+
+      <section class="tabpanel help" id="tab-help" role="tabpanel" aria-labelledby="tabHelpBtn" hidden>
+        <div class="help-intro">
+          <h2 class="help-title">How to use Portrait Value Studio</h2>
+          <p class="help-lede">Everything here runs in your browser. Your photos and paintings stay on your device. Here is the whole app, one part at a time, with pictures from a phone.</p>
+          <ol class="help-steps">
+            <li><strong>Load a photo.</strong> Or keep the sample portrait. <button type="button" class="btn btn-small" data-go="study">Go to Study</button></li>
+            <li><strong>Look at the shapes.</strong> See where the darks, middles and lights are, and which big colors there are.</li>
+            <li><strong>Paint it in the Studio.</strong> Copy the lines, mix the colors, paint. <button type="button" class="btn btn-small" data-go="paint">Go to Studio</button></li>
+            <li><strong>Check how close you got.</strong> Score your painting shape by shape. <button type="button" class="btn btn-small" data-go="check">Check a painting</button></li>
+          </ol>
+        </div>
+
+        <section class="help-part" id="help-start">
+          <div class="help-text">
+            <h3>Getting around</h3>
+            <ol>
+              <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
+              <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
+              <li>The big buttons are the tabs: <strong>Study the photo</strong>, <strong>Studio</strong>, <strong>Paint by numbers</strong>, and this guide.</li>
+            </ol>
+          </div>
+          <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo and the four tabs" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
+        </section>
+
+        <section class="help-part" id="help-study">
+          <div class="help-text">
+            <h3>Study the photo</h3>
+            <p>The app makes two pictures from the photo.</p>
+            <ol>
+              <li><strong>Dark, middle, light</strong> turns the photo into three grays. Paint these three shapes first and a portrait already looks right.</li>
+              <li><strong>Big color shapes</strong> splits each gray into a few colors that are really in the photo.</li>
+              <li>Use <strong>All three / Photo / Values / Shapes</strong> to see one picture big. <strong>Save PNG</strong> keeps a picture on your device.</li>
+              <li>In <strong>Dark, middle, light</strong>, the Detail switch chooses how much to simplify. Soft keeps only the big shapes.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/studies.jpg" alt="The photo, the dark-middle-light picture and the big color shapes on a phone" loading="lazy"><figcaption>The three pictures</figcaption></figure>
+            <figure class="phone"><img src="img/help/values.jpg" alt="The Dark, middle, light drawer with the Detail switch and the three grays" loading="lazy"><figcaption>Detail and the three grays</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-tools">
+          <div class="help-text">
+            <h3>Drawing tools</h3>
+            <p>The row of tool buttons works on every picture. Tap a tool to use it. Tap it again to turn it off, so touching a picture just scrolls.</p>
+            <ol>
+              <li><strong>Magnifier</strong> shows the color under your finger. Tap to keep it in Picked colors.</li>
+              <li><strong>Lines</strong> draws straight lines, like a line through both eyes. They show on all three pictures.</li>
+              <li><strong>Measure</strong> compares lengths. Make one line the unit, and every other line says how many units it is.</li>
+              <li><strong>Plumb</strong> drops a straight-down line and a level line through a point, to see what lines up.</li>
+              <li><strong>Grid</strong> lays a 3 × 3 or 4 × 4 grid over the picture, for drawing it square by square.</li>
+            </ol>
+          </div>
+          <div class="help-shots"><figure class="phone"><img src="img/help/lines.jpg" alt="Two red lines drawn on the photo with the Lines tool: one through the eyes, one down the middle of the face" loading="lazy"><figcaption>Lines through the eyes and the middle</figcaption></figure></div>
+        </section>
+
+        <section class="help-part" id="help-colors">
+          <div class="help-text">
+            <h3>Colors and paints</h3>
+            <ol>
+              <li><strong>Colors in each value</strong> sets how many colors each of the three grays is split into. Three is a good start.</li>
+              <li><strong>Paints to use</strong> lists palettes, best match first. Each one is a small set of real paints.</li>
+              <li>Tap a palette to see a <strong>recipe for every color</strong>: which paints, and how many parts of each.</li>
+              <li>The <strong>Photo / palette</strong> switch above the big color shapes shows the picture as your paints would mix it.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/colors.jpg" alt="The Colors and paints drawer with the palettes to choose from" loading="lazy"><figcaption>Choosing a palette</figcaption></figure>
+            <figure class="phone"><img src="img/help/mixes.jpg" alt="The recipes for every color in the study, mixed from the chosen palette" loading="lazy"><figcaption>A recipe for every color</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-studio">
+          <div class="help-text">
+            <h3>Studio</h3>
+            <p>A paper to paint on. The row of icons at the bottom holds every tool. Tap an icon to open its sheet. Tap the paper to close it.</p>
+            <ol>
+              <li><strong>Brushes</strong>: the chisel, the round brush, the pencil, the underdrawing pencil and the blend brush. The underdrawing goes on its own layer under the paint. <strong>Copy the Study lines</strong> draws your lines from the Study tab onto it.</li>
+              <li><strong>Paints</strong>: tap paints to put parts into the mixing well. <strong>Lock in</strong> keeps the mix. Tap a kept mix to paint with it. The first eight are skin tones mixed from your palette.</li>
+              <li><strong>Reference</strong>: the photo floats over the paper. Drag it anywhere. Show it as the photo, the values or the shapes.</li>
+              <li><strong>Canvas</strong>: a raw, toned or gray ground, a linen or paper texture, and <strong>Save as PNG</strong>.</li>
+              <li>Then <strong>zoom</strong>, <strong>undo</strong>, <strong>turn the paper</strong> and <strong>clear</strong>. Clearing takes two taps, and Undo brings the paper back. Your painting is saved on its own and is there when you come back.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/studio.jpg" alt="The Studio on a phone: the paper with strokes on it, the reference floating in the corner and the row of tool icons at the bottom" loading="lazy"><figcaption>The paper and the tools</figcaption></figure>
+            <figure class="phone"><img src="img/help/brushes.jpg" alt="The Brushes sheet with the five brushes and the round brush's size slider" loading="lazy"><figcaption>Brushes</figcaption></figure>
+            <figure class="phone"><img src="img/help/paints.jpg" alt="The Paints sheet: the palette's paints, the mixing well with a mix in it and the kept mixes" loading="lazy"><figcaption>Paints and the mixing well</figcaption></figure>
+            <figure class="phone"><img src="img/help/reference.jpg" alt="The Reference sheet: the Study photo or a portrait, shown as the original, values or blocks" loading="lazy"><figcaption>Reference</figcaption></figure>
+            <figure class="phone"><img src="img/help/canvas.jpg" alt="The Canvas sheet: ground, texture and Save as PNG" loading="lazy"><figcaption>Canvas</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-check">
+          <div class="help-text">
+            <h3>How close did I get?</h3>
+            <p>Open the last drawer on the Study tab to score a painting against the photo.</p>
+            <ol>
+              <li><strong>Load a photo of my painting</strong>, or <strong>Use my Studio painting</strong>.</li>
+              <li>If the photo is crooked, open <strong>Line up the photo</strong> and slide it until it matches. <strong>Fix color cast</strong> takes out a yellow or blue tint from the room's light.</li>
+              <li>The <strong>Color score</strong> says how close your colors are. The <strong>light and dark score</strong> ignores color and looks only at light and dark.</li>
+              <li><strong>What to fix first</strong> lists the biggest differences, with plain notes like "too light, too warm".</li>
+              <li>The last picture shows every shape with its own score. White labels are the ones to fix first.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/check.jpg" alt="The How close did I get drawer with its buttons" loading="lazy"><figcaption>Loading a painting</figcaption></figure>
+            <figure class="phone"><img src="img/help/score.jpg" alt="The scores and the list of what to fix first" loading="lazy"><figcaption>The scores</figcaption></figure>
+            <figure class="phone"><img src="img/help/shapes.jpg" alt="Every shape labelled with how close the painting matches it" loading="lazy"><figcaption>Shape by shape</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-game">
+          <div class="help-text">
+            <h3>Paint by numbers</h3>
+            <ol>
+              <li>Choose <strong>a photo or a painting</strong>, a <strong>palette</strong>, a <strong>level</strong> and a <strong>mode</strong>. Relaxed has no timer. Then <strong>Start painting</strong>.</li>
+              <li>Tap a <strong>number</strong>, then tap <strong>paints</strong> to mix its color. Every tap adds one part. Every shape with that number fills with your mix.</li>
+              <li>The chip shows your mix. When it is spot on, it chimes. <strong>Next</strong> jumps to the next unpainted number.</li>
+              <li><strong>Lock in portrait</strong> ends the game and shows your score and stars. <strong>Analyze</strong> shows which numbers were off and the recipe that would have matched.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/game-setup.jpg" alt="The game setup: the portrait to paint, the palette, the level and the mode" loading="lazy"><figcaption>Setting up a game</figcaption></figure>
+            <figure class="phone"><img src="img/help/game-play.jpg" alt="A game in play: the numbered board, the paints, the mix for number 1 and the number buttons" loading="lazy"><figcaption>Mixing number 1</figcaption></figure>
+            <figure class="phone"><img src="img/help/game-score.jpg" alt="The score popup after locking in a portrait" loading="lazy"><figcaption>The score</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-tips">
+          <div class="help-text">
+            <h3>Good to know</h3>
+            <ul>
+              <li>Nothing is uploaded. Photos, paintings and scores stay in this browser.</li>
+              <li>The Studio saves your painting as you go. Close the tab, come back later, and it is still there.</li>
+              <li>Undo is everywhere: on the Studio strip, in the mixing well, and under the game's paints.</li>
+              <li>On a phone, the tabs hide while you paint or play. The arrow at the left of the Studio strip, or ✕ twice in a game, brings them back.</li>
+              <li>Stuck? Switch to <strong>Simple</strong> at the top of the page, and start again with the sample portrait.</li>
+            </ul>
+          </div>
+        </section>
       </section>
     </main>
   </div>

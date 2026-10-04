@@ -115,6 +115,10 @@ The score is out of 1,200. Color accuracy gives up to 1,000: each number scores 
 
 With the built-in sample, the drawer opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
 
+## How to use
+
+The fourth tab is a guide to the whole app, one part at a time, each with phone screenshots in a phone frame: getting around, the Study tab's pictures, the drawing tools, colors and paints, the Studio and its sheets, How close did I get?, Paint by numbers, and a few things good to know (nothing is uploaded, the Studio autosaves, where Undo is). It opens with the four-step path through the app, with buttons that jump to the part they describe. The screenshots are in `img/help/`, taken from the app itself at phone width.
+
 ## Simple and Advanced
 
 The switch at the top of the page chooses how much to show. **Simple**, the default, is for beginners and classrooms: the Study tab shows a Detail preset (Soft, Normal, Sharp) instead of the Simplify, Smoothing and Merge sliders, hides the value splits, gray values, the lighter-tones lean and My paints, and offers three palettes with a reason for each (Zorn, Three primaries and Rembrandt's earths). The scoring hints say what the numbers mean in plain words, with the formulas behind **Show the details**. **Advanced** shows every setting. The choice is remembered.
@@ -166,5 +170,6 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `js/subjects.js`: the generated portraits for the game (a planar head painted after seven masters)
 - `js/game.js`: the Paint by numbers game
 - `js/painting.js`: the Studio tab
+- `img/help/`: the phone screenshots the How to use tab shows
 
 Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html). The spectral data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) (MIT license).
