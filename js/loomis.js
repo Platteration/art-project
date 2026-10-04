@@ -331,12 +331,18 @@
     g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1.5 * dpr;
     g.beginPath(); g.moveTo(size * dpr / 2, 0); g.lineTo(size * dpr / 2, size * dpr); g.moveTo(0, size * dpr / 2); g.lineTo(size * dpr, size * dpr / 2); g.stroke();
     g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 1 * dpr; g.beginPath(); g.arc(size * dpr / 2, size * dpr / 2, 6 * dpr, 0, Math.PI * 2); g.stroke();
-    // above the finger, or below it near the top of the stage
+    // above the finger when there is room, else beside it, else below: never under the hand
     const st = $('stage').getBoundingClientRect(), r = overlay.getBoundingClientRect();
     const fx = r.left + x * r.width - st.left, fy = r.top + y * r.height - st.top;
-    const above = fy - 90 - size > 8;
-    loupe.style.left = `${Math.max(8, Math.min(st.width - size - 8, fx - size / 2))}px`;
-    loupe.style.top = `${above ? fy - 90 - size : fy + 60}px`;
+    let lx = fx - size / 2, ly = fy - 80 - size;
+    if (ly < 8) {
+      ly = Math.max(8, Math.min(st.height - size - 8, fy - size / 2));
+      if (fx + 70 + size < st.width - 8) lx = fx + 70;
+      else if (fx - 70 - size > 8) lx = fx - 70 - size;
+      else { lx = fx - size / 2; ly = fy + 60; }
+    }
+    loupe.style.left = `${Math.max(8, Math.min(st.width - size - 8, lx))}px`;
+    loupe.style.top = `${Math.max(8, Math.min(st.height - size - 8, ly))}px`;
     loupe.hidden = false;
   }
   function hideLoupe() { loupe.hidden = true; }
