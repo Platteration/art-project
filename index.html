@@ -361,39 +361,24 @@
 
       <section class="tabpanel" id="tab-loomis" role="tabpanel" aria-labelledby="tabLoomisBtn" hidden>
         <div class="ps lh" id="lh-root">
+          <div class="lh-card" id="lh-card">
+            <p class="lh-step" id="lh-stepLabel">1 of 8</p>
+            <p class="lh-ask" id="lh-ask"></p>
+            <p class="lh-sub" id="lh-sub"></p>
+            <div class="lh-acts">
+              <button type="button" class="btn btn-primary" id="lh-lock" disabled>Lock in</button>
+              <button type="button" class="btn btn-ghost" id="lh-skip" hidden>Skip</button>
+              <button type="button" class="btn btn-ghost" id="lh-back" disabled>Back</button>
+              <button type="button" class="btn btn-primary" id="lh-cardStudio" hidden>Draw it in the Studio</button>
+              <button type="button" class="btn btn-ghost" id="lh-refit" hidden>Back to the fit</button>
+            </div>
+          </div>
           <div class="ps-stage" id="lh-stage">
             <div class="lh-wrap" id="lh-wrap">
               <canvas id="lh-photo" aria-hidden="true"></canvas>
               <canvas id="lh-overlay" aria-label="The photo: tap the feature asked for"></canvas>
             </div>
-            <div class="lh-card" id="lh-card">
-              <p class="lh-step" id="lh-stepLabel">1 of 8</p>
-              <p class="lh-ask" id="lh-ask"></p>
-              <div class="lh-acts">
-                <button type="button" class="btn btn-primary" id="lh-lock" disabled>Lock in</button>
-                <button type="button" class="btn" id="lh-skip" hidden>Skip</button>
-                <button type="button" class="btn" id="lh-back" disabled>Back</button>
-                <button type="button" class="btn btn-primary" id="lh-cardStudio" hidden>Draw it in the Studio</button>
-              </div>
-            </div>
-            <section class="ps-sheet ps-sheet-small" id="lh-adjustSheet" hidden aria-label="Adjust the head">
-              <h2>Adjust the head <button type="button" class="ps-x" data-lh-close aria-label="Close">×</button></h2>
-              <div class="ps-row"><span class="ps-label">Turn</span><output id="lh-turnOut">0°</output></div>
-              <input type="range" id="lh-turn" min="-90" max="90" step="1" value="0" aria-label="Turn the head left or right">
-              <div class="ps-row"><span class="ps-label">Nod</span><output id="lh-nodOut">0°</output></div>
-              <input type="range" id="lh-nod" min="-45" max="45" step="1" value="0" aria-label="Nod the head up or down">
-              <div class="ps-row"><span class="ps-label">Tilt</span><output id="lh-tiltOut">0°</output></div>
-              <input type="range" id="lh-tilt" min="-45" max="45" step="1" value="0" aria-label="Tilt the head">
-              <div class="ps-row"><span class="ps-label">Size</span><output id="lh-sizeOut">100%</output></div>
-              <input type="range" id="lh-size" min="70" max="130" step="1" value="100" aria-label="Size of the ball">
-              <div class="ps-row"><span class="ps-label">Across</span><output id="lh-acrossOut">0</output></div>
-              <input type="range" id="lh-across" min="-15" max="15" step="0.5" value="0" aria-label="Move left or right">
-              <div class="ps-row"><span class="ps-label">Up and down</span><output id="lh-updownOut">0</output></div>
-              <input type="range" id="lh-updown" min="-15" max="15" step="0.5" value="0" aria-label="Move up or down">
-              <div class="ps-row"><span class="ps-label">Face length</span><output id="lh-lengthOut">100%</output></div>
-              <input type="range" id="lh-length" min="75" max="130" step="1" value="100" aria-label="Face length">
-              <div class="ps-row"><button type="button" class="btn" id="lh-refit">Back to the fit</button><p class="hint">Moving a dot refits the head and resets these.</p></div>
-            </section>
+            <div class="lh-loupe" id="lh-loupe" hidden aria-hidden="true"><canvas id="lh-loupeCanvas"></canvas></div>
           </div>
           <nav class="ps-strip" aria-label="Loomis head tools">
             <button type="button" class="ps-ic ps-exit" id="lh-exit" title="Leave" aria-label="Leave the Loomis head"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
@@ -402,7 +387,6 @@
             <button type="button" class="ps-ic" id="lh-undo" title="Back one mark" aria-label="Back one mark" disabled><svg viewBox="0 0 24 24"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
             <button type="button" class="ps-ic" id="lh-reset" title="Start over" aria-label="Start over" disabled><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/></svg></button>
             <button type="button" class="ps-ic" id="lh-show" title="Show or hide the head" aria-label="Show or hide the head" aria-pressed="true" disabled><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
-            <button type="button" class="ps-ic" id="lh-adjust" title="Adjust the head" aria-label="Adjust the head" aria-expanded="false" disabled><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="7" cy="17" r="2" fill="currentColor"/></svg></button>
             <span class="ps-sep"></span>
             <button type="button" class="ps-ic" id="lh-studio" title="Draw it in the Studio" aria-label="Draw it in the Studio" disabled><svg viewBox="0 0 24 24"><path d="M5 19l1-4L16 5l3 3L9 18l-4 1z"/><path d="M14 7l3 3"/></svg></button>
             <button type="button" class="ps-ic" id="lh-save" title="Save as PNG" aria-label="Save as PNG" disabled><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 19h16"/></svg></button>
@@ -832,16 +816,16 @@
             <h3>Loomis head</h3>
             <p>Artists start a head with a ball and a few lines, the way Andrew Loomis taught. This tab fits that construction over any face so you can see where the lines go, then draw them yourself.</p>
             <ol>
-              <li>The card asks for one feature at a time: each eye, each eyebrow, the bottom of the nose, the middle of the mouth, the bottom of the chin and the top of the forehead. Tap it on the photo, then press <strong>Lock in</strong>. <strong>Back</strong> undoes the last one. Eyebrows and forehead can be skipped.</li>
-              <li>After the last one, the head appears: the <strong>ball</strong> (red), the <strong>flat side</strong>, the <strong>centre line</strong> and <strong>brow line</strong> (blue), and the <strong>eye, nose, mouth and chin lines</strong> (yellow). Lines on the far side of the head are faint and dashed.</li>
-              <li>Drag a dot to move a mark, or open <strong>Adjust</strong> on the strip to turn, nod, tilt, size and move the head, or change the face length, with sliders.</li>
-              <li>Draw it on your paper in order, or press <strong>Draw it in the Studio</strong> to get it in pencil on the Studio's underdrawing. The head also shows on the Study tab's pictures.</li>
+              <li>The card names one feature at a time: each eye, each eyebrow, the nose, the mouth, the chin and the forehead. Tap it on the photo. A loupe shows the spot magnified, so drag until it is exact, then press <strong>Lock in</strong>. Eyebrows and forehead can be skipped.</li>
+              <li>After the last one the head appears: the <strong>ball</strong> (red), the <strong>flat side</strong>, the <strong>centre line</strong> and <strong>brow line</strong> (blue), and the <strong>eye, nose, mouth and chin lines</strong> (yellow). Lines on the far side of the head are faint and dashed.</li>
+              <li>To adjust it, drag: a dot moves that mark; the centre line turns the head; the brow or eye line nods it; the nose, mouth or chin line changes the face length; the ball's edge sizes it; anywhere else inside moves it. The <strong>arrows</strong> around the ball turn, nod and tilt it a little at a time. Hold one to keep going.</li>
+              <li>Then draw it on your paper in order, or press <strong>Draw it in the Studio</strong> to get it in pencil on the Studio's underdrawing.</li>
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="The Loomis head tab: the photo fills the screen and a card asks for the left eyebrow" loading="lazy"><figcaption>Marking the features</figcaption></figure>
-            <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face: ball, side plane, centre and brow lines, eye, nose, mouth and chin lines" loading="lazy"><figcaption>The head over the face</figcaption></figure>
-            <figure class="phone"><img src="img/help/loomis-adjust.jpg" alt="The Adjust sheet with sliders for turn, nod, tilt, size, position and face length" loading="lazy"><figcaption>Dialing it in</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="Placing a mark on the Loomis head tab: the loupe shows the eye magnified under the finger" loading="lazy"><figcaption>Placing a mark with the loupe</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face, with arrow buttons around the ball to turn, nod and tilt it" loading="lazy"><figcaption>The head and its arrows</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-adjust.jpg" alt="The head turned to the side after dragging its centre line" loading="lazy"><figcaption>Turned by dragging the centre line</figcaption></figure>
           </div>
         </section>
 

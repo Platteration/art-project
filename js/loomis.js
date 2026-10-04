@@ -25,14 +25,14 @@
   // ---- The marks, in picture fractions (0-1), and where the model has each feature -------------
   const C = 0.72, SR = Math.sqrt(1 - C * C);        // where the side plane cuts the ball, and its radius
   const STEPS = [
-    { key: 'leftEye', ask: 'Tap the middle of the eye on the LEFT of the picture.', model: [-0.4, 0.35, 0.85], weight: 1, face: true },
-    { key: 'rightEye', ask: 'Now the middle of the eye on the RIGHT.', model: [0.4, 0.35, 0.85], weight: 1, face: true },
-    { key: 'leftBrow', ask: 'The highest point of the left eyebrow.', model: [-0.4, -0.02, 0.9], weight: 0.5, optional: true },
-    { key: 'rightBrow', ask: 'The highest point of the right eyebrow.', model: [0.4, -0.02, 0.9], weight: 0.5, optional: true },
-    { key: 'nose', ask: 'The bottom of the nose, in the middle.', model: [0, 1.0, 1.0], weight: 1, face: true },
-    { key: 'mouth', ask: 'The middle of the mouth, where the lips meet.', model: [0, 1.33, 0.92], weight: 1, face: true },
-    { key: 'chin', ask: 'The bottom of the chin, in the middle.', model: [0, 2.0, 0.78], weight: 1, face: true },
-    { key: 'forehead', ask: 'The top of the forehead, where the hair starts. Skip it if you cannot see it.', model: [0, -C, SR], weight: 0.6, optional: true },
+    { key: 'leftEye', name: 'Left eye', ask: 'Tap the middle of the eye on the left of the picture.', model: [-0.4, 0.35, 0.85], weight: 1, face: true },
+    { key: 'rightEye', name: 'Right eye', ask: 'Tap the middle of the eye on the right.', model: [0.4, 0.35, 0.85], weight: 1, face: true },
+    { key: 'leftBrow', name: 'Left eyebrow', ask: 'Tap its highest point.', model: [-0.4, -0.02, 0.9], weight: 0.5, optional: true },
+    { key: 'rightBrow', name: 'Right eyebrow', ask: 'Tap its highest point.', model: [0.4, -0.02, 0.9], weight: 0.5, optional: true },
+    { key: 'nose', name: 'Nose', ask: 'Tap the bottom of the nose, in the middle.', model: [0, 1.0, 1.0], weight: 1, face: true },
+    { key: 'mouth', name: 'Mouth', ask: 'Tap the middle, where the lips meet.', model: [0, 1.33, 0.92], weight: 1, face: true },
+    { key: 'chin', name: 'Chin', ask: 'Tap the bottom of the chin, in the middle.', model: [0, 2.0, 0.78], weight: 1, face: true },
+    { key: 'forehead', name: 'Forehead', ask: 'Tap the top of the forehead, where the hair starts.', model: [0, -C, SR], weight: 0.6, optional: true },
   ];
   const NEEDED = ['leftEye', 'rightEye', 'nose', 'mouth', 'chin'];
   const state = { points: {}, step: 0, pending: null, fit: null, auto: null, shown: true, aspect: 1, moving: null };
@@ -150,7 +150,7 @@
     state.pending = null;
     state.step++;
     refit();
-    if (done()) Studio.toast('The Loomis head is over the face. Dial it in with Adjust.');
+    if (done()) Studio.toast('The head is over the face');
   }
   function skip() {
     if (done() || !current().optional) return;
@@ -167,51 +167,93 @@
     delete state.points[current().key];
     refit();
   }
-  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; closeSheet(); render(); }
+  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; render(); }
   function refit() { state.fit = fitHead(); state.auto = state.fit && { ...state.fit }; render(); }
 
-  // ---- The adjust sheet: sliders over the fitted pose ---------------------------------------------
-  const DEG = 180 / Math.PI;
-  const SLIDERS = [
-    ['turn', 'yaw', (v) => v / DEG, (f) => f.yaw * DEG, (v) => `${Math.round(v)}°`],
-    ['nod', 'pitch', (v) => v / DEG, (f) => f.pitch * DEG, (v) => `${Math.round(v)}°`],
-    ['tilt', 'roll', (v) => v / DEG, (f) => f.roll * DEG, (v) => `${Math.round(v)}°`],
-    ['size', 's', (v) => (state.auto ? state.auto.s : 0.2) * (v / 100), (f) => (state.auto ? (f.s / state.auto.s) * 100 : 100), (v) => `${Math.round(v)}%`],
-    ['across', 'tx', (v) => (state.auto ? state.auto.tx : 0.5) + v / 100, (f) => (state.auto ? (f.tx - state.auto.tx) * 100 : 0), (v) => `${v > 0 ? '+' : ''}${Math.round(v)}`],
-    ['updown', 'ty', (v) => (state.auto ? state.auto.ty : 0.5) + v / 100, (f) => (state.auto ? (f.ty - state.auto.ty) * 100 : 0), (v) => `${v > 0 ? '+' : ''}${Math.round(v)}`],
-    ['length', 'len', (v) => v / 100, (f) => f.len * 100, (v) => `${Math.round(v)}%`],
-  ];
-  SLIDERS.forEach(([id, key, toFit, fromFit, label]) => {
-    $(id).addEventListener('input', () => {
-      if (!state.fit) return;
-      state.fit[key] = toFit(+$(id).value);
-      $(id + 'Out').textContent = label(+$(id).value);
-      Studio.redraw(); drawTab();
-    });
-  });
-  function showSliders() {
-    if (!state.fit) return;
-    SLIDERS.forEach(([id, key, toFit, fromFit, label]) => { const v = fromFit(state.fit); $(id).value = v; $(id + 'Out').textContent = label(v); });
+  // ---- Adjusting the fitted head on the canvas: arrows turn, nod and tilt it; its lines drag -----
+  // What each piece of the head does when dragged: the centre line and the side plane turn the head,
+  // the brow, hairline and eye lines nod it, the face lines set the face length, the ball's edge
+  // sets its size, and anywhere else inside the head moves it.
+  const DRAGS = { centre: 'yaw', side: 'yaw', sideLine: 'yaw', brow: 'pitch', hair: 'pitch', eyes: 'pitch', nose: 'len', mouth: 'len', chin: 'len', face: 'len', jaw: 'len' };
+  const RANGE = { yaw: 0.7, pitch: 0.5, len: 0.3 };
+  const LIMITS = { yaw: [-1.5, 1.5], pitch: [-0.9, 0.9], len: [0.75, 1.3] };
+  const NUDGE = 3 / DEG_();
+  function DEG_() { return 180 / Math.PI; }
+  // the arrow buttons around the ball, in pixels for a picture W wide
+  function handles(W) {
+    const f = state.fit;
+    if (!f) return [];
+    const cx = f.tx * W, cy = f.ty * W, R = f.s * W, pad = 26 * (W / 700 + 0.6);
+    return [
+      { key: 'yaw', d: -1, x: cx - R - pad, y: cy, glyph: 'left' }, { key: 'yaw', d: 1, x: cx + R + pad, y: cy, glyph: 'right' },
+      { key: 'pitch', d: -1, x: cx - pad * 0.9, y: cy - R - pad, glyph: 'up' }, { key: 'pitch', d: 1, x: cx + pad * 0.9, y: cy - R - pad, glyph: 'down' },
+      { key: 'roll', d: -1, x: cx - R * 0.78 - pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'ccw' }, { key: 'roll', d: 1, x: cx + R * 0.78 + pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'cw' },
+    ];
   }
-  $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; showSliders(); Studio.redraw(); drawTab(); } });
-  function openSheet() { if (!state.fit) return; showSliders(); $('adjustSheet').hidden = false; $('adjust').setAttribute('aria-expanded', 'true'); }
-  function closeSheet() { $('adjustSheet').hidden = true; $('adjust').setAttribute('aria-expanded', 'false'); }
-  $('adjust').addEventListener('click', () => ($('adjustSheet').hidden ? openSheet() : closeSheet()));
-  q('[data-lh-close]').forEach((b) => b.addEventListener('click', closeSheet));
+  function nudge(key, d) {
+    if (!state.fit) return;
+    const lim = key === 'roll' ? [-1.2, 1.2] : LIMITS[key];
+    state.fit[key] = Math.max(lim[0], Math.min(lim[1], state.fit[key] + d * NUDGE));
+    Studio.redraw(); drawTab();
+  }
+  // the distance from a point to a polyline, in the same units
+  function distToPts(pts, x, y) {
+    let best = Infinity;
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+      best = Math.min(best, Math.hypot(x - (ax + t * dx), y - (ay + t * dy)));
+    }
+    return best;
+  }
+  // what is under a point (overlay pixels): a handle, a mark, a piece of the head, the ball's edge, or the inside
+  function hitTest(px, py, W) {
+    const f = state.fit, unit = W / 400;
+    if (!f || !state.shown) return null;
+    for (const h of handles(W)) if (Math.hypot(h.x - px, h.y - py) < 16 * unit) return { kind: 'handle', handle: h };
+    let best = null, bd = 14 * unit;
+    STEPS.forEach((st) => { const p = state.points[st.key]; if (!p) return; const d = Math.hypot(p.x * W - px, p.y * W * state.aspect - py); if (d < bd) { bd = d; best = { kind: 'mark', key: st.key }; } });
+    if (best) return best;
+    bd = 12 * unit;
+    projected(W).forEach((piece) => { const d = distToPts(piece.pts.filter((p) => p[2]), px, py); if (d < bd && DRAGS[piece.name]) { bd = d; best = { kind: 'line', param: DRAGS[piece.name], name: piece.name }; } });
+    if (best) return best;
+    const r = Math.hypot(px - f.tx * W, py - f.ty * W);
+    if (Math.abs(r - f.s * W) < 12 * unit) return { kind: 'ball' };
+    if (r < f.s * W * 1.9) return { kind: 'move' };
+    return null;
+  }
+  // the parameter value that brings the dragged piece closest to the pointer (a golden-section search)
+  function solve(name, param, px, py, W) {
+    const f = state.fit, lim = LIMITS[param];
+    const piece = PIECES.find((pc) => pc.name === name);
+    const score = (v) => { const g = { ...f, [param]: v }; const pts = piece.pts.map((p) => { const pt = project(p, g, piece.face); return [pt[0] * W, pt[1] * W, pt[2] >= -0.05]; }).filter((p) => p[2]); return pts.length > 1 ? distToPts(pts, px, py) : 1e9; };
+    let a = Math.max(lim[0], f[param] - RANGE[param]), b = Math.min(lim[1], f[param] + RANGE[param]);
+    const gr = (Math.sqrt(5) - 1) / 2;
+    let c = b - gr * (b - a), d = a + gr * (b - a), fc = score(c), fd = score(d);
+    for (let i = 0; i < 40; i++) {
+      if (fc < fd) { b = d; d = c; fd = fc; c = b - gr * (b - a); fc = score(c); }
+      else { a = c; c = d; fc = fd; d = a + gr * (b - a); fd = score(d); }
+    }
+    return (a + b) / 2;
+  }
 
   // ---- The card and the strip -----------------------------------------------------------------
   function render() {
     const d = done();
-    $('stepLabel').textContent = d ? 'All marked' : `${state.step + 1} of ${STEPS.length}${current().optional ? ' · optional' : ''}`;
-    $('ask').textContent = d ? 'The head is over the face. Drag a dot to move a mark, or use Adjust to dial the head in. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.' : `${current().ask}${state.pending ? ' Then press Lock in.' : ''}`;
+    $('stepLabel').textContent = d ? 'Head fitted' : `${state.step + 1} of ${STEPS.length}`;
+    $('ask').textContent = d ? 'Drag a dot or a line to adjust it' : current().name;
+    $('sub').textContent = d ? 'The arrows turn, nod and tilt the head. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.' : `${current().ask}${state.pending ? ' Drag to fine-tune, then lock it in.' : ''}`;
     $('lock').hidden = d; $('lock').disabled = !state.pending;
     $('skip').hidden = d || !current().optional;
-    $('back').disabled = !state.step && !state.pending;
+    $('back').hidden = d; $('back').disabled = !state.step && !state.pending;
     $('cardStudio').hidden = !d;
+    $('refit').hidden = !d;
     $('undo').disabled = !state.step && !state.pending;
     $('reset').disabled = !state.step && !state.pending;
-    ['show', 'adjust', 'studio', 'save'].forEach((id) => { $(id).disabled = !state.fit; });
+    ['show', 'studio', 'save'].forEach((id) => { $(id).disabled = !state.fit; });
     $('show').setAttribute('aria-pressed', String(state.shown));
+    root.classList.toggle('lh-done', d);
     Studio.redraw();
     drawTab();
   }
@@ -220,6 +262,7 @@
   $('back').addEventListener('click', back);
   $('undo').addEventListener('click', back);
   $('reset').addEventListener('click', reset);
+  $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; Studio.redraw(); drawTab(); } });
   $('show').addEventListener('click', () => { state.shown = !state.shown; render(); });
   const toStudio = () => { document.getElementById('tabPaintBtn').click(); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
   $('studio').addEventListener('click', toStudio);
@@ -265,6 +308,7 @@
     const g = overlay.getContext('2d');
     g.clearRect(0, 0, overlay.width, overlay.height);
     draw(g, overlay.width, overlay.height, dpr * 1.15);
+    drawHandles(g, overlay.width, dpr * 1.15);
   }
   function layout() { if (!active) return; PaintStudio.pin(root); fit(); }
   window.addEventListener('resize', layout);
@@ -273,15 +317,64 @@
   window.addEventListener('studio:result', () => { if (active) showPhoto(); });
 
   const pos = (e) => { const r = overlay.getBoundingClientRect(); return [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))]; };
-  let down = false;
+  // the loupe: the photo magnified around the finger while a mark is placed, so the tap lands exactly
+  const loupe = $('loupe'), loupeCanvas = $('loupeCanvas');
+  function showLoupe(x, y) {
+    if (!photo.width) return;
+    const dpr = window.devicePixelRatio || 1, size = 120, zoom = 3;
+    loupeCanvas.width = loupeCanvas.height = size * dpr;
+    const g = loupeCanvas.getContext('2d');
+    const cropW = (size / zoom) * (photo.width / wrap.clientWidth), cropH = (size / zoom) * (photo.height / wrap.clientHeight);
+    g.imageSmoothingEnabled = true;
+    g.fillStyle = '#222'; g.fillRect(0, 0, size * dpr, size * dpr);
+    g.drawImage(photo, x * photo.width - cropW / 2, y * photo.height - cropH / 2, cropW, cropH, 0, 0, size * dpr, size * dpr);
+    g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1.5 * dpr;
+    g.beginPath(); g.moveTo(size * dpr / 2, 0); g.lineTo(size * dpr / 2, size * dpr); g.moveTo(0, size * dpr / 2); g.lineTo(size * dpr, size * dpr / 2); g.stroke();
+    g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 1 * dpr; g.beginPath(); g.arc(size * dpr / 2, size * dpr / 2, 6 * dpr, 0, Math.PI * 2); g.stroke();
+    // above the finger, or below it near the top of the stage
+    const st = $('stage').getBoundingClientRect(), r = overlay.getBoundingClientRect();
+    const fx = r.left + x * r.width - st.left, fy = r.top + y * r.height - st.top;
+    const above = fy - 90 - size > 8;
+    loupe.style.left = `${Math.max(8, Math.min(st.width - size - 8, fx - size / 2))}px`;
+    loupe.style.top = `${above ? fy - 90 - size : fy + 60}px`;
+    loupe.hidden = false;
+  }
+  function hideLoupe() { loupe.hidden = true; }
+  let drag_ = null, holdTimer = 0;
   overlay.addEventListener('pointerdown', (e) => {
     if (e.button > 0) return;
-    e.preventDefault(); overlay.setPointerCapture(e.pointerId); closeSheet();
-    down = true;
-    const [x, y] = pos(e); place(x, y);
+    e.preventDefault(); overlay.setPointerCapture(e.pointerId);
+    const [x, y] = pos(e), dpr = window.devicePixelRatio || 1, px = x * overlay.width, py = y * overlay.height;
+    const hit = done() ? hitTest(px, py, overlay.width) : null;
+    if (hit && hit.kind === 'handle') {
+      // a tap nudges; holding keeps nudging
+      nudge(hit.handle.key, hit.handle.d);
+      clearTimeout(holdTimer);
+      const repeat = () => { nudge(hit.handle.key, hit.handle.d); holdTimer = setTimeout(repeat, 90); };
+      holdTimer = setTimeout(repeat, 400);
+      drag_ = { kind: 'handle' };
+      return;
+    }
+    if (hit && hit.kind === 'mark') { state.moving = hit.key; drag_ = { kind: 'mark' }; showLoupe(x, y); return; }
+    if (hit && (hit.kind === 'line' || hit.kind === 'ball' || hit.kind === 'move')) { drag_ = { ...hit, lastX: px, lastY: py }; return; }
+    if (done()) return;
+    place(x, y); drag_ = { kind: 'place' }; showLoupe(x, y);
   });
-  overlay.addEventListener('pointermove', (e) => { if (!down) return; const [x, y] = pos(e); drag(x, y); });
-  ['pointerup', 'pointercancel'].forEach((t) => overlay.addEventListener(t, () => { down = false; release(); }));
+  overlay.addEventListener('pointermove', (e) => {
+    if (!drag_) return;
+    const [x, y] = pos(e), px = x * overlay.width, py = y * overlay.height, W = overlay.width;
+    if (drag_.kind === 'place') { drag(x, y); showLoupe(x, y); return; }
+    if (drag_.kind === 'mark') { if (state.moving) { state.points[state.moving] = { x, y }; refit(); } showLoupe(x, y); return; }
+    if (drag_.kind === 'handle') return;
+    const f = state.fit;
+    if (!f) return;
+    if (drag_.kind === 'move') { f.tx += (px - drag_.lastX) / W; f.ty += (py - drag_.lastY) / W; }
+    else if (drag_.kind === 'ball') f.s = Math.max(0.03, Math.hypot(px - f.tx * W, py - f.ty * W) / W);
+    else if (drag_.kind === 'line') f[drag_.param] = solve(drag_.name, drag_.param, px, py, W);
+    drag_.lastX = px; drag_.lastY = py;
+    Studio.redraw(); drawTab();
+  });
+  ['pointerup', 'pointercancel'].forEach((t) => overlay.addEventListener(t, () => { clearTimeout(holdTimer); drag_ = null; release(); hideLoupe(); }));
   overlay.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // ---- Drawing the head: on this tab's overlay, on the Study pictures and into saved PNGs ---------
@@ -331,6 +424,33 @@
     if (state.pending) dot(state.pending, true);
     g.restore();
   }
+  // the arrow buttons: turn at the sides, nod above, tilt at the upper corners
+  function drawHandles(g, W, unit) {
+    if (!state.fit || !state.shown || !done()) return;
+    const r = 15 * unit;
+    g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+    handles(W).forEach((h) => {
+      g.beginPath(); g.arc(h.x, h.y, r, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(250,245,234,0.92)'; g.fill();
+      g.strokeStyle = 'rgba(30,43,34,0.6)'; g.lineWidth = 1.2 * unit; g.stroke();
+      g.fillStyle = '#1e2b22'; g.strokeStyle = '#1e2b22'; g.lineWidth = 2 * unit;
+      const a = r * 0.5;
+      g.beginPath();
+      if (h.glyph === 'left') { g.moveTo(h.x + a * 0.6, h.y - a); g.lineTo(h.x - a * 0.7, h.y); g.lineTo(h.x + a * 0.6, h.y + a); g.closePath(); g.fill(); }
+      else if (h.glyph === 'right') { g.moveTo(h.x - a * 0.6, h.y - a); g.lineTo(h.x + a * 0.7, h.y); g.lineTo(h.x - a * 0.6, h.y + a); g.closePath(); g.fill(); }
+      else if (h.glyph === 'up') { g.moveTo(h.x - a, h.y + a * 0.6); g.lineTo(h.x, h.y - a * 0.7); g.lineTo(h.x + a, h.y + a * 0.6); g.closePath(); g.fill(); }
+      else if (h.glyph === 'down') { g.moveTo(h.x - a, h.y - a * 0.6); g.lineTo(h.x, h.y + a * 0.7); g.lineTo(h.x + a, h.y - a * 0.6); g.closePath(); g.fill(); }
+      else {
+        // a curved arrow: an arc with a head at its end
+        const cw = h.glyph === 'cw', s0 = cw ? Math.PI * 1.15 : Math.PI * 1.85, s1 = cw ? Math.PI * 1.85 : Math.PI * 1.15;
+        g.arc(h.x, h.y, a * 1.1, s0, s1, !cw); g.stroke();
+        const ex = h.x + Math.cos(s1) * a * 1.1, ey = h.y + Math.sin(s1) * a * 1.1, dir = s1 + (cw ? Math.PI / 2 : -Math.PI / 2);
+        g.beginPath(); g.moveTo(ex + Math.cos(dir) * a * 0.7, ey + Math.sin(dir) * a * 0.7);
+        g.lineTo(ex + Math.cos(dir + 2.5) * a * 0.55, ey + Math.sin(dir + 2.5) * a * 0.55); g.lineTo(ex + Math.cos(dir - 2.5) * a * 0.55, ey + Math.sin(dir - 2.5) * a * 0.55); g.closePath(); g.fill();
+      }
+    });
+    g.restore();
+  }
   // the near-side lines as straight segments in picture fractions, for the Studio's underdrawing
   function segments() {
     if (!state.fit || !state.shown) return [];
@@ -344,7 +464,7 @@
   window.addEventListener('studio:tab', (e) => {
     active = e.detail === 'loomis';
     document.body.classList.toggle('tab-loomis', active);
-    if (!active) { closeSheet(); return; }
+    if (!active) { hideLoupe(); return; }
     window.scrollTo(0, 0);
     PaintStudio.pin(root);
     showPhoto();
@@ -356,5 +476,5 @@
 
   // for tests: fit a set of marks (picture fractions) at a given picture aspect
   function fitPoints(points, aspect) { state.points = { ...points }; state.aspect = aspect; state.step = STEPS.length; state.fit = fitHead(); state.auto = state.fit && { ...state.fit }; return state.fit; }
-  window.Loomis = { place, drag, release, reset, draw, segments, state, has: () => !!state.fit, fitPoints, project, STEPS };
+  window.Loomis = { place, drag, release, reset, draw, segments, state, has: () => !!state.fit, fitPoints, project, STEPS, hitTest, handles };
 })();

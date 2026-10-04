@@ -1485,14 +1485,24 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .lh-wrap { position: relative; box-shadow: 0 3px 14px rgba(0, 0, 0, 0.4); background: #222; }
 .lh-wrap > canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #lh-overlay { touch-action: none; cursor: crosshair; }
-.lh-card { position: absolute; left: 50%; top: 12px; translate: -50% 0; z-index: 4; width: min(440px, calc(100% - 24px)); display: grid; gap: 6px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
+/* the card never covers the photo: a row above the stage on a phone, beside the strip on a wide screen */
+.lh { grid-template-rows: auto minmax(0, 1fr) auto; }
+.lh-card { z-index: 4; margin: 8px 8px 0; display: grid; gap: 6px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
 .lh-step { margin: 0; font: 600 0.68rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.lh-ask { margin: 0; font: 600 1rem/1.35 var(--display); }
-.lh-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.lh-ask { margin: 0; font: 700 1.25rem/1.2 var(--display); }
+.lh-sub { margin: 0; min-height: 2.6em; font-size: 0.82rem; color: var(--muted); }
+.lh-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lh-acts .btn-ghost { padding: 6px 8px; }
+.lh-done .lh-card { gap: 4px; padding: 10px 14px; }
+.lh-done .lh-ask { font-size: 1.05rem; }
+.lh-done .lh-sub { display: none; }
+.lh-loupe { position: absolute; z-index: 6; width: 120px; height: 120px; border-radius: 50%; overflow: hidden; border: 3px solid var(--surface); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); pointer-events: none; background: #222; }
+.lh-loupe canvas { display: block; width: 100%; height: 100%; }
 .lh .ps-ic[aria-pressed="true"] { background: none; color: var(--ink); border-color: var(--line); }
 .lh .ps-ic[aria-pressed="false"] { opacity: 0.55; }
 .lh label.ps-ic { cursor: pointer; }
 @media (min-width: 760px) {
-  .lh-card { left: calc(50% + 44px); }
-  .lh .ps-stage { padding: 18px 88px; }
+  .lh { grid-template-rows: minmax(0, 1fr); }
+  .lh-card { position: absolute; left: 84px; top: 14px; width: 300px; margin: 0; }
+  .lh .ps-stage { padding: 18px 88px 18px 400px; }
 }
