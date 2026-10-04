@@ -238,6 +238,7 @@
       <button type="button" class="tool-btn" data-tool="line" aria-pressed="false" title="Draw lines"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19 20 5"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="20" cy="5" r="1.8" fill="currentColor"/></svg><span class="tool-name">Lines</span></button>
       <button type="button" class="tool-btn" data-tool="measure" aria-pressed="false" title="Measure in units"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg><span class="tool-name">Measure</span></button>
       <button type="button" class="tool-btn" data-tool="plumb" aria-pressed="false" title="Plumb lines and levels"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M3 15h18" stroke-dasharray="2.5 2"/><path d="M12 11c-2.2 2.4-3 4-3 5.5a3 3 0 0 0 6 0c0-1.5-.8-3.1-3-5.5z" fill="currentColor"/></svg><span class="tool-name">Plumb</span></button>
+      <button type="button" class="tool-btn" data-tool="loomis" aria-pressed="false" title="Loomis head: mark the features, get the construction"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9.5" r="6.5"/><path d="M5.5 9.5h13M12 3v18M7.5 14.5 9 20h6l1.5-5.5"/><path d="M8.5 11.5h2M13.5 11.5h2"/></svg><span class="tool-name">Loomis</span></button>
       <span class="tool-sep" aria-hidden="true"></span>
       <button type="button" class="tool-btn" id="gridBtn" aria-label="Grid: off" title="Grid: off, 3 × 3, 4 × 4"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg><span class="tool-name">Grid</span><span class="tool-badge" id="gridBadge" hidden></span></button>
     </nav>
@@ -272,6 +273,16 @@
         <div class="tool-group plumb-tools">
           <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
           <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
+        </div>
+        <div class="tool-group loomis-tools">
+          <p class="loomis-prompt" id="loomisPrompt" aria-live="polite"></p>
+          <div class="loomis-acts">
+            <button type="button" class="btn btn-small btn-primary" id="loomisLock" disabled>Lock in</button>
+            <button type="button" class="btn btn-small" id="loomisBack" disabled>Back</button>
+            <button type="button" class="btn btn-small" id="loomisReset" disabled>Start over</button>
+            <button type="button" class="btn btn-small" id="loomisShow" hidden>Hide the head</button>
+            <button type="button" class="btn btn-small" id="loomisToStudio" hidden>Draw it in the Studio</button>
+          </div>
         </div>
         <p class="tool-hint" id="toolHint"></p>
       </div>
@@ -769,10 +780,28 @@
               <li><strong>Lines</strong> draws straight lines, like a line through both eyes. They show on all three pictures.</li>
               <li><strong>Measure</strong> compares lengths. Make one line the unit, and every other line says how many units it is.</li>
               <li><strong>Plumb</strong> drops a straight-down line and a level line through a point, to see what lines up.</li>
+              <li><strong>Loomis</strong> fits a Loomis head over the face from six taps. See below.</li>
               <li><strong>Grid</strong> lays a 3 × 3 or 4 × 4 grid over the picture, for drawing it square by square.</li>
             </ol>
           </div>
           <div class="help-shots"><figure class="phone"><img src="img/help/lines.jpg" alt="Two red lines drawn on the photo with the Lines tool: one through the eyes, one down the middle of the face" loading="lazy"><figcaption>Lines through the eyes and the middle</figcaption></figure></div>
+        </section>
+
+        <section class="help-part" id="help-loomis">
+          <div class="help-text">
+            <h3>The Loomis head</h3>
+            <p>Artists start a head with a ball and a few lines, the way Andrew Loomis taught. This tool fits that construction over any face so you can see where the lines go, then draw them yourself.</p>
+            <ol>
+              <li>Tap the <strong>Loomis</strong> tool. It asks for one feature at a time: each eye, each eyebrow, the bottom of the nose, the middle of the mouth.</li>
+              <li>Tap the feature on the photo, then press <strong>Lock in</strong>. <strong>Back</strong> undoes the last one.</li>
+              <li>After the last one, the head appears: the <strong>ball</strong> (red), the <strong>flat side</strong>, the <strong>centre line</strong> and <strong>brow line</strong> (blue), and the <strong>eye, nose, mouth and chin lines</strong> (yellow). Lines on the far side of the head are faint and dashed. Drag a dot to move it.</li>
+              <li>Draw them on your paper in that order, or press <strong>Draw it in the Studio</strong> to get them in pencil on the Studio's underdrawing.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="Marking the features: two eyes locked in, the prompt asking for the left eyebrow" loading="lazy"><figcaption>Marking the features</figcaption></figure>
+            <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face: ball, side plane, centre and brow lines, eye, nose and mouth lines" loading="lazy"><figcaption>The head over the face</figcaption></figure>
+          </div>
         </section>
 
         <section class="help-part" id="help-colors">
@@ -916,5 +945,6 @@
 <script src="js/subjects.js"></script>
 <script src="js/game.js"></script>
 <script src="js/painting.js"></script>
+<script src="js/loomis.js"></script>
 </body>
 </html>

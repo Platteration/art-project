@@ -330,7 +330,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   top: 0;
   pointer-events: none;
 }
-.tool-line .view, .tool-measure .view, .tool-plumb .view { cursor: crosshair; touch-action: none; }
+.tool-line .view, .tool-measure .view, .tool-plumb .view, .tool-loomis .view { cursor: crosshair; touch-action: none; }
 .tool-plumb .view.on-ring { cursor: grab; }
 .tool-plumb .view.is-dragging { cursor: grabbing; }
 
@@ -435,13 +435,16 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   border: 1px solid var(--line);
   border-radius: var(--r);
 }
-.tool-line .tool-options, .tool-measure .tool-options, .tool-plumb .tool-options, .tool-none .tool-options { display: grid; }
+.tool-line .tool-options, .tool-measure .tool-options, .tool-plumb .tool-options, .tool-loomis .tool-options, .tool-none .tool-options { display: grid; }
 .tool-none .view { cursor: default; }
 .tool-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tool-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .tool-hint { margin: 0; font-size: 0.8rem; color: var(--muted); }
-.line-tools, .measure-tools, .plumb-tools { display: none; }
+.line-tools, .measure-tools, .plumb-tools, .loomis-tools { display: none; }
 .tool-line .line-tools, .tool-measure .measure-tools, .tool-plumb .plumb-tools { display: flex; }
+.tool-loomis .loomis-tools { display: grid; gap: 8px; }
+.loomis-prompt { margin: 0; min-height: 2.7em; font: 600 0.95rem/1.35 var(--display); }
+.loomis-acts { display: flex; flex-wrap: wrap; gap: 6px; }
 .canvas-unit { display: flex; align-items: center; gap: 6px; }
 .canvas-unit input {
   width: 5.5em;

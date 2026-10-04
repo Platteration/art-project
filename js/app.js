@@ -768,6 +768,13 @@
         return;
       }
       const p = state.dragging;
+      if (p && p.canvas === canvas && p.loomis) {
+        const pt = pointOn(canvas, e);
+        p.x = clamp01(pt.x); p.y = clamp01(pt.y);
+        Loomis.drag(p.x, p.y);
+        loupeAt(canvas, p.x, p.y, e.pointerType);
+        return;
+      }
       if (p && p.canvas === canvas) {
         const pt = pointOn(canvas, e);
         p.far = p.far || Math.hypot(e.clientX - p.downX, e.clientY - p.downY) >= tapSlop(e);
@@ -803,6 +810,17 @@
         const pt = pointOn(canvas, e);
         state.drawing = { canvas, kind: state.tool, x1: pt.x, y1: pt.y, x2: pt.x, y2: pt.y, color: state.lineColor };
         showLoupeFor(canvas, e);
+        return;
+      }
+      if (state.tool === 'loomis' && window.Loomis) {
+        if (!canvas.width) return;
+        e.preventDefault();
+        releaseFocus();
+        canvas.setPointerCapture(e.pointerId);
+        const pt = pointOn(canvas, e);
+        state.dragging = { canvas, loomis: true, x: pt.x, y: pt.y };
+        Loomis.place(clamp01(pt.x), clamp01(pt.y));
+        loupeAt(canvas, pt.x, pt.y, e.pointerType);
         return;
       }
       if (state.tool === 'plumb') {
@@ -858,6 +876,12 @@
         return;
       }
       const p = state.dragging;
+      if (p && p.canvas === canvas && p.loomis) {
+        state.dragging = null;
+        Loomis.release();
+        if (e.pointerType === 'touch') els.loupe.hidden = true;
+        return;
+      }
       if (p && p.canvas === canvas) {
         state.dragging = null;
         canvas.classList.remove('is-dragging');
@@ -1274,6 +1298,7 @@
       });
     });
     drawMeasures(g, W, H, unit, avoid);
+    if (window.Loomis) Loomis.draw(g, W, H, unit);
   }
 
   // The accuracy map has its percentages burned in: measure labels keep off them
@@ -1322,15 +1347,16 @@
 
   function setTool(tool) {
     state.tool = tool;
-    ['line', 'measure', 'plumb', 'none'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
+    ['line', 'measure', 'plumb', 'loomis', 'none'].forEach((t) => document.body.classList.toggle('tool-' + t, state.tool === t));
     if (!magnifying()) els.loupe.hidden = true;
     updateToolHint();
     updateToolbar();
+    window.dispatchEvent(new CustomEvent('studio:tool', { detail: tool }));
   }
 
   // A copy of an image with the grid, lines, measures and plumb lines burned in, for saving
   function withOverlay(canvas) {
-    if (!state.grid && !state.lines.length && !state.measures.length && !state.plumbs.length) return canvas;
+    if (!state.grid && !state.lines.length && !state.measures.length && !state.plumbs.length && !(window.Loomis && Loomis.has())) return canvas;
     const out = document.createElement('canvas');
     out.width = canvas.width;
     out.height = canvas.height;
@@ -1906,6 +1932,7 @@
     line: 'Drag on any image to draw a line. It appears on every image. Hold Shift to snap to 15°. The loupe shows the angle.',
     measure: 'Choose a unit you can see on the sitter, such as eye line to chin, and drag across it first: it becomes 1 U. Then drag across any other length to compare it with the unit. Hold Shift to snap to 15°.',
     plumb: 'Click an image to drop a plumb line and a level through that point, on every image, and see what lines up with it. Drag a ring to move it; click a ring to remove it.',
+    loomis: 'Mark the eyes, brows, nose and mouth one at a time, and a Loomis head is fitted over the face: the ball, the flat side, the centre line and the lines for the brow, eyes, nose and mouth. Then draw it on your paper.',
   };
 
   function updateToolHint() {
@@ -1970,6 +1997,7 @@
   // A new photo starts clean: the old lines, measures and plumb points were placed on another face
   function clearMarks() {
     Object.assign(state, { lines: [], measures: [], unitIndex: 0, plumbs: [], history: [] });
+    if (window.Loomis) Loomis.reset();
     updateToolButtons();
     drawAllOverlays();
   }
@@ -2495,11 +2523,14 @@
     if (state.grid) for (let k = 1; k < state.grid; k++) { const t = k / state.grid; segs.push([t, 0, t, 1], [0, t, 1, t]); }
     state.plumbs.forEach((p) => segs.push([p.x, 0, p.x, 1], [0, p.y, 1, p.y]));
     state.lines.concat(state.measures).forEach((l) => segs.push([l.x1, l.y1, l.x2, l.y2]));
+    if (window.Loomis) segs.push(...Loomis.segments());
     return segs;
   }
 
   window.Studio = {
     marks,
+    tool: () => state.tool,
+    redraw: drawAllOverlays,
     result: () => state.result,
     source: () => state.source,
     prep: () => state.prep,
