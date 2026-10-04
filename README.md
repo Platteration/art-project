@@ -2,8 +2,8 @@
 
 A browser tool for drawing and painting from reference portraits. Load a photo and it makes two studies next to the original (a Paint by numbers game and a Studio to paint in follow, in their own tabs, and a drawer checks your painting against the reference):
 
-- **Three values**: the photo simplified into large shadow, middle and light masses, each painted a single gray.
-- **Color blocks**: the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it. **Lean toward lighter tones** (in Colors and paints, 60% by default) corrects a dark bias in that choice: in a lit face most pixels of a group sit on its darker side, so the busiest color reads dark and a few lighter highlights lose. With the lean up, a group takes the lightest color of the same hue that is still common enough in it (at 100%, one a quarter as common as the busiest), so lit skin keeps its lights; at Off it takes the most common color as before. The same setting applies to the game board and to Check my painting, which reads both pictures the same way, so it doesn't count as a miss. It is remembered between visits. The switch above it shows the blocks in the photo's colors (**Photo**) or as your palette mixes them (for example **Zorn**): each block is repainted with the closest mix the palette makes, so you can see the painting your paints would give. The palette is the one chosen under **Colors and paints**, or, until you choose one, the known palette that mixes the study best. The choice is remembered, and the magnifier and **Save PNG** use the colors shown.
+- **Dark, middle, light** (the three-value study): the photo simplified into large shadow, middle and light masses, each painted a single gray.
+- **Big color shapes** (the color-block study): the same value masses, split into a few color groups per value. Each group is filled with its most prominent color: the color that covers the most of it in the photo, not a mix of everything in it. **Lean toward lighter tones** (in Colors and paints, 60% by default) corrects a dark bias in that choice: in a lit face most pixels of a group sit on its darker side, so the busiest color reads dark and a few lighter highlights lose. With the lean up, a group takes the lightest color of the same hue that is still common enough in it (at 100%, one a quarter as common as the busiest), so lit skin keeps its lights; at Off it takes the most common color as before. The same setting applies to the game board and to Check my painting, which reads both pictures the same way, so it doesn't count as a miss. It is remembered between visits. The switch above it shows the blocks in the photo's colors (**Photo**) or as your palette mixes them (for example **Zorn**): each block is repainted with the closest mix the palette makes, so you can see the painting your paints would give. The palette is the one chosen under **Colors and paints**, or, until you choose one, the known palette that mixes the study best. The choice is remembered, and the magnifier and **Save PNG** use the colors shown.
 
 A bar of tool icons sits beside the images (a row pinned to the top of the screen on a phone). Press an icon to use that tool; press it again to turn it off, so touching an image just scrolls the page.
 
@@ -13,7 +13,7 @@ A bar of tool icons sits beside the images (a row pinned to the top of the scree
 
 The settings fold away into three drawers beside the tool bar (above it on a phone), so the page shows only the studies until you need more. Each drawer's header says what it is set to, such as `Splits at V 2.7 and 4.6`, so it can stay closed. The drawers you leave open are opened again on your next visit.
 
-- **Values and shapes**: Simplify, Smoothing, Merge small shapes, Working size, the value splits and gray values.
+- **Dark, middle, light**: in Simple mode a Detail preset (Soft, Normal, Sharp); in Advanced mode Simplify, Smoothing, Merge small shapes, Working size, the value splits and gray values.
 - **Colors and paints**: Colors per value, and paints for the study: known palettes ranked for this photo, or a palette chosen from the paints you own, with a starting mix for every color.
 - **Picked colors**: the colors you clicked. Sort them dark to light, copy them as hex codes, or save them as a PNG. They are kept in your browser between visits and shared by every tab you have the tool open in.
 
@@ -94,9 +94,9 @@ The third tab is a timed game on the color-block study. The reference becomes a 
 
 The score is out of 1,200. Color accuracy gives up to 1,000: each number scores `100 − 2.5 × ΔE` (CIEDE2000) against its color as mixed from your palette, weighted by its area, and an unpainted number scores 0. If every number is painted, the time left adds up to 200 more, scaled by your accuracy, so speed only pays when the colors are right. When the portrait locks in, the score pops up over it, arcade style: your color match counting up to its percentage, a rating out of five stars (one star from 30%, two from 50%, three from 65%, four from 78%, five from 88%) and a flashing **New best!** when you beat your score. Close it with × to look at your portrait. **Analyze** opens the details below: the points, your portrait beside the colors to match and the photo, and every number from furthest off to closest with what was wrong (such as "too light by 0.6 value, too warm") and the recipe its color was mixed from. Your best score for each portrait, level and palette is kept in your browser.
 
-### Check my painting
+### How close did I get? (Check my painting)
 
-**Check my painting**, the last drawer of the Study tab, scores your finished piece against the reference. Open it and the results appear below the studies; its badge keeps the score.
+**How close did I get?**, the last drawer of the Study tab, scores your finished piece against the reference. Open it and the results appear below the studies; its badge keeps the score.
 
 1. Load, drop or paste a photo of your painting, or press **Use my Studio painting** to score the paper on the Studio tab as it stands (if the Studio was painting from a dealt portrait, that portrait becomes the reference here). Shoot a photo straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
 2. For each shape in the reference's color-block map, the most prominent reference color is compared with the most prominent color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
@@ -114,6 +114,12 @@ The score is out of 1,200. Color accuracy gives up to 1,000: each number scores 
 - **Fix color cast** removes the tint from warm or cool lighting. Click it, then click a spot on your painting that should be white or neutral gray, such as the paper edge. The five-by-five pixel patch there becomes neutral at the same brightness, and the same correction applies to the whole photo. Spots that are clearly a color rather than a white tinted by the light (skin, brick red, leaf green, orange) are refused, and the fix goes no further than ordinary lamps and daylight need: no channel halved, red or green at most doubled, blue at most tripled. Picking again replaces the earlier fix. **Remove color fix** undoes it. It corrects tint only, not exposure.
 
 With the built-in sample, the drawer opens with a made-up example painting, photographed slightly tilted, so you can see how the scoring and alignment work.
+
+## Simple and Advanced
+
+The switch at the top of the page chooses how much to show. **Simple**, the default, is for beginners and classrooms: the Study tab shows a Detail preset (Soft, Normal, Sharp) instead of the Simplify, Smoothing and Merge sliders, hides the value splits, gray values, the lighter-tones lean and My paints, and offers three palettes with a reason for each (Zorn, Three primaries and Rembrandt's earths). The scoring hints say what the numbers mean in plain words, with the formulas behind **Show the details**. **Advanced** shows every setting. The choice is remembered.
+
+The Studio keeps your work: the paper, the underdrawing, the ground and texture and which way the paper is turned are saved in the browser a moment after each change (in IndexedDB, as the pictures are too big for localStorage) and come back on the next visit. **Clear the paper** takes two taps, and Undo brings a cleared paper back.
 
 ## Running it
 

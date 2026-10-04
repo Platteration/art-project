@@ -104,6 +104,7 @@
   const BLOCK_VIEW_KEY = 'portrait-value-studio.blockView';
   const LEAN_KEY = 'portrait-value-studio.lean';
   const DRAWERS_KEY = 'portrait-value-studio.drawers';
+  const MODE_KEY = 'portrait-value-studio.mode';
   // Check my painting is a drawer of the Study tab: its results show below the studies while it is open
   const checking = () => state.tab === 'study' && els.drawers.check.open;
 
@@ -260,7 +261,10 @@
     showBlocks();
     renderZones();
     drawHistogram();
-    els.drawerState.values.textContent = `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
+    const detail = document.querySelector('input[name="detailPreset"]:checked');
+    els.drawerState.values.textContent = document.body.classList.contains('mode-simple') && detail
+      ? `${detail.value[0].toUpperCase()}${detail.value.slice(1)} detail`
+      : `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
     state.art.dirty = true;
     if (checking()) runCheck();
     els.busy.hidden = true;
@@ -2437,6 +2441,26 @@
 
   // ---- Start --------------------------------------------------------------
 
+  // ---- Simple and advanced ------------------------------------------------
+
+  // Simple shows the few controls a beginner needs and presets for the rest; Advanced shows every
+  // setting. Simple is the default, and the choice is remembered.
+  function setMode(mode, remember = true) {
+    document.body.classList.toggle('mode-simple', mode === 'simple');
+    document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    if (remember) { try { localStorage.setItem(MODE_KEY, mode); } catch (err) { /* not remembered */ } }
+    window.dispatchEvent(new CustomEvent('studio:mode', { detail: mode }));
+    if (state.result) runSoon(0);
+  }
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  // Simple mode's Detail presets set Simplify and Merge together
+  const DETAIL = { soft: [6, 6], normal: [3, 4], sharp: [1, 2] };
+  document.querySelectorAll('input[name="detailPreset"]').forEach((r) => r.addEventListener('change', () => {
+    const [simplify, merge] = DETAIL[r.value];
+    els.simplify.value = simplify; els.merge.value = merge;
+    updateOutputs(); runSoon();
+  }));
+
   // ---- Drawers ------------------------------------------------------------
 
   function restoreDrawers() {
@@ -2482,6 +2506,9 @@
 
   function start() {
     restoreDrawers();
+    let mode = 'simple';
+    try { mode = localStorage.getItem(MODE_KEY) || 'simple'; } catch (err) { /* simple */ }
+    setMode(mode, false);
     els.checkSection.hidden = !els.drawers.check.open;
     updateToolbar();
     restoreSmoothing();

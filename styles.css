@@ -1441,3 +1441,14 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 }
 @media (max-width: 480px) { .ps-strip { gap: 2px; padding-inline: 4px; } .ps-ic svg { width: 22px; height: 22px; } .ps-sep { margin: 0; } .ps-ic .ps-sub { right: 0; } }
 @media (prefers-reduced-motion: reduce) { .ps-paint .ps-dot { transition: none; } }
+
+/* ---- Simple and advanced modes: Simple hides the fine controls and shows presets instead ---- */
+.mode-simple .advanced { display: none !important; }
+.simple-only { display: none; }
+.mode-simple .simple-only { display: grid; }
+.mode-simple .preset-list li:not([data-simple]) { display: none; }
+.preset-why { display: none; font-size: 0.78rem; color: var(--muted); text-align: left; }
+.mode-simple .preset-why { display: block; }
+.mode-switch button { padding: 6px 12px; font-size: 0.8rem; }
+.more summary { cursor: pointer; font-size: 0.78rem; color: var(--muted); }
+.more[open] summary { margin-bottom: 6px; }

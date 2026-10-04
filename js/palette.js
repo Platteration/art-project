@@ -139,10 +139,18 @@
     });
   }
 
+  // the three palettes Simple mode offers, and why
+  const SIMPLE_WHY = {
+    zorn: 'Four colors. The easiest way to mix skin.',
+    primary: 'A yellow, a red and a blue. Mix every color yourself.',
+    rembrandt: 'Earth colors, for the old-master look.',
+  };
   function renderPresets(n) {
     els.presetList.innerHTML = '';
     ranking.forEach(({ preset, cov }, rank) => {
       const li = el('li');
+      li.dataset.preset = preset.id;
+      if (SIMPLE_WHY[preset.id]) li.dataset.simple = '';
       const b = el('button', 'preset');
       b.type = 'button';
       b.setAttribute('aria-pressed', String(choice.preset === preset.id));
@@ -156,6 +164,7 @@
       bar.style.setProperty('--v', (cov.reached / n).toFixed(3));
       meter.append(bar, el('span', 'preset-reach', `${cov.reached} / ${n}`));
       b.append(head, dots, meter);
+      if (SIMPLE_WHY[preset.id]) b.append(el('span', 'preset-why', SIMPLE_WHY[preset.id]));
       b.setAttribute('aria-label', `${preset.name}: ${preset.paints.length} paints, ${reachText(cov, n).toLowerCase()}`);
       b.addEventListener('click', () => {
         choice.preset = preset.id;

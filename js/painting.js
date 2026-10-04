@@ -62,7 +62,7 @@
 
   const state = { tool: 'chisel', chisel: 'm', round: 18, hard: 'medium', pencil: 3, lead: 'graphite', pcolor: 'black', sketch: 3, slead: 'graphite', shard: 'medium', scolor: 'black', lastLayer: 'paint', lastBrush: 'chisel', blend: 60, blendStr: 0.4, eraser: 24, color: hexOf('#7A3B24'), name: 'Burnt Sienna', well: [], mixes: [] };
   const CHISEL = { s: 20, m: 40, l: 72 };
-  const HARD = { hard: { alpha: 0.16, dots: 3, grow: 0.85, grey: 0.45, label: '2H' }, medium: { alpha: 0.3, dots: 7, grow: 1, grey: 0.2, label: 'HB' }, soft: { alpha: 0.5, dots: 14, grow: 1.35, grey: 0, label: '4B' } };
+  const HARD = { hard: { alpha: 0.16, dots: 3, grow: 0.85, grey: 0.45, label: 'Light · 2H', short: '2H' }, medium: { alpha: 0.3, dots: 7, grow: 1, grey: 0.2, label: 'Medium · HB', short: 'HB' }, soft: { alpha: 0.5, dots: 14, grow: 1.35, grey: 0, label: 'Dark · 4B', short: '4B' } };
   // Graphite: fine grains, pale when hard. Charcoal: coarser, darker, with a soft dusty edge; a
   // hard stick keeps a crisper line, a soft one spreads and blackens.
   const CHAR = { hard: { alpha: 0.28, dots: 10, grow: 1.0, grey: 0.12, spread: 0.55, label: 'Hard' }, medium: { alpha: 0.42, dots: 18, grow: 1.25, grey: 0.05, spread: 0.75, label: 'Medium' }, soft: { alpha: 0.6, dots: 30, grow: 1.6, grey: 0, spread: 1, label: 'Soft' } };
@@ -206,13 +206,13 @@
     codes.forEach((code) => {
       const b = document.createElement('button'); b.type = 'button'; b.style.setProperty('--c', paintHex(code)); b.title = paintName(code); b.setAttribute('aria-label', `Wash of ${paintName(code)}`);
       b.setAttribute('aria-pressed', String(code === canvasState.washCode));
-      b.addEventListener('click', () => { canvasState.washCode = code; renderWash(); applyCanvas(); });
+      b.addEventListener('click', () => { canvasState.washCode = code; renderWash(); applyCanvas(); saveSoon(); });
       $('washRow').append(b);
     });
   }
-  q('[data-ground]').forEach((b) => b.addEventListener('click', () => { canvasState.ground = b.dataset.ground; applyCanvas(); }));
-  q('[data-weave]').forEach((b) => b.addEventListener('click', () => { canvasState.weave = b.dataset.weave; applyCanvas(); }));
-  $('washStr').addEventListener('input', () => { canvasState.washStr = +$('washStr').value / 100; applyCanvas(); });
+  q('[data-ground]').forEach((b) => b.addEventListener('click', () => { canvasState.ground = b.dataset.ground; applyCanvas(); saveSoon(); }));
+  q('[data-weave]').forEach((b) => b.addEventListener('click', () => { canvasState.weave = b.dataset.weave; applyCanvas(); saveSoon(); }));
+  $('washStr').addEventListener('input', () => { canvasState.washStr = +$('washStr').value / 100; applyCanvas(); saveSoon(); });
 
   // the finished picture, all its layers in one, for saving
   function composite() {
@@ -308,11 +308,17 @@
     snapshot(); last = pos(e); dragFrom = null; segment(last, last, press(e));
   });
   paper.addEventListener('pointermove', (e) => { if (!last) return; const p = pos(e); segment(last, p, press(e)); last = p; });
-  ['pointerup', 'pointercancel'].forEach((t) => paper.addEventListener(t, () => { last = null; dragFrom = null; }));
+  ['pointerup', 'pointercancel'].forEach((t) => paper.addEventListener(t, () => { if (last) saveSoon(); last = null; dragFrom = null; }));
   paper.addEventListener('contextmenu', (e) => e.preventDefault());
-  $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; });
-  $('clear').addEventListener('click', () => { useLayer(paper); snapshot(); blank(); closeSheets(); });
-  $('sketchClear').addEventListener('click', () => { useLayer(sketch); snapshot(); blank(); });
+  $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
+  let clearArmed = 0;
+  $('clear').addEventListener('click', () => {
+    closeSheets();
+    if (performance.now() - clearArmed > 3000) { clearArmed = performance.now(); Studio.toast('Tap again to clear the paper (Undo brings it back)'); return; }
+    clearArmed = 0;
+    useLayer(paper); snapshot(); blank(); saveSoon();
+  });
+  $('sketchClear').addEventListener('click', () => { useLayer(sketch); snapshot(); blank(); saveSoon(); });
   // The grid, lines, measures and plumb lines from the Study tab, drawn on the underdrawing in
   // pencil, with the underdrawing brush as it is set. They were drawn over the reference, so they
   // are fitted to the paper the way the reference would be: as large as fits, centred.
@@ -330,13 +336,14 @@
     showSketch(true);
     state.lastLayer = 'sketch';
     closeSheets();
+    saveSoon();
     Studio.toast('The Study lines are on the underdrawing, in pencil');
   });
   function showSketch(on) {
     wrap.classList.toggle('ps-no-sketch', !on);
     q('[data-sketch-show]').forEach((x) => x.setAttribute('aria-pressed', String(!!+x.dataset.sketchShow === on)));
   }
-  q('[data-sketch-show]').forEach((b) => b.addEventListener('click', () => showSketch(!!+b.dataset.sketchShow)));
+  q('[data-sketch-show]').forEach((b) => b.addEventListener('click', () => { showSketch(!!+b.dataset.sketchShow); saveSoon(); }));
   // turning the paper keeps what is on it
   $('orient').addEventListener('click', () => {
     const land = paper.width < paper.height;
@@ -350,7 +357,67 @@
     undoStack.length = 0; $('undo').disabled = true;
     layout();
     showStatus();
+    saveSoon();
   });
+
+  // ---- Autosave: the paper, the underdrawing and the canvas are kept in the browser (IndexedDB,
+  // since the pictures are too big for localStorage) a moment after each change, and come back
+  // on the next visit, so a closed tab or a sleeping iPad loses nothing.
+  const DB_NAME = 'portrait-value-studio', DB_STORE = 'studio', SAVE_KEY = 'painting';
+  const hasDb = typeof indexedDB !== 'undefined';
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const r = indexedDB.open(DB_NAME, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  async function dbPut(key, value) {
+    const db = await openDb();
+    await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); });
+    db.close();
+  }
+  async function dbGet(key) {
+    const db = await openDb();
+    const v = await new Promise((resolve, reject) => { const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    db.close();
+    return v;
+  }
+  const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
+  let saveTimer = 0, saving = false, saveAgain = false;
+  function saveSoon() { if (!hasDb) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
+  async function saveNow() {
+    if (!hasDb) return;
+    if (saving) { saveAgain = true; return; }
+    saving = true;
+    try {
+      const [paperBlob, sketchBlob] = await Promise.all([toBlob(paper), toBlob(sketch)]);
+      await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: Date.now() });
+    } catch (e) { /* storage unavailable: the painting lives in this visit only */ }
+    saving = false;
+    if (saveAgain) { saveAgain = false; saveSoon(); }
+  }
+  const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
+  let restored = false;
+  async function restore() {
+    if (!hasDb) return;
+    let saved;
+    try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
+    if (!saved || !saved.w || !saved.h) return;
+    const [pImg, sImg] = await Promise.all([loadBlob(saved.paper), loadBlob(saved.sketch)]);
+    [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
+    if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
+    if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
+    if (saved.canvas) Object.assign(canvasState, saved.canvas);
+    renderWash(); applyCanvas();
+    showSketch(saved.sketchShown !== false);
+    undoStack.length = 0; $('undo').disabled = true;
+    restored = true;
+    layout();
+    showStatus();
+  }
+  window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveNow(); } });
 
   // ---- Sheets ----------------------------------------------------------------------------------
   const SHEETS = { brushSheet: 'brushBtn', eraserSheet: null, refSheet: 'refBtn', canvasSheet: 'canvasBtn', viewSheet: 'viewBtn', paintSheet: 'colorBtn' };
@@ -458,13 +525,13 @@
 
   // ---- Tools -----------------------------------------------------------------------------------
   function showStatus() {
-    const leadLabel = (lead, hard) => (lead === 'charcoal' ? `Charcoal · ${CHAR[hard].label}` : HARD[hard].label);
+    const leadLabel = (lead, hard) => (lead === 'charcoal' ? `Charcoal · ${CHAR[hard].label}` : HARD[hard].short);
     const t = { chisel: `Chisel · ${state.chisel.toUpperCase()}`, round: `Round · ${state.round} px`, pencil: `Pencil · ${state.pcolor} · ${leadLabel(state.lead, state.hard)} · ${state.pencil} px`, sketch: `Underdrawing · ${state.scolor} · ${leadLabel(state.slead, state.shard)} · ${state.sketch} px`, blend: `Blend · ${state.blend} px · ${Math.round(state.blendStr * 100)}%`, eraser: `Eraser · ${state.eraser} px · ${state.lastLayer === 'sketch' ? 'underdrawing' : 'paint'}` }[state.tool];
     $('status').textContent = `${t} · ${paper.width} × ${paper.height}`;
-    const subs = { chisel: state.chisel.toUpperCase(), round: state.round, pencil: state.lead === 'charcoal' ? 'Ch' : HARD[state.hard].label, sketch: state.slead === 'charcoal' ? 'Ch' : HARD[state.shard].label, blend: state.blend };
+    const subs = { chisel: state.chisel.toUpperCase(), round: state.round, pencil: state.lead === 'charcoal' ? 'Ch' : HARD[state.hard].short, sketch: state.slead === 'charcoal' ? 'Ch' : HARD[state.shard].short, blend: state.blend };
     $('chiselSub').textContent = subs.chisel; $('roundSub').textContent = subs.round; $('pencilSub').textContent = subs.pencil; $('sketchSub').textContent = subs.sketch; $('blendSub').textContent = subs.blend;
     q('[data-hard]').forEach((b) => { b.textContent = state.lead === 'charcoal' ? CHAR[b.dataset.hard].label : HARD[b.dataset.hard].label; });
-    $('pencilHint').textContent = state.lead === 'charcoal' ? 'A hard stick keeps a crisper line; a soft one spreads and goes black. Pen pressure counts.' : '2H is pale and fine; 4B is dark and builds up. Pen pressure counts.';
+    $('pencilHint').textContent = state.lead === 'charcoal' ? 'A hard stick keeps a crisp line; a soft one spreads and goes black. Press harder with a pen for more.' : 'Light is pale and fine; Dark builds up fast. Press harder with a pen for more.';
     $('eraserSub').textContent = state.eraser;
     // the Brushes icon shows the brush in hand (or the last one used)
     const b = BRUSHES.includes(state.tool) ? state.tool : state.lastBrush;
@@ -631,6 +698,8 @@
   applyPalette();
   showStatus();
   applyView();
+  let welcomed = false;
+  const ready = restore();
 
   window.addEventListener('studio:tab', (e) => {
     active = e.detail === 'paint';
@@ -641,6 +710,7 @@
     refreshReference();
     layout();
     setTimeout(layout, 120);
+    ready.then(() => { layout(); if (restored && !welcomed) Studio.toast('Your painting is back from last time'); welcomed = true; });
   });
   // the page may open straight on this tab (index.html#paint), before this script was listening
   if (Studio.tab() === 'paint') window.dispatchEvent(new CustomEvent('studio:tab', { detail: 'paint' }));
@@ -652,5 +722,5 @@
     const e = Subjects.entry(ref.id), picture = Subjects.picture(ref.id, 1);
     return { kind: 'painting', id: ref.id, picture, width: picture.width, height: picture.height, title: `${e.title}, after ${Subjects.painterOf(ref.id)}` };
   }
-  window.PaintStudio = { composite, reference, state };
+  window.PaintStudio = { composite, reference, state, saveNow, ready: () => ready };
 })();
