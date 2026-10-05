@@ -771,7 +771,7 @@
         <div class="game-setup" id="vb-setup">
           <div class="game-card">
             <h2 class="game-title">Value battle</h2>
-            <p class="game-lede">Colors mixed from the same palette. Which is darker, lighter, cooler or warmer? With three or four, put them in order or sort them into families. Ten rounds. Trust your eye.</p>
+            <p class="game-lede">Colors mixed from the same palette. Which is darker, lighter, cooler or warmer? With three or four, find the darkest, the lightest, or put them all in order. Ten rounds. Trust your eye.</p>
             <div class="field">
               <label for="vb-palette">Palette</label>
               <select id="vb-palette"></select>
@@ -785,7 +785,7 @@
                 <input type="radio" name="vbCount" id="vbCount4" value="4"><label for="vbCount4">4</label>
                 <input type="radio" name="vbCount" id="vbCountMix" value="mix" checked><label for="vbCountMix">Mix</label>
               </div>
-              <p class="hint">Two colors: left, right or the same. Three or four: tap the darkest or lightest, tap them in order, or sort them into warm and cool.</p>
+              <p class="hint">Two colors: left, right or the same. Three or four: tap the darkest or the lightest, or tap them in order.</p>
             </fieldset>
             <fieldset class="field">
               <legend>Level</legend>
@@ -833,7 +833,6 @@
             <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
             <button type="button" class="btn vb-choice" data-choice="right">Right ▶</button>
             <button type="button" class="btn vb-undo" id="vb-undo" disabled>Start the round over</button>
-            <button type="button" class="btn btn-primary vb-done" id="vb-done">Done</button>
             <p class="hint vb-tap-hint">Tap the swatches to answer.</p>
           </div>
           <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
@@ -993,7 +992,7 @@
             <ol>
               <li>Pick a <strong>palette</strong> and a <strong>level</strong>, then <strong>Start the battle</strong>. Both colors in every round are mixed from that palette.</li>
               <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>, or tap a swatch.</li>
-              <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, tap them <strong>in order</strong> from darkest to lightest, or tap every <strong>warm</strong> (or <strong>cool</strong>) one and press <strong>Done</strong>. Choose how many colors on the setup, or Mix for all three.</li>
+              <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, or tap them <strong>in order</strong> from darkest to lightest. Choose how many colors on the setup, or Mix for all three.</li>
               <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
               <li>After ten rounds the score pops up with stars, and your best for that palette and level is kept.</li>
             </ol>
