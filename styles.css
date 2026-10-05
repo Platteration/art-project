@@ -764,9 +764,10 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 
 /* ---- Paint by numbers ---- */
 .tab-game .rail, .tab-game .toolstrip, .tab-game .tool-options,
+.tab-battle .rail, .tab-battle .toolstrip, .tab-battle .tool-options,
 .tab-help .rail, .tab-help .toolstrip, .tab-help .tool-options,
 .tab-loomis .rail, .tab-loomis .toolstrip, .tab-loomis .tool-options { display: none !important; }
-@media (min-width: 960px) { .tab-game .layout, .tab-help .layout { grid-template-columns: minmax(0, 1fr); } }
+@media (min-width: 960px) { .tab-game .layout, .tab-help .layout, .tab-battle .layout { grid-template-columns: minmax(0, 1fr); } }
 
 .game-title { font: 700 1.6rem/1.1 var(--display); letter-spacing: -0.01em; text-transform: none; }
 .game-setup { display: grid; gap: 20px; align-items: start; }
@@ -1013,9 +1014,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   /* phones: while playing, the bar, the painting and the palette (paints, then the amount slider
      and a quick undo) fill the screen; the painting takes whatever height is left. The mix, copy and
      number buttons are just below. */
-  .game-focus .topbar, .game-focus .tabs { display: none; }
-  .game-focus .app { padding-block: 8px; gap: 0; }
-  .game-focus .work { gap: 0; }
+  .game-focus .topbar, .game-focus .tabs, .battle-focus .topbar, .battle-focus .tabs { display: none; }
+  .game-focus .app, .battle-focus .app { padding-block: 8px; gap: 0; }
+  .game-focus .work, .battle-focus .work { gap: 0; }
   .game-play {
     --bar-h: 50px;
     --paints-h: 64px;
@@ -1517,4 +1518,31 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .lh { grid-template-rows: minmax(0, 1fr); }
   .lh-card { position: absolute; left: 84px; top: 14px; width: 300px; margin: 0; }
   .lh .ps-stage { padding: 18px 88px 18px 400px; }
+}
+
+/* ---- Value battle: two circles on a primer-gray board, three answers below ---- */
+.vb-about h3 { margin: 0; font: 700 1rem var(--display); }
+.vb-play { display: grid; gap: 12px; max-width: 760px; margin-inline: auto; }
+.vb-bar { position: static; grid-area: auto; }
+.vb-bar .game-progress { grid-area: auto; }
+.vb-round { font: 600 1.1rem/1 var(--mono); font-variant-numeric: tabular-nums; }
+.vb-board { position: relative; display: grid; gap: 18px; justify-items: center; align-content: center; min-height: min(62vh, 520px); padding: 22px 16px; background: #8c8a86; border-radius: var(--r); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.vb-question { margin: 0; font: 700 clamp(1.15rem, 1rem + 1vw, 1.5rem)/1.2 var(--display); color: #f3eee2; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.vb-circles { display: flex; gap: clamp(20px, 6vw, 60px); justify-content: center; }
+.vb-circle { appearance: none; width: clamp(120px, 34vw, 200px); height: clamp(120px, 34vw, 200px); border-radius: 50%; border: 0; padding: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.3); transition: transform 0.12s; }
+.vb-circle:active { transform: scale(0.97); }
+.vb-circle:focus-visible { outline: 3px solid #faf5ea; outline-offset: 4px; }
+.vb-circle.is-answer { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 5px #d9a441, 0 6px 18px rgba(0, 0, 0, 0.3); }
+.vb-circle.is-wrong { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 5px rgba(147, 52, 31, 0.9), 0 6px 18px rgba(0, 0, 0, 0.3); }
+.vb-answered .vb-circle { cursor: default; }
+.vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #f3eee2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.vb-answer.is-right::first-line, .vb-answer.is-wrong::first-line { font-weight: 700; }
+.vb-choices { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; }
+.vb-choice { min-height: 52px; font: 600 1rem var(--display); }
+.vb-choice.is-chosen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.vb-choice:disabled { opacity: 0.6; }
+.vb-next { justify-self: end; min-height: 48px; }
+@media (max-width: 999px) {
+  .battle-focus .vb-play { gap: 8px; }
+  .vb-board { min-height: 50vh; }
 }

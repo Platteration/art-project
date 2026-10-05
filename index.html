@@ -37,6 +37,7 @@
       <button type="button" class="tab" id="tabGamesBtn" aria-selected="false" aria-haspopup="menu" aria-expanded="false" aria-controls="tabGamesMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span class="tab-text"><span>Games</span><span class="tab-sub" id="tabGamesSub">Paint by numbers</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       <div class="tab-menu" id="tabGamesMenu" role="menu" hidden>
         <button type="button" role="menuitemradio" class="tab-item" id="tabGameBtn" data-tab="game" aria-checked="false"><span>Paint by numbers</span><small>Mix every number's color against the clock</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabBattleBtn" data-tab="battle" aria-checked="false"><span>Value battle</span><small>Two colors: which is darker, lighter, cooler or warmer?</small></button>
         <p class="tab-menu-note">More games are on the way.</p>
       </div>
     </div>
@@ -766,6 +767,69 @@
         </div>
       </section>
 
+      <section class="tabpanel" id="tab-battle" hidden>
+        <div class="game-setup" id="vb-setup">
+          <div class="game-card">
+            <h2 class="game-title">Value battle</h2>
+            <p class="game-lede">Two colors mixed from the same palette. Which is darker, lighter, cooler or warmer? Ten rounds. Trust your eye.</p>
+            <div class="field">
+              <label for="vb-palette">Palette</label>
+              <select id="vb-palette"></select>
+              <p class="hint">Both colors are mixed from these paints.</p>
+            </div>
+            <fieldset class="field">
+              <legend>Level</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Level">
+                <input type="radio" name="vbLevel" id="vbEasy" value="easy" checked><label for="vbEasy">Easy<small>big differences</small></label>
+                <input type="radio" name="vbLevel" id="vbMedium" value="medium"><label for="vbMedium">Medium<small>closer</small></label>
+                <input type="radio" name="vbLevel" id="vbHard" value="hard"><label for="vbHard">Hard<small>a hair apart</small></label>
+              </div>
+            </fieldset>
+            <p class="game-best" id="vb-best"></p>
+            <button type="button" class="btn btn-primary game-start" id="vb-start">Start the battle</button>
+          </div>
+          <div class="game-card vb-about">
+            <h3>What you are looking at</h3>
+            <p class="hint"><strong>Value</strong> is how light or dark a color is, with the color ignored. Squint and the darker one goes darker first.</p>
+            <p class="hint"><strong>Temperature</strong> is which way a color leans: toward orange and yellow is warm, toward blue is cool. A gray-green can be cooler than a pink that is just as dark.</p>
+            <p class="hint">Some rounds are a tie. "Both the same" is a real answer, not a trick.</p>
+          </div>
+        </div>
+        <div class="vb-play" id="vb-play" hidden>
+          <div class="game-bar vb-bar" id="vb-bar">
+            <span class="vb-round" id="vb-round">1 of 10</span>
+            <p class="game-progress" id="vb-score">0 right</p>
+            <button type="button" class="game-icon-btn" id="vb-quit" aria-label="Quit this battle" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+          <div class="vb-board" id="vb-board">
+            <p class="vb-question" id="vb-question">Which color is darker in value?</p>
+            <div class="vb-circles">
+              <button type="button" class="vb-circle" id="vb-left" data-choice="left" aria-label="The left color"></button>
+              <button type="button" class="vb-circle" id="vb-right" data-choice="right" aria-label="The right color"></button>
+            </div>
+            <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
+            <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" hidden>
+              <p class="game-kicker" id="vb-kicker">Battle over</p>
+              <p class="game-pct"><span id="vb-pct">0</span><span class="game-pct-sign">%</span></p>
+              <p class="game-pct-label">right</p>
+              <div class="game-stars" id="vb-stars" role="img" aria-label=""><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span></div>
+              <p class="game-grade" id="vb-grade"></p>
+              <p class="game-newbest" id="vb-newBest" hidden>New best!</p>
+              <div class="game-popup-actions">
+                <button type="button" class="btn btn-primary" id="vb-again">Play again</button>
+                <button type="button" class="btn btn-ghost" id="vb-settings">Change settings</button>
+              </div>
+            </div>
+          </div>
+          <div class="vb-choices" id="vb-choices">
+            <button type="button" class="btn vb-choice" data-choice="left">◀ Left</button>
+            <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
+            <button type="button" class="btn vb-choice" data-choice="right">Right ▶</button>
+          </div>
+          <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
+        </div>
+      </section>
+
       <section class="tabpanel help" id="tab-help" hidden>
         <div class="help-intro">
           <h2 class="help-title">How to use Portrait Value Studio</h2>
@@ -784,7 +848,7 @@
             <ol>
               <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
               <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
-              <li>The three big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Games</strong> opens a menu with Paint by numbers, and more games to come.</li>
+              <li>The three big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
             </ol>
           </div>
           <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo and the four tabs" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
@@ -913,6 +977,22 @@
           </div>
         </section>
 
+        <section class="help-part" id="help-battle">
+          <div class="help-text">
+            <h3>Value battle</h3>
+            <ol>
+              <li>Pick a <strong>palette</strong> and a <strong>level</strong>, then <strong>Start the battle</strong>. Both colors in every round are mixed from that palette.</li>
+              <li>Two circles sit on a gray board and a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>. Tapping a circle works too.</li>
+              <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
+              <li>After ten rounds the score pops up with stars, and your best for that palette and level is kept.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/battle-play.jpg" alt="Value battle: two color circles on a gray board, the question Which color is darker in value, and the three answer buttons" loading="lazy"><figcaption>A round</figcaption></figure>
+            <figure class="phone"><img src="img/help/battle-answer.jpg" alt="After answering: the right circle is ringed and a line explains the values" loading="lazy"><figcaption>The answer explained</figcaption></figure>
+          </div>
+        </section>
+
         <section class="help-part" id="help-tips">
           <div class="help-text">
             <h3>Good to know</h3>
@@ -982,5 +1062,6 @@
 <script src="js/game.js"></script>
 <script src="js/painting.js"></script>
 <script src="js/loomis.js"></script>
+<script src="js/battle.js"></script>
 </body>
 </html>

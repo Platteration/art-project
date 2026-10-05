@@ -416,7 +416,7 @@
     els.modeAbout.textContent = MODES[m].about;
     els.palette.hidden = m === 'mystery';
     els.deal.hidden = m !== 'mystery';
-    document.querySelectorAll('.game-levels label').forEach((l) => {
+    document.querySelectorAll('#tab-game .game-levels label').forEach((l) => {
       const lv = LEVELS[l.getAttribute('for').replace('game', '').toLowerCase()];
       l.querySelector('small').textContent = `Up to ${lv.colors * 3} colors · ${m === 'relaxed' ? 'no clock' : lv.seconds / 60 + ' min'}`;
     });

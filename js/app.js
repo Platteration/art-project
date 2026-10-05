@@ -27,7 +27,7 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), paint: $('tab-paint'), game: $('tab-game'), help: $('tab-help') },
+    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), paint: $('tab-paint'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -2045,8 +2045,8 @@
   // Three sections at the top: Learning tools (a menu: Study the photo, Loomis head, How to use),
   // Studio, and Games (a menu: Paint by numbers, with more to come). The group button shows which
   // of its pages is open.
-  const GROUP_OF = { study: 'learn', loomis: 'learn', help: 'learn', paint: 'paint', game: 'games' };
-  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', help: 'How to use', paint: 'Studio', game: 'Paint by numbers' };
+  const GROUP_OF = { study: 'learn', loomis: 'learn', help: 'learn', paint: 'paint', game: 'games', battle: 'games' };
+  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', help: 'How to use', paint: 'Studio', game: 'Paint by numbers', battle: 'Value battle' };
   const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), games: $('tabGamesBtn') };
   const groupSubs = { learn: $('tabLearnSub'), games: $('tabGamesSub') };
   function closeMenus() {
@@ -2068,6 +2068,7 @@
     // the game, the Studio, the Loomis head and the guide have their own layouts: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
     document.body.classList.toggle('tab-help', name === 'help');
+    document.body.classList.toggle('tab-battle', name === 'battle');
     if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
@@ -2559,6 +2560,7 @@
     if (location.hash === '#paint') switchTab('paint');
     if (location.hash === '#help') switchTab('help');
     if (location.hash === '#loomis') switchTab('loomis');
+    if (location.hash === '#battle') switchTab('battle');
   }
 
   const redrawHist = () => drawHistogram();
