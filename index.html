@@ -787,6 +787,16 @@
               </div>
               <p class="hint">Two colors: left, right or the same. Three or four: tap the darkest or the lightest, or tap them in order.</p>
             </fieldset>
+            <fieldset class="field">
+              <legend>Mode</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Mode">
+                <input type="radio" name="vbMode" id="vbModeStreak" value="streak" checked><label for="vbModeStreak">Streak<small>until a miss</small></label>
+                <input type="radio" name="vbMode" id="vbMode1" value="60"><label for="vbMode1">1 min<small>on the clock</small></label>
+                <input type="radio" name="vbMode" id="vbMode2" value="120"><label for="vbMode2">2 min<small>on the clock</small></label>
+                <input type="radio" name="vbMode" id="vbMode5" value="300"><label for="vbMode5">5 min<small>on the clock</small></label>
+              </div>
+              <p class="hint">Streak ends at the first miss. On the clock, get as many right as you can; a miss only costs the time to read the answer.</p>
+            </fieldset>
             <p class="game-best" id="vb-best"></p>
             <button type="button" class="btn btn-primary game-start" id="vb-start">Start the battle</button>
           </div>
@@ -801,6 +811,7 @@
         <div class="vb-play" id="vb-play" hidden>
           <div class="game-bar vb-bar" id="vb-bar">
             <span class="vb-round" id="vb-round">Streak 0</span>
+            <span class="game-timer vb-time" id="vb-time" hidden>1:00</span>
             <p class="game-progress" id="vb-score">0 right</p>
             <button type="button" class="game-icon-btn" id="vb-quit" aria-label="Quit this battle" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
@@ -808,10 +819,18 @@
             <p class="vb-question" id="vb-question">Which color is darker in value?</p>
             <div class="vb-swatches" id="vb-swatches" data-count="2"></div>
             <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
+            <div class="game-popup vb-miss" id="vb-miss" role="group" aria-labelledby="vb-missKicker" hidden>
+              <p class="game-kicker" id="vb-missKicker">Not quite</p>
+              <p class="vb-miss-why" id="vb-missWhy"></p>
+              <div class="vb-chips" id="vb-missChips"></div>
+              <div class="game-popup-actions">
+                <button type="button" class="btn btn-primary" id="vb-missNext">See the score</button>
+              </div>
+            </div>
             <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" hidden>
               <p class="game-kicker" id="vb-kicker">Streak over</p>
               <p class="game-pct"><span id="vb-pct">0</span></p>
-              <p class="game-pct-label">in a row</p>
+              <p class="game-pct-label" id="vb-pctLabel">in a row</p>
               <div class="game-stars" id="vb-stars" role="img" aria-label=""><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span></div>
               <p class="game-grade" id="vb-grade"></p>
               <p class="game-newbest" id="vb-newBest" hidden>New best!</p>
@@ -987,7 +1006,7 @@
               <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>, or tap a swatch.</li>
               <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, or tap them <strong>in order</strong> from darkest to lightest. Choose how many colors on the setup, or Mix for all three.</li>
               <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
-              <li>The rounds keep coming, each a little harder, and your <strong>streak</strong> counts up in the bar. One miss ends it: the streak pops up with stars, and your best for that palette and color count is kept.</li>
+              <li>The rounds keep coming, each a little harder. In <strong>Streak</strong> mode one miss ends it. On the <strong>clock</strong> (1, 2 or 5 minutes) you get as many right as you can. A miss pops up the right answer with the colors in order, then the score pops up with stars and your best is kept.</li>
             </ol>
           </div>
           <div class="help-shots">

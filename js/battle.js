@@ -3,8 +3,10 @@
  * gray board. With two, a question asks which is darker, lighter, cooler or warmer, and three
  * buttons answer: the left one, the right one, or both the same. With more, the question is
  * answered on the swatches: tap the darkest or the lightest, tap them in order from darkest to
- * lightest. The rounds keep coming, each a little harder than the last, until the first miss:
- * the score is the streak. It pops up the way Paint by numbers scores a portrait, and the best
+ * lightest. The rounds keep coming, each a little harder than the last. In Streak mode the first
+ * miss ends it and the score is the streak; on the clock (1, 2 or 5 minutes) a miss only costs the
+ * time it takes to read the answer, and the score is how many were right. A miss pops up the right
+ * answer with the colors in order. It pops up the way Paint by numbers scores a portrait, and the best
  * streak for each palette and color count is kept in the browser.
  *
  * Value is lightness (L*), read on the 0-10 value scale the Study tab uses. Temperature is the hue:
@@ -20,6 +22,7 @@
   if (!root) return;
   const PALETTE_KEY = 'portrait-value-studio.battlePalette';
   const COUNT_KEY = 'portrait-value-studio.battleCount';
+  const MODE_KEY = 'portrait-value-studio.battleMode';
   const BEST_KEY = 'portrait-value-studio.battleBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
@@ -151,36 +154,71 @@
   const els = {
     setup: $('setup'), play: $('play'), palette: $('palette'), start: $('start'), best: $('best'),
     bar: $('bar'), round: $('round'), score: $('score'), quit: $('quit'), question: $('question'), swatches: $('swatches'),
-    answer: $('answer'), choices: $('choices'), undo: $('undo'), next: $('next'), board: $('board'),
+    answer: $('answer'), choices: $('choices'), undo: $('undo'), next: $('next'), board: $('board'), time: $('time'),
+    miss: $('miss'), missWhy: $('missWhy'), missChips: $('missChips'), missNext: $('missNext'), label: $('pctLabel'),
     popup: $('popup'), kicker: $('kicker'), pct: $('pct'), stars: $('stars'), grade: $('grade'), newBest: $('newBest'), again: $('again'), settings: $('settings'),
   };
   let game = null, countUp = 0;
   const count = () => (root.querySelector('input[name="vbCount"]:checked') || {}).value || 'mix';
+  // the mode: a streak until the first miss, or as many as you can in 1, 2 or 5 minutes
+  const mode = () => (root.querySelector('input[name="vbMode"]:checked') || {}).value || 'streak';
+  const timed = () => game && game.seconds > 0;
   const paletteNow = () => palettes().find((p) => p.id === els.palette.value) || palettes()[0];
-  const bestKey = () => `${paletteNow().id}:${count()}`;
+  const bestKey = () => `${paletteNow().id}:${count()}:${mode()}`;
   function renderSetup() {
     const list = palettes(), was = els.palette.value || load(PALETTE_KEY, 'zorn');
     els.palette.innerHTML = '';
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const ct = load(COUNT_KEY, 'mix');
+    const ct = load(COUNT_KEY, 'mix'), md = load(MODE_KEY, 'streak');
+    root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
     root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
     showBest();
   }
   function showBest() {
     const best = load(BEST_KEY, {})[bestKey()];
-    els.best.textContent = best == null ? 'No streak yet for these settings.' : `Your best streak here: ${best} in a row.`;
+    els.best.textContent = best == null ? (mode() === 'streak' ? 'No streak yet for these settings.' : 'No score yet for these settings.') : mode() === 'streak' ? `Your best streak here: ${best} in a row.` : `Your best here: ${best} right in ${mode() / 60} minute${mode() === '60' ? '' : 's'}.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
   root.querySelectorAll('input[name="vbCount"]').forEach((r) => r.addEventListener('change', () => { save(COUNT_KEY, count()); showBest(); }));
+  root.querySelectorAll('input[name="vbMode"]').forEach((r) => r.addEventListener('change', () => { save(MODE_KEY, mode()); showBest(); }));
 
   function start() {
     const pal = paletteNow();
     const pool = mixPool(pal.codes, 220);
-    game = { pool, count: count(), rounds: [], i: -1, streak: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
-    els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true;
+    const seconds = mode() === 'streak' ? 0 : +mode();
+    game = { pool, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
+    els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true; els.miss.hidden = true;
+    els.time.hidden = !seconds;
     setFocus(true);
     nextRound();
+    startClock();
+  }
+  // the clock, for a timed game: it pauses while the answer to a miss is being read
+  let clock = 0, clockFrom = 0;
+  function startClock() {
+    clearInterval(clock);
+    if (!timed()) return;
+    clockFrom = performance.now();
+    showTime();
+    clock = setInterval(tick, 250);
+  }
+  function pauseClock() { if (!timed() || !clock) return; clearInterval(clock); clock = 0; game.left = Math.max(0, game.left - (performance.now() - clockFrom) / 1000); showTime(); }
+  function tick() {
+    const left = game.left - (performance.now() - clockFrom) / 1000;
+    showTime(left);
+    if (left <= 0) { clearInterval(clock); clock = 0; game.left = 0; timeUp(); }
+  }
+  function showTime(left = game.left) {
+    const sec = Math.max(0, Math.ceil(left));
+    els.time.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    els.time.classList.toggle('is-low', sec <= 10);
+  }
+  function timeUp() {
+    if (!game || game.over) return;
+    // mid-round, the round is void; a miss being read finishes when it is closed
+    if (!els.miss.hidden) { game.pendingEnd = true; return; }
+    finish(true);
   }
   // each round is dealt as it comes, a little harder than the last; the colors per round as set
   // (or a mix, shuffled in threes), the questions dealt in turn
@@ -199,7 +237,7 @@
   function showRound() {
     const r = game.rounds[game.i];
     game.answered = false; game.picked = [];
-    els.round.textContent = `Streak ${game.streak}`;
+    els.round.textContent = timed() ? `${game.right} right` : `Streak ${game.streak}`;
     els.score.textContent = `Round ${game.i + 1} · ${game.i < 6 ? 'warming up' : game.i < 16 ? 'closing in' : game.i < 24 ? 'getting hard' : 'a hair apart'}`;
     els.question.textContent = r.q.ask;
     els.swatches.innerHTML = '';
@@ -272,7 +310,12 @@
     const r = game.rounds[game.i];
     game.answered = true; game.lastChoice = choice;
     const right = same(choice, r.answer);
-    if (right) { game.streak++; els.round.textContent = `Streak ${game.streak}`; pulse(els.round); if (game.streak % 5 === 0) { els.round.classList.remove('is-milestone'); void els.round.offsetWidth; els.round.classList.add('is-milestone'); } }
+    if (right) {
+      game.streak++; game.right++;
+      els.round.textContent = timed() ? `${game.right} right` : `Streak ${game.streak}`;
+      pulse(els.round);
+      if ((timed() ? game.right : game.streak) % 5 === 0) { els.round.classList.remove('is-milestone'); void els.round.offsetWidth; els.round.classList.add('is-milestone'); }
+    } else { game.missed++; if (timed()) game.streak = 0; }   // in Streak mode the miss ends the game, and the streak is the score
     els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = true; b.classList.toggle('is-chosen', b.dataset.choice === choice); });
     els.undo.disabled = true;
     // the right swatches ringed in gold, a wrong pick in red
@@ -283,24 +326,52 @@
       chosen.forEach((i) => { if (!correct.includes(i)) swatch(i).classList.add('is-wrong'); });
       if (r.q.mode === 'order') r.answer.forEach((i, k) => { const b = swatch(i).querySelector('.vb-badge'); b.textContent = k + 1; b.hidden = false; });
     }
-    els.answer.textContent = `${right ? 'Right!' : 'Not quite.'} ${explain(r)}`;
+    els.answer.textContent = right ? `Right! ${explain(r)}` : '';
     els.answer.classList.add(right ? 'is-right' : 'is-wrong');
     root.classList.add('vb-answered');
     if (right) ding();
     if (navigator.vibrate && (!window.GameSound || GameSound.on())) navigator.vibrate(right ? [18, 40, 28] : 60);
-    els.next.hidden = false;
-    els.next.textContent = right ? 'Next ▸' : 'See the score';
-    els.next.focus({ preventScroll: true });
+    if (right) {
+      els.next.hidden = false; els.next.textContent = 'Next ▸';
+      // on the clock there is no time to read: the next round comes by itself
+      if (timed()) { clearTimeout(game.auto); game.auto = setTimeout(() => { if (game && !game.over && game.answered) nextRound(); }, 650); }
+      else els.next.focus({ preventScroll: true });
+    } else showMiss(r);
   }
+  // the miss popup: what the answer was, with the colors in order and their values or leans
+  function showMiss(r) {
+    pauseClock();
+    els.missWhy.textContent = explain(r);
+    els.missChips.innerHTML = '';
+    const order = r.q.kind === 'value' ? r.colors.map((c, i) => i).sort((a, b) => r.colors[a].L - r.colors[b].L) : r.colors.map((c, i) => i);
+    order.forEach((i) => {
+      const c = r.colors[i], chip = document.createElement('span');
+      chip.className = 'vb-chip';
+      chip.innerHTML = `<span class="vb-chip-color" style="background:${css(c.rgb)}"></span><span class="vb-chip-text">${r.n > 2 ? LETTERS[i] : i === 0 ? 'Left' : 'Right'}<br>${r.q.kind === 'value' ? vLabel(c) : tLabel(c)}</span>`;
+      els.missChips.append(chip);
+    });
+    els.missNext.textContent = timed() ? 'Next ▸' : 'See the score';
+    els.miss.hidden = false;
+    els.miss.classList.remove('is-shown'); void els.miss.offsetWidth; els.miss.classList.add('is-shown');
+    els.missNext.focus({ preventScroll: true });
+  }
+  els.missNext.addEventListener('click', () => {
+    if (!game) return;
+    els.miss.hidden = true;
+    if (!timed()) { finish(false); return; }
+    if (game.pendingEnd || game.left <= 0) { finish(true); return; }
+    nextRound();
+    startClock();
+  });
   els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => { if (game && !game.answered) { pulse(b); click(b.dataset.choice === 'left' ? 0 : b.dataset.choice === 'same' ? 4 : 8); } choose(b.dataset.choice); }));
   els.next.addEventListener('click', () => {
-    if (!game || !game.answered) return;
-    const r = game.rounds[game.i];
-    if (same(game.lastChoice, r.answer)) nextRound();
-    else finish();
+    if (!game || !game.answered || game.over) return;
+    clearTimeout(game.auto);
+    nextRound();
   });
   document.addEventListener('keydown', (e) => {
     if (!game || game.over || Studio.tab() !== 'battle') return;
+    if (!els.miss.hidden) { if (e.key === 'Enter') els.missNext.click(); return; }
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') {
       if (e.key === 'ArrowLeft') choose('left');
@@ -314,17 +385,24 @@
   const STARS = [20, 12, 8, 5, 2];
   const GRADES = ['Keep looking', 'Warming up', 'Getting there', 'Good eye', 'Sharp eye!', 'Eagle eye!'];
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  function finish() {
+  // on the clock, stars go by right answers a minute
+  const TIMED_STARS = [10, 7, 5, 3, 1];
+  function finish(timeout) {
     game.over = true;
-    const pct = game.streak;
-    const stars = STARS.filter((min) => pct >= min).length;
+    clearInterval(clock); clock = 0; clearTimeout(game.auto);
+    els.miss.hidden = true;
+    const onClock = game.seconds > 0;
+    const score = onClock ? game.right : game.streak;
+    const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
-    const isBest = game.streak > 0 && (bests[key] == null || game.streak > bests[key]);
-    if (isBest) { bests[key] = game.streak; save(BEST_KEY, bests); }
-    els.kicker.textContent = game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
+    const isBest = score > 0 && (bests[key] == null || score > bests[key]);
+    if (isBest) { bests[key] = score; save(BEST_KEY, bests); }
+    els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
+    els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
-    els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${game.streak} in a row`);
+    els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${score} ${onClock ? 'right' : 'in a row'}`);
+    const pct = score;
     els.stars.querySelectorAll('.game-star').forEach((st, i) => { st.classList.toggle('is-on', i < stars); st.style.setProperty('--i', i); });
     els.popup.hidden = false;
     els.popup.classList.remove('is-shown'); void els.popup.offsetWidth; els.popup.classList.add('is-shown');
@@ -338,7 +416,7 @@
     els.again.focus({ preventScroll: true });
   }
   els.again.addEventListener('click', start);
-  els.settings.addEventListener('click', () => { game = null; els.popup.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); showBest(); });
+  els.settings.addEventListener('click', () => { clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null; els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); showBest(); });
   // the tabs are hidden while playing on a phone, so the bar has a way out: tap ✕ twice
   let quitArmed = 0;
   els.quit.addEventListener('click', () => {
