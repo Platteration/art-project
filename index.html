@@ -771,12 +771,22 @@
         <div class="game-setup" id="vb-setup">
           <div class="game-card">
             <h2 class="game-title">Value battle</h2>
-            <p class="game-lede">Two colors mixed from the same palette. Which is darker, lighter, cooler or warmer? Ten rounds. Trust your eye.</p>
+            <p class="game-lede">Colors mixed from the same palette. Which is darker, lighter, cooler or warmer? With three or four, put them in order or sort them into families. Ten rounds. Trust your eye.</p>
             <div class="field">
               <label for="vb-palette">Palette</label>
               <select id="vb-palette"></select>
               <p class="hint">Both colors are mixed from these paints.</p>
             </div>
+            <fieldset class="field">
+              <legend>Colors in a round</legend>
+              <div class="seg seg-full" role="radiogroup" aria-label="Colors in a round">
+                <input type="radio" name="vbCount" id="vbCount2" value="2"><label for="vbCount2">2</label>
+                <input type="radio" name="vbCount" id="vbCount3" value="3"><label for="vbCount3">3</label>
+                <input type="radio" name="vbCount" id="vbCount4" value="4"><label for="vbCount4">4</label>
+                <input type="radio" name="vbCount" id="vbCountMix" value="mix" checked><label for="vbCountMix">Mix</label>
+              </div>
+              <p class="hint">Two colors: left, right or the same. Three or four: tap the darkest or lightest, tap them in order, or sort them into warm and cool.</p>
+            </fieldset>
             <fieldset class="field">
               <legend>Level</legend>
               <div class="seg seg-full game-levels" role="radiogroup" aria-label="Level">
@@ -803,10 +813,7 @@
           </div>
           <div class="vb-board" id="vb-board">
             <p class="vb-question" id="vb-question">Which color is darker in value?</p>
-            <div class="vb-circles">
-              <button type="button" class="vb-circle" id="vb-left" data-choice="left" aria-label="The left color"></button>
-              <button type="button" class="vb-circle" id="vb-right" data-choice="right" aria-label="The right color"></button>
-            </div>
+            <div class="vb-swatches" id="vb-swatches" data-count="2"></div>
             <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
             <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" hidden>
               <p class="game-kicker" id="vb-kicker">Battle over</p>
@@ -825,6 +832,9 @@
             <button type="button" class="btn vb-choice" data-choice="left">◀ Left</button>
             <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
             <button type="button" class="btn vb-choice" data-choice="right">Right ▶</button>
+            <button type="button" class="btn vb-undo" id="vb-undo" disabled>Start the round over</button>
+            <button type="button" class="btn btn-primary vb-done" id="vb-done">Done</button>
+            <p class="hint vb-tap-hint">Tap the swatches to answer.</p>
           </div>
           <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
         </div>
@@ -982,14 +992,16 @@
             <h3>Value battle</h3>
             <ol>
               <li>Pick a <strong>palette</strong> and a <strong>level</strong>, then <strong>Start the battle</strong>. Both colors in every round are mixed from that palette.</li>
-              <li>Two circles sit on a gray board and a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>. Tapping a circle works too.</li>
+              <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>, or tap a swatch.</li>
+              <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, tap them <strong>in order</strong> from darkest to lightest, or tap every <strong>warm</strong> (or <strong>cool</strong>) one and press <strong>Done</strong>. Choose how many colors on the setup, or Mix for all three.</li>
               <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
               <li>After ten rounds the score pops up with stars, and your best for that palette and level is kept.</li>
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/battle-play.jpg" alt="Value battle: two color circles on a gray board, the question Which color is darker in value, and the three answer buttons" loading="lazy"><figcaption>A round</figcaption></figure>
-            <figure class="phone"><img src="img/help/battle-answer.jpg" alt="After answering: the right circle is ringed and a line explains the values" loading="lazy"><figcaption>The answer explained</figcaption></figure>
+            <figure class="phone"><img src="img/help/battle-play.jpg" alt="Value battle: two color squares on a gray board, the question, and the three answer buttons" loading="lazy"><figcaption>A round</figcaption></figure>
+            <figure class="phone"><img src="img/help/battle-answer.jpg" alt="After answering: the right swatch is ringed in gold and a line explains the values" loading="lazy"><figcaption>The answer explained</figcaption></figure>
+            <figure class="phone"><img src="img/help/battle-four.jpg" alt="Four lettered swatches and the prompt to tap them in order from darkest to lightest" loading="lazy"><figcaption>Four colors in order</figcaption></figure>
           </div>
         </section>
 

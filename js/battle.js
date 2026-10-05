@@ -1,7 +1,9 @@
 /*
- * Value battle: two colors mixed from the same palette sit as circles on a primer-gray board, and a
- * question asks which is darker, lighter, cooler or warmer. Three buttons answer: the left one, the
- * right one, or both the same. Ten rounds make a game; the score pops up the way Paint by numbers
+ * Value battle: two, three or four colors mixed from the same palette sit as squares on a primer-
+ * gray board. With two, a question asks which is darker, lighter, cooler or warmer, and three
+ * buttons answer: the left one, the right one, or both the same. With more, the question is
+ * answered on the swatches: tap the darkest or the lightest, tap them in order from darkest to
+ * lightest, or tap every warm (or cool) one and press Done. Ten rounds make a game; the score pops up the way Paint by numbers
  * scores a portrait, and the best for each palette and difficulty is kept in the browser.
  *
  * Value is lightness (L*), read on the 0-10 value scale the Study tab uses. Temperature is the hue:
@@ -17,6 +19,7 @@
   if (!root) return;
   const PALETTE_KEY = 'portrait-value-studio.battlePalette';
   const LEVEL_KEY = 'portrait-value-studio.battleLevel';
+  const COUNT_KEY = 'portrait-value-studio.battleCount';
   const BEST_KEY = 'portrait-value-studio.battleBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
   const ROUNDS = 10;
@@ -65,22 +68,34 @@
   }
 
   // ---- Rounds --------------------------------------------------------------------------------------
+  // Two colors get a left-right-same question. Three or four get one answered on the swatches
+  // themselves: tap the darkest or the lightest, tap them in order from darkest to lightest, or
+  // tap all the warm (or all the cool) ones and press Done. Swatches are lettered A to D so the
+  // answer can name them.
   const QUESTIONS = [
-    { key: 'darker', ask: 'Which color is darker in value?', kind: 'value', pick: (d) => -d },
-    { key: 'lighter', ask: 'Which color is lighter in value?', kind: 'value', pick: (d) => d },
-    { key: 'cooler', ask: 'Which color is cooler in tone?', kind: 'temp', pick: (d) => -d },
-    { key: 'warmer', ask: 'Which color is warmer in tone?', kind: 'temp', pick: (d) => d },
+    { key: 'darker', ask: 'Which color is darker in value?', kind: 'value', mode: 'pair', pick: (d) => -d },
+    { key: 'lighter', ask: 'Which color is lighter in value?', kind: 'value', mode: 'pair', pick: (d) => d },
+    { key: 'cooler', ask: 'Which color is cooler in tone?', kind: 'temp', mode: 'pair', pick: (d) => -d },
+    { key: 'warmer', ask: 'Which color is warmer in tone?', kind: 'temp', mode: 'pair', pick: (d) => d },
+    { key: 'darkest', ask: 'Tap the color with the darkest value.', kind: 'value', mode: 'pick', dir: -1 },
+    { key: 'lightest', ask: 'Tap the color with the lightest value.', kind: 'value', mode: 'pick', dir: 1 },
+    { key: 'order', ask: 'Tap the colors in order, from darkest to lightest.', kind: 'value', mode: 'order' },
+    { key: 'warmFamily', ask: 'Tap every color in the warm family, then press Done.', kind: 'temp', mode: 'family', dir: 1 },
+    { key: 'coolFamily', ask: 'Tap every color in the cool family, then press Done.', kind: 'temp', mode: 'family', dir: -1 },
   ];
-  // how far apart the two colors are, by level: value in L*, temperature in warmth (0-2)
+  const PAIR_Q = QUESTIONS.filter((q) => q.mode === 'pair'), MANY_Q = QUESTIONS.filter((q) => q.mode !== 'pair');
+  // how far apart the colors are, by level: value in L*, temperature in warmth (0-2); and how far
+  // from neutral a color must lean to count as warm or cool
   const LEVELS = {
-    easy: { name: 'Easy', value: [14, 40], temp: [0.6, 2], same: 0.15 },
-    medium: { name: 'Medium', value: [6, 14], temp: [0.3, 0.7], same: 0.25 },
-    hard: { name: 'Hard', value: [2.5, 6], temp: [0.12, 0.3], same: 0.3 },
+    easy: { name: 'Easy', value: [14, 40], temp: [0.6, 2], same: 0.15, gap: 12, lean: 0.5 },
+    medium: { name: 'Medium', value: [6, 14], temp: [0.3, 0.7], same: 0.25, gap: 7, lean: 0.35 },
+    hard: { name: 'Hard', value: [2.5, 6], temp: [0.12, 0.3], same: 0.3, gap: 3.5, lean: 0.2 },
   };
   const SAME = { value: 0.9, temp: 0.05 };      // closer than this is "the same"
+  const LETTERS = ['A', 'B', 'C', 'D'];
   function measure(kind, c) { return kind === 'value' ? c.L : c.warmth; }
   // a pair of colors for the question at the level, or a "same" pair when the dice say so
-  function makeRound(pool, level, q) {
+  function makePair(pool, level, q) {
     const lv = LEVELS[level];
     const usable = q.kind === 'temp' ? pool.filter((c) => c.chroma >= 10) : pool;
     const wantSame = Math.random() < lv.same;
@@ -100,89 +115,182 @@
       const sorted = usable.filter((c) => c !== a).sort((x, y) => Math.abs(Math.abs(measure(q.kind, x) - measure(q.kind, a)) - (lo + hi) / 2) - Math.abs(Math.abs(measure(q.kind, y) - measure(q.kind, a)) - (lo + hi) / 2));
       best = [a, sorted[0] || a];
     }
-    const [left, right] = Math.random() < 0.5 ? best : [best[1], best[0]];
-    const d = measure(q.kind, right) - measure(q.kind, left);
+    const colors = Math.random() < 0.5 ? best : [best[1], best[0]];
+    const d = measure(q.kind, colors[1]) - measure(q.kind, colors[0]);
     const answer = Math.abs(d) < SAME[q.kind] ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
-    return { q, left, right, answer };
+    return { q, n: 2, colors, answer };
   }
+  // three or four colors for a swatch question: values at least a level's gap apart where the
+  // question needs them told apart, and every color clearly warm or cool for a family question
+  function makeMany(pool, level, q, n) {
+    const lv = LEVELS[level];
+    const byL = (list) => list.slice().sort((x, y) => x.L - y.L);
+    let colors = null;
+    for (let tries = 0; tries < 300 && !colors; tries++) {
+      const set = [];
+      const from = q.kind === 'temp' ? pool.filter((c) => c.chroma >= 10 && Math.abs(c.warmth) >= lv.lean) : pool;
+      if (from.length < n) break;
+      while (set.length < n) { const c = from[rnd(from.length)]; if (!set.includes(c)) set.push(c); }
+      if (q.mode === 'order') { const s = byL(set); if (s.every((c, i) => !i || c.L - s[i - 1].L >= lv.gap)) colors = set; }
+      else if (q.mode === 'pick') { const s = byL(set); const edge = q.dir < 0 ? s[1].L - s[0].L : s[n - 1].L - s[n - 2].L; if (edge >= lv.gap) colors = set; }
+      else colors = set;   // family: the lean filter did the work
+    }
+    if (!colors) {
+      // the palette can't make such a set: take the n most spread colors it has
+      const from = (q.kind === 'temp' ? pool.filter((c) => c.chroma >= 10) : pool).slice().sort(() => Math.random() - 0.5).slice(0, 40);
+      colors = byL(from).filter((c, i, arr) => i % Math.max(1, Math.floor(arr.length / n)) === 0).slice(0, n);
+      while (colors.length < n && pool.length) colors.push(pool[rnd(pool.length)]);
+    }
+    let answer;
+    if (q.mode === 'pick') { const s = byL(colors); answer = colors.indexOf(q.dir < 0 ? s[0] : s[n - 1]); }
+    else if (q.mode === 'order') answer = byL(colors).map((c) => colors.indexOf(c));
+    else answer = colors.map((c, i) => (q.dir > 0 ? c.warmth > 0 : c.warmth < 0) ? i : -1).filter((i) => i >= 0);
+    return { q, n, colors, answer };
+  }
+  function makeRound(pool, level, q, n) { return n === 2 ? makePair(pool, level, q) : makeMany(pool, level, q, n); }
 
   // ---- The game ------------------------------------------------------------------------------------
   const els = {
     setup: $('setup'), play: $('play'), palette: $('palette'), start: $('start'), best: $('best'),
-    bar: $('bar'), round: $('round'), score: $('score'), quit: $('quit'), question: $('question'), left: $('left'), right: $('right'),
-    answer: $('answer'), choices: $('choices'), next: $('next'), board: $('board'),
+    bar: $('bar'), round: $('round'), score: $('score'), quit: $('quit'), question: $('question'), swatches: $('swatches'),
+    answer: $('answer'), choices: $('choices'), done: $('done'), undo: $('undo'), next: $('next'), board: $('board'),
     popup: $('popup'), kicker: $('kicker'), pct: $('pct'), stars: $('stars'), grade: $('grade'), newBest: $('newBest'), again: $('again'), settings: $('settings'),
   };
   let game = null, countUp = 0;
   const level = () => (root.querySelector('input[name="vbLevel"]:checked') || {}).value || 'easy';
+  const count = () => (root.querySelector('input[name="vbCount"]:checked') || {}).value || 'mix';
   const paletteNow = () => palettes().find((p) => p.id === els.palette.value) || palettes()[0];
-  const bestKey = () => `${paletteNow().id}:${level()}`;
+  const bestKey = () => `${paletteNow().id}:${level()}:${count()}`;
   function renderSetup() {
     const list = palettes(), was = els.palette.value || load(PALETTE_KEY, 'zorn');
     els.palette.innerHTML = '';
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const lv = load(LEVEL_KEY, 'easy');
+    const lv = load(LEVEL_KEY, 'easy'), ct = load(COUNT_KEY, 'mix');
     root.querySelectorAll('input[name="vbLevel"]').forEach((r) => { r.checked = r.value === lv; });
+    root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
     showBest();
   }
   function showBest() {
     const best = load(BEST_KEY, {})[bestKey()];
-    els.best.textContent = best == null ? 'No score yet for this palette and level.' : `Your best here: ${best} of ${ROUNDS}.`;
+    els.best.textContent = best == null ? 'No score yet for these settings.' : `Your best here: ${best} of ${ROUNDS}.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
   root.querySelectorAll('input[name="vbLevel"]').forEach((r) => r.addEventListener('change', () => { save(LEVEL_KEY, level()); showBest(); }));
+  root.querySelectorAll('input[name="vbCount"]').forEach((r) => r.addEventListener('change', () => { save(COUNT_KEY, count()); showBest(); }));
 
   function start() {
     const pal = paletteNow();
     const pool = mixPool(pal.codes, 220);
-    // ten rounds, the four questions dealt evenly in a shuffled order
-    const order = [];
-    for (let i = 0; i < ROUNDS; i++) order.push(QUESTIONS[i % QUESTIONS.length]);
-    for (let i = order.length - 1; i > 0; i--) { const j = rnd(i + 1); [order[i], order[j]] = [order[j], order[i]]; }
-    game = { pool, level: level(), rounds: order.map((q) => makeRound(pool, level(), q)), i: 0, right: 0, answered: false, over: false };
+    // ten rounds: the colors per round as set (or a mix), the questions dealt evenly and shuffled
+    const ct = count();
+    const rounds = [], dealt = { pair: 0, many: 0 };
+    for (let i = 0; i < ROUNDS; i++) {
+      const n = ct === 'mix' ? [2, 3, 4][i % 3] : +ct;
+      const qs = n === 2 ? PAIR_Q : MANY_Q, key = n === 2 ? 'pair' : 'many';
+      rounds.push({ n, q: qs[dealt[key]++ % qs.length] });
+    }
+    for (let i = rounds.length - 1; i > 0; i--) { const j = rnd(i + 1); [rounds[i], rounds[j]] = [rounds[j], rounds[i]]; }
+    game = { pool, level: level(), rounds: rounds.map((r) => makeRound(pool, level(), r.q, r.n)), i: 0, right: 0, answered: false, over: false, picked: [] };
     els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true;
     setFocus(true);
     showRound();
   }
-  function showRound() {
-    const r = game.rounds[game.i];
-    game.answered = false;
-    els.round.textContent = `${game.i + 1} of ${ROUNDS}`;
-    els.score.textContent = `${game.right} right`;
-    els.question.textContent = r.q.ask;
-    els.left.style.background = css(r.left.rgb); els.right.style.background = css(r.right.rgb);
-    [els.left, els.right].forEach((c) => c.classList.remove('is-right', 'is-wrong', 'is-answer'));
-    els.answer.textContent = ''; els.answer.classList.remove('is-right', 'is-wrong');
-    els.choices.querySelectorAll('button').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen'); });
-    els.next.hidden = true;
-    root.classList.remove('vb-answered');
-  }
   const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const vLabel = (c) => `V ${(c.L / 10).toFixed(1)}`;
   const tLabel = (c) => (c.warmth > 0.35 ? 'warm' : c.warmth < -0.35 ? 'cool' : 'in between');
-  // why the answer is what it is, in a sentence the student can check against the circles
+  function showRound() {
+    const r = game.rounds[game.i];
+    game.answered = false; game.picked = [];
+    els.round.textContent = `${game.i + 1} of ${ROUNDS}`;
+    els.score.textContent = `${game.right} right`;
+    els.question.textContent = r.q.ask;
+    els.swatches.innerHTML = '';
+    els.swatches.dataset.count = r.n;
+    r.colors.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'vb-swatch'; b.dataset.index = i;
+      b.style.background = css(c.rgb);
+      b.setAttribute('aria-label', `Color ${LETTERS[i]}`);
+      b.innerHTML = `<span class="vb-letter">${LETTERS[i]}</span><span class="vb-badge" hidden></span>`;
+      b.addEventListener('click', () => tapSwatch(i));
+      els.swatches.append(b);
+    });
+    els.answer.textContent = ''; els.answer.classList.remove('is-right', 'is-wrong');
+    root.dataset.mode = r.q.mode;
+    els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen'); });
+    els.done.disabled = false; els.undo.disabled = true;
+    els.next.hidden = true;
+    root.classList.remove('vb-answered');
+  }
+  const swatch = (i) => els.swatches.querySelector(`.vb-swatch[data-index="${i}"]`);
+  // a tap on a swatch: the answer itself for a pair or a pick, the next in line for an order, a
+  // toggle for a family
+  function tapSwatch(i) {
+    if (!game || game.answered) return;
+    const r = game.rounds[game.i];
+    if (r.q.mode === 'pair') { choose(i === 0 ? 'left' : 'right'); return; }
+    if (r.q.mode === 'pick') { choose(i); return; }
+    if (r.q.mode === 'order') {
+      if (game.picked.includes(i)) return;
+      game.picked.push(i);
+      const badge = swatch(i).querySelector('.vb-badge'); badge.textContent = game.picked.length; badge.hidden = false;
+      els.undo.disabled = false;
+      if (game.picked.length === r.n) choose(game.picked.slice());
+      return;
+    }
+    // family: toggle
+    const at = game.picked.indexOf(i);
+    if (at >= 0) game.picked.splice(at, 1); else game.picked.push(i);
+    const badge = swatch(i).querySelector('.vb-badge'); badge.textContent = '✓'; badge.hidden = at >= 0;
+    swatch(i).classList.toggle('is-picked', at < 0);
+    els.undo.disabled = !game.picked.length;
+  }
+  els.done.addEventListener('click', () => { if (game && !game.answered && game.rounds[game.i].q.mode === 'family') choose(game.picked.slice().sort()); });
+  els.undo.addEventListener('click', () => {
+    if (!game || game.answered) return;
+    game.picked = [];
+    els.swatches.querySelectorAll('.vb-swatch').forEach((b) => { b.classList.remove('is-picked'); b.querySelector('.vb-badge').hidden = true; });
+    els.undo.disabled = true;
+  });
+  const same = (a, b) => Array.isArray(a) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b;
+  const names = (idx) => (idx.length ? idx.map((i) => LETTERS[i]).join(idx.length > 2 ? ', ' : ' and ') : 'none of them');
+  // why the answer is what it is, in a sentence the student can check against the swatches
   function explain(r) {
     const side = { left: 'The left one', right: 'The right one', same: 'Both' };
-    if (r.q.kind === 'value') {
-      if (r.answer === 'same') return `Both are the same value: ${vLabel(r.left)} and ${vLabel(r.right)}. Different colors, equal in light and dark.`;
-      const win = r.answer === 'left' ? r.left : r.right, lose = r.answer === 'left' ? r.right : r.left;
-      return `${side[r.answer]} is ${r.q.key}: ${vLabel(win)} against ${vLabel(lose)}.`;
+    if (r.q.mode === 'pair') {
+      const [L, R] = r.colors;
+      if (r.q.kind === 'value') {
+        if (r.answer === 'same') return `Both are the same value: ${vLabel(L)} and ${vLabel(R)}. Different colors, equal in light and dark.`;
+        const win = r.answer === 'left' ? L : R, lose = r.answer === 'left' ? R : L;
+        return `${side[r.answer]} is ${r.q.key}: ${vLabel(win)} against ${vLabel(lose)}.`;
+      }
+      if (r.answer === 'same') return `Both lean the same way: ${tLabel(L)}. The difference is in value, not temperature.`;
+      return `${side[r.answer]} is ${r.q.key}: it leans more toward ${r.q.key === 'warmer' ? 'orange and yellow' : 'blue and green'} than the other.`;
     }
-    if (r.answer === 'same') return `Both lean the same way: ${tLabel(r.left)}. The difference is in value, not temperature.`;
-    return `${side[r.answer]} is ${r.q.key}: it leans more toward ${r.q.key === 'warmer' ? 'orange and yellow' : 'blue and green'} than the other.`;
+    const vals = r.colors.map((c, i) => `${LETTERS[i]} ${vLabel(c)}`).join(', ');
+    if (r.q.mode === 'pick') return `${LETTERS[r.answer]} is the ${r.q.key}. The values: ${vals}.`;
+    if (r.q.mode === 'order') return `Darkest to lightest: ${r.answer.map((i) => LETTERS[i]).join(', ')}. The values: ${vals}.`;
+    const warm = r.colors.map((c, i) => (c.warmth > 0 ? i : -1)).filter((i) => i >= 0), cool = r.colors.map((c, i) => (c.warmth < 0 ? i : -1)).filter((i) => i >= 0);
+    return `Warm: ${names(warm)}. Cool: ${names(cool)}. Warm leans toward orange and yellow; cool toward blue and green.`;
   }
   function choose(choice) {
     if (!game || game.answered || game.over) return;
     const r = game.rounds[game.i];
     game.answered = true;
-    const right = choice === r.answer;
+    const right = same(choice, r.answer);
     if (right) game.right++;
     els.score.textContent = `${game.right} right`;
-    els.choices.querySelectorAll('button').forEach((b) => { b.disabled = true; b.classList.toggle('is-chosen', b.dataset.choice === choice); });
-    if (r.answer !== 'same') (r.answer === 'left' ? els.left : els.right).classList.add('is-answer');
-    else [els.left, els.right].forEach((c) => c.classList.add('is-answer'));
-    if (!right && choice !== 'same') (choice === 'left' ? els.left : els.right).classList.add('is-wrong');
+    els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = true; b.classList.toggle('is-chosen', b.dataset.choice === choice); });
+    els.done.disabled = true; els.undo.disabled = true;
+    // the right swatches ringed in gold, a wrong pick in red
+    const correct = r.q.mode === 'pair' ? (r.answer === 'same' ? [0, 1] : [r.answer === 'left' ? 0 : 1]) : r.q.mode === 'pick' ? [r.answer] : r.answer;
+    correct.forEach((i) => swatch(i).classList.add('is-answer'));
+    if (!right) {
+      const chosen = r.q.mode === 'pair' ? (choice === 'same' ? [] : [choice === 'left' ? 0 : 1]) : r.q.mode === 'pick' ? [choice] : choice;
+      chosen.forEach((i) => { if (!correct.includes(i)) swatch(i).classList.add('is-wrong'); });
+      if (r.q.mode === 'order') r.answer.forEach((i, k) => { const b = swatch(i).querySelector('.vb-badge'); b.textContent = k + 1; b.hidden = false; });
+    }
     els.answer.textContent = `${right ? 'Right!' : 'Not quite.'} ${explain(r)}`;
     els.answer.classList.add(right ? 'is-right' : 'is-wrong');
     root.classList.add('vb-answered');
@@ -192,7 +300,7 @@
     els.next.textContent = game.i + 1 < ROUNDS ? 'Next ▸' : 'See the score';
     els.next.focus({ preventScroll: true });
   }
-  els.choices.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => choose(b.dataset.choice)));
+  els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => choose(b.dataset.choice)));
   els.next.addEventListener('click', () => {
     if (!game || !game.answered) return;
     if (game.i + 1 < ROUNDS) { game.i++; showRound(); }
@@ -200,10 +308,14 @@
   });
   document.addEventListener('keydown', (e) => {
     if (!game || game.over || Studio.tab() !== 'battle') return;
-    if (e.key === 'ArrowLeft') choose('left');
-    else if (e.key === 'ArrowRight') choose('right');
-    else if (e.key === '=' || e.key === 'ArrowDown') choose('same');
-    else if (e.key === 'Enter' && game.answered) els.next.click();
+    const r = game.rounds[game.i];
+    if (r.q.mode === 'pair') {
+      if (e.key === 'ArrowLeft') choose('left');
+      else if (e.key === 'ArrowRight') choose('right');
+      else if (e.key === '=' || e.key === 'ArrowDown') choose('same');
+    } else if (/^[1-4]$/.test(e.key) && +e.key <= r.n) tapSwatch(+e.key - 1);
+    else if (e.key === 'd' && r.q.mode === 'family') els.done.click();
+    if (e.key === 'Enter' && game.answered) els.next.click();
   });
 
   // ---- The score, the way Paint by numbers shows one ----------------------------------------------
@@ -268,5 +380,5 @@
     if (on && !game) renderSetup();
   });
   if (Studio.tab() === 'battle') renderSetup();
-  window.ValueBattle = { makeRound, mixPool, LEVELS, QUESTIONS, state: () => game };
+  window.ValueBattle = { makeRound, mixPool, LEVELS, QUESTIONS, LETTERS, state: () => game };
 })();

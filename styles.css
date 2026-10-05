@@ -1528,16 +1528,33 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-round { font: 600 1.1rem/1 var(--mono); font-variant-numeric: tabular-nums; }
 .vb-board { position: relative; display: grid; gap: 18px; justify-items: center; align-content: center; min-height: min(62vh, 520px); padding: 22px 16px; background: #8c8a86; border-radius: var(--r); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
 .vb-question { margin: 0; font: 700 clamp(1.15rem, 1rem + 1vw, 1.5rem)/1.2 var(--display); color: #f3eee2; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
-.vb-circles { display: flex; gap: clamp(20px, 6vw, 60px); justify-content: center; }
-.vb-circle { appearance: none; width: clamp(120px, 34vw, 200px); height: clamp(120px, 34vw, 200px); border-radius: 50%; border: 0; padding: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.3); transition: transform 0.12s; }
-.vb-circle:active { transform: scale(0.97); }
-.vb-circle:focus-visible { outline: 3px solid #faf5ea; outline-offset: 4px; }
-.vb-circle.is-answer { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 5px #d9a441, 0 6px 18px rgba(0, 0, 0, 0.3); }
-.vb-circle.is-wrong { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 5px rgba(147, 52, 31, 0.9), 0 6px 18px rgba(0, 0, 0, 0.3); }
-.vb-answered .vb-circle { cursor: default; }
+.vb-swatches { display: grid; gap: clamp(14px, 4vw, 36px); justify-content: center; grid-template-columns: repeat(2, auto); }
+.vb-swatches[data-count="3"] { grid-template-columns: repeat(3, auto); }
+.vb-swatches[data-count="4"] { grid-template-columns: repeat(2, auto); }
+@media (min-width: 640px) { .vb-swatches[data-count="4"] { grid-template-columns: repeat(4, auto); } }
+.vb-swatch { appearance: none; position: relative; width: clamp(110px, 32vw, 190px); height: clamp(110px, 32vw, 190px); border-radius: 10px; border: 5px solid #bdbab4; padding: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.3); transition: transform 0.12s; }
+.vb-swatches[data-count="3"] .vb-swatch { width: clamp(90px, 26vw, 170px); height: clamp(90px, 26vw, 170px); }
+.vb-swatches[data-count="4"] .vb-swatch { width: clamp(100px, 30vw, 150px); height: clamp(100px, 30vw, 150px); }
+.vb-swatch:active { transform: scale(0.97); }
+.vb-swatch:focus-visible { outline: 3px solid #faf5ea; outline-offset: 4px; }
+.vb-swatch.is-picked { border-color: #faf5ea; }
+.vb-swatch.is-answer { border-color: #d9a441; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px #d9a441, 0 6px 18px rgba(0, 0, 0, 0.3); }
+.vb-swatch.is-wrong { border-color: #93341f; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px rgba(147, 52, 31, 0.9), 0 6px 18px rgba(0, 0, 0, 0.3); }
+.vb-letter { position: absolute; left: 6px; top: 4px; font: 700 0.8rem var(--mono); color: #faf5ea; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.vb-swatches[data-count="2"] .vb-letter { display: none; }
+.vb-badge { position: absolute; right: 6px; bottom: 6px; min-width: 26px; height: 26px; padding: 0 6px; display: grid; place-items: center; border-radius: 13px; background: #1e2b22; color: #faf5ea; font: 700 0.85rem var(--mono); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.vb-answered .vb-swatch { cursor: default; }
 .vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #f3eee2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
 .vb-answer.is-right::first-line, .vb-answer.is-wrong::first-line { font-weight: 700; }
-.vb-choices { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; }
+.vb-choices { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; align-items: center; }
+/* which answer controls show depends on the question: buttons for a pair, Done and a reset for a family, a hint otherwise */
+.vb-undo, .vb-done, .vb-tap-hint { display: none; }
+.vb-tap-hint { margin: 0; text-align: center; grid-column: 1 / -1; }
+[data-mode="pick"] .vb-choice, [data-mode="order"] .vb-choice, [data-mode="family"] .vb-choice { display: none; }
+[data-mode="pick"] .vb-tap-hint { display: block; }
+[data-mode="order"] .vb-undo { display: block; grid-column: 1 / -1; justify-self: center; }
+[data-mode="family"] .vb-undo { display: block; grid-column: 1 / 3; }
+[data-mode="family"] .vb-done { display: block; grid-column: 3; min-height: 52px; }
 .vb-choice { min-height: 52px; font: 600 1rem var(--display); }
 .vb-choice.is-chosen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .vb-choice:disabled { opacity: 0.6; }
