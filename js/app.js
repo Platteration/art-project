@@ -27,7 +27,6 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabs: { study: $('tabStudyBtn'), loomis: $('tabLoomisBtn'), paint: $('tabPaintBtn'), game: $('tabGameBtn'), help: $('tabHelpBtn') },
     tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), paint: $('tab-paint'), game: $('tab-game'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
@@ -2043,35 +2042,54 @@
 
   // ---- Tabs ---------------------------------------------------------------
 
+  // Three sections at the top: Learning tools (a menu: Study the photo, Loomis head, How to use),
+  // Studio, and Games (a menu: Paint by numbers, with more to come). The group button shows which
+  // of its pages is open.
+  const GROUP_OF = { study: 'learn', loomis: 'learn', help: 'learn', paint: 'paint', game: 'games' };
+  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', help: 'How to use', paint: 'Studio', game: 'Paint by numbers' };
+  const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), games: $('tabGamesBtn') };
+  const groupSubs = { learn: $('tabLearnSub'), games: $('tabGamesSub') };
+  function closeMenus() {
+    document.querySelectorAll('.tab-menu').forEach((m) => { m.hidden = true; });
+    document.querySelectorAll('.tab[aria-haspopup]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+  }
   function switchTab(name, focus) {
+    if (!els.tabPanels[name]) return;
     state.tab = name;
     if (name !== 'study') setPicking(false); // picking a neutral spot only works on Your painting
-    Object.entries(els.tabs).forEach(([key, btn]) => {
-      const on = key === name;
-      btn.setAttribute('aria-selected', on);
-      btn.tabIndex = on ? 0 : -1;
-      els.tabPanels[key].hidden = !on;
-      if (on && focus) btn.focus();
-    });
+    Object.entries(els.tabPanels).forEach(([key, panel]) => { panel.hidden = key !== name; });
+    const group = GROUP_OF[name];
+    Object.entries(groupBtns).forEach(([key, btn]) => btn.setAttribute('aria-selected', String(key === group)));
+    if (groupSubs[group]) groupSubs[group].textContent = TAB_NAMES[name];
+    document.querySelectorAll('.tab-item').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.tab === name)));
+    closeMenus();
+    if (focus) groupBtns[group].focus();
     if (checking() && state.art.dirty) runCheck();
-    // the game has its own board and controls: the drawers and tool bar step aside
+    // the game, the Studio, the Loomis head and the guide have their own layouts: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
     document.body.classList.toggle('tab-help', name === 'help');
     if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
   }
-
-  Object.entries(els.tabs).forEach(([key, btn]) => {
-    btn.addEventListener('click', () => switchTab(key));
-    btn.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-      e.preventDefault();
-      const keys = Object.keys(els.tabs);
-      const step = e.key === 'ArrowRight' ? 1 : keys.length - 1;
-      switchTab(keys[(keys.indexOf(key) + step) % keys.length], true);
+  document.querySelectorAll('.tab-item').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab, true)));
+  $('tabPaintBtn').addEventListener('click', () => switchTab('paint'));
+  document.querySelectorAll('.tab[aria-haspopup]').forEach((btn) => {
+    const menu = $(btn.getAttribute('aria-controls'));
+    btn.addEventListener('click', () => {
+      const open = menu.hidden;
+      closeMenus();
+      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); const on = menu.querySelector('.tab-item[aria-checked="true"]') || menu.querySelector('.tab-item'); if (on) on.focus(); }
+    });
+    btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); btn.click(); } });
+    menu.addEventListener('keydown', (e) => {
+      const items = [...menu.querySelectorAll('.tab-item')], i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+      if (e.key === 'Escape') { closeMenus(); btn.focus(); }
     });
   });
+  document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.tab-group')) closeMenus(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
   // ---- Check my painting --------------------------------------------------
 
@@ -2506,6 +2524,7 @@
     marks,
     tool: () => state.tool,
     redraw: drawAllOverlays,
+    go: switchTab,
     result: () => state.result,
     source: () => state.source,
     prep: () => state.prep,

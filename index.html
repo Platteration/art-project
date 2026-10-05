@@ -23,12 +23,23 @@
     </div>
   </header>
 
-  <div class="tabs" role="tablist" aria-label="Mode">
-    <button type="button" role="tab" class="tab" id="tabStudyBtn" aria-selected="true" aria-controls="tab-study"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span>Study the photo</span></button>
-    <button type="button" role="tab" class="tab" id="tabLoomisBtn" aria-selected="false" aria-controls="tab-loomis" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9.5" r="6.5"/><path d="M5.5 9.5h13M12 3v18M7.5 14.5 9 20h6l1.5-5.5"/><path d="M8.5 11.5h2M13.5 11.5h2"/></svg><span>Loomis head</span></button>
-    <button type="button" role="tab" class="tab" id="tabPaintBtn" aria-selected="false" aria-controls="tab-paint" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span>Studio</span></button>
-    <button type="button" role="tab" class="tab" id="tabGameBtn" aria-selected="false" aria-controls="tab-game" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span>Paint by numbers</span></button>
-    <button type="button" role="tab" class="tab" id="tabHelpBtn" aria-selected="false" aria-controls="tab-help" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.5v.4"/><circle cx="12" cy="17" r="1" fill="currentColor"/></svg><span>How to use</span></button>
+  <div class="tabs" aria-label="Sections">
+    <div class="tab-group" data-group="learn">
+      <button type="button" class="tab" id="tabLearnBtn" aria-selected="true" aria-haspopup="menu" aria-expanded="false" aria-controls="tabLearnMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2z"/></svg><span class="tab-text"><span>Learning tools</span><span class="tab-sub" id="tabLearnSub">Study the photo</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="tab-menu" id="tabLearnMenu" role="menu" hidden>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabStudyBtn" data-tab="study" aria-checked="true"><span>Study the photo</span><small>Dark, middle, light; colors and paints; how close you got</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabLoomisBtn" data-tab="loomis" aria-checked="false"><span>Loomis head</span><small>Mark the features, get the head construction</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabHelpBtn" data-tab="help" aria-checked="false"><span>How to use</span><small>Every part of the app, with pictures</small></button>
+      </div>
+    </div>
+    <button type="button" class="tab" id="tabPaintBtn" data-tab="paint" aria-selected="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span class="tab-text"><span>Studio</span><span class="tab-sub">Paint on the paper</span></span></button>
+    <div class="tab-group" data-group="games">
+      <button type="button" class="tab" id="tabGamesBtn" aria-selected="false" aria-haspopup="menu" aria-expanded="false" aria-controls="tabGamesMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span class="tab-text"><span>Games</span><span class="tab-sub" id="tabGamesSub">Paint by numbers</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="tab-menu" id="tabGamesMenu" role="menu" hidden>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabGameBtn" data-tab="game" aria-checked="false"><span>Paint by numbers</span><small>Mix every number's color against the clock</small></button>
+        <p class="tab-menu-note">More games are on the way.</p>
+      </div>
+    </div>
   </div>
 
   <div class="layout">
@@ -279,7 +290,7 @@
 
 
 
-      <section class="tabpanel" id="tab-study" role="tabpanel" aria-labelledby="tabStudyBtn">
+      <section class="tabpanel" id="tab-study">
         <div class="work-bar">
           <p class="source" id="source"></p>
           <div class="seg" role="radiogroup" aria-label="Show">
@@ -359,7 +370,7 @@
         </section>
       </section>
 
-      <section class="tabpanel" id="tab-loomis" role="tabpanel" aria-labelledby="tabLoomisBtn" hidden>
+      <section class="tabpanel" id="tab-loomis" hidden>
         <div class="ps lh" id="lh-root">
           <div class="lh-card" id="lh-card">
             <p class="lh-step" id="lh-stepLabel">1 of 8</p>
@@ -394,7 +405,7 @@
         </div>
       </section>
 
-      <section class="tabpanel" id="tab-paint" role="tabpanel" aria-labelledby="tabPaintBtn" hidden>
+      <section class="tabpanel" id="tab-paint" hidden>
         <div class="ps" id="ps-root">
           <div class="ps-stage" id="ps-stage">
             <div class="ps-paper-wrap" id="ps-paperWrap">
@@ -574,7 +585,7 @@
         </div>
       </section>
 
-      <section class="tabpanel" id="tab-game" role="tabpanel" aria-labelledby="tabGameBtn" hidden>
+      <section class="tabpanel" id="tab-game" hidden>
         <div class="game-setup" id="gameSetup">
           <div class="game-card">
             <h2 class="game-title">Paint by numbers</h2>
@@ -755,12 +766,12 @@
         </div>
       </section>
 
-      <section class="tabpanel help" id="tab-help" role="tabpanel" aria-labelledby="tabHelpBtn" hidden>
+      <section class="tabpanel help" id="tab-help" hidden>
         <div class="help-intro">
           <h2 class="help-title">How to use Portrait Value Studio</h2>
           <p class="help-lede">Everything here runs in your browser. Your photos and paintings stay on your device. Here is the whole app, one part at a time, with pictures from a phone.</p>
           <ol class="help-steps">
-            <li><strong>Load a photo.</strong> Or keep the sample portrait. <button type="button" class="btn btn-small" data-go="study">Go to Study</button></li>
+            <li><strong>Load a photo.</strong> Or keep the sample portrait. <button type="button" class="btn btn-small" data-go="study">Go to Study the photo</button></li>
             <li><strong>Look at the shapes.</strong> See where the darks, middles and lights are, and which big colors there are.</li>
             <li><strong>Paint it in the Studio.</strong> Copy the lines, mix the colors, paint. <button type="button" class="btn btn-small" data-go="paint">Go to Studio</button></li>
             <li><strong>Check how close you got.</strong> Score your painting shape by shape. <button type="button" class="btn btn-small" data-go="check">Check a painting</button></li>
@@ -773,7 +784,7 @@
             <ol>
               <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
               <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
-              <li>The big buttons are the tabs: <strong>Study the photo</strong>, <strong>Loomis head</strong>, <strong>Studio</strong>, <strong>Paint by numbers</strong>, and this guide.</li>
+              <li>The three big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Games</strong> opens a menu with Paint by numbers, and more games to come.</li>
             </ol>
           </div>
           <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo and the four tabs" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>

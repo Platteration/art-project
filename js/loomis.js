@@ -264,7 +264,7 @@
   $('reset').addEventListener('click', reset);
   $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; Studio.redraw(); drawTab(); } });
   $('show').addEventListener('click', () => { state.shown = !state.shown; render(); });
-  const toStudio = () => { document.getElementById('tabPaintBtn').click(); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
+  const toStudio = () => { Studio.go('paint'); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
   $('studio').addEventListener('click', toStudio);
   $('cardStudio').addEventListener('click', toStudio);
   $('save').addEventListener('click', () => {
@@ -276,7 +276,7 @@
     draw(g, prep.w, prep.h, Math.max(1, Math.max(prep.w, prep.h) / 500));
     Studio.savePng(c, 'loomis-head.png');
   });
-  $('exit').addEventListener('click', () => document.getElementById('tabStudyBtn').click());
+  $('exit').addEventListener('click', () => Studio.go('study'));
 
   // ---- The photo on the stage, and the marks made on it ----------------------------------------
   const photo = $('photo'), overlay = $('overlay'), wrap = $('wrap');

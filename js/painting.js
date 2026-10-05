@@ -435,7 +435,7 @@
   $('refBtn').addEventListener('click', () => openSheet('refSheet'));
   document.addEventListener('keydown', (e) => { if (active && e.key === 'Escape') closeSheets(); });
   // on a phone the tabs are out of view while painting, so the strip has a way back
-  $('exit').addEventListener('click', () => document.getElementById('tabStudyBtn').click());
+  $('exit').addEventListener('click', () => Studio.go('study'));
 
   // ---- The reference: the Study tab's photo, or a generated portrait, shown as itself, its ---------
   // three-value study or its color-block study
