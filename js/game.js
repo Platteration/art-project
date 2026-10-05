@@ -1051,6 +1051,8 @@
     if (!soundOn || !audio) return;
     snap(audio.currentTime, vary(4200, 0.08), 0.3, 9);
   }
+  // the same clicks and chime for the other games, under this game's sound switch
+  window.GameSound = { keyDown, keyUp, chime: () => chime(), on: () => soundOn };
   // "Spot on!": two bright bell notes, a fifth apart, each with a quiet octave overtone
   function bell(t, freq, level) {
     [[1, level], [2, level * 0.22]].forEach(([mult, lv]) => {

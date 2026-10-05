@@ -1543,6 +1543,11 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-swatches[data-count="2"] .vb-letter { display: none; }
 .vb-badge { position: absolute; right: 6px; bottom: 6px; min-width: 26px; height: 26px; padding: 0 6px; display: grid; place-items: center; border-radius: 13px; background: #1e2b22; color: #faf5ea; font: 700 0.85rem var(--mono); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
 .vb-answered .vb-swatch { cursor: default; }
+.vb-swatch.is-pulse { animation: vb-pulse 0.3s ease-out; }
+.vb-choice.is-pulse { animation: vb-pulse-btn 0.3s ease-out; }
+@keyframes vb-pulse { 0% { transform: scale(1); } 40% { transform: scale(1.09); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 8px rgba(250, 245, 234, 0.35), 0 8px 22px rgba(0, 0, 0, 0.35); } 100% { transform: scale(1); } }
+@keyframes vb-pulse-btn { 0% { transform: scale(1); } 40% { transform: scale(1.05); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .vb-swatch.is-pulse, .vb-choice.is-pulse { animation: none; } }
 .vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #f3eee2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
 .vb-answer.is-right::first-line, .vb-answer.is-wrong::first-line { font-weight: 700; }
 .vb-choices { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; align-items: center; }

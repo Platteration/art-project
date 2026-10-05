@@ -218,8 +218,16 @@
   }
   const swatch = (i) => els.swatches.querySelector(`.vb-swatch[data-index="${i}"]`);
   // a tap on a swatch: the answer itself for a pair or a pick, the next in line for an order
+  // a tap pulses what was tapped and clicks like a key on the Paint by numbers palette
+  function pulse(el) { if (!el) return; el.classList.remove('is-pulse'); void el.offsetWidth; el.classList.add('is-pulse'); }
+  function click(i) {
+    if (!window.GameSound) return;
+    GameSound.keyDown(i || 0);
+    setTimeout(() => GameSound.keyUp(), 70);
+  }
   function tapSwatch(i) {
     if (!game || game.answered) return;
+    pulse(swatch(i)); click(i);
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') { choose(i === 0 ? 'left' : 'right'); return; }
     if (r.q.mode === 'pick') { choose(i); return; }
@@ -232,6 +240,7 @@
   }
   els.undo.addEventListener('click', () => {
     if (!game || game.answered) return;
+    click(2);
     game.picked = [];
     els.swatches.querySelectorAll('.vb-swatch').forEach((b) => { b.classList.remove('is-picked'); b.querySelector('.vb-badge').hidden = true; });
     els.undo.disabled = true;
@@ -275,12 +284,12 @@
     els.answer.classList.add(right ? 'is-right' : 'is-wrong');
     root.classList.add('vb-answered');
     if (right) ding();
-    if (navigator.vibrate) navigator.vibrate(right ? [18, 40, 28] : 60);
+    if (navigator.vibrate && (!window.GameSound || GameSound.on())) navigator.vibrate(right ? [18, 40, 28] : 60);
     els.next.hidden = false;
     els.next.textContent = game.i + 1 < ROUNDS ? 'Next ▸' : 'See the score';
     els.next.focus({ preventScroll: true });
   }
-  els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => choose(b.dataset.choice)));
+  els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => { if (game && !game.answered) { pulse(b); click(b.dataset.choice === 'left' ? 0 : b.dataset.choice === 'same' ? 4 : 8); } choose(b.dataset.choice); }));
   els.next.addEventListener('click', () => {
     if (!game || !game.answered) return;
     if (game.i + 1 < ROUNDS) { game.i++; showRound(); }
@@ -336,21 +345,8 @@
   });
   function setFocus(on) { document.body.classList.toggle('battle-focus', on); if (on) window.scrollTo(0, 0); }
 
-  // a small bell for a right answer
-  let audio = null;
-  function ding() {
-    try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      if (audio.state === 'suspended') audio.resume();
-      const t = audio.currentTime;
-      [[1318.5, 0], [1975.5, 0.09]].forEach(([f, dt]) => {
-        const osc = audio.createOscillator(), gain = audio.createGain();
-        osc.type = 'sine'; osc.frequency.value = f;
-        gain.gain.setValueAtTime(0.0001, t + dt); gain.gain.exponentialRampToValueAtTime(0.12, t + dt + 0.01); gain.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.5);
-        osc.connect(gain).connect(audio.destination); osc.start(t + dt); osc.stop(t + dt + 0.55);
-      });
-    } catch (e) { audio = null; }
-  }
+  // the Paint by numbers "spot on" chime for a right answer
+  function ding() { if (window.GameSound) GameSound.chime(); }
 
   els.start.addEventListener('click', start);
   window.addEventListener('studio:tab', (e) => {
