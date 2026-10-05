@@ -3,8 +3,9 @@
  * gray board. With two, a question asks which is darker, lighter, cooler or warmer, and three
  * buttons answer: the left one, the right one, or both the same. With more, the question is
  * answered on the swatches: tap the darkest or the lightest, tap them in order from darkest to
- * lightest. Ten rounds make a game; the score pops up the way Paint by numbers
- * scores a portrait, and the best for each palette and difficulty is kept in the browser.
+ * lightest. The rounds keep coming, each a little harder than the last, until the first miss:
+ * the score is the streak. It pops up the way Paint by numbers scores a portrait, and the best
+ * streak for each palette and color count is kept in the browser.
  *
  * Value is lightness (L*), read on the 0-10 value scale the Study tab uses. Temperature is the hue:
  * a color leaning toward orange and yellow is warm, toward blue is cool, measured as how far the
@@ -18,11 +19,9 @@
   const root = document.getElementById('tab-battle');
   if (!root) return;
   const PALETTE_KEY = 'portrait-value-studio.battlePalette';
-  const LEVEL_KEY = 'portrait-value-studio.battleLevel';
   const COUNT_KEY = 'portrait-value-studio.battleCount';
   const BEST_KEY = 'portrait-value-studio.battleBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
-  const ROUNDS = 10;
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
 
@@ -81,18 +80,25 @@
     { key: 'order', ask: 'Tap the colors in order, from darkest to lightest.', kind: 'value', mode: 'order' },
   ];
   const PAIR_Q = QUESTIONS.filter((q) => q.mode === 'pair'), MANY_Q = QUESTIONS.filter((q) => q.mode !== 'pair');
-  // how far apart the colors are, by level: value in L*, temperature in warmth (0-2)
-  const LEVELS = {
-    easy: { name: 'Easy', value: [14, 40], temp: [0.6, 2], same: 0.15, gap: 12 },
-    medium: { name: 'Medium', value: [6, 14], temp: [0.3, 0.7], same: 0.25, gap: 7 },
-    hard: { name: 'Hard', value: [2.5, 6], temp: [0.12, 0.3], same: 0.3, gap: 3.5 },
-  };
+  // How far apart the colors are: value in L*, temperature in warmth (0-2), and the gap between
+  // neighbouring values in a three- or four-color round. The game starts easy and tightens a
+  // little every round: by round 24 it is as hard as the old Hard level, and it keeps closing in
+  // after that, down to a floor the eye can still tell apart.
+  const EASY = { value: [14, 40], temp: [0.6, 2], same: 0.15, gap: 12 };
+  const HARD = { value: [2.5, 6], temp: [0.12, 0.3], same: 0.3, gap: 3.5 };
+  const FLOOR = { value: [1.6, 4], temp: [0.08, 0.2], same: 0.3, gap: 2.2 };
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function levelAt(round) {
+    const mix = (a, b, t) => ({ value: [lerp(a.value[0], b.value[0], t), lerp(a.value[1], b.value[1], t)], temp: [lerp(a.temp[0], b.temp[0], t), lerp(a.temp[1], b.temp[1], t)], same: lerp(a.same, b.same, t), gap: lerp(a.gap, b.gap, t) });
+    if (round <= 24) return mix(EASY, HARD, round / 24);
+    return mix(HARD, FLOOR, Math.min(1, (round - 24) / 24));
+  }
+  const LEVELS = { easy: EASY, medium: levelAt(12), hard: HARD };   // for tests and the README
   const SAME = { value: 0.9, temp: 0.05 };      // closer than this is "the same"
   const LETTERS = ['A', 'B', 'C', 'D'];
   function measure(kind, c) { return kind === 'value' ? c.L : c.warmth; }
   // a pair of colors for the question at the level, or a "same" pair when the dice say so
-  function makePair(pool, level, q) {
-    const lv = LEVELS[level];
+  function makePair(pool, lv, q) {
     const usable = q.kind === 'temp' ? pool.filter((c) => c.chroma >= 10) : pool;
     const wantSame = Math.random() < lv.same;
     const [lo, hi] = lv[q.kind];
@@ -118,8 +124,7 @@
   }
   // three or four colors for a swatch question: values at least a level's gap apart where the
   // question needs them told apart
-  function makeMany(pool, level, q, n) {
-    const lv = LEVELS[level];
+  function makeMany(pool, lv, q, n) {
     const byL = (list) => list.slice().sort((x, y) => x.L - y.L);
     let colors = null;
     for (let tries = 0; tries < 300 && !colors; tries++) {
@@ -140,7 +145,7 @@
     else answer = byL(colors).map((c) => colors.indexOf(c));
     return { q, n, colors, answer };
   }
-  function makeRound(pool, level, q, n) { return n === 2 ? makePair(pool, level, q) : makeMany(pool, level, q, n); }
+  function makeRound(pool, lv, q, n) { return n === 2 ? makePair(pool, lv, q) : makeMany(pool, lv, q, n); }
 
   // ---- The game ------------------------------------------------------------------------------------
   const els = {
@@ -150,43 +155,42 @@
     popup: $('popup'), kicker: $('kicker'), pct: $('pct'), stars: $('stars'), grade: $('grade'), newBest: $('newBest'), again: $('again'), settings: $('settings'),
   };
   let game = null, countUp = 0;
-  const level = () => (root.querySelector('input[name="vbLevel"]:checked') || {}).value || 'easy';
   const count = () => (root.querySelector('input[name="vbCount"]:checked') || {}).value || 'mix';
   const paletteNow = () => palettes().find((p) => p.id === els.palette.value) || palettes()[0];
-  const bestKey = () => `${paletteNow().id}:${level()}:${count()}`;
+  const bestKey = () => `${paletteNow().id}:${count()}`;
   function renderSetup() {
     const list = palettes(), was = els.palette.value || load(PALETTE_KEY, 'zorn');
     els.palette.innerHTML = '';
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const lv = load(LEVEL_KEY, 'easy'), ct = load(COUNT_KEY, 'mix');
-    root.querySelectorAll('input[name="vbLevel"]').forEach((r) => { r.checked = r.value === lv; });
+    const ct = load(COUNT_KEY, 'mix');
     root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
     showBest();
   }
   function showBest() {
     const best = load(BEST_KEY, {})[bestKey()];
-    els.best.textContent = best == null ? 'No score yet for these settings.' : `Your best here: ${best} of ${ROUNDS}.`;
+    els.best.textContent = best == null ? 'No streak yet for these settings.' : `Your best streak here: ${best} in a row.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
-  root.querySelectorAll('input[name="vbLevel"]').forEach((r) => r.addEventListener('change', () => { save(LEVEL_KEY, level()); showBest(); }));
   root.querySelectorAll('input[name="vbCount"]').forEach((r) => r.addEventListener('change', () => { save(COUNT_KEY, count()); showBest(); }));
 
   function start() {
     const pal = paletteNow();
     const pool = mixPool(pal.codes, 220);
-    // ten rounds: the colors per round as set (or a mix), the questions dealt evenly and shuffled
-    const ct = count();
-    const rounds = [], dealt = { pair: 0, many: 0 };
-    for (let i = 0; i < ROUNDS; i++) {
-      const n = ct === 'mix' ? [2, 3, 4][i % 3] : +ct;
-      const qs = n === 2 ? PAIR_Q : MANY_Q, key = n === 2 ? 'pair' : 'many';
-      rounds.push({ n, q: qs[dealt[key]++ % qs.length] });
-    }
-    for (let i = rounds.length - 1; i > 0; i--) { const j = rnd(i + 1); [rounds[i], rounds[j]] = [rounds[j], rounds[i]]; }
-    game = { pool, level: level(), rounds: rounds.map((r) => makeRound(pool, level(), r.q, r.n)), i: 0, right: 0, answered: false, over: false, picked: [] };
+    game = { pool, count: count(), rounds: [], i: -1, streak: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
     els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true;
     setFocus(true);
+    nextRound();
+  }
+  // each round is dealt as it comes, a little harder than the last; the colors per round as set
+  // (or a mix, shuffled in threes), the questions dealt in turn
+  function nextRound() {
+    game.i++;
+    if (!game.bag.length) { game.bag = game.count === 'mix' ? [2, 3, 4].sort(() => Math.random() - 0.5) : [+game.count]; }
+    const n = game.bag.shift();
+    const qs = n === 2 ? PAIR_Q : MANY_Q, key = n === 2 ? 'pair' : 'many';
+    const q = qs[game.dealt[key]++ % qs.length];
+    game.rounds[game.i] = makeRound(game.pool, levelAt(game.i), q, n);
     showRound();
   }
   const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -195,8 +199,8 @@
   function showRound() {
     const r = game.rounds[game.i];
     game.answered = false; game.picked = [];
-    els.round.textContent = `${game.i + 1} of ${ROUNDS}`;
-    els.score.textContent = `${game.right} right`;
+    els.round.textContent = `Streak ${game.streak}`;
+    els.score.textContent = `Round ${game.i + 1} · ${game.i < 6 ? 'warming up' : game.i < 16 ? 'closing in' : game.i < 24 ? 'getting hard' : 'a hair apart'}`;
     els.question.textContent = r.q.ask;
     els.swatches.innerHTML = '';
     els.swatches.dataset.count = r.n;
@@ -266,10 +270,9 @@
   function choose(choice) {
     if (!game || game.answered || game.over) return;
     const r = game.rounds[game.i];
-    game.answered = true;
+    game.answered = true; game.lastChoice = choice;
     const right = same(choice, r.answer);
-    if (right) game.right++;
-    els.score.textContent = `${game.right} right`;
+    if (right) { game.streak++; els.round.textContent = `Streak ${game.streak}`; pulse(els.round); if (game.streak % 5 === 0) { els.round.classList.remove('is-milestone'); void els.round.offsetWidth; els.round.classList.add('is-milestone'); } }
     els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = true; b.classList.toggle('is-chosen', b.dataset.choice === choice); });
     els.undo.disabled = true;
     // the right swatches ringed in gold, a wrong pick in red
@@ -286,13 +289,14 @@
     if (right) ding();
     if (navigator.vibrate && (!window.GameSound || GameSound.on())) navigator.vibrate(right ? [18, 40, 28] : 60);
     els.next.hidden = false;
-    els.next.textContent = game.i + 1 < ROUNDS ? 'Next ▸' : 'See the score';
+    els.next.textContent = right ? 'Next ▸' : 'See the score';
     els.next.focus({ preventScroll: true });
   }
   els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => { if (game && !game.answered) { pulse(b); click(b.dataset.choice === 'left' ? 0 : b.dataset.choice === 'same' ? 4 : 8); } choose(b.dataset.choice); }));
   els.next.addEventListener('click', () => {
     if (!game || !game.answered) return;
-    if (game.i + 1 < ROUNDS) { game.i++; showRound(); }
+    const r = game.rounds[game.i];
+    if (same(game.lastChoice, r.answer)) nextRound();
     else finish();
   });
   document.addEventListener('keydown', (e) => {
@@ -307,20 +311,20 @@
   });
 
   // ---- The score, the way Paint by numbers shows one ----------------------------------------------
-  const STARS = [100, 90, 70, 50, 30];
-  const GRADES = ['Keep looking', 'Keep looking', 'Getting there', 'Good eye', 'Sharp eye!', 'Perfect eye!'];
+  const STARS = [20, 12, 8, 5, 2];
+  const GRADES = ['Keep looking', 'Warming up', 'Getting there', 'Good eye', 'Sharp eye!', 'Eagle eye!'];
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   function finish() {
     game.over = true;
-    const pct = Math.round((game.right / ROUNDS) * 100);
+    const pct = game.streak;
     const stars = STARS.filter((min) => pct >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
-    const isBest = game.right > 0 && (bests[key] == null || game.right > bests[key]);
-    if (isBest) { bests[key] = game.right; save(BEST_KEY, bests); }
-    els.kicker.textContent = `${game.right} of ${ROUNDS} right`;
+    const isBest = game.streak > 0 && (bests[key] == null || game.streak > bests[key]);
+    if (isBest) { bests[key] = game.streak; save(BEST_KEY, bests); }
+    els.kicker.textContent = game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
-    els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${pct}% right`);
+    els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${game.streak} in a row`);
     els.stars.querySelectorAll('.game-star').forEach((st, i) => { st.classList.toggle('is-on', i < stars); st.style.setProperty('--i', i); });
     els.popup.hidden = false;
     els.popup.classList.remove('is-shown'); void els.popup.offsetWidth; els.popup.classList.add('is-shown');
@@ -355,5 +359,5 @@
     if (on && !game) renderSetup();
   });
   if (Studio.tab() === 'battle') renderSetup();
-  window.ValueBattle = { makeRound, mixPool, LEVELS, QUESTIONS, LETTERS, state: () => game };
+  window.ValueBattle = { makeRound, mixPool, LEVELS, levelAt, QUESTIONS, LETTERS, state: () => game };
 })();

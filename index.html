@@ -771,7 +771,7 @@
         <div class="game-setup" id="vb-setup">
           <div class="game-card">
             <h2 class="game-title">Value battle</h2>
-            <p class="game-lede">Colors mixed from the same palette. Which is darker, lighter, cooler or warmer? With three or four, find the darkest, the lightest, or put them all in order. Ten rounds. Trust your eye.</p>
+            <p class="game-lede">Colors mixed from the same palette. Which is darker, lighter, cooler or warmer? With three or four, find the darkest, the lightest, or put them all in order. Every round is a little harder than the last. How long can your streak go?</p>
             <div class="field">
               <label for="vb-palette">Palette</label>
               <select id="vb-palette"></select>
@@ -787,14 +787,6 @@
               </div>
               <p class="hint">Two colors: left, right or the same. Three or four: tap the darkest or the lightest, or tap them in order.</p>
             </fieldset>
-            <fieldset class="field">
-              <legend>Level</legend>
-              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Level">
-                <input type="radio" name="vbLevel" id="vbEasy" value="easy" checked><label for="vbEasy">Easy<small>big differences</small></label>
-                <input type="radio" name="vbLevel" id="vbMedium" value="medium"><label for="vbMedium">Medium<small>closer</small></label>
-                <input type="radio" name="vbLevel" id="vbHard" value="hard"><label for="vbHard">Hard<small>a hair apart</small></label>
-              </div>
-            </fieldset>
             <p class="game-best" id="vb-best"></p>
             <button type="button" class="btn btn-primary game-start" id="vb-start">Start the battle</button>
           </div>
@@ -803,11 +795,12 @@
             <p class="hint"><strong>Value</strong> is how light or dark a color is, with the color ignored. Squint and the darker one goes darker first.</p>
             <p class="hint"><strong>Temperature</strong> is which way a color leans: toward orange and yellow is warm, toward blue is cool. A gray-green can be cooler than a pink that is just as dark.</p>
             <p class="hint">Some rounds are a tie. "Both the same" is a real answer, not a trick.</p>
+            <p class="hint">The first rounds are easy. Each one after is a little closer, until the colors are a hair apart. One miss ends the streak.</p>
           </div>
         </div>
         <div class="vb-play" id="vb-play" hidden>
           <div class="game-bar vb-bar" id="vb-bar">
-            <span class="vb-round" id="vb-round">1 of 10</span>
+            <span class="vb-round" id="vb-round">Streak 0</span>
             <p class="game-progress" id="vb-score">0 right</p>
             <button type="button" class="game-icon-btn" id="vb-quit" aria-label="Quit this battle" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
@@ -816,9 +809,9 @@
             <div class="vb-swatches" id="vb-swatches" data-count="2"></div>
             <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
             <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" hidden>
-              <p class="game-kicker" id="vb-kicker">Battle over</p>
-              <p class="game-pct"><span id="vb-pct">0</span><span class="game-pct-sign">%</span></p>
-              <p class="game-pct-label">right</p>
+              <p class="game-kicker" id="vb-kicker">Streak over</p>
+              <p class="game-pct"><span id="vb-pct">0</span></p>
+              <p class="game-pct-label">in a row</p>
               <div class="game-stars" id="vb-stars" role="img" aria-label=""><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span></div>
               <p class="game-grade" id="vb-grade"></p>
               <p class="game-newbest" id="vb-newBest" hidden>New best!</p>
@@ -990,11 +983,11 @@
           <div class="help-text">
             <h3>Value battle</h3>
             <ol>
-              <li>Pick a <strong>palette</strong> and a <strong>level</strong>, then <strong>Start the battle</strong>. Both colors in every round are mixed from that palette.</li>
+              <li>Pick a <strong>palette</strong> and how many <strong>colors</strong> a round has, then <strong>Start the battle</strong>. Every color is mixed from that palette.</li>
               <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>, or tap a swatch.</li>
               <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, or tap them <strong>in order</strong> from darkest to lightest. Choose how many colors on the setup, or Mix for all three.</li>
               <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
-              <li>After ten rounds the score pops up with stars, and your best for that palette and level is kept.</li>
+              <li>The rounds keep coming, each a little harder, and your <strong>streak</strong> counts up in the bar. One miss ends it: the streak pops up with stars, and your best for that palette and color count is kept.</li>
             </ol>
           </div>
           <div class="help-shots">
