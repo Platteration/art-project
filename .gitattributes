@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.ico binary
+*.woff2 binary
+*.svg text
+fonts/* linguist-vendored

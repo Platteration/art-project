@@ -1,0 +1,18 @@
+# OS and editor litter
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
+
+# local tooling, never part of the site
+node_modules/
+*.log
+.env
+.env.*
+*.bak
+*.orig
+.cache/
+.claude/settings.local.json

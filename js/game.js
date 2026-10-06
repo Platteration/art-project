@@ -81,7 +81,15 @@
   const MODE_KEY = 'portrait-value-studio.gameMode';
 
   function load(key, fallback) {
-    try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (err) { return fallback; }
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      if (v == null) return fallback;
+      // a saved value of another shape than the default (a bad write, an older version) is ignored
+      if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback;
+      return v;
+    } catch (err) {
+      return fallback;
+    }
   }
   function save(key, value) {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* storage unavailable: kept for this visit */ }
@@ -273,7 +281,7 @@
   let game = null;       // the game in progress or just scored
   let setupFor = null;   // { from, level } the setup board was built for
 
-  const level = () => document.querySelector('input[name="gameLevel"]:checked').value;
+  const level = () => (document.querySelector('input[name="gameLevel"]:checked') || {}).value || 'medium';
   const mode = () => els.mode.value;
   // bests are kept per mode; Classic's keys stay as they were
   const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
@@ -334,7 +342,7 @@
     const keep = els.palette.value || load(PALETTE_KEY, 'zorn');
     const choices = paletteChoices();
     const sug = board ? suggestedPalette(board).id : null;
-    els.palette.innerHTML = '';
+    els.palette.replaceChildren();
     choices.forEach((p) => els.palette.append(new Option(p.id === sug ? `${p.name} (suggested)` : p.name, p.id)));
     const fresh = board && paletteFor !== board;
     paletteFor = board;
@@ -358,8 +366,16 @@
     let k = 0, task = null;
     const done = (v) => { delete b.mixing[p.id]; return v; };
     return (b.mixing[p.id] = new Promise((resolve) => {
-      (function next() {
+      next();
+      function next() {
         if (board !== b || chosenPalette().id !== p.id) { resolve(null); return; }
+        try { step(); } catch (err) { // a mixing error ends this palette's targets as "none", never a Start button stuck off
+          delete b.mixing[p.id];
+          if (window.StudioGuard) StudioGuard.report(err);
+          resolve(null);
+        }
+      }
+      function step() {
         const end = performance.now() + 24;
         while (k < b.groups.length && performance.now() < end) {
           const g = b.groups[k];
@@ -379,7 +395,7 @@
         }
         b.targets[p.id] = out;
         resolve(out);
-      })();
+      }
     }).then(done));
   }
 
@@ -431,7 +447,7 @@
 
   function showPalette() {
     const p = chosenPalette();
-    els.paletteDots.innerHTML = '';
+    els.paletteDots.replaceChildren();
     p.codes.forEach((c) => {
       const d = document.createElement('span');
       d.className = 'paint-dot';
@@ -647,7 +663,7 @@
   }
 
   function renderPaints() {
-    els.paints.innerHTML = '';
+    els.paints.replaceChildren();
     game.paints.forEach((paint, i) => {
       const li = document.createElement('li');
       const b = document.createElement('button');
@@ -734,7 +750,7 @@
   });
 
   function renderNumbers() {
-    els.numbers.innerHTML = '';
+    els.numbers.replaceChildren();
     game.board.groups.forEach((g, k) => {
       const li = document.createElement('li');
       const b = document.createElement('button');
@@ -1246,7 +1262,7 @@
     game.result = { pct: Math.round(accuracy), stars: starsFor(accuracy), points, grade: GRADES[starsFor(accuracy)] };
     showScore(accuracy, isBest, timedOut);
     els.points.textContent = points;
-    els.breakdown.innerHTML = '';
+    els.breakdown.replaceChildren();
     [
       ['Mode', MODES[game.mode].name, ''],
       ...(valueMode ? [['Value study', `${valueAcc.toFixed(0)}%`, `+${valuePts}`]] : []),
@@ -1480,7 +1496,7 @@
   }
 
   function renderZones(rows) {
-    els.zones.innerHTML = '';
+    els.zones.replaceChildren();
     const sorted = rows.slice().sort((a, b) => a.match - b.match);
     sorted.forEach((r) => {
       const li = document.createElement('li');
@@ -1574,7 +1590,7 @@
     if (board) renderPalettes();
   });
   els.deal.addEventListener('click', () => { dealMystery(); renderPalettes(); });
-  const savedLevel = load(LEVEL_KEY, 'medium');
+  const savedLevel = LEVELS[load(LEVEL_KEY, 'medium')] ? load(LEVEL_KEY, 'medium') : 'medium';
   document.querySelectorAll('input[name="gameLevel"]').forEach((r) => {
     r.checked = r.value === savedLevel;
     r.addEventListener('change', () => { if (Studio.tab() === 'game') refreshSetup(); });

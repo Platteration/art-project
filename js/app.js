@@ -148,11 +148,12 @@
   const toHex = (c) => ('#' + hex2(c.r) + hex2(c.g) + hex2(c.b)).toUpperCase();
 
   let toastTimer = 0;
-  function toast(msg) {
+  // ms: how long it stays; a problem the visitor has to read gets longer than a passing confirmation
+  function toast(msg, ms = 1800) {
     els.toast.textContent = msg;
     els.toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => els.toast.classList.remove('show'), 1800);
+    toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
   }
 
   function cssVar(name) {
@@ -184,17 +185,29 @@
     } catch (err) { return true; }
   })();
 
+  let saveImgUrl = '';
   function savePng(canvas, name) {
-    canvas.toBlob((blob) => blob && downloadBlob(blob, name), 'image/png');
-    if (!downloadsMayBeBlocked) return;
-    els.saveImg.src = canvas.toDataURL('image/png');
-    els.saveImg.alt = name;
-    els.saveName.textContent = name;
-    els.saveDialog.showModal();
+    canvas.toBlob((blob) => {
+      if (!blob) { toast('The PNG could not be made. Try a smaller Working size.', 5000); return; }
+      downloadBlob(blob, name);
+      if (!downloadsMayBeBlocked) return;
+      // the same blob is the preview to save by hand, so the page needs no data: URLs
+      if (saveImgUrl) URL.revokeObjectURL(saveImgUrl);
+      saveImgUrl = URL.createObjectURL(blob);
+      els.saveImg.src = saveImgUrl;
+      els.saveImg.alt = name;
+      els.saveName.textContent = name;
+      openDialog(els.saveDialog);
+    }, 'image/png');
+  }
+
+  // showModal() where the browser has it; otherwise the dialog opens in place
+  function openDialog(dlg) {
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
   }
 
   els.saveClose.addEventListener('click', () => els.saveDialog.close());
-  els.saveDialog.addEventListener('close', () => els.saveImg.removeAttribute('src'));
+  els.saveDialog.addEventListener('close', () => { els.saveImg.removeAttribute('src'); if (saveImgUrl) { URL.revokeObjectURL(saveImgUrl); saveImgUrl = ''; } });
 
   // ---- Settings -----------------------------------------------------------
 
@@ -367,7 +380,7 @@
 
   function renderZones() {
     const r = state.result;
-    els.zones.innerHTML = '';
+    els.zones.replaceChildren();
     r.zoneGray.forEach((g, i) => {
       const li = document.createElement('li');
       const tone = document.createElement('span');
@@ -425,18 +438,23 @@
   function readImage(file, done) {
     if (!file) return;
     if (file.type && !file.type.startsWith('image/')) {
-      toast('That file is not an image. Choose a JPG, PNG or WebP photo.');
+      toast('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
       return;
     }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
+      // an image with no size (an SVG without width and height) would become a blank 1 x 1 study
+      if ((img.naturalWidth || img.width) < 16 || (img.naturalHeight || img.height) < 16) {
+        toast('That image has no usable size. Use a JPG, PNG or WebP photo.', 5000);
+        return;
+      }
       done(img);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      toast('This image could not be opened. Try saving it as JPG or PNG first.');
+      toast('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
     };
     img.src = url;
   }
@@ -501,16 +519,22 @@
       checking() ? 'Drop your painting to check it' : 'Drop the portrait to load it';
     els.dropHint.hidden = false;
   });
-  window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  // Every drag over the page is claimed, so dropping text, a link or a picture from another tab can
+  // never navigate the browser away from the app and lose the work in it.
+  window.addEventListener('dragover', (e) => { e.preventDefault(); });
   window.addEventListener('dragleave', () => {
     dragDepth = Math.max(0, dragDepth - 1);
     if (!dragDepth) els.dropHint.hidden = true;
   });
   window.addEventListener('drop', (e) => {
-    if (!hasFiles(e)) return;
     e.preventDefault();
     dragDepth = 0;
     els.dropHint.hidden = true;
+    if (!hasFiles(e)) {
+      const types = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
+      if (types.includes('text/uri-list') || types.includes('text/html')) toast('Save the picture to your device first, then drop the file here.', 5000);
+      return;
+    }
     loadForTab(e.dataTransfer.files[0]);
   });
   window.addEventListener('paste', (e) => {
@@ -898,7 +922,8 @@
     try {
       const raw = localStorage.getItem(PALETTE_KEY);
       const list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list.filter((c) => c && Number.isInteger(c.r)) : [];
+      const ok = (n) => Number.isInteger(n) && n >= 0 && n <= 255;
+      return Array.isArray(list) ? list.filter((c) => c && typeof c === 'object' && ok(c.r) && ok(c.g) && ok(c.b)) : [];
     } catch (err) {
       return null;
     }
@@ -948,7 +973,7 @@
 
   function renderPalette() {
     const list = state.palette;
-    els.swatches.innerHTML = '';
+    els.swatches.replaceChildren();
     list.forEach((c, index) => {
       const hex = toHex(c);
       const li = document.createElement('li');
@@ -2295,7 +2320,7 @@
     ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
 
-    els.fixList.innerHTML = '';
+    els.fixList.replaceChildren();
     if (!cmp.top.length) {
       const li = document.createElement('li');
       li.className = 'fix-none';
@@ -2530,6 +2555,7 @@
     source: () => state.source,
     prep: () => state.prep,
     savePng,
+    openDialog,
     sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
     settings,
     tab: () => state.tab,
@@ -2539,17 +2565,23 @@
     valueLabel,
   };
 
+  // Each step that reads saved settings runs on its own: a bad saved value (an older version, a
+  // stray write) must not stop the rest of the app from starting. The failure is still reported.
+  function safely(step) {
+    try { step(); } catch (err) { if (window.StudioGuard) StudioGuard.report(err, { saved: true }); else console.error(err); }
+  }
+
   function start() {
-    restoreDrawers();
+    safely(restoreDrawers);
     let mode = 'simple';
-    try { mode = localStorage.getItem(MODE_KEY) || 'simple'; } catch (err) { /* simple */ }
+    try { mode = localStorage.getItem(MODE_KEY) === 'advanced' ? 'advanced' : 'simple'; } catch (err) { /* simple */ }
     setMode(mode, false);
     els.checkSection.hidden = !els.drawers.check.open;
     updateToolbar();
-    restoreSmoothing();
+    safely(restoreSmoothing);
     updateOutputs();
-    renderPalette();
-    loadCanvasSize();
+    safely(renderPalette);
+    safely(loadCanvasSize);
     updateToolButtons();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
@@ -2561,6 +2593,24 @@
     if (location.hash === '#help') switchTab('help');
     if (location.hash === '#loomis') switchTab('loomis');
     if (location.hash === '#battle') switchTab('battle');
+  }
+
+  // Help tab: forget everything this site keeps in the browser. Two taps, so a stray tap does nothing.
+  const forgetBtn = $('forgetBtn');
+  if (forgetBtn) {
+    const idle = forgetBtn.textContent;
+    let armed = 0;
+    forgetBtn.addEventListener('click', () => {
+      if (!armed) {
+        forgetBtn.textContent = 'Tap again to clear everything and reload';
+        armed = setTimeout(() => { armed = 0; forgetBtn.textContent = idle; }, 5000);
+        return;
+      }
+      clearTimeout(armed);
+      forgetBtn.disabled = true;
+      forgetBtn.textContent = 'Clearing…';
+      if (window.StudioGuard) StudioGuard.forget(true); else location.reload();
+    });
   }
 
   const redrawHist = () => drawHistogram();

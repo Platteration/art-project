@@ -1,0 +1,8 @@
+# Netlify: the repository's own notes and configs are not part of the site.
+# (Cloudflare Pages ignores 404 rules; there, publish only the runtime files.)
+/README.md        /404.html  404
+/fonts/README.md  /404.html  404
+/deploy/*         /404.html  404
+/_headers         /404.html  404
+/_redirects       /404.html  404
+/.htaccess        /404.html  404

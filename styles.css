@@ -1,3 +1,71 @@
+/* ---- Type: the three faces are served from fonts/ (see fonts/README.md), not from a font CDN, so a
+   page view sends nothing to a third party and the page renders even when the outside network is
+   slow or blocked. Each rule covers one unicode subset; the browser fetches only the ones it uses. ---- */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url(fonts/bricolage-grotesque-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url(fonts/bricolage-grotesque-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/ibm-plex-mono-latin-400.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/ibm-plex-mono-latin-500.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(fonts/ibm-plex-mono-latin-ext-400.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(fonts/ibm-plex-mono-latin-ext-500.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url(fonts/ibm-plex-sans-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url(fonts/ibm-plex-sans-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 /* Layout: a painter's workbench. A rail of collapsible tool drawers on the left, the three images
    side by side on neutral gray mattes (so values read true). On phones the drawers sit above the images. */
 :root {
@@ -478,6 +546,12 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   cursor: pointer;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
+/* the swatch colors live here, not in style attributes, so a strict Content-Security-Policy can forbid inline styles */
+#lcRed + label { --c: #e5322d; }
+#lcCyan + label { --c: #1ec8ec; }
+#lcYellow + label { --c: #ffd21f; }
+#lcWhite + label { --c: #ffffff; }
+#lcBlack + label { --c: #111111; }
 .line-colors input:checked + label { outline: 2px solid var(--ink); outline-offset: 2px; }
 .line-colors input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -1579,3 +1653,24 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 @media (max-width: 999px) {
   .vb-board { min-height: 60vh; padding-inline: 10px; }
 }
+
+/* ---- 404 page (404.html): one card, same ground and type as the app ---- */
+body.not-found { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.not-found-card { max-width: 520px; text-align: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 32px 24px; box-shadow: 0 8px 24px var(--shadow); }
+.not-found-card h1 { font: 700 28px/1.15 var(--display); margin: 12px 0 10px; }
+.not-found-card p { margin: 0 0 14px; }
+.not-found-card a:not(.btn) { color: var(--accent); }
+.not-found-mark { width: 48px; height: 48px; color: var(--ink); fill: none; stroke: currentColor; stroke-width: 1.6; }
+
+/* ---- Without JavaScript (or when a script failed to load): a note, and the guide instead of dead controls.
+   js/guard.js removes .no-js as the first thing it does; it adds .load-failed when a script or the stylesheet fails. ---- */
+.nojs-note { display: none; margin: 16px max(16px, 2vw) 0; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--earth); border-radius: var(--r); }
+.no-js .nojs-note, .load-failed .nojs-note { display: block; }
+.oldbrowser-note { display: none; margin: 16px max(16px, 2vw) 0; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--earth); border-radius: var(--r); }
+.old-browser .oldbrowser-note { display: block; }
+.no-js .topbar-actions, .no-js .tabs, .no-js .rail, .no-js .tabpanel:not(#tab-help), .no-js .help-steps .btn,
+.old-browser .topbar-actions, .old-browser .tabs, .old-browser .rail, .old-browser .tabpanel:not(#tab-help), .old-browser .help-steps .btn { display: none !important; }
+.no-js #tab-help, .old-browser #tab-help { display: block !important; }
+.brand-privacy { margin: 2px 0 0; font-size: 0.85rem; color: var(--muted); }
+.toast .toast-action { pointer-events: auto; margin-left: 8px; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--ground); background: transparent; color: var(--ground); font: 600 0.8rem/1.4 var(--body); cursor: pointer; }
+.toast .toast-action:hover { background: var(--ground); color: var(--ink); }

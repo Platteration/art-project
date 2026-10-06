@@ -44,7 +44,10 @@
   function load(key, fallback) {
     try {
       const v = JSON.parse(localStorage.getItem(key));
-      return v == null ? fallback : v;
+      if (v == null) return fallback;
+      // a saved value of another shape than the default (a bad write, an older version) is ignored
+      if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback;
+      return v;
     } catch (err) {
       return fallback;
     }
@@ -55,6 +58,10 @@
 
   const known = new Set(Paints.LIBRARY.map((p) => p.code));
   const choice = Object.assign({ source: 'preset', preset: '', max: 6 }, load(CHOICE_KEY, {}));
+  // only values the drawer knows: anything else (an older version, a stray write) falls back to the default
+  if (choice.source !== 'mine') choice.source = 'preset';
+  if (typeof choice.preset !== 'string') choice.preset = '';
+  if (!Number.isInteger(choice.max) || choice.max < 3 || choice.max > 10) choice.max = 6; // the range of #paintMax
   const mine = new Set(load(MINE_KEY, []).filter((c) => known.has(c)));
 
   // Paints ready to mix, made once each
@@ -146,7 +153,7 @@
     rembrandt: 'Earth colors, for the old-master look.',
   };
   function renderPresets(n) {
-    els.presetList.innerHTML = '';
+    els.presetList.replaceChildren();
     ranking.forEach(({ preset, cov }, rank) => {
       const li = el('li');
       li.dataset.preset = preset.id;
@@ -233,7 +240,7 @@
     els.resultName.textContent = name;
     els.resultMatch.textContent = reachText(cov, colors.length);
     els.resultAbout.textContent = about || '';
-    els.resultPaints.innerHTML = '';
+    els.resultPaints.replaceChildren();
     codes.forEach((c) => {
       const li = el('li', 'paint-chip');
       li.append(dot(c), el('span', 'paint-code', c), el('span', 'paint-name', Paints.byCode(c).name));
@@ -259,7 +266,7 @@
 
   function renderMixes(codes, colors) {
     const paints = codes.map(paintFor);
-    els.mixList.innerHTML = '';
+    els.mixList.replaceChildren();
     const rows = colors.map((c) => {
       const li = el('li', 'mix-row');
       const chips = el('span', 'mix-chips');
@@ -350,7 +357,7 @@
   // ---- The paint library dialog ---------------------------------------------
 
   function renderLibrary() {
-    els.cats.innerHTML = '';
+    els.cats.replaceChildren();
     Paints.CATEGORIES.forEach((cat) => {
       const paints = Paints.LIBRARY.filter((p) => p.category === cat.id);
       const sec = el('section', 'paint-cat');
@@ -420,7 +427,7 @@
   });
   els.mineEdit.addEventListener('click', () => {
     if (!els.cats.childElementCount) renderLibrary();
-    els.dialog.showModal();
+    if (window.Studio && Studio.openDialog) Studio.openDialog(els.dialog); else els.dialog.showModal();
   });
   els.dialogDone.addEventListener('click', () => els.dialog.close());
   // a new set of paints gets a new suggestion straight away

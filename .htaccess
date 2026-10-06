@@ -1,0 +1,49 @@
+# Portrait Value Studio: Apache 2.4 settings for a launch (mod_rewrite and mod_headers).
+# Netlify / Cloudflare Pages read _headers instead; nginx users: see deploy/nginx.conf.
+
+Options -Indexes
+ServerSignature Off
+AddDefaultCharset utf-8
+ErrorDocument 404 /404.html
+ErrorDocument 403 /404.html
+
+<IfModule mod_mime.c>
+  AddType font/woff2 .woff2
+  AddType image/svg+xml .svg
+  AddType text/javascript .js
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # everything over https
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+  # never serve dotfiles (.git above all), except the ACME folder certificates need
+  RewriteRule (^|/)\.(?!well-known/) - [R=404,L]
+  # the repository's own notes and server configs are not part of the site
+  RewriteRule ^(README\.md|_headers|deploy(/.*)?|fonts/README\.md)$ - [R=404,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "accelerometer=(), autoplay=(self), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), usb=(), clipboard-write=(self)"
+  Header always set Cross-Origin-Opener-Policy "same-origin"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" env=HTTPS
+  # frame-ancestors is left out on purpose: the app is meant to be embeddable. Do not add X-Frame-Options.
+  <FilesMatch "\.html$">
+    Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
+    Header always set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.(css|js|txt)$">
+    Header always set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "\.woff2$">
+    Header always set Cache-Control "public, max-age=31536000, immutable"
+    Header always set Access-Control-Allow-Origin "*"
+  </FilesMatch>
+  <FilesMatch "\.(jpg|jpeg|png|webp|svg|ico)$">
+    Header always set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+</IfModule>

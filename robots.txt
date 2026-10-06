@@ -1,0 +1,3 @@
+# Portrait Value Studio: a single-page app. Everything public is index.html.
+User-agent: *
+Allow: /

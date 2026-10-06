@@ -1,20 +1,33 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
 <title>Portrait Value Studio</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Load a portrait photo and see its dark, middle and light shapes and its big colors, pick paints and mixes, paint it in the Studio, then check how close you got. Everything runs in your browser and photos never leave your device.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="theme-color" content="#efe7d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#152019" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Portrait Value Studio">
+<meta property="og:description" content="See a portrait's dark, middle and light shapes and its big colors, pick paints, paint it, then check how close you got. Runs entirely in your browser.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script src="js/guard.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<div class="oldbrowser-note" role="alert"><strong>This browser is too old for Portrait Value Studio.</strong> Use a current Safari, Chrome, Edge or Firefox (2022 or later). The guide below still reads.</div>
+<div class="nojs-note" role="alert"><strong>Portrait Value Studio has not started.</strong> Everything runs in your browser and nothing is uploaded, but the studies, the Studio and the games are drawn with JavaScript. If JavaScript is off, turn it on for this site; otherwise check your connection. Then reload the page. The guide below still reads without it.</div>
 <div class="app">
   <header class="topbar">
     <div class="brand">
       <h1>Portrait Value Studio</h1>
       <p>Load a portrait. See its dark, middle and light shapes and its big colors, pick paints, paint it in the Studio, then check how close you got.</p>
+      <p class="brand-privacy">Photos stay on your device. Nothing is uploaded.</p>
     </div>
     <div class="topbar-actions">
       <span class="pill-switch mode-switch" role="group" aria-label="Simple or advanced controls"><button type="button" data-mode="simple" aria-pressed="true" title="Just the controls you need">Simple</button><button type="button" data-mode="advanced" aria-pressed="false" title="Every setting">Advanced</button></span>
@@ -260,11 +273,11 @@
         <div class="tool-group line-tools">
           <span class="tool-label" id="lineColorLabel">Line color</span>
           <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
-            <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" style="--c:#e5322d" title="Red"><span class="visually-hidden">Red</span></label>
-            <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" style="--c:#1ec8ec" title="Cyan"><span class="visually-hidden">Cyan</span></label>
-            <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" style="--c:#ffd21f" title="Yellow"><span class="visually-hidden">Yellow</span></label>
-            <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" style="--c:#ffffff" title="White"><span class="visually-hidden">White</span></label>
-            <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" style="--c:#111111" title="Black"><span class="visually-hidden">Black</span></label>
+            <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" title="Red"><span class="visually-hidden">Red</span></label>
+            <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" title="Cyan"><span class="visually-hidden">Cyan</span></label>
+            <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" title="Yellow"><span class="visually-hidden">Yellow</span></label>
+            <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" title="White"><span class="visually-hidden">White</span></label>
+            <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" title="Black"><span class="visually-hidden">Black</span></label>
           </div>
           <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
           <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
@@ -1047,6 +1060,9 @@
               <li>On a phone, the tabs hide while you paint or play. The arrow at the left of the Studio strip, or ✕ twice in a game, brings them back.</li>
               <li>Stuck? Switch to <strong>Simple</strong> at the top of the page, and start again with the sample portrait.</li>
             </ul>
+            <h3>Your work stays on this device</h3>
+            <p>Settings, palettes, scores and the Studio painting are kept in this browser only, until you clear them. On a shared computer, clear them when you are done. The first tap arms the button; the second clears everything and reloads the page.</p>
+            <p><button type="button" class="btn btn-danger" id="forgetBtn">Forget my work on this device</button></p>
           </div>
         </section>
       </section>
@@ -1097,6 +1113,8 @@
   <p class="hint" id="saveHint">If no download started, right-click or long-press the image to save it. Some embedded views block downloads; they always work when you open index.html directly.</p>
 </dialog>
 
+<!-- Classic scripts, in dependency order: processing (Study), mixing (Mixing) and paints (Paints) first; app (Studio) next;
+     then the modules that use them. guard.js is loaded in <head>. -->
 <script src="js/processing.js"></script>
 <script src="js/mixing.js"></script>
 <script src="js/paints.js"></script>

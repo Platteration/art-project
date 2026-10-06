@@ -23,7 +23,7 @@
   const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const lab = (c) => Study.rgbToLab(c[0], c[1], c[2]);
-  function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
+  function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
 
   // ---- Paints and the mixing model (the same as the Study tab and the game use) ----------------
@@ -207,7 +207,7 @@
   function renderWash() {
     const codes = codesNow();
     if (!codes.includes(canvasState.washCode)) canvasState.washCode = codes.find((c) => ['YO', 'RS', 'BS', 'RU', 'BU', 'LR', 'NY', 'CO', 'TR', 'YOP', 'TOR'].includes(c)) || codes[1] || codes[0];
-    $('washRow').innerHTML = '';
+    $('washRow').replaceChildren();
     codes.forEach((code) => {
       const b = document.createElement('button'); b.type = 'button'; b.style.setProperty('--c', paintHex(code)); b.title = paintName(code); b.setAttribute('aria-label', `Wash of ${paintName(code)}`);
       b.setAttribute('aria-pressed', String(code === canvasState.washCode));
@@ -390,10 +390,10 @@
     return v;
   }
   const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
-  let saveTimer = 0, saving = false, saveAgain = false;
-  function saveSoon() { if (!hasDb) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
+  let saveTimer = 0, saving = false, saveAgain = false, forgetting = false;
+  function saveSoon() { if (!hasDb || forgetting) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
   async function saveNow() {
-    if (!hasDb) return;
+    if (!hasDb || forgetting) return;
     if (saving) { saveAgain = true; return; }
     saving = true;
     try {
@@ -409,12 +409,16 @@
     if (!hasDb) return;
     let saved;
     try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
-    if (!saved || !saved.w || !saved.h) return;
-    const [pImg, sImg] = await Promise.all([loadBlob(saved.paper), loadBlob(saved.sketch)]);
+    // only a record of the expected shape is used: sizes a canvas can hold, pictures that are blobs
+    const size = (n) => Number.isInteger(n) && n > 0 && n <= 16384;
+    if (!saved || typeof saved !== 'object' || !size(saved.w) || !size(saved.h)) return;
+    const [pImg, sImg] = await Promise.all([saved.paper instanceof Blob ? loadBlob(saved.paper) : null, saved.sketch instanceof Blob ? loadBlob(saved.sketch) : null]);
     [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
     if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
     if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
-    if (saved.canvas) Object.assign(canvasState, saved.canvas);
+    if (saved.canvas && typeof saved.canvas === 'object') {
+      Object.keys(canvasState).forEach((k) => { if (k in saved.canvas && typeof saved.canvas[k] === typeof canvasState[k]) canvasState[k] = saved.canvas[k]; });
+    }
     renderWash(); applyCanvas();
     showSketch(saved.sketchShown !== false);
     undoStack.length = 0; $('undo').disabled = true;
@@ -540,7 +544,10 @@
     $('eraserSub').textContent = state.eraser;
     // the Brushes icon shows the brush in hand (or the last one used)
     const b = BRUSHES.includes(state.tool) ? state.tool : state.lastBrush;
-    $('brushIcon').innerHTML = root.querySelector(`[data-brush="${b}"] svg`).innerHTML;
+    const brushSvg = root.querySelector(`[data-brush="${b}"] svg`);
+    const icon = $('brushIcon');
+    icon.textContent = '';
+    if (brushSvg) Array.from(brushSvg.childNodes).forEach((n) => icon.append(n.cloneNode(true)));
     $('brushSub').textContent = subs[b];
     $('brushBtn').setAttribute('aria-pressed', String(BRUSHES.includes(state.tool)));
     q('[data-ps-tool]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.psTool === state.tool)));
@@ -575,11 +582,14 @@
   // ---- Paints and the well -----------------------------------------------------------------------
   function setColor(c, name) { state.color = c; state.name = name; $('colorDot').style.setProperty('--c', css(c)); $('colorBtn').title = `Paints and mixing · ${name}`; }
   function renderPaints() {
-    $('paints').innerHTML = '';
+    $('paints').replaceChildren();
     codesNow().forEach((code) => {
       const li = document.createElement('li');
       const b = document.createElement('button'); b.type = 'button'; b.className = 'ps-paint'; b.title = paintName(code); b.dataset.code = code;
-      b.innerHTML = `<span class="ps-dot" style="--c:${paintHex(code)}"></span><span class="ps-code">${code}</span><span class="ps-n"></span>`;
+      const dot = document.createElement('span'); dot.className = 'ps-dot'; dot.style.setProperty('--c', paintHex(code));
+      const label = document.createElement('span'); label.className = 'ps-code'; label.textContent = code;
+      const count = document.createElement('span'); count.className = 'ps-n';
+      b.append(dot, label, count);
       b.addEventListener('click', () => { state.well.push({ code, amount: AMOUNTS[+$('amount').value] }); showWell(); });
       li.append(b); $('paints').append(li);
     });
@@ -624,7 +634,7 @@
   }
   $('dropMix').addEventListener('click', () => { if (picked < 0) return; state.mixes.splice(picked, 1); picked = -1; $('picked').hidden = true; renderMixes(); saveMixes(); });
   function renderMixes() {
-    $('mixes').innerHTML = '';
+    $('mixes').replaceChildren();
     if (!state.mixes.length) { const s = document.createElement('span'); s.className = 'ps-none'; s.textContent = 'Lock in a mix to keep it here.'; $('mixes').append(s); return; }
     state.mixes.forEach((m, i) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'ps-mix'; b.style.setProperty('--c', css(m.c)); b.title = `${m.name || 'Mix ' + (i + 1)}: ${recipeOf(m.parts)}`; b.setAttribute('aria-label', b.title);
@@ -685,7 +695,7 @@
   function renderPalettes() {
     paletteList = palettes();
     const sel = $('palette'), was = sel.value;
-    sel.innerHTML = '';
+    sel.replaceChildren();
     paletteList.forEach((p) => sel.append(new Option(p.name, p.id)));
     // until you choose one here, the palette follows the Study tab's
     const cur = window.StudioPalette && StudioPalette.current();
@@ -698,13 +708,15 @@
 
   // ---- Start ---------------------------------------------------------------------------------------
   renderPalettes();
-  state.mixes = load(MIXES_KEY, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && p.amount > 0), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
+  state.mixes = load(MIXES_KEY, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && Number.isFinite(p.amount) && p.amount > 0 && p.amount <= 100), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
   blank();
   applyPalette();
   showStatus();
   applyView();
   let welcomed = false;
-  const ready = restore();
+  const ready = restore().catch((err) => { if (window.StudioGuard) StudioGuard.report(err, { saved: true }); }); // a bad saved painting never stops the Studio
+  // Forget my work on this device: stop saving, so the pending autosave (or the one on pagehide) can't bring the painting back
+  window.addEventListener('studio:forget', () => { forgetting = true; clearTimeout(saveTimer); saveTimer = 0; });
 
   window.addEventListener('studio:tab', (e) => {
     active = e.detail === 'paint';
