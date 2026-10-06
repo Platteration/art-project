@@ -425,7 +425,19 @@
     quitArmed = 0;
     els.settings.click();
   });
-  function setFocus(on) { document.body.classList.toggle('battle-focus', on); if (on) window.scrollTo(0, 0); }
+  // While a game is on, the board is pinned to the screen the Studio's way: the whole visual
+  // viewport on a phone, the window below the tabs on a wide screen. So it always fills one
+  // screen, whatever a round holds.
+  function setFocus(on) {
+    document.body.classList.toggle('battle-focus', on);
+    els.play.classList.toggle('is-pinned', on);
+    if (on) { window.scrollTo(0, 0); layout(); setTimeout(layout, 120); }
+    else els.play.style.cssText = '';
+  }
+  function layout() { if (!game || els.play.hidden || !window.PaintStudio) return; PaintStudio.pin(els.play); }
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', () => setTimeout(layout, 60));
+  if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }
 
   // the Paint by numbers "spot on" chime for a right answer
   function ding() { if (window.GameSound) GameSound.chime(); }
@@ -433,7 +445,7 @@
   els.start.addEventListener('click', start);
   window.addEventListener('studio:tab', (e) => {
     const on = e.detail === 'battle';
-    setFocus(on && !!game && !game.over);
+    setFocus(on && !!game);
     if (on && !game) renderSetup();
   });
   if (Studio.tab() === 'battle') renderSetup();

@@ -1523,7 +1523,11 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 /* ---- Value battle: one primer-gray board holds the bar, the colors and the answers ---- */
 .vb-about h3 { margin: 0; font: 700 1rem var(--display); }
 .vb-play { display: grid; max-width: 760px; margin-inline: auto; }
-.vb-board { position: relative; display: grid; grid-template-rows: auto 1fr; gap: 10px; min-height: min(72vh, 600px); padding: 10px 14px 18px; background: #8c8a86; border-radius: var(--r); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
+/* pinned while a game is on: the board fills one screen */
+.vb-play.is-pinned { position: fixed; left: 0; top: 0; z-index: 20; max-width: none; margin: 0; grid-template-rows: minmax(0, 1fr); }
+.vb-play.is-pinned .vb-board { min-height: 0; height: 100%; overflow: hidden; }
+.battle-focus { overflow: hidden; }
+.vb-board { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; min-height: min(72vh, 600px); padding: 10px 14px 18px; background: #8c8a86; border-radius: var(--r); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
 .vb-stage { display: grid; gap: 18px; justify-items: center; align-content: center; min-width: 0; }
 .vb-bar { justify-self: stretch; display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 10px; border-bottom: 1px solid rgba(243, 238, 226, 0.25); color: #f3eee2; }
 .vb-round { font: 700 1.15rem/1 var(--mono); font-variant-numeric: tabular-nums; }
@@ -1541,9 +1545,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-swatches[data-count="3"] { grid-template-columns: repeat(3, auto); }
 .vb-swatches[data-count="4"] { grid-template-columns: repeat(2, auto); }
 @media (min-width: 640px) { .vb-swatches[data-count="4"] { grid-template-columns: repeat(4, auto); } }
-.vb-swatch { appearance: none; position: relative; width: clamp(110px, 32vw, 190px); height: clamp(110px, 32vw, 190px); border-radius: 10px; border: 5px solid #bdbab4; padding: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.3); transition: transform 0.12s; }
-.vb-swatches[data-count="3"] .vb-swatch { width: clamp(90px, 26vw, 170px); height: clamp(90px, 26vw, 170px); }
-.vb-swatches[data-count="4"] .vb-swatch { width: clamp(100px, 30vw, 140px); height: clamp(100px, 30vw, 140px); }
+.vb-swatch { appearance: none; position: relative; width: min(clamp(110px, 38vw, 190px), 30vh); height: min(clamp(110px, 38vw, 190px), 30vh); border-radius: 10px; border: 5px solid #bdbab4; padding: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.3); transition: transform 0.12s; }
+.vb-swatches[data-count="3"] .vb-swatch { width: min(clamp(90px, 28vw, 170px), 26vh); height: min(clamp(90px, 28vw, 170px), 26vh); }
+.vb-swatches[data-count="4"] .vb-swatch { width: min(clamp(100px, 36vw, 150px), 24vh); height: min(clamp(100px, 36vw, 150px), 24vh); }
 .vb-swatch:active { transform: scale(0.97); }
 .vb-swatch:focus-visible { outline: 3px solid #faf5ea; outline-offset: 4px; }
 .vb-swatch.is-answer { border-color: #d9a441; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px #d9a441, 0 6px 18px rgba(0, 0, 0, 0.3); }
@@ -1578,4 +1582,5 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-choice.is-pulse { animation: vb-pulse-btn 0.3s ease-out; }
 @media (max-width: 999px) {
   .vb-board { min-height: 60vh; padding-inline: 10px; }
+  .vb-play.is-pinned .vb-board { border-radius: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
 }
