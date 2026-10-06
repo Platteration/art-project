@@ -153,7 +153,15 @@ To load a photo, use **Load photo**, drag it onto the page, or paste it. Transpa
 
 The site is static: there is nothing to run on the server, and nothing a visitor should ever see except the page itself. The repository carries the hosting settings so that the usual launch mistakes are already handled. The full audit behind them, with what was fixed and what is left to decide, is in [docs/security-audit.md](docs/security-audit.md).
 
-**Publish only the runtime files**: `index.html`, `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `styles.css`, `js/`, `img/` and `fonts/`, plus the config file for your host. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify; `docs/` is treated the same way.
+**Publish only the runtime files**: `index.html`, `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `styles.css`, `LICENSE`, `manifest.json`, `.well-known/security.txt`, `js/`, `img/` and `fonts/`, plus the config file for your host. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify; `docs/` is treated the same way.
+
+**Publishing an export.** The repository's `.gitattributes` marks the notes and tooling `export-ignore`, so one command produces exactly the runtime files plus the host configs (`_headers`, `_redirects`, `.htaccess`; each host ignores the others' files):
+
+```sh
+git archive --format=tar HEAD | tar -x -C /path/to/publish-folder
+```
+
+Point the host at that folder (or set it as the publish directory), never at the checkout. For nginx, copy `deploy/nginx.conf` into the server's config by hand.
 
 **Serve over HTTPS only**, with plain `http://` redirected (the Apache and nginx configs do this; Netlify, Cloudflare Pages and GitHub Pages have a "force HTTPS" switch). Clipboard, `<dialog>` downloads and the saved painting all need a secure context.
 
@@ -161,7 +169,7 @@ The site is static: there is nothing to run on the server, and nothing a visitor
 
 | Header | Value | Why |
 | --- | --- | --- |
-| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'` | Only this site's own scripts, styles and fonts run; photos and the save preview (`blob:`) stay allowed, and Trusted Types stop any future string-to-HTML injection. The same policy is in a `<meta>` tag in `index.html`, so hosts without header control (GitHub Pages) get it too. |
+| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'` | Only this site's own scripts, styles and fonts run; photos and the save preview (`blob:`) stay allowed, and Trusted Types stop any future string-to-HTML injection. The same policy is in a `<meta>` tag in `index.html`, so hosts without header control (GitHub Pages) get it too. |
 | `X-Content-Type-Options` | `nosniff` | Files are what their type says. |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | No page paths leak to other sites. |
 | `Permissions-Policy` | camera, microphone, geolocation, payment, USB, sensors and the Topics API off; autoplay and clipboard-write for this site | The app only needs the clipboard and its own chime. |
@@ -188,7 +196,7 @@ curl -s  https://SITE/js/ | grep -c 'Page not found'   # 1: the 404 page, not a 
 curl -sI https://SITE/nonexistent | head -1   # 404
 ```
 
-Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it.
+Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it. Security problems are reported through GitHub issues, as `SECURITY.md` and `/.well-known/security.txt` say; the `Expires` date in that file is 1 October 2027 and needs renewing before then. On GitHub Pages, Jekyll skips dot-folders, so add `include: [.well-known]` to a `_config.yml` for the file to be served.
 
 ## Privacy
 
@@ -243,16 +251,18 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `js/guard.js`: loaded first; shows a note when a script fails or something throws, and clears everything the site keeps in the browser
 - `img/help/`: the phone screenshots the How to use tab shows
 - `fonts/`: the three typefaces, served from here rather than a font CDN, with their licenses
-- `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`: the page for a wrong address, the icons, and the crawler note
+- `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `manifest.json`, `img/icon-*.png`, `img/og.jpg`, `robots.txt`: the page for a wrong address, the icons and share image, the web app manifest, and the crawler note
+- `LICENSE`, `SECURITY.md`, `.well-known/security.txt`: the MIT license, and where to report a security problem
 - `_headers`, `.htaccess`, `deploy/nginx.conf`: the same response headers and server rules for Netlify or Cloudflare Pages, Apache and nginx (see [Publishing](#publishing))
 
 ## Licenses and notices
+
+Portrait Value Studio is released under the [MIT License](LICENSE), copyright (c) 2026 Platteration. The license file is served with the site, so a copy travels with every deployment.
 
 Third-party material in this repository:
 
 - The spectral mixing data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) by Ronald van Wijnen, MIT license (the full notice is in that file).
 - The typefaces in `fonts/` (Bricolage Grotesque by the Bricolage Grotesque Project Authors; IBM Plex Sans and IBM Plex Mono by IBM) are under the SIL Open Font License 1.1; their license texts are next to the files.
 
-The app's own code has no license file yet. Add one before publishing the source.
 
 Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html).

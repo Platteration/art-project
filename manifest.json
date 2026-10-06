@@ -1,0 +1,15 @@
+{
+  "name": "Portrait Value Studio",
+  "short_name": "Value Studio",
+  "description": "See a portrait's dark, middle and light shapes and its big colors, pick paints, paint it, then check how close you got. Runs entirely in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#efe7d6",
+  "theme_color": "#efe7d6",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

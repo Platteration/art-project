@@ -1,9 +1,10 @@
 <!doctype html>
+<!-- Portrait Value Studio. Copyright (c) 2026 Platteration. MIT License: see /LICENSE. -->
 <html lang="en" class="no-js">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
 <title>Portrait Value Studio</title>
 <meta name="description" content="Load a portrait photo and see its dark, middle and light shapes and its big colors, pick paints and mixes, paint it in the Studio, then check how close you got. Everything runs in your browser and photos never leave your device.">
 <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -16,6 +17,7 @@
 <link rel="icon" href="favicon.ico" sizes="32x32">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
 <script src="js/guard.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -1059,6 +1061,7 @@
               <li>Undo is everywhere: on the Studio strip, in the mixing well, and under the game's paints.</li>
               <li>On a phone, the tabs hide while you paint or play. The arrow at the left of the Studio strip, or ✕ twice in a game, brings them back.</li>
               <li>Stuck? Switch to <strong>Simple</strong> at the top of the page, and start again with the sample portrait.</li>
+              <li>Using the app inside another site's page? The browser keeps that copy's settings and saved painting apart from the ones here, and Copy needs the embedding page's permission.</li>
             </ul>
             <h3>Your work stays on this device</h3>
             <p>Settings, palettes, scores and the Studio painting are kept in this browser only, until you clear them. On a shared computer, clear them when you are done. The first tap arms the button; the second clears everything and reloads the page.</p>
