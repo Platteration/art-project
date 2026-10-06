@@ -185,6 +185,26 @@ For a site that embeds the app: give the `<iframe>` `allow="clipboard-write"` so
 
 **Nothing leaves the visitor's device.** There is no backend, no analytics and no third-party request: the fonts are served from `fonts/` rather than a font CDN. Keep it that way when adding features; the `connect-src 'none'` line in the policy makes any new network request from a script fail loudly in the browser console.
 
+**When the public address is known.** Four things wait for it; with `https://SITE/` as the address, add to `<head>` in `index.html`, after the `twitter:card` line:
+
+```html
+<link rel="canonical" href="https://SITE/">
+<meta property="og:url" content="https://SITE/">
+<meta property="og:image" content="https://SITE/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Portrait Value Studio: a portrait beside its dark, middle and light study and its big color shapes">
+```
+
+and change `twitter:card` from `summary` to `summary_large_image`. Then create `sitemap.xml` at the root with the one page:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://SITE/</loc></url></urlset>
+```
+
+and add `Sitemap: https://SITE/sitemap.xml` to `robots.txt` and `Canonical: https://SITE/.well-known/security.txt` to `.well-known/security.txt`. Nothing in the policy needs to change for these.
+
 **Launch checklist**, with `SITE` your https address. Deploy from a clean, committed tree: `fonts/` and `js/guard.js` are runtime files the page needs, so a partial copy breaks it.
 
 ```sh

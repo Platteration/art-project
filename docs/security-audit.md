@@ -245,4 +245,12 @@ Done in the commit that adds this file, closing leftovers the report lists above
 - **F23 caution — Fixed.** `.editorconfig` exempts `fonts/LICENSE-*.txt` and sets 4-space indentation for `deploy/nginx.conf`.
 - **F17 residual, F10 and F01 wording — Fixed in README.** A note for embedders (`allow="clipboard-write"`, separate storage inside an embed), the 404 page's root-absolute paths described correctly, and "deploy from a clean, committed tree; `fonts/` and `js/guard.js` are runtime files".
 
-Still open, as decisions for the owner (section 4): F04 (huge-photo guard), F05 (LICENSE), F06 (publish an export, not the checkout), F09 (per-module guards), F10 (sub-path deploy), F11 (hashed asset names), F12 (best-score keys), F13 (first-use autosave notice), F18 (security contact), F20 (manifest, og:image, canonical), F22, F26, F28, F29, F42, F43.
+Decided by the owner and done in the next commit (`367fbc0` and after):
+
+- **F05 — Fixed.** `LICENSE` is the MIT License, copyright (c) 2026 Platteration; a notice at the top of `index.html` and a line in the README. The three configs serve `/LICENSE` as text.
+- **F18 — Fixed.** `SECURITY.md` and `.well-known/security.txt` point reports at the repository's GitHub issues (`Expires` 2027-10-01; the README says when to renew it and how GitHub Pages serves a dot-folder).
+- **F17 — Decided.** Embedding stays open to any site. The Help tab now tells an embedded visitor that settings and the saved painting are kept apart there, and the README tells embedders about `allow="clipboard-write"`.
+- **F06 — Fixed.** `.gitattributes` marks `README.md`, `SECURITY.md`, `docs/`, `deploy/`, `fonts/README.md` and the editor and git dotfiles `export-ignore`, so `git archive HEAD` yields the runtime files plus the host configs; the README shows the command.
+- **F20 — Partly fixed.** `manifest.json` (display `browser`, icons at 192 and 512 px rendered from the favicon), its link tag, `manifest-src 'self'` in every copy of the policy, and a 1200 × 630 share image at `img/og.jpg`. The canonical link, `og:url`, the absolute `og:image` address and `sitemap.xml` wait for the public address; the README lists the exact lines to add.
+
+Still open, as decisions for the owner (section 4): F04 (huge-photo guard), F09 (per-module guards), F10 (sub-path deploy), F11 (hashed asset names), F12 (best-score keys), F13 (first-use autosave notice), F20 (the URL-dependent part), F22, F26, F28, F29, F42, F43.
