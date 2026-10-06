@@ -380,12 +380,12 @@
   }
   async function dbPut(key, value) {
     const db = await openDb();
-    await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); });
+    await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); t.onabort = () => reject(t.error || new Error('aborted')); });
     db.close();
   }
   async function dbGet(key) {
     const db = await openDb();
-    const v = await new Promise((resolve, reject) => { const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const v = await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE); const r = t.objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); t.onabort = () => reject(t.error || new Error('aborted')); });
     db.close();
     return v;
   }

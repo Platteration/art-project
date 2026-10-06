@@ -151,9 +151,9 @@ To load a photo, use **Load photo**, drag it onto the page, or paste it. Transpa
 
 ## Publishing
 
-The site is static: there is nothing to run on the server, and nothing a visitor should ever see except the page itself. The repository carries the hosting settings so that the usual launch mistakes are already handled.
+The site is static: there is nothing to run on the server, and nothing a visitor should ever see except the page itself. The repository carries the hosting settings so that the usual launch mistakes are already handled. The full audit behind them, with what was fixed and what is left to decide, is in [docs/security-audit.md](docs/security-audit.md).
 
-**Publish only the runtime files**: `index.html`, `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `styles.css`, `js/`, `img/` and `fonts/`, plus the config file for your host. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify.
+**Publish only the runtime files**: `index.html`, `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `styles.css`, `js/`, `img/` and `fonts/`, plus the config file for your host. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify; `docs/` is treated the same way.
 
 **Serve over HTTPS only**, with plain `http://` redirected (the Apache and nginx configs do this; Netlify, Cloudflare Pages and GitHub Pages have a "force HTTPS" switch). Clipboard, `<dialog>` downloads and the saved painting all need a secure context.
 
@@ -171,11 +171,13 @@ The site is static: there is nothing to run on the server, and nothing a visitor
 
 `frame-ancestors` and `X-Frame-Options` are left out **on purpose**: the app is built to be embedded in other sites (it even works around sandboxed frames that block downloads). To restrict embedding, append `; frame-ancestors 'self' https://your-site.example` to the policy in your host's config.
 
-**Not-found pages.** `404.html` is the page a visitor sees for a wrong address or a folder with no index; Netlify, Cloudflare Pages and GitHub Pages pick a root `404.html` up by themselves, and the Apache and nginx configs wire it up (and turn folder listings off). Its links are root-absolute (`/`, `/styles.css`), so if the site lives under a sub-path, edit those four links.
+For a site that embeds the app: give the `<iframe>` `allow="clipboard-write"` so Copy works, and know that a browser keeps the embedded copy's settings and saved painting apart from the ones on this site.
+
+**Not-found pages.** `404.html` is the page a visitor sees for a wrong address or a folder with no index; Netlify, Cloudflare Pages and GitHub Pages pick a root `404.html` up by themselves, and the Apache and nginx configs wire it up (and turn folder listings off). Its links and asset paths are root-absolute (`/`, `/styles.css`, the icons and the hash shortcuts), so if the site lives under a sub-path rather than a domain root, edit them.
 
 **Nothing leaves the visitor's device.** There is no backend, no analytics and no third-party request: the fonts are served from `fonts/` rather than a font CDN. Keep it that way when adding features; the `connect-src 'none'` line in the policy makes any new network request from a script fail loudly in the browser console.
 
-**Launch checklist**, with `SITE` your https address:
+**Launch checklist**, with `SITE` your https address. Deploy from a clean, committed tree: `fonts/` and `js/guard.js` are runtime files the page needs, so a partial copy breaks it.
 
 ```sh
 curl -sI http://SITE/ | head -1              # a 301 to https

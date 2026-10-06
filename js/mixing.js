@@ -24,7 +24,7 @@
   'use strict';
 
   // ---- Spectral data --------------------------------------------------------
-  /*
+  /*!
    * The seven reflectance curves that build a curve from a color (white, cyan, magenta,
    * yellow, red, green, blue) and the D65-weighted CIE 1931 color matching functions are
    * from spectral.js 3.0.0 by Ronald van Wijnen, rounded to five digits:

@@ -10,3 +10,11 @@ trim_trailing_whitespace = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+[deploy/nginx.conf]
+indent_size = 4
+
+[fonts/LICENSE-*.txt]
+end_of_line = unset
+trim_trailing_whitespace = false
+insert_final_newline = unset

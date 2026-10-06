@@ -2,6 +2,9 @@
 (function () {
   'use strict';
 
+  // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to load
+  document.documentElement.classList.remove('no-js');
+
   const $ = (id) => document.getElementById(id);
   const els = {
     file: $('file'),
@@ -369,13 +372,26 @@
     syncOverlay(canvas);
   }
 
-  function prepareAndRun(resetSplit) {
-    state.prep = Study.prepare(state.source, +els.detail.value);
-    const { w, h, rgba } = state.prep;
-    paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
-    state.pixels.orig = rgba;
-    if (resetSplit) autoSplit();
-    runSoon(0);
+  // Preparing a photo (decode, Lab conversion, auto split) blocks for up to a second or more on a
+  // phone, so for a photo the visitor just loaded the "Updating…" indicator is painted first and the
+  // work runs two frames later; a newer photo arriving in between wins. Start-up prepares at once,
+  // so the sample study and the hash routes find the data ready.
+  let prepareJob = 0;
+  function prepareAndRun(resetSplit, immediate) {
+    const job = ++prepareJob;
+    const work = () => {
+      if (job !== prepareJob) return;
+      state.prep = Study.prepare(state.source, +els.detail.value);
+      const { w, h, rgba } = state.prep;
+      paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
+      state.pixels.orig = rgba;
+      if (resetSplit) autoSplit();
+      runSoon(0);
+    };
+    if (immediate) { work(); return; }
+    els.busy.hidden = false;
+    clearTimeout(runTimer);
+    requestAnimationFrame(() => requestAnimationFrame(work));
   }
 
   function renderZones() {
@@ -2586,7 +2602,7 @@
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
-    prepareAndRun(true);
+    prepareAndRun(true, true);
     if (location.hash === '#check') { switchTab('study'); els.drawers.check.open = true; }
     if (location.hash === '#game') switchTab('game');
     if (location.hash === '#paint') switchTab('paint');

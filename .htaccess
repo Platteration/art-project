@@ -22,7 +22,11 @@ ErrorDocument 403 /404.html
   # never serve dotfiles (.git above all), except the ACME folder certificates need
   RewriteRule (^|/)\.(?!well-known/) - [R=404,L]
   # the repository's own notes and server configs are not part of the site
-  RewriteRule ^(README\.md|_headers|deploy(/.*)?|fonts/README\.md)$ - [R=404,L]
+  RewriteRule ^(README\.md|_headers|_redirects|deploy(/.*)?|docs(/.*)?|fonts/README\.md)$ - [R=404,L]
+  # a folder with no page of its own (js/, img/, fonts/) is a 404, not a 403 that hints at a listing
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteCond %{REQUEST_URI} !^/$
+  RewriteRule ^ - [R=404,L]
 </IfModule>
 
 <IfModule mod_headers.c>

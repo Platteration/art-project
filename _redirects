@@ -3,6 +3,10 @@
 /README.md        /404.html  404
 /fonts/README.md  /404.html  404
 /deploy/*         /404.html  404
+/docs/*           /404.html  404
 /_headers         /404.html  404
 /_redirects       /404.html  404
 /.htaccess        /404.html  404
+/.gitignore       /404.html  404
+/.gitattributes   /404.html  404
+/.editorconfig    /404.html  404
