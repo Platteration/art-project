@@ -1,7 +1,7 @@
 /*
  * Value battle: two, three or four colors mixed from the same palette sit as squares on a primer-
- * gray board. With two, a question asks which is darker, lighter, cooler or warmer, and three
- * buttons answer: the left one, the right one, or both the same. With more, the question is
+ * gray board. With two, a question asks which is darker, lighter, cooler or warmer: tap the color,
+ * or the one button that says both are the same. With more, the question is
  * answered on the swatches: tap the darkest or the lightest, tap them in order from darkest to
  * lightest. The rounds keep coming, each a little harder than the last. In Streak mode the first
  * miss ends it and the score is the streak; on the clock (1, 2 or 5 minutes) a miss only costs the
@@ -238,7 +238,7 @@
     const r = game.rounds[game.i];
     game.answered = false; game.picked = [];
     els.round.textContent = timed() ? `${game.right} right` : `Streak ${game.streak}`;
-    els.score.textContent = `Round ${game.i + 1} · ${game.i < 6 ? 'warming up' : game.i < 16 ? 'closing in' : game.i < 24 ? 'getting hard' : 'a hair apart'}`;
+    els.score.textContent = `Round ${game.i + 1}`;
     els.question.textContent = r.q.ask;
     els.swatches.innerHTML = '';
     els.swatches.dataset.count = r.n;
@@ -254,7 +254,7 @@
     els.answer.textContent = ''; els.answer.classList.remove('is-right', 'is-wrong');
     root.dataset.mode = r.q.mode;
     els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen'); });
-    els.undo.disabled = true;
+    els.undo.hidden = true;
     els.next.hidden = true;
     root.classList.remove('vb-answered');
   }
@@ -271,13 +271,13 @@
     if (!game || game.answered) return;
     pulse(swatch(i)); click(i);
     const r = game.rounds[game.i];
-    if (r.q.mode === 'pair') { choose(i === 0 ? 'left' : 'right'); return; }
+    if (r.q.mode === 'pair') { choose(i === 0 ? 'left' : 'right'); return; }   // the colors are the Left and Right buttons
     if (r.q.mode === 'pick') { choose(i); return; }
     // order: the next in line
     if (game.picked.includes(i)) return;
     game.picked.push(i);
     const badge = swatch(i).querySelector('.vb-badge'); badge.textContent = game.picked.length; badge.hidden = false;
-    els.undo.disabled = false;
+    els.undo.hidden = game.picked.length === r.n;
     if (game.picked.length === r.n) choose(game.picked.slice());
   }
   els.undo.addEventListener('click', () => {
@@ -285,7 +285,7 @@
     click(2);
     game.picked = [];
     els.swatches.querySelectorAll('.vb-swatch').forEach((b) => { b.classList.remove('is-picked'); b.querySelector('.vb-badge').hidden = true; });
-    els.undo.disabled = true;
+    els.undo.hidden = true;
   });
   const same = (a, b) => Array.isArray(a) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b;
   // why the answer is what it is, in a sentence the student can check against the swatches
@@ -317,7 +317,7 @@
       if ((timed() ? game.right : game.streak) % 5 === 0) { els.round.classList.remove('is-milestone'); void els.round.offsetWidth; els.round.classList.add('is-milestone'); }
     } else { game.missed++; if (timed()) game.streak = 0; }   // in Streak mode the miss ends the game, and the streak is the score
     els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = true; b.classList.toggle('is-chosen', b.dataset.choice === choice); });
-    els.undo.disabled = true;
+    els.undo.hidden = true;
     // the right swatches ringed in gold, a wrong pick in red
     const correct = r.q.mode === 'pair' ? (r.answer === 'same' ? [0, 1] : [r.answer === 'left' ? 0 : 1]) : r.q.mode === 'pick' ? [r.answer] : r.answer;
     correct.forEach((i) => swatch(i).classList.add('is-answer'));
@@ -363,7 +363,7 @@
     nextRound();
     startClock();
   });
-  els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => { if (game && !game.answered) { pulse(b); click(b.dataset.choice === 'left' ? 0 : b.dataset.choice === 'same' ? 4 : 8); } choose(b.dataset.choice); }));
+  els.choices.querySelectorAll('.vb-choice').forEach((b) => b.addEventListener('click', () => { if (game && !game.answered) { pulse(b); click(4); } choose(b.dataset.choice); }));
   els.next.addEventListener('click', () => {
     if (!game || !game.answered || game.over) return;
     clearTimeout(game.auto);
@@ -374,8 +374,8 @@
     if (!els.miss.hidden) { if (e.key === 'Enter') els.missNext.click(); return; }
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') {
-      if (e.key === 'ArrowLeft') choose('left');
-      else if (e.key === 'ArrowRight') choose('right');
+      if (e.key === 'ArrowLeft') tapSwatch(0);
+      else if (e.key === 'ArrowRight') tapSwatch(1);
       else if (e.key === '=' || e.key === 'ArrowDown') choose('same');
     } else if (/^[1-4]$/.test(e.key) && +e.key <= r.n) tapSwatch(+e.key - 1);
     if (e.key === 'Enter' && game.answered) els.next.click();

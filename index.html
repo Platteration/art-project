@@ -785,7 +785,7 @@
                 <input type="radio" name="vbCount" id="vbCount4" value="4"><label for="vbCount4">4</label>
                 <input type="radio" name="vbCount" id="vbCountMix" value="mix" checked><label for="vbCountMix">Mix</label>
               </div>
-              <p class="hint">Two colors: left, right or the same. Three or four: tap the darkest or the lightest, or tap them in order.</p>
+              <p class="hint">Tap a color to answer. With two, a button says they are the same. With three or four, tap the darkest or the lightest, or tap them in order.</p>
             </fieldset>
             <fieldset class="field">
               <legend>Mode</legend>
@@ -809,16 +809,23 @@
           </div>
         </div>
         <div class="vb-play" id="vb-play" hidden>
-          <div class="game-bar vb-bar" id="vb-bar">
-            <span class="vb-round" id="vb-round">Streak 0</span>
-            <span class="game-timer vb-time" id="vb-time" hidden>1:00</span>
-            <p class="game-progress" id="vb-score">0 right</p>
-            <button type="button" class="game-icon-btn" id="vb-quit" aria-label="Quit this battle" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-          </div>
           <div class="vb-board" id="vb-board">
-            <p class="vb-question" id="vb-question">Which color is darker in value?</p>
-            <div class="vb-swatches" id="vb-swatches" data-count="2"></div>
-            <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
+            <div class="vb-bar" id="vb-bar">
+              <span class="vb-round" id="vb-round">Streak 0</span>
+              <span class="vb-score" id="vb-score">Round 1</span>
+              <span class="vb-time" id="vb-time" hidden>1:00</span>
+              <button type="button" class="vb-quit" id="vb-quit" aria-label="Quit this battle" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </div>
+            <div class="vb-stage">
+              <p class="vb-question" id="vb-question">Which color is darker in value?</p>
+              <div class="vb-swatches" id="vb-swatches" data-count="2"></div>
+              <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
+              <div class="vb-controls" id="vb-choices">
+                <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
+                <button type="button" class="btn vb-undo" id="vb-undo" hidden>Start the round over</button>
+                <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
+              </div>
+            </div>
             <div class="game-popup vb-miss" id="vb-miss" role="group" aria-labelledby="vb-missKicker" hidden>
               <p class="game-kicker" id="vb-missKicker">Not quite</p>
               <p class="vb-miss-why" id="vb-missWhy"></p>
@@ -840,14 +847,28 @@
               </div>
             </div>
           </div>
-          <div class="vb-choices" id="vb-choices">
-            <button type="button" class="btn vb-choice" data-choice="left">◀ Left</button>
-            <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
-            <button type="button" class="btn vb-choice" data-choice="right">Right ▶</button>
-            <button type="button" class="btn vb-undo" id="vb-undo" disabled>Start the round over</button>
-            <p class="hint vb-tap-hint">Tap the swatches to answer.</p>
+            </div>
+            <div class="game-popup vb-miss" id="vb-miss" role="group" aria-labelledby="vb-missKicker" hidden>
+              <p class="game-kicker" id="vb-missKicker">Not quite</p>
+              <p class="vb-miss-why" id="vb-missWhy"></p>
+              <div class="vb-chips" id="vb-missChips"></div>
+              <div class="game-popup-actions">
+                <button type="button" class="btn btn-primary" id="vb-missNext">See the score</button>
+              </div>
+            </div>
+            <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" hidden>
+              <p class="game-kicker" id="vb-kicker">Streak over</p>
+              <p class="game-pct"><span id="vb-pct">0</span></p>
+              <p class="game-pct-label" id="vb-pctLabel">in a row</p>
+              <div class="game-stars" id="vb-stars" role="img" aria-label=""><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span></div>
+              <p class="game-grade" id="vb-grade"></p>
+              <p class="game-newbest" id="vb-newBest" hidden>New best!</p>
+              <div class="game-popup-actions">
+                <button type="button" class="btn btn-primary" id="vb-again">Play again</button>
+                <button type="button" class="btn btn-ghost" id="vb-settings">Change settings</button>
+              </div>
+            </div>
           </div>
-          <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
         </div>
       </section>
 
@@ -1003,7 +1024,7 @@
             <h3>Value battle</h3>
             <ol>
               <li>Pick a <strong>palette</strong> and how many <strong>colors</strong> a round has, then <strong>Start the battle</strong>. Every color is mixed from that palette.</li>
-              <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap <strong>Left</strong>, <strong>Right</strong> or <strong>Both the same</strong>, or tap a swatch.</li>
+              <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap the color, or <strong>Both the same</strong>.</li>
               <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, or tap them <strong>in order</strong> from darkest to lightest. Choose how many colors on the setup, or Mix for all three.</li>
               <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
               <li>The rounds keep coming, each a little harder. In <strong>Streak</strong> mode one miss ends it. On the <strong>clock</strong> (1, 2 or 5 minutes) you get as many right as you can. A miss pops up the right answer with the colors in order, then the score pops up with stars and your best is kept.</li>
