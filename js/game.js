@@ -45,12 +45,15 @@
   };
 
   // Every level splits each value into at least 3 colors: with fewer, a face can share a color with
-  // the wall behind it. Easy is easier through bigger shapes and a longer clock instead.
+  // the wall behind it. Easy is easier through bigger shapes and a longer clock instead: on a photo
+  // its shapes are at least twice the Study's smallest (and never smaller than the Soft detail
+  // preset's), on a painting `merge` sets them.
   const LEVELS = {
-    easy: { colors: 3, seconds: 360, merge: 7, about: 'Big shapes' },
-    medium: { colors: 3, seconds: 300, merge: 6, about: 'Smaller shapes' },
-    hard: { colors: 4, seconds: 480, merge: 5, about: 'More colors' },
+    easy: { colors: 3, seconds: 360, merge: 9, photoShapes: 2, about: 'Big shapes' },
+    medium: { colors: 3, seconds: 300, merge: 6, photoShapes: 1, about: 'Smaller shapes' },
+    hard: { colors: 4, seconds: 480, merge: 5, photoShapes: 1, about: 'More colors' },
   };
+  const SOFT_SHAPES = 0.012 * 0.36;    // the smallest shape at the Soft preset (Merge 6), as a share
   // How a game is played; the mode is chosen in the setup
   const MODES = {
     classic: { name: 'Classic', about: 'Beat the clock: mix every number to match the reference, then lock in.' },
@@ -128,6 +131,9 @@
     const { w, h } = prep;
     opts.colorsPerZone = level.colors;
     opts.outlines = false;
+    if (!painting && level.photoShapes > 1) {
+      opts.minSize = Math.max(Math.round(opts.minSize * level.photoShapes), Math.round(w * h * SOFT_SHAPES));
+    }
     if (painting) {
       opts.lighter = 0;                 // flat planes: nothing to lean toward
       opts.blurRadius = 0;

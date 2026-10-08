@@ -641,6 +641,8 @@
   const RESCUE_SHARE = 0.002;  // shapes smaller than this share of the picture keep their group's color
   const NEW_SHARE = 0.005;     // and only a shape this big can add a color; a smaller one can only move
   const RESCUE_CAP = 2;        // new colors a value zone can gain
+  const RESCUE_GAIN = 1;       // a move must bring the shape's pixels this much closer (mean dE00)
+  const RESCUE_SAMPLES = 2000; // pixels sampled per shape for that test
 
   const labAt = (lin, l) => linToLab(lin[l * 3], lin[l * 3 + 1], lin[l * 3 + 2]);
   const dE = (p, q) => deltaE2000(p[0], p[1], p[2], q[0], q[1], q[2]);
@@ -650,33 +652,57 @@
    * picture, and the whole group is painted with its most prominent color. With few colors per
    * value, a face can share a group with a bigger, flatter wall (or a shirt with the hair), and the
    * wall's color wins: the face comes out the wall's green-gray. So every connected shape big
-   * enough to matter is also read on its own. One whose own most prominent color is more than
-   * RESCUE_DE from its group's color, and another hue too (more than RESCUE_HUE_DE apart at equal
-   * lightness, so a lighter or darker piece of the same wall stays in its group), moves to the
-   * color of its value zone closest to its own, if that is within JOIN_DE. Otherwise it starts a
-   * new color of its own (at most `cap` new ones per zone; past that it takes the closest color of
-   * its zone, if that fits better than its group's). Only a shape of at least NEW_SHARE of the
-   * picture can add a color. Shapes stay whole and keep their value zone, so the value study is
-   * untouched.
+   * enough to matter is also read on its own (its own most prominent color, `mine`).
+   *
+   * A shape is a candidate when `mine` is more than RESCUE_DE from its group's color and another
+   * hue too (more than RESCUE_HUE_DE apart at equal lightness), so a lighter or darker piece of the
+   * same wall stays in its group. Its options are the colors of its value zone whose lightness lies
+   * inside the zone's band [lo, hi), so the color study keeps agreeing with the value study: the
+   * closest of them, if it is within JOIN_DE; otherwise a new color of its own (`mine`, if that is
+   * inside the band, the shape is at least NEW_SHARE of the picture and the zone has made fewer
+   * than `cap` new colors) or the closest one. The option its own pixels sit closest to (mean dE00)
+   * wins, and only if it beats the group's color by RESCUE_GAIN, so no shape ends up further from
+   * the photo than it was. Colors are not read again afterwards: a group keeps its color, and a
+   * new color is the color of the shape that made it, so a shape that stays put never changes.
    *
    * block (labels) and zoneOf (each label's zone) are updated in place; group is dominantColors()
-   * for the current labels. Returns the new label count and whether any shape moved.
+   * for the current labels; band is [lo, hi] per zone. Returns the label count and, for each new
+   * label, its color in linear RGB.
    */
-  function rescueShapes(prep, block, zoneOf, nb, group, lean, minArea, cap) {
+  function rescueShapes(prep, block, zoneOf, nb, group, lean, minArea, cap, band) {
     const groupLin = group.lin;
-    const { w, h } = prep;
+    const { w, h, L, A, B } = prep;
     const n = w * h;
+    const none = { labels: nb, newLin: [] };
     const { comp, count } = components(block, w, h);
     const area = new Int32Array(count);
     for (let i = 0; i < n; i++) area[comp[i]]++;
     const mask = new Uint8Array(n);
     let any = false;
     for (let i = 0; i < n; i++) if (area[comp[i]] >= minArea) { mask[i] = 1; any = true; }
-    if (!any) return { labels: nb, moved: false };
+    if (!any) return none;
 
     const own = dominantColors(prep, comp, count, mask, lean).lin;
     const labelOf = new Int32Array(count).fill(-1);
     for (let i = 0; i < n; i++) if (mask[i] && labelOf[comp[i]] < 0) labelOf[comp[i]] = block[i];
+
+    // each big shape's pixels, for the closeness test
+    const start = new Int32Array(count + 1);
+    for (let c = 0; c < count; c++) start[c + 1] = start[c] + (labelOf[c] >= 0 ? area[c] : 0);
+    const fill = start.slice(0, count);
+    const pixels = new Int32Array(start[count]);
+    for (let i = 0; i < n; i++) if (mask[i]) pixels[fill[comp[i]]++] = i;
+    function meanDE(c, lab) {
+      const from = start[c], m = start[c + 1] - from;
+      const step = Math.max(1, Math.floor(m / RESCUE_SAMPLES));
+      let sum = 0, k = 0;
+      for (let j = 0; j < m; j += step, k++) {
+        const i = pixels[from + j];
+        sum += deltaE2000(L[i], A[i], B[i], lab[0], lab[1], lab[2]);
+      }
+      return sum / k;
+    }
+    const inBand = (lab, z) => lab[0] >= band[z][0] && lab[0] < band[z][1];
 
     // the colors a shape can move to: every group of its zone, then the new colors as they are made
     const targets = [[], [], []];
@@ -685,7 +711,7 @@
       if (!group.total[l]) continue;
       const lab = labAt(groupLin, l);
       groupLab.set(l, lab);
-      targets[zoneOf[l]].push({ label: l, lab });
+      if (inBand(lab, zoneOf[l])) targets[zoneOf[l]].push({ label: l, lab });
     }
 
     // biggest shapes first, so a new color is seeded by the shape that matters most
@@ -695,34 +721,46 @@
 
     const moveTo = new Int32Array(count).fill(-1);
     const made = [0, 0, 0];
+    const newLin = [];
     let next = nb;
     for (const c of order) {
       const g = labelOf[c], z = zoneOf[g];
-      const mine = labAt(own, c);
       const theirs = groupLab.get(g);
-      const fromGroup = theirs ? dE(mine, theirs) : Infinity;
-      if (fromGroup <= RESCUE_DE) continue;
-      if (theirs && dE([theirs[0], mine[1], mine[2]], theirs) <= RESCUE_HUE_DE) continue;
+      if (!theirs) continue;
+      const mine = labAt(own, c);
+      if (dE(mine, theirs) <= RESCUE_DE) continue;
+      if (dE([theirs[0], mine[1], mine[2]], theirs) <= RESCUE_HUE_DE) continue;
+
       let best = null, bestDE = Infinity;
       for (const t of targets[z]) {
         if (t.label === g) continue;
         const d = dE(mine, t.lab);
         if (d < bestDE) { bestDE = d; best = t; }
       }
-      if (best && bestDE <= JOIN_DE) moveTo[c] = best.label;
-      else if (made[z] < cap && area[c] >= NEW_SHARE * n) {
+      const options = [];
+      if (best) options.push(best);
+      const canMake = made[z] < cap && area[c] >= NEW_SHARE * n && inBand(mine, z);
+      if (canMake && !(best && bestDE <= JOIN_DE)) options.push({ label: -1, lab: mine });
+      let pick = null, pickDE = meanDE(c, theirs) - RESCUE_GAIN;
+      for (const o of options) {
+        const d = meanDE(c, o.lab);
+        if (d <= pickDE) { pickDE = d; pick = o; }
+      }
+      if (!pick) continue;
+      if (pick.label < 0) {
         made[z]++;
         zoneOf[next] = z;
+        newLin.push([own[c * 3], own[c * 3 + 1], own[c * 3 + 2]]);
         targets[z].push({ label: next, lab: mine });
         moveTo[c] = next++;
-      } else if (best && bestDE < fromGroup) moveTo[c] = best.label;
+      } else moveTo[c] = pick.label;
     }
-    if (!moveTo.some((t) => t >= 0)) return { labels: nb, moved: false };
+    if (!moveTo.some((t) => t >= 0)) return none;
     for (let i = 0; i < n; i++) {
       const t = moveTo[comp[i]];
       if (t >= 0) block[i] = t;
     }
-    return { labels: next, moved: true };
+    return { labels: next, newLin };
   }
 
   // ---- Main pass ----------------------------------------------------------
@@ -804,23 +842,27 @@
     const cap = RESCUE_CAP;                     // new colors a value zone can gain in step 4
     const zoneOf = new Uint8Array(3 * K + 3 * cap);
     for (let b = 0; b < 3 * K; b++) zoneOf[b] = Math.floor(b / K);
-    let dom = dominantColors(prep, block, 3 * K, null, lean);
+    const dom = dominantColors(prep, block, 3 * K, null, lean);
 
     // 4. A shape its group's color doesn't fit (a face in a group that is mostly wall) moves to a
-    //    color of its value that fits, or gets its own; then every color is read again
+    //    color of its value that fits it better, or gets its own
     const minArea = Math.max(opts.minSize | 0, Math.round(n * RESCUE_SHARE));
-    const rescue = rescueShapes(prep, block, zoneOf, 3 * K, dom, lean, minArea, cap);
+    const band = [[-Infinity, opts.t1], [opts.t1, opts.t2], [opts.t2, Infinity]];
+    const rescue = rescueShapes(prep, block, zoneOf, 3 * K, dom, lean, minArea, cap, band);
     const nb = rescue.labels;
-    if (rescue.moved) dom = dominantColors(prep, block, nb, null, lean);
+    const lin = new Float64Array(nb * 3);
+    lin.set(dom.lin);
+    rescue.newLin.forEach((c, j) => lin.set(c, (3 * K + j) * 3));
+    const sc = new Float64Array(nb);
+    for (let i = 0; i < n; i++) sc[block[i]]++;
 
-    const sc = dom.total;
     const blockRGB = new Uint8Array(nb * 3);
     const blockColors = [];
     for (let b = 0; b < nb; b++) {
       if (!sc[b]) continue;
-      const r = linToSrgb(dom.lin[b * 3]);
-      const g = linToSrgb(dom.lin[b * 3 + 1]);
-      const bb = linToSrgb(dom.lin[b * 3 + 2]);
+      const r = linToSrgb(lin[b * 3]);
+      const g = linToSrgb(lin[b * 3 + 1]);
+      const bb = linToSrgb(lin[b * 3 + 2]);
       blockRGB[b * 3] = r; blockRGB[b * 3 + 1] = g; blockRGB[b * 3 + 2] = bb;
       blockColors.push({ r, g, b: bb, zone: zoneOf[b], share: sc[b] / n, label: b });
     }
