@@ -47,7 +47,8 @@
   // Every level splits each value into at least 3 colors: with fewer, a face can share a color with
   // the wall behind it. Easy is easier through bigger shapes and a longer clock instead: on a photo
   // its shapes are at least twice the Study's smallest (and never smaller than the Soft detail
-  // preset's), on a painting `merge` sets them.
+  // preset's), on a painting `merge` sets them. Easy is then checked against Medium's board (see
+  // buildBoard), so it never has more numbers or as many shapes.
   const LEVELS = {
     easy: { colors: 3, seconds: 360, merge: 9, photoShapes: 2, about: 'Big shapes' },
     medium: { colors: 3, seconds: 300, merge: 6, photoShapes: 1, about: 'Smaller shapes' },
@@ -123,10 +124,8 @@
    * painting is already flat planes: it gets no blur, so their straight edges stay, only specks
    * merge away, and its value splits are worked out for it, as Auto does for a photo.
    */
-  function buildBoard(levelId) {
-    const level = LEVELS[levelId];
-    const painting = subject.kind === 'painting';
-    const prep = painting ? Study.prepare(subjectSource(), SIZE) : Studio.prep();
+  // The study a level's board is made from
+  function levelOptions(level, prep, painting) {
     const opts = Studio.settings(prep);
     const { w, h } = prep;
     opts.colorsPerZone = level.colors;
@@ -140,7 +139,37 @@
       opts.minSize = Math.round(w * h * 0.004 * Math.pow(level.merge / 10, 2));
       [opts.t1, opts.t2] = Study.autoThresholds(prep, opts.blurRadius, opts.smoothing);
     }
-    const res = Study.process(prep, opts);
+    return opts;
+  }
+
+  /*
+   * Easy's study: Medium's with bigger shapes. Its shapes may not add colors of their own, and
+   * they grow until Easy has fewer shapes than Medium and no more numbers (a picture of a few big
+   * planes can come out the same at both sizes, and merging can empty one of Medium's colors).
+   * If no size manages both, the try with the fewest numbers, then shapes, is used.
+   */
+  function easyStudy(prep, painting) {
+    const medium = Study.process(prep, levelOptions(LEVELS.medium, prep, painting));
+    const shapes = Study.shapeCount(medium), numbers = medium.blockColors.length;
+    const opts = levelOptions(LEVELS.easy, prep, painting);
+    opts.newColors = 0;
+    let best = null;
+    for (let tries = 0; tries < 5; tries++) {
+      const res = Study.process(prep, opts);
+      const k = { res, numbers: res.blockColors.length, shapes: Study.shapeCount(res) };
+      if (k.numbers <= numbers && (k.shapes < shapes || shapes <= 1)) return res;
+      if (!best || k.numbers < best.numbers || (k.numbers === best.numbers && k.shapes < best.shapes)) best = k;
+      opts.minSize = Math.round(Math.max(opts.minSize, 1) * 1.6);
+    }
+    return best.res;
+  }
+
+  function buildBoard(levelId) {
+    const level = LEVELS[levelId];
+    const painting = subject.kind === 'painting';
+    const prep = painting ? Study.prepare(subjectSource(), SIZE) : Studio.prep();
+    const { w, h } = prep;
+    const res = levelId === 'easy' ? easyStudy(prep, painting) : Study.process(prep, levelOptions(level, prep, painting));
 
     const groups = res.blockColors
       .map((c) => ({ label: c.label, rgb: [c.r, c.g, c.b], share: c.share }))
