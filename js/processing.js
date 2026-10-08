@@ -633,6 +633,98 @@
     return { lin, total };
   }
 
+  // ---- Shapes their group's color doesn't fit ---------------------------------
+
+  const RESCUE_DE = 10;        // a shape this far (CIEDE2000) from its group's color gets a better one...
+  const RESCUE_HUE_DE = 8;     // ...if it is also this far at equal lightness: another hue, not a lighter piece
+  const JOIN_DE = 8;           // it joins another color of its value this close, rather than adding one
+  const RESCUE_SHARE = 0.002;  // shapes smaller than this share of the picture keep their group's color
+  const NEW_SHARE = 0.005;     // and only a shape this big can add a color; a smaller one can only move
+  const RESCUE_CAP = 2;        // new colors a value zone can gain
+
+  const labAt = (lin, l) => linToLab(lin[l * 3], lin[l * 3 + 1], lin[l * 3 + 2]);
+  const dE = (p, q) => deltaE2000(p[0], p[1], p[2], q[0], q[1], q[2]);
+
+  /*
+   * A color group is every pixel of a value zone nearest one k-means center, anywhere in the
+   * picture, and the whole group is painted with its most prominent color. With few colors per
+   * value, a face can share a group with a bigger, flatter wall (or a shirt with the hair), and the
+   * wall's color wins: the face comes out the wall's green-gray. So every connected shape big
+   * enough to matter is also read on its own. One whose own most prominent color is more than
+   * RESCUE_DE from its group's color, and another hue too (more than RESCUE_HUE_DE apart at equal
+   * lightness, so a lighter or darker piece of the same wall stays in its group), moves to the
+   * color of its value zone closest to its own, if that is within JOIN_DE. Otherwise it starts a
+   * new color of its own (at most `cap` new ones per zone; past that it takes the closest color of
+   * its zone, if that fits better than its group's). Only a shape of at least NEW_SHARE of the
+   * picture can add a color. Shapes stay whole and keep their value zone, so the value study is
+   * untouched.
+   *
+   * block (labels) and zoneOf (each label's zone) are updated in place; group is dominantColors()
+   * for the current labels. Returns the new label count and whether any shape moved.
+   */
+  function rescueShapes(prep, block, zoneOf, nb, group, lean, minArea, cap) {
+    const groupLin = group.lin;
+    const { w, h } = prep;
+    const n = w * h;
+    const { comp, count } = components(block, w, h);
+    const area = new Int32Array(count);
+    for (let i = 0; i < n; i++) area[comp[i]]++;
+    const mask = new Uint8Array(n);
+    let any = false;
+    for (let i = 0; i < n; i++) if (area[comp[i]] >= minArea) { mask[i] = 1; any = true; }
+    if (!any) return { labels: nb, moved: false };
+
+    const own = dominantColors(prep, comp, count, mask, lean).lin;
+    const labelOf = new Int32Array(count).fill(-1);
+    for (let i = 0; i < n; i++) if (mask[i] && labelOf[comp[i]] < 0) labelOf[comp[i]] = block[i];
+
+    // the colors a shape can move to: every group of its zone, then the new colors as they are made
+    const targets = [[], [], []];
+    const groupLab = new Map();
+    for (let l = 0; l < nb; l++) {
+      if (!group.total[l]) continue;
+      const lab = labAt(groupLin, l);
+      groupLab.set(l, lab);
+      targets[zoneOf[l]].push({ label: l, lab });
+    }
+
+    // biggest shapes first, so a new color is seeded by the shape that matters most
+    const order = [];
+    for (let c = 0; c < count; c++) if (labelOf[c] >= 0) order.push(c);
+    order.sort((a, b) => area[b] - area[a]);
+
+    const moveTo = new Int32Array(count).fill(-1);
+    const made = [0, 0, 0];
+    let next = nb;
+    for (const c of order) {
+      const g = labelOf[c], z = zoneOf[g];
+      const mine = labAt(own, c);
+      const theirs = groupLab.get(g);
+      const fromGroup = theirs ? dE(mine, theirs) : Infinity;
+      if (fromGroup <= RESCUE_DE) continue;
+      if (theirs && dE([theirs[0], mine[1], mine[2]], theirs) <= RESCUE_HUE_DE) continue;
+      let best = null, bestDE = Infinity;
+      for (const t of targets[z]) {
+        if (t.label === g) continue;
+        const d = dE(mine, t.lab);
+        if (d < bestDE) { bestDE = d; best = t; }
+      }
+      if (best && bestDE <= JOIN_DE) moveTo[c] = best.label;
+      else if (made[z] < cap && area[c] >= NEW_SHARE * n) {
+        made[z]++;
+        zoneOf[next] = z;
+        targets[z].push({ label: next, lab: mine });
+        moveTo[c] = next++;
+      } else if (best && bestDE < fromGroup) moveTo[c] = best.label;
+    }
+    if (!moveTo.some((t) => t >= 0)) return { labels: nb, moved: false };
+    for (let i = 0; i < n; i++) {
+      const t = moveTo[comp[i]];
+      if (t >= 0) block[i] = t;
+    }
+    return { labels: next, moved: true };
+  }
+
   // ---- Main pass ----------------------------------------------------------
 
   const CHROMA_WEIGHT = 1.4; // hue/saturation differences count a bit more than lightness inside a zone
@@ -708,9 +800,19 @@
     mergeSmallRegions(block, w, h, opts.minSize, 3 * K, K);
 
     // 3. Each block group is painted with its most prominent photo color, not a mix
-    const nb = 3 * K;
     const lean = opts.lighter || 0;
-    const dom = dominantColors(prep, block, nb, null, lean);
+    const cap = RESCUE_CAP;                     // new colors a value zone can gain in step 4
+    const zoneOf = new Uint8Array(3 * K + 3 * cap);
+    for (let b = 0; b < 3 * K; b++) zoneOf[b] = Math.floor(b / K);
+    let dom = dominantColors(prep, block, 3 * K, null, lean);
+
+    // 4. A shape its group's color doesn't fit (a face in a group that is mostly wall) moves to a
+    //    color of its value that fits, or gets its own; then every color is read again
+    const minArea = Math.max(opts.minSize | 0, Math.round(n * RESCUE_SHARE));
+    const rescue = rescueShapes(prep, block, zoneOf, 3 * K, dom, lean, minArea, cap);
+    const nb = rescue.labels;
+    if (rescue.moved) dom = dominantColors(prep, block, nb, null, lean);
+
     const sc = dom.total;
     const blockRGB = new Uint8Array(nb * 3);
     const blockColors = [];
@@ -720,7 +822,7 @@
       const g = linToSrgb(dom.lin[b * 3 + 1]);
       const bb = linToSrgb(dom.lin[b * 3 + 2]);
       blockRGB[b * 3] = r; blockRGB[b * 3 + 1] = g; blockRGB[b * 3 + 2] = bb;
-      blockColors.push({ r, g, b: bb, zone: Math.floor(b / K), share: sc[b] / n, label: b });
+      blockColors.push({ r, g, b: bb, zone: zoneOf[b], share: sc[b] / n, label: b });
     }
 
     const blockImage = new Uint8ClampedArray(n * 4);
@@ -745,8 +847,10 @@
       zoneGray,
       blockColors,
       zone,    // value zone (0-2) per pixel
-      block,   // color group per pixel: zone * K + cluster
+      block,   // color per pixel: zone * K + cluster, or 3 * K and up for a color a shape was given in step 4
       K,
+      labels: nb,                     // how many color labels block uses
+      zoneOf: zoneOf.slice(0, nb),    // each label's value zone (0-2)
       lean,    // how far the group colors lean toward the lighter tones (0 to 1)
     };
   }
@@ -908,7 +1012,7 @@
         cy: sy[c] / k,
         bin: binFor(dE),
         pct: Math.round(Math.max(0, 100 - 2.5 * dE)), // same per-shape score the color accuracy averages
-        zone: Math.floor(refRes.block[first[c]] / refRes.K),
+        zone: refRes.zoneOf ? refRes.zoneOf[refRes.block[first[c]]] : Math.floor(refRes.block[first[c]] / refRes.K),
       };
     }
 

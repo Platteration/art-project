@@ -131,7 +131,7 @@
           <div class="field">
             <div class="field-head"><label for="colors">Colors in each value</label><output id="colorsOut" for="colors"></output></div>
             <input type="range" id="colors" min="1" max="6" step="1" value="3">
-            <p class="hint">How many colors each of the three values is split into. Every color shown is one that is really in the photo.</p>
+            <p class="hint">How many colors each of the three values is split into. Every color shown is one that is really in the photo. A shape that its group's color doesn't fit, such as a face sharing a group with the wall, gets a closer color or one of its own.</p>
           </div>
           <div class="field advanced">
             <div class="field-head"><label for="lean">Lean toward lighter tones</label><output id="leanOut" for="lean"></output></div>
@@ -609,9 +609,9 @@
             <fieldset class="field">
               <legend>Difficulty</legend>
               <div class="seg seg-full game-levels" role="radiogroup" aria-label="Difficulty">
-                <input type="radio" name="gameLevel" id="gameEasy" value="easy"><label for="gameEasy">Easy<small>Up to 6 colors · 3 min</small></label>
-                <input type="radio" name="gameLevel" id="gameMedium" value="medium" checked><label for="gameMedium">Medium<small>Up to 9 colors · 5 min</small></label>
-                <input type="radio" name="gameLevel" id="gameHard" value="hard"><label for="gameHard">Hard<small>Up to 12 colors · 8 min</small></label>
+                <input type="radio" name="gameLevel" id="gameEasy" value="easy"><label for="gameEasy">Easy<small>Big shapes · 6 min</small></label>
+                <input type="radio" name="gameLevel" id="gameMedium" value="medium" checked><label for="gameMedium">Medium<small>Smaller shapes · 5 min</small></label>
+                <input type="radio" name="gameLevel" id="gameHard" value="hard"><label for="gameHard">Hard<small>More colors · 8 min</small></label>
               </div>
             </fieldset>
             <div class="field">

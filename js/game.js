@@ -44,10 +44,12 @@
     paintingPane: $('gameFromPaintingPane'), paintingName: $('gamePaintingName'), reroll: $('gameReroll'),
   };
 
+  // Every level splits each value into at least 3 colors: with fewer, a face can share a color with
+  // the wall behind it. Easy is easier through bigger shapes and a longer clock instead.
   const LEVELS = {
-    easy: { colors: 2, seconds: 180, merge: 7 },
-    medium: { colors: 3, seconds: 300, merge: 6 },
-    hard: { colors: 4, seconds: 480, merge: 5 },
+    easy: { colors: 3, seconds: 360, merge: 7, about: 'Big shapes' },
+    medium: { colors: 3, seconds: 300, merge: 6, about: 'Smaller shapes' },
+    hard: { colors: 4, seconds: 480, merge: 5, about: 'More colors' },
   };
   // How a game is played; the mode is chosen in the setup
   const MODES = {
@@ -141,7 +143,7 @@
       g.number = i + 1;
       g.lab = Study.rgbToLab(g.rgb[0], g.rgb[1], g.rgb[2]);
     });
-    const numberOf = new Int16Array(3 * res.K).fill(-1);
+    const numberOf = new Int16Array(res.labels || 3 * res.K).fill(-1);
     groups.forEach((g, i) => { numberOf[g.label] = i; });
     const cell = new Int16Array(w * h);
     for (let i = 0; i < w * h; i++) cell[i] = numberOf[res.block[i]];
@@ -418,7 +420,7 @@
     els.deal.hidden = m !== 'mystery';
     document.querySelectorAll('#tab-game .game-levels label').forEach((l) => {
       const lv = LEVELS[l.getAttribute('for').replace('game', '').toLowerCase()];
-      l.querySelector('small').textContent = `Up to ${lv.colors * 3} colors · ${m === 'relaxed' ? 'no clock' : lv.seconds / 60 + ' min'}`;
+      l.querySelector('small').textContent = `${lv.about} · ${m === 'relaxed' ? 'no clock' : lv.seconds / 60 + ' min'}`;
     });
     if (board) notePreview();
   }
