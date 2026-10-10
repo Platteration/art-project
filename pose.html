@@ -128,6 +128,22 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .pose-btn img:not([src]) { display: none; }
 .pose-name { position: absolute; inset: 0; display: grid; place-items: center; padding: 4px; text-align: center; font-size: 0.7rem; line-height: 1.2; color: #f5efe2; }
 .pose-btn.has-img .pose-name { display: none; }
+/* the pose library: a sheet over the stage, opened from the Poses button (and first thing, to choose where to start) */
+.stage .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.stage-bar .btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.sheet { position: absolute; inset: 0; z-index: 6; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--surface); color: var(--ink); }
+.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+.sheet-title { display: grid; gap: 2px; min-width: 0; }
+.sheet-title h2 { font-size: 1.05rem; letter-spacing: -0.01em; text-transform: none; }
+.sheet-title .note { color: var(--muted); font-size: 0.82rem; }
+.sheet-x { flex: none; width: 36px; height: 36px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--ground); color: var(--ink); font: 500 22px/1 var(--body); cursor: pointer; }
+.sheet.is-start .sheet-x { display: none; }
+.sheet-body { overflow: auto; overscroll-behavior: contain; padding: 12px 16px 18px; display: grid; gap: 18px; align-content: start; }
+.lib-groups { display: grid; gap: 18px; }
+.lib-group { display: grid; gap: 8px; }
+.lib-group h3 { margin: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 700 0.74rem/1.2 var(--display); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.sheet .library { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.tool.choosing .rail { opacity: 0.5; }
 .pose-x { position: absolute; top: 2px; right: 2px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: rgba(20, 24, 20, 0.72); color: #f5efe2; font: 600 16px/28px var(--body); cursor: pointer; }
 .pose-x:hover { background: rgba(20, 24, 20, 0.9); }
 .lesson b { color: var(--ink); font-weight: 600; }
@@ -178,16 +194,28 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       <div class="arrows" id="arrows"></div>
       <button type="button" class="lamp" id="lampHandle" aria-label="The lamp: drag it to move the light, or use the arrow keys"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
       <div class="stage-bar">
+        <button type="button" class="btn btn-primary" id="posesBtn" aria-haspopup="dialog" aria-controls="library" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg>Poses</button>
         <button type="button" class="btn" id="undo" disabled>Undo</button>
         <button type="button" class="btn" id="snap">Snapshot</button>
       </div>
+      <section class="sheet" id="library" role="dialog" aria-modal="true" aria-labelledby="libTitle" aria-describedby="libNote" hidden>
+        <div class="sheet-head">
+          <div class="sheet-title"><h2 id="libTitle">Pose library</h2><span class="note" id="libNote">Tap a pose to start from it</span></div>
+          <button type="button" class="sheet-x" id="libClose" aria-label="Close the pose library" title="Close">×</button>
+        </div>
+        <div class="sheet-body">
+          <div class="lib-group" id="continueWrap" hidden><h3>Where you left off</h3><div class="library" id="continue"></div></div>
+          <div class="lib-group" id="mineWrap" hidden><h3>Your poses <button type="button" class="btn btn-small" id="mineBack" hidden>Put back the pose you removed</button></h3><div class="library" id="mine"></div></div>
+          <div class="lib-groups" id="poses"></div>
+        </div>
+      </section>
       <div class="fail" id="fail" hidden><p><b>The 3D view could not start.</b><br>This browser has WebGL turned off, or the 3D library could not load. Try another browser, or check the connection and reload.</p></div>
     </div>
 
     <div class="rail">
       <section class="card" aria-labelledby="partTitle">
         <div class="card-head"><h2 id="partTitle">Pose</h2><span class="note" id="partName">Nothing picked</span></div>
-        <p class="empty" id="partEmpty">Drag the colored controls to pose the figure, or tap a part to pick it.</p>
+        <p class="empty" id="partEmpty">Drag the colored controls to pose the figure, or tap a part to pick it. <b>Poses</b>, under the figure, opens the pose library.</p>
         <p class="empty" id="partHow" hidden><span class="adv-only">Tap the yellow arrows to move it. Hold an arrow to keep it moving. You can also drag the part itself.</span><span class="simple-only">Drag it to move it. Advanced adds arrows that move it a little at a time.</span> Left and right are the figure's own.</p>
         <p class="empty" id="partDepth" hidden><b>◉</b> brings it toward you and <b>⊗</b> sends it away from you.</p>
         <div class="row" id="partButtons" hidden>
@@ -203,17 +231,10 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
             <label class="check" for="plantFeet"><input type="checkbox" id="plantFeet" checked> Keep the feet planted when the body moves</label>
           </div>
         </details>
-        <div class="row"><button type="button" class="btn" id="ground">Put the feet on the floor</button></div>
-      </section>
-
-      <section class="card" aria-labelledby="libTitle">
-        <div class="card-head"><h2 id="libTitle">Pose library</h2><span class="note" id="libNote">Tap a pose to start from it</span></div>
-        <div class="library" id="poses"></div>
-        <div class="field" id="mineWrap" hidden>
-          <span class="field-head">Your poses <button type="button" class="btn btn-small" id="mineBack" hidden>Put back the pose you removed</button></span>
-          <div class="library" id="mine"></div>
+        <div class="row">
+          <button type="button" class="btn" id="ground">Put the feet on the floor</button>
+          <button type="button" class="btn" id="savePose">Save this pose</button>
         </div>
-        <div class="row"><button type="button" class="btn" id="savePose">Save this pose</button></div>
       </section>
 
       <section class="card" aria-labelledby="lightTitle">
@@ -321,6 +342,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   // Simple or Advanced (see "Simple and Advanced" near the end), and in Simple the arm, leg or body
   // last touched, whose elbow or knee diamond or chest ring shows
   let simple = true, active = null;
+  let sheetStart = false;     // the pose library is open as the start screen (see "Pose library")
   const groupOf = (n) => (n === 'root' || n === 'waist' || n === 'neck' ? 'body' : (/^(shoulder|elbow|wrist)/.test(n) ? 'arm' : 'leg') + n.slice(-1));
   const srgb = (hex) => new T.Color(hex).convertSRGBToLinear();
 
@@ -695,22 +717,22 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   const POSES = [
     { id: 'stand', name: 'Stand', p: { shoulderR: { z: -7 }, shoulderL: { z: 7 }, elbowR: { x: -10 }, elbowL: { x: -10 } }, thumbView: { az: 25, el: 8 } },
     { id: 'relaxed', name: 'Weight on one leg', p: { root: { z: 5, y: 8 }, waist: { z: -7, y: -4 }, neck: { z: 5, y: -10 }, hipR: { x: -2, z: -2 }, hipL: { x: -10, z: 6 }, kneeL: { x: 22 }, ankleL: { x: -6 }, shoulderR: { z: -9 }, shoulderL: { z: 5, x: -6 }, elbowR: { x: -12 }, elbowL: { x: -25 } }, thumbView: { az: 20, el: 8 } },
-    { id: 'walk', name: 'Walk', p: { waist: { y: 7 }, hipR: { x: -26 }, kneeR: { x: 8 }, ankleR: { x: -8 }, hipL: { x: 20 }, kneeL: { x: 30 }, ankleL: { x: 14 }, shoulderR: { x: 22, z: -6 }, elbowR: { x: -14 }, shoulderL: { x: -28, z: 6 }, elbowL: { x: -32 } }, thumbView: { az: 60, el: 8 } },
-    { id: 'run', name: 'Run', p: { root: { x: 12 }, waist: { x: 10, y: 10 }, neck: { x: -12 }, hipR: { x: -70 }, kneeR: { x: 75 }, ankleR: { x: 10 }, hipL: { x: 30 }, kneeL: { x: 95 }, ankleL: { x: 30 }, shoulderR: { x: 45, z: -10 }, elbowR: { x: -95 }, shoulderL: { x: -55, z: 10 }, elbowL: { x: -95 } }, thumbView: { az: 65, el: 8 } },
+    { id: 'walk', group: 'moving', name: 'Walk', p: { waist: { y: 7 }, hipR: { x: -26 }, kneeR: { x: 8 }, ankleR: { x: -8 }, hipL: { x: 20 }, kneeL: { x: 30 }, ankleL: { x: 14 }, shoulderR: { x: 22, z: -6 }, elbowR: { x: -14 }, shoulderL: { x: -28, z: 6 }, elbowL: { x: -32 } }, thumbView: { az: 60, el: 8 } },
+    { id: 'run', group: 'moving', name: 'Run', p: { root: { x: 12 }, waist: { x: 10, y: 10 }, neck: { x: -12 }, hipR: { x: -70 }, kneeR: { x: 75 }, ankleR: { x: 10 }, hipL: { x: 30 }, kneeL: { x: 95 }, ankleL: { x: 30 }, shoulderR: { x: 45, z: -10 }, elbowR: { x: -95 }, shoulderL: { x: -55, z: 10 }, elbowL: { x: -95 } }, thumbView: { az: 65, el: 8 } },
     { id: 'wave', name: 'Wave', p: { neck: { y: 10, z: -5 }, shoulderL: { z: 95, y: 90 }, elbowL: { x: -105 }, wristL: { z: -10 }, shoulderR: { z: -7 }, elbowR: { x: -10 } }, thumbView: { az: 20, el: 8 } },
     { id: 'reach', name: 'Reach', p: { waist: { x: 12 }, neck: { x: -10 }, shoulderR: { x: -150, z: -10 }, shoulderL: { x: -150, z: 10 }, elbowR: { x: -8 }, elbowL: { x: -8 } }, thumbView: { az: 35, el: 8 } },
-    { id: 'crouch', name: 'Crouch', p: { height: -0.38, root: { x: 18 }, waist: { x: 20 }, neck: { x: -25 }, hipR: { x: -105, z: -8 }, kneeR: { x: 125 }, ankleR: { x: -25 }, hipL: { x: -105, z: 8 }, kneeL: { x: 125 }, ankleL: { x: -25 }, shoulderR: { x: -40, z: -10 }, elbowR: { x: -60 }, shoulderL: { x: -40, z: 10 }, elbowL: { x: -60 } }, thumbView: { az: 50, el: 8 } },
+    { id: 'crouch', group: 'low', name: 'Crouch', p: { height: -0.38, root: { x: 18 }, waist: { x: 20 }, neck: { x: -25 }, hipR: { x: -105, z: -8 }, kneeR: { x: 125 }, ankleR: { x: -25 }, hipL: { x: -105, z: 8 }, kneeL: { x: 125 }, ankleL: { x: -25 }, shoulderR: { x: -40, z: -10 }, elbowR: { x: -60 }, shoulderL: { x: -40, z: 10 }, elbowL: { x: -60 } }, thumbView: { az: 50, el: 8 } },
     { id: 'think', name: 'Think', p: { neck: { x: 12, y: -15 }, shoulderR: { x: -35, z: -14, y: 20 }, elbowR: { x: -145 }, wristR: { x: -20 }, shoulderL: { x: -10, z: 22, y: -40 }, elbowL: { x: -100 }, hipL: { z: 4 }, hipR: { x: -6 } }, thumbView: { az: 30, el: 8 } },
     { id: 'hips', name: 'Hands on hips', p: { root: { y: -8, z: -7 }, waist: { x: -6, y: 5, z: 13 }, neck: { x: -8, y: 14, z: -6 }, shoulderR: { x: 29, y: 66, z: -39 }, elbowR: { x: -105 }, wristR: { x: 23, y: 3, z: -37 }, hipR: { z: 9 }, shoulderL: { x: 14, y: -71, z: 31 }, elbowL: { x: -82 }, wristL: { x: 2, y: 28, z: 23 }, hipL: { x: -15, y: 12, z: 15 }, kneeL: { x: 33 }, ankleL: { x: -10, z: -4 } }, thumbView: { az: 25, el: 10 } },
     { id: 'point', name: 'Point', p: { root: { y: -10, z: 5 }, waist: { x: 4, y: -25, z: 14 }, neck: { x: -6, y: -35 }, shoulderR: { x: -43, y: -90, z: -131 }, hipR: { x: -8, z: -11 }, kneeR: { x: 16 }, ankleR: { x: -4 }, shoulderL: { x: 10, z: 20 }, elbowL: { x: -25 }, hipL: { x: 4, z: 14 }, ankleL: { x: 26, z: 6 } }, thumbView: { az: 25, el: 10 } },
-    { id: 'lunge', name: 'Lunge', p: { root: { x: 14 }, waist: { x: -4, y: -6, z: 2 }, neck: { x: -12, y: 6 }, shoulderR: { x: -26, y: 67, z: -6 }, elbowR: { x: -46 }, wristR: { x: 8, y: 46, z: -43 }, hipR: { x: -95, y: 18, z: 15 }, kneeR: { x: 82 }, ankleR: { x: -1, y: -7, z: 4 }, shoulderL: { x: 37, y: -70, z: 38 }, elbowL: { x: -112 }, wristL: { x: 36, y: 29, z: 33 }, hipL: { x: 40, z: 3 }, kneeL: { x: 22 }, ankleL: { x: -21, y: -3, z: -2 } }, thumbView: { az: 55, el: 12 } },
-    { id: 'kneel', name: 'Kneel', p: { root: { y: -25 }, waist: { x: 10, y: 6, z: -2 }, neck: { x: -8, y: 6, z: 3 }, shoulderR: { x: 10, y: 10, z: -12 }, elbowR: { x: -22 }, hipR: { x: 4, z: -3 }, kneeR: { x: 105 }, ankleR: { x: -28 }, shoulderL: { x: -21, y: -37, z: -2 }, elbowL: { x: -47 }, wristL: { x: -6, y: -72, z: 26 }, hipL: { x: -84, z: 5 }, kneeL: { x: 84 }, ankleL: { y: 6, z: -5 } }, thumbView: { az: 40, el: 12 } },
-    { id: 'sit', name: 'Sit', p: { root: { x: -27 }, waist: { x: 52, y: 5, z: 3 }, neck: { x: 20, y: -10, z: 9 }, shoulderR: { x: -71, y: 55, z: -33 }, elbowR: { x: -56 }, wristR: { x: -40, y: -40, z: 20 }, hipR: { x: -119, y: -3, z: -2 }, kneeR: { x: 130 }, ankleR: { x: 16, y: -8 }, shoulderL: { x: -81, y: 5, z: 94 }, elbowL: { x: -86 }, wristL: { x: -35, y: 60, z: -15 }, hipL: { x: -116, y: -4, z: -1 }, kneeL: { x: 119 }, ankleL: { x: 26, y: 6, z: -1 } }, thumbView: { az: 55, el: 12 } },
-    { id: 'jump', name: 'Jump', p: { root: { x: 8, z: 3 }, waist: { x: -28, y: 5, z: -4 }, neck: { x: -28, y: 10, z: -5 }, shoulderR: { x: -12, y: 30, z: -150 }, elbowR: { x: -12 }, wristR: { z: -20 }, hipR: { x: 22, y: 20, z: -8 }, kneeR: { x: 115 }, ankleR: { x: 38 }, shoulderL: { x: -28, y: -30, z: 136 }, elbowL: { x: -24 }, wristL: { z: -20 }, hipL: { y: -15, z: 7 }, kneeL: { x: 95 }, ankleL: { x: 30 } }, lift: 0.25, thumbView: { az: 40, el: 8 } },
-    { id: 'throw', name: 'Throw', p: { root: { x: 10, y: -31, z: 6 }, waist: { x: 5, y: -40, z: -14 }, neck: { x: -14, y: 40, z: 8 }, shoulderR: { x: 32, y: -90, z: -97 }, elbowR: { x: -95 }, wristR: { z: -45 }, hipR: { x: 19, y: -8, z: -12 }, kneeR: { x: 35 }, ankleR: { x: -13, y: -24, z: 6 }, shoulderL: { x: -52, y: -25, z: 112 }, elbowL: { x: -28 }, hipL: { x: -68, y: 14, z: 11 }, kneeL: { x: 37 }, ankleL: { x: 20, y: -12, z: 2 } }, thumbView: { az: 40, el: 10 } },
-    { id: 'kick', name: 'Kick', p: { root: { x: -15, y: -47, z: -11 }, waist: { x: -8, y: 10, z: 5 }, neck: { x: 18, y: -8 }, shoulderR: { x: -50, z: -65 }, elbowR: { x: -35 }, hipR: { x: 15, y: -1 }, kneeR: { x: 16 }, ankleR: { x: -13, y: -22, z: -3 }, shoulderL: { x: 35, z: 65 }, elbowL: { x: -30 }, hipL: { x: -98, z: 4 }, kneeL: { x: 8 }, ankleL: { x: 25 } }, thumbView: { az: 40, el: 10 } },
-    { id: 'dance', name: 'Dance', p: { root: { x: 37, y: -25, z: 16 }, waist: { x: -18, y: 10 }, neck: { x: -28, y: -10 }, shoulderR: { x: -120, z: -3 }, elbowR: { x: -8 }, wristR: { z: -10 }, hipR: { x: 40, y: 15 }, ankleR: { x: 45 }, shoulderL: { x: 12, z: 100 }, elbowL: { x: -15 }, wristL: { z: -12 }, hipL: { x: -40, y: 20, z: -5 } }, thumbView: { az: 40, el: 10 } },
-    { id: 'box', name: 'Box', p: { root: { x: 2, y: 40, z: -8 }, waist: { x: 8, y: 8 }, neck: { x: 12, y: 22 }, shoulderR: { x: -45, y: 34, z: 14 }, elbowR: { x: -141 }, wristR: { x: 15, y: -75 }, hipR: { x: -24, y: -5, z: -11 }, kneeR: { x: 49 }, ankleR: { x: -13, y: -5 }, shoulderL: { x: -57, y: -23, z: -11 }, elbowL: { x: -105 }, wristL: { x: 20, y: -75 }, hipL: { x: -30, y: 45, z: 31 }, kneeL: { x: 39 }, ankleL: { x: -5, y: -15, z: -4 } }, thumbView: { az: 35, el: 10 } },
+    { id: 'lunge', group: 'moving', name: 'Lunge', p: { root: { x: 14 }, waist: { x: -4, y: -6, z: 2 }, neck: { x: -12, y: 6 }, shoulderR: { x: -26, y: 67, z: -6 }, elbowR: { x: -46 }, wristR: { x: 8, y: 46, z: -43 }, hipR: { x: -95, y: 18, z: 15 }, kneeR: { x: 82 }, ankleR: { x: -1, y: -7, z: 4 }, shoulderL: { x: 37, y: -70, z: 38 }, elbowL: { x: -112 }, wristL: { x: 36, y: 29, z: 33 }, hipL: { x: 40, z: 3 }, kneeL: { x: 22 }, ankleL: { x: -21, y: -3, z: -2 } }, thumbView: { az: 55, el: 12 } },
+    { id: 'kneel', group: 'low', name: 'Kneel', p: { root: { y: -25 }, waist: { x: 10, y: 6, z: -2 }, neck: { x: -8, y: 6, z: 3 }, shoulderR: { x: 10, y: 10, z: -12 }, elbowR: { x: -22 }, hipR: { x: 4, z: -3 }, kneeR: { x: 105 }, ankleR: { x: -28 }, shoulderL: { x: -21, y: -37, z: -2 }, elbowL: { x: -47 }, wristL: { x: -6, y: -72, z: 26 }, hipL: { x: -84, z: 5 }, kneeL: { x: 84 }, ankleL: { y: 6, z: -5 } }, thumbView: { az: 40, el: 12 } },
+    { id: 'sit', group: 'low', name: 'Sit', p: { root: { x: -27 }, waist: { x: 52, y: 5, z: 3 }, neck: { x: 20, y: -10, z: 9 }, shoulderR: { x: -71, y: 55, z: -33 }, elbowR: { x: -56 }, wristR: { x: -40, y: -40, z: 20 }, hipR: { x: -119, y: -3, z: -2 }, kneeR: { x: 130 }, ankleR: { x: 16, y: -8 }, shoulderL: { x: -81, y: 5, z: 94 }, elbowL: { x: -86 }, wristL: { x: -35, y: 60, z: -15 }, hipL: { x: -116, y: -4, z: -1 }, kneeL: { x: 119 }, ankleL: { x: 26, y: 6, z: -1 } }, thumbView: { az: 55, el: 12 } },
+    { id: 'jump', group: 'moving', name: 'Jump', p: { root: { x: 8, z: 3 }, waist: { x: -28, y: 5, z: -4 }, neck: { x: -28, y: 10, z: -5 }, shoulderR: { x: -12, y: 30, z: -150 }, elbowR: { x: -12 }, wristR: { z: -20 }, hipR: { x: 22, y: 20, z: -8 }, kneeR: { x: 115 }, ankleR: { x: 38 }, shoulderL: { x: -28, y: -30, z: 136 }, elbowL: { x: -24 }, wristL: { z: -20 }, hipL: { y: -15, z: 7 }, kneeL: { x: 95 }, ankleL: { x: 30 } }, lift: 0.25, thumbView: { az: 40, el: 8 } },
+    { id: 'throw', group: 'moving', name: 'Throw', p: { root: { x: 10, y: -31, z: 6 }, waist: { x: 5, y: -40, z: -14 }, neck: { x: -14, y: 40, z: 8 }, shoulderR: { x: 32, y: -90, z: -97 }, elbowR: { x: -95 }, wristR: { z: -45 }, hipR: { x: 19, y: -8, z: -12 }, kneeR: { x: 35 }, ankleR: { x: -13, y: -24, z: 6 }, shoulderL: { x: -52, y: -25, z: 112 }, elbowL: { x: -28 }, hipL: { x: -68, y: 14, z: 11 }, kneeL: { x: 37 }, ankleL: { x: 20, y: -12, z: 2 } }, thumbView: { az: 40, el: 10 } },
+    { id: 'kick', group: 'moving', name: 'Kick', p: { root: { x: -15, y: -47, z: -11 }, waist: { x: -8, y: 10, z: 5 }, neck: { x: 18, y: -8 }, shoulderR: { x: -50, z: -65 }, elbowR: { x: -35 }, hipR: { x: 15, y: -1 }, kneeR: { x: 16 }, ankleR: { x: -13, y: -22, z: -3 }, shoulderL: { x: 35, z: 65 }, elbowL: { x: -30 }, hipL: { x: -98, z: 4 }, kneeL: { x: 8 }, ankleL: { x: 25 } }, thumbView: { az: 40, el: 10 } },
+    { id: 'dance', group: 'dance', name: 'Arabesque', p: { root: { x: 37, y: -25, z: 16 }, waist: { x: -18, y: 10 }, neck: { x: -28, y: -10 }, shoulderR: { x: -120, z: -3 }, elbowR: { x: -8 }, wristR: { z: -10 }, hipR: { x: 40, y: 15 }, ankleR: { x: 45 }, shoulderL: { x: 12, z: 100 }, elbowL: { x: -15 }, wristL: { z: -12 }, hipL: { x: -40, y: 20, z: -5 } }, thumbView: { az: 40, el: 10 } },
+    { id: 'box', group: 'moving', name: 'Box', p: { root: { x: 2, y: 40, z: -8 }, waist: { x: 8, y: 8 }, neck: { x: 12, y: 22 }, shoulderR: { x: -45, y: 34, z: 14 }, elbowR: { x: -141 }, wristR: { x: 15, y: -75 }, hipR: { x: -24, y: -5, z: -11 }, kneeR: { x: 49 }, ankleR: { x: -13, y: -5 }, shoulderL: { x: -57, y: -23, z: -11 }, elbowL: { x: -105 }, wristL: { x: 20, y: -75 }, hipL: { x: -30, y: 45, z: 31 }, kneeL: { x: 39 }, ankleL: { x: -5, y: -15, z: -4 } }, thumbView: { az: 35, el: 10 } },
   ];
 
   // ---- The rig: arms and legs that follow their hand or foot (inverse kinematics) -------------------
@@ -1402,8 +1424,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   // pictures are drawn one at a time after the page is up, so it opens quickly
   const thumbQueue = [];
   let thumbBusy = false;
-  function thumbLater(entry, btn) {
-    thumbQueue.push([entry, btn]);
+  function thumbLater(entry, btn, first) {
+    if (first) thumbQueue.unshift([entry, btn]); else thumbQueue.push([entry, btn]);
     if (thumbBusy) return;
     thumbBusy = true;
     const next = () => {
@@ -1417,7 +1439,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     };
     setTimeout(next, 60);
   }
-  function poseButton(name, entry, onPick) {
+  function poseButton(name, entry, onPick, first) {
     const item = document.createElement('div');
     item.className = 'pose-item';
     const b = document.createElement('button');
@@ -1433,7 +1455,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     b.addEventListener('click', onPick);
     item.appendChild(b);
     if (entry.id && thumbs.has(entry.id)) { img.src = thumbs.get(entry.id); b.classList.add('has-img'); }
-    else thumbLater(entry, b);
+    else thumbLater(entry, b, first);
     return item;
   }
   const thumbs = new Map();                  // pictures already drawn, by pose id
@@ -1446,18 +1468,33 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   function markLibrary() {
     const on = chosen && chosen.pose === JSON.stringify(pose) ? chosen.id : null;
     document.querySelectorAll('#poses .pose-btn, #mine .pose-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === on)));
-    $('libNote').textContent = on ? chosen.name : 'Tap a pose to start from it';
+    if (!sheetStart) $('libNote').textContent = on ? `On the figure now: ${chosen.name}` : 'Tap a pose to start from it';
   }
-  POSES.forEach((ps) => {
-    const item = poseButton(ps.name, ps, () => {
-      setPose(ps.p);
-      ground();
-      if (ps.lift) { pose.height = clamp(pose.height + ps.lift, LOW, HIGH); applyPose(); }
-      choose(ps.id, ps.name);
-      remember();
+  // the library in groups, so 30 pictures are easy to look through
+  const GROUPS = [['standing', 'Standing'], ['moving', 'Moving and sport'], ['low', 'Low to the floor'], ['dance', 'Dance']];
+  GROUPS.forEach(([g, title]) => {
+    const list = POSES.filter((ps) => (ps.group || 'standing') === g);
+    if (!list.length) return;
+    const sec = document.createElement('div');
+    sec.className = 'lib-group';
+    const h = document.createElement('h3');
+    h.textContent = title;
+    const grid = document.createElement('div');
+    grid.className = 'library';
+    list.forEach((ps) => {
+      const item = poseButton(ps.name, ps, () => {
+        setPose(ps.p);
+        ground();
+        if (ps.lift) { pose.height = clamp(pose.height + ps.lift, LOW, HIGH); applyPose(); }
+        choose(ps.id, ps.name);
+        remember();
+        closeLibrary();
+      });
+      item.firstChild.dataset.id = ps.id;
+      grid.appendChild(item);
     });
-    item.firstChild.dataset.id = ps.id;
-    $('poses').appendChild(item);
+    sec.append(h, grid);
+    $('poses').appendChild(sec);
   });
 
   // your own poses, kept in this browser
@@ -1476,7 +1513,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     mine.forEach((m, i) => {
       const name = `Your pose ${i + 1}`;
       const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
-      const item = poseButton(name, { id: m.id, p: m.p, ground: false, thumbView: view }, () => { setPose(m.p); choose(m.id, name); remember(); });
+      const item = poseButton(name, { id: m.id, p: m.p, ground: false, thumbView: view }, () => { setPose(m.p); choose(m.id, name); remember(); closeLibrary(); });
       item.firstChild.dataset.id = m.id;
       const x = document.createElement('button');
       x.type = 'button'; x.className = 'pose-x'; x.textContent = '×';
@@ -1507,7 +1544,11 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     markLibrary();
     $('savePose').focus();
   });
+  let savedSay = 0;
   $('savePose').addEventListener('click', () => {
+    clearTimeout(savedSay);
+    $('savePose').textContent = 'Saved in the pose library';
+    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, 2200);
     removed = null;
     const id = 'mine-' + Date.now().toString(36);
     mine.push({ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } });
@@ -1517,6 +1558,53 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     choose(id, `Your pose ${mine.length}`);
   });
   showMine();
+
+  // The sheet over the stage. It opens from the Poses button, and first thing when the page opens (and
+  // after Start over) to choose a pose to start from: then it has no close button and the rest of the
+  // page waits until a pose is picked. Picking a pose closes it.
+  const sheet = $('library');
+  const behindSheet = () => [canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
+  function openLibrary(start) {
+    sheetStart = !!start;
+    sheet.classList.toggle('is-start', sheetStart);
+    $('libTitle').textContent = sheetStart ? 'Choose a pose to start' : 'Pose library';
+    if (sheetStart) $('libNote').textContent = 'Pick a pose to begin. The Poses button under the figure brings this back any time.';
+    else $('continueWrap').hidden = true;
+    sheet.hidden = false;
+    $('posesBtn').setAttribute('aria-expanded', 'true');
+    document.querySelector('.tool').classList.add('choosing');
+    behindSheet().forEach((el) => el && el.setAttribute('inert', ''));
+    markLibrary();
+    // it opens at the top, or at the group of the pose on the figure now
+    const body = sheet.querySelector('.sheet-body'), now = sheet.querySelector('.pose-btn[aria-pressed="true"]');
+    body.scrollTop = now && !sheetStart ? Math.max(0, now.closest('.lib-group').offsetTop - body.offsetTop - 8) : 0;
+    const on = sheet.querySelector('#continue .pose-btn') || now || sheet.querySelector('#poses .pose-btn');
+    if (on) on.focus({ preventScroll: true });
+  }
+  function closeLibrary() {
+    if (sheet.hidden) return;
+    const wasStart = sheetStart;
+    sheetStart = false;
+    sheet.hidden = true;
+    $('continueWrap').hidden = true;
+    $('posesBtn').setAttribute('aria-expanded', 'false');
+    document.querySelector('.tool').classList.remove('choosing');
+    behindSheet().forEach((el) => el && el.removeAttribute('inert'));
+    $('hint').hidden = !wasStart;              // the tips show once a first pose is chosen
+    markLibrary();
+    $('posesBtn').focus({ preventScroll: true });
+    requestRender();
+  }
+  $('posesBtn').addEventListener('click', () => openLibrary(false));
+  $('libClose').addEventListener('click', closeLibrary);
+  sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheetStart) { e.preventDefault(); closeLibrary(); } });
+  // the pose from last time, as the first choice on the start screen
+  function offerContinue() {
+    $('continue').textContent = '';
+    const item = poseButton('Where you left off', { id: 'continue', p: copyPose(pose), ground: false, thumbView: { az: view.az, el: view.el } }, closeLibrary, true);
+    $('continue').appendChild(item);
+    $('continueWrap').hidden = false;
+  }
 
   // ---- How it is shown: color, gray, or the three values ----------------------------------------
 
@@ -1607,7 +1695,12 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     if (behind) { x = -x; y = -y; }
     const off = behind || Math.abs(x) > 0.94 || Math.abs(y) > 0.94;
     if (off) { const k = 0.94 / Math.max(Math.abs(x), Math.abs(y), 1e-6); x *= k; y *= k; }
-    handle.style.transform = `translate(${clamp((x + 1) / 2 * w, 26, w - 26)}px, ${clamp((1 - y) / 2 * h, 26, h - 64)}px)`;
+    // the ring stays on the stage, and above the buttons in its bottom corner (Poses, Undo, Snapshot)
+    const bar = document.querySelector('.stage-bar');
+    const hx = clamp((x + 1) / 2 * w, 26, w - 26);
+    let hy = clamp((1 - y) / 2 * h, 26, h - 26);
+    if (bar && hx > bar.offsetLeft - 26 && hy > bar.offsetTop - 27) hy = Math.max(26, bar.offsetTop - 27);
+    handle.style.transform = `translate(${hx}px, ${hy}px)`;
     handle.classList.toggle('is-off', off);
     // hidden behind the figure: the ring dims and lets taps through to the figure
     let behindFigure = false;
@@ -1619,8 +1712,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       behindFigure = !!h0 && h0.distance < far - 0.05;
     }
     handle.classList.toggle('is-behind', behindFigure);
-    handle.dataset.x = clamp((x + 1) / 2 * w, 26, w - 26);
-    handle.dataset.y = clamp((1 - y) / 2 * h, 26, h - 64);
+    handle.dataset.x = hx;
+    handle.dataset.y = hy;
   }
   function render() {
     queued = false;
@@ -2159,6 +2252,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     Object.assign(view, { az: 32, el: 8, dist: 5.2 }); placeCamera();
     Object.assign(light, { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 }); lightChanged(false);
     setPose(POSES[0].p); ground(); pick(null); remember();
+    openLibrary(true);
   });
 
   // ---- Snapshot ------------------------------------------------------------------------------
@@ -2215,6 +2309,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   showPart();
   last = snapshot();
   resize();
+  if (saved && saved.pose) offerContinue();
+  openLibrary(true);
 
   // for tests and for the app later on
   window.PoseAndLight = { pose, light, view, setPose, pick, POSES, LIGHTS, J, SPEC, render, camera, parts, scene, tipWorld, lamp, stand, applyPose, placeCamera, lightChanged,
