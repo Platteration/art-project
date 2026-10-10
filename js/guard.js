@@ -69,7 +69,14 @@
     note(saved ? SAVED_FAILED : APP_FAILED, saved);
   }
 
-  window.StudioGuard = { report: report, forget: forget };
+  // A module whose dependencies never loaded (a script that failed or threw) calls this: the standing
+  // "has not started" note shows, and the module stays out instead of dying halfway with errors.
+  function failed(what) {
+    if (window.console && console.error) console.error(what);
+    document.documentElement.classList.add('load-failed');
+  }
+
+  window.StudioGuard = { report: report, forget: forget, failed: failed };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
   // stylesheet failing to load shows the standing note at the top of the page, not a passing toast.

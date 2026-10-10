@@ -9,6 +9,12 @@
 (function () {
   'use strict';
 
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('palette.js: app.js did not finish loading');
+    return;
+  }
+
   const $ = (id) => document.getElementById(id);
   const els = {
     drawer: $('drawer-colors'),
@@ -60,7 +66,7 @@
   const choice = Object.assign({ source: 'preset', preset: '', max: 6 }, load(CHOICE_KEY, {}));
   // only values the drawer knows: anything else (an older version, a stray write) falls back to the default
   if (choice.source !== 'mine') choice.source = 'preset';
-  if (typeof choice.preset !== 'string') choice.preset = '';
+  if (typeof choice.preset !== 'string' || (choice.preset && !Paints.PRESETS.some((pr) => pr.id === choice.preset))) choice.preset = '';
   if (!Number.isInteger(choice.max) || choice.max < 3 || choice.max > 10) choice.max = 6; // the range of #paintMax
   const mine = new Set(load(MINE_KEY, []).filter((c) => known.has(c)));
 

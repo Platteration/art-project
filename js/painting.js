@@ -12,11 +12,18 @@
  */
 (function () {
   'use strict';
+
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('painting.js: app.js did not finish loading');
+    return;
+  }
   const root = document.getElementById('ps-root');
   if (!root) return;
   const $ = (id) => document.getElementById('ps-' + id);
   const q = (sel) => root.querySelectorAll(sel);
   const MIXES_KEY = 'portrait-value-studio.paintMixes';
+  const NOTICE_KEY = 'portrait-value-studio.studioNotice'; // the one-time note that the painting is kept in this browser
   const MINE_KEY = 'portrait-value-studio.myPaints';
   const AMOUNTS = [0.25, 0.5, 1, 2, 4];
   const fmt = (v) => { const qv = Math.round(v * 4) / 4, w = Math.floor(qv), f = ['', '¼', '½', '¾'][Math.round((qv - w) * 4)]; return w ? `${w}${f}` : f || '0'; };
@@ -727,7 +734,14 @@
     refreshReference();
     layout();
     setTimeout(layout, 120);
-    ready.then(() => { layout(); if (restored && !welcomed) Studio.toast('Your painting is back from last time'); welcomed = true; });
+    ready.then(() => {
+      layout();
+      if (!welcomed) {
+        if (restored) Studio.toast('Your painting is back from last time');
+        else if (!load(NOTICE_KEY, false)) { Studio.toast('Your painting is saved in this browser as you go. "Forget my work on this device", under How to use, clears it.', 7000); save(NOTICE_KEY, true); }
+      }
+      welcomed = true;
+    });
   });
   // the page may open straight on this tab (index.html#paint), before this script was listening
   if (Studio.tab() === 'paint') window.dispatchEvent(new CustomEvent('studio:tab', { detail: 'paint' }));

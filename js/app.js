@@ -5,6 +5,12 @@
   // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to load
   document.documentElement.classList.remove('no-js');
 
+  // the modules this one needs; without them the page shows the standing note instead of half an app
+  if (!window.Study || !window.Mixing || !window.Paints) {
+    if (window.StudioGuard) StudioGuard.failed('app.js: processing.js, mixing.js or paints.js did not load');
+    return;
+  }
+
   const $ = (id) => document.getElementById(id);
   const els = {
     file: $('file'),
@@ -459,20 +465,53 @@
     }
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => {
+    let settled = false;
+    const loaded = () => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
+      const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
       // an image with no size (an SVG without width and height) would become a blank 1 x 1 study
-      if ((img.naturalWidth || img.width) < 16 || (img.naturalHeight || img.height) < 16) {
+      if (w < 16 || h < 16) {
         toast('That image has no usable size. Use a JPG, PNG or WebP photo.', 5000);
         return;
       }
-      done(img);
+      done(shrinkIfHuge(img, w, h));
     };
-    img.onerror = () => {
+    const failed = () => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
       toast('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
     };
+    img.onload = loaded;
+    img.onerror = failed;
     img.src = url;
+    // decode() keeps the decoding of a big photo off the click handler, so the page stays responsive
+    if (typeof img.decode === 'function') img.decode().then(loaded, () => { /* some browsers refuse decode() for a huge image that still loads: onload or onerror decides */ });
+  }
+
+  // A huge photo (a 50-megapixel camera file) costs hundreds of megabytes once decoded and can
+  // close the tab on a phone. Above this many pixels the photo is drawn once onto a canvas no larger
+  // than twice the biggest working size, which is more than the studies ever use, and the big
+  // decoded image is let go.
+  const HUGE_PIXELS = 24e6;
+  const SHRINK_SIDE = 2800;
+  function shrinkIfHuge(img, w, h) {
+    if (w * h <= HUGE_PIXELS) return img;
+    const scale = SHRINK_SIDE / Math.max(w, h);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * scale));
+    c.height = Math.max(1, Math.round(h * scale));
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    try {
+      g.drawImage(img, 0, 0, c.width, c.height);
+    } catch (err) {
+      return img; // a canvas the browser cannot give: keep the photo as it is
+    }
+    toast(`A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.`, 5000);
+    return c;
   }
 
   function loadFile(file) {

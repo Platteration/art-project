@@ -14,6 +14,12 @@
 (function () {
   'use strict';
 
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('game.js: app.js did not finish loading');
+    return;
+  }
+
   const $ = (id) => document.getElementById(id);
   const els = {
     setup: $('gameSetup'), play: $('gamePlay'), result: $('gameResult'),
@@ -94,6 +100,8 @@
   function save(key, value) {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* storage unavailable: kept for this visit */ }
   }
+  // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
+  function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
 
   const toHex = (c) => Studio.toHex({ r: c[0], g: c[1], b: c[2] });
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -1248,7 +1256,7 @@
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
     const isBest = !bests[game.bestKey] || points > bests[game.bestKey];
-    if (isBest) { bests[game.bestKey] = points; save(BEST_KEY, bests); }
+    if (isBest) { bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); }
 
     els.play.hidden = true;
     els.result.hidden = false;

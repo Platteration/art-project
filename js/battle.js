@@ -17,6 +17,12 @@
  */
 (function () {
   'use strict';
+
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('battle.js: app.js did not finish loading');
+    return;
+  }
   const $ = (id) => document.getElementById('vb-' + id);
   const root = document.getElementById('tab-battle');
   if (!root) return;
@@ -27,6 +33,8 @@
   const MINE_KEY = 'portrait-value-studio.myPaints';
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
+  function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
 
   // ---- Colors from the palette ------------------------------------------------------------------
   const made = new Map();
@@ -401,7 +409,7 @@
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
     const isBest = score > 0 && (bests[key] == null || score > bests[key]);
-    if (isBest) { bests[key] = score; save(BEST_KEY, bests); }
+    if (isBest) { bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); }
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];

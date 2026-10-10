@@ -253,4 +253,15 @@ Decided by the owner and done in the next commit (`367fbc0` and after):
 - **F06 — Fixed.** `.gitattributes` marks `README.md`, `SECURITY.md`, `docs/`, `deploy/`, `fonts/README.md` and the editor and git dotfiles `export-ignore`, so `git archive HEAD` yields the runtime files plus the host configs; the README shows the command.
 - **F20 — Partly fixed.** `manifest.json` (display `browser`, icons at 192 and 512 px rendered from the favicon), its link tag, `manifest-src 'self'` in every copy of the policy, and a 1200 × 630 share image at `img/og.jpg`. The canonical link, `og:url`, the absolute `og:image` address and `sitemap.xml` wait for the public address; the README lists the exact lines to add.
 
-Still open, as decisions for the owner (section 4): F04 (huge-photo guard), F09 (per-module guards), F10 (sub-path deploy), F11 (hashed asset names), F12 (best-score keys), F13 (first-use autosave notice), F20 (the URL-dependent part), F22, F26, F28, F29, F42, F43.
+Third round, in the commit after that:
+
+- **F04 — Fixed.** `readImage()` in `js/app.js` decodes with `img.decode()` (off the click handler, with `onload`/`onerror` as the fallback) and, above 24 megapixels, draws the photo once onto a canvas with a 2800 px long side, twice the largest working size, and tells the visitor the new size. A 24.6-megapixel test file is reduced in about 1.6 s with no error.
+- **F09 — Fixed.** Each dependent module (`palette.js`, `game.js`, `painting.js`, `battle.js`, `loomis.js`) bails out at its first line when `Study`, `Mixing`, `Paints`, `Studio` (and for the Loomis head `PaintStudio`) are missing, through `StudioGuard.failed()`, which shows the standing "has not started" note; `app.js` does the same for its own three dependencies. With `app.js` blocked, the other modules now produce no errors; with `painting.js` throwing, the Loomis head stays out and the games still run.
+- **F13 — Fixed.** The first time the Studio opens without a restored painting, a seven-second note says the painting is saved in this browser and names the Forget button; it is shown once (`portrait-value-studio.studioNotice`).
+- **F12 — Mitigated.** `pruneBests()` in `js/game.js` and `js/battle.js` keeps the newest fifty boards, so the map of best scores, whose keys name the photo, no longer grows for good. The keys themselves are unchanged (changing them would discard everyone's scores).
+- **F29 — Fixed.** IBM Plex Mono 600 and 700 (latin and latin-ext) are shipped with their `@font-face` rules; the nineteen bold mono rules no longer render a synthesized bold.
+- **F28 — Fixed.** The 23 help screenshots are 400 × 774 (twice their largest display width) at quality 85, progressive: 2.05 MB became 0.9 MB. The `<img>` tags carry `width` and `height`, so the Help tab no longer shifts as they load.
+- **F19, F21, F02 leftovers — Fixed.** More binary types in `.gitattributes`; an unknown saved preset id falls back; the README's checklist names the sandboxed-iframe case.
+- **F42 — Not possible from here.** The eight palette-source links could not be reached from the audit sandbox; click them once before launch.
+
+Still open, as decisions for the owner (section 4): F10 (sub-path deploy), F11 (hashed asset names), F12 (the keys themselves), F20 (the URL-dependent part), F22, F26, F42 (manual link check), F43.

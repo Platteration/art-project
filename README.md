@@ -216,7 +216,7 @@ curl -s  https://SITE/js/ | grep -c 'Page not found'   # 1: the 404 page, not a 
 curl -sI https://SITE/nonexistent | head -1   # 404
 ```
 
-Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it. Security problems are reported through GitHub issues, as `SECURITY.md` and `/.well-known/security.txt` say; the `Expires` date in that file is 1 October 2027 and needs renewing before then. On GitHub Pages, Jekyll skips dot-folders, so add `include: [.well-known]` to a `_config.yml` for the file to be served.
+Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it, including a sandboxed one (`sandbox="allow-scripts allow-modals"`), where the fonts and the save dialog must still work. Security problems are reported through GitHub issues, as `SECURITY.md` and `/.well-known/security.txt` say; the `Expires` date in that file is 1 October 2027 and needs renewing before then. On GitHub Pages, Jekyll skips dot-folders, so add `include: [.well-known]` to a `_config.yml` for the file to be served.
 
 ## Privacy
 
@@ -226,7 +226,7 @@ What the site keeps in the browser, and clears with **Forget my work on this dev
 
 | Where | What |
 | --- | --- |
-| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size) |
+| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size; only the newest fifty are kept), and whether the Studio's one-time saving note was shown |
 | IndexedDB database `portrait-value-studio` | The Studio painting: the paper, the underdrawing and the canvas settings, saved a moment after each change |
 
 Saved PNGs are drawn from the canvas and carry no camera metadata. The game's Share button hands the scorecard to the phone's share sheet only when pressed. A web server hosting the site sees only ordinary access logs.
@@ -269,7 +269,7 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `js/loomis.js`: the Loomis head tab
 - `js/battle.js`: the Value battle game
 - `js/guard.js`: loaded first; shows a note when a script fails or something throws, and clears everything the site keeps in the browser
-- `img/help/`: the phone screenshots the How to use tab shows
+- `img/help/`: the phone screenshots the How to use tab shows (400 px wide, twice their display width)
 - `fonts/`: the three typefaces, served from here rather than a font CDN, with their licenses
 - `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `manifest.json`, `img/icon-*.png`, `img/og.jpg`, `robots.txt`: the page for a wrong address, the icons and share image, the web app manifest, and the crawler note
 - `LICENSE`, `SECURITY.md`, `.well-known/security.txt`: the MIT license, and where to report a security problem
