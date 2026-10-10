@@ -2083,6 +2083,13 @@
   function openPose() {
     if (!poseFrame.getAttribute('src')) poseFrame.setAttribute('src', poseFrame.dataset.src);
   }
+  // it follows the app's Simple or Advanced switch: told when it loads and whenever the switch changes
+  function tellPoseMode() {
+    if (!poseFrame.getAttribute('src') || !poseFrame.contentWindow) return;
+    poseFrame.contentWindow.postMessage({ type: 'pose-and-light:mode', mode: document.body.classList.contains('mode-simple') ? 'simple' : 'advanced' }, '*');
+  }
+  poseFrame.addEventListener('load', tellPoseMode);
+  window.addEventListener('studio:mode', tellPoseMode);
   window.addEventListener('message', (e) => {
     const d = e.data;
     if (e.source !== poseFrame.contentWindow || !d || d.type !== 'pose-and-light:height') return;

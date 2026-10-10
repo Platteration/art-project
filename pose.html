@@ -147,6 +147,12 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
 .embed .top { display: none; }
 .embed .app { padding-block: 4px 16px; padding-inline: 0; }
 .embed .stage { height: var(--stage-h, 600px); }
+/* Simple shows only what a beginner needs; Advanced shows every control */
+.simple .adv-only, html:not(.simple) .simple-only { display: none !important; }
+.top-side { display: flex; align-items: center; gap: 10px; }
+.mode-switch { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); }
+.mode-switch button { appearance: none; border: 0; border-radius: 99px; background: transparent; color: var(--muted); font: 600 0.8rem/1 var(--body); padding: 7px 12px; cursor: pointer; }
+.mode-switch button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
 </style>
 </head>
 <body>
@@ -157,13 +163,16 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       <h1>Pose and Light</h1>
       <p>A wooden drawing figure and one lamp. Pose every limb, move the light, and watch where the light side, the shadow side and the cast shadow fall.</p>
     </div>
-    <span class="badge">Test version</span>
+    <div class="top-side">
+      <span class="mode-switch" role="group" aria-label="Simple or advanced controls"><button type="button" data-mode="simple" aria-pressed="true" title="Just the controls you need">Simple</button><button type="button" data-mode="advanced" aria-pressed="false" title="Every control">Advanced</button></span>
+      <span class="badge">Test version</span>
+    </div>
   </header>
 
   <div class="tool">
     <div class="stage" id="stage">
       <canvas id="view" aria-label="The wooden figure and the lamp. Drag a hand, a foot, the ring around the hips or the ring around the chest to pose the figure. Tap a part of the figure to pick it, then use the arrows to move it. Drag the lamp to move the light, or drag the background to walk around."></canvas>
-      <div class="hint" id="hint"><span>Drag a colored control to pose</span><span>Tap a part for arrows</span><span>Drag the lamp to move the light</span><span>Drag the background to walk around</span></div>
+      <div class="hint" id="hint"><span>Drag a colored control to pose</span><span class="adv-only">Tap a part for arrows</span><span class="simple-only">Tap a part to pick it</span><span>Drag the lamp to move the light</span><span>Drag the background to walk around</span></div>
       <div class="picked" id="picked" hidden></div>
       <svg class="rig" id="rig" aria-hidden="true"></svg>
       <div class="arrows" id="arrows"></div>
@@ -179,14 +188,14 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       <section class="card" aria-labelledby="partTitle">
         <div class="card-head"><h2 id="partTitle">Pose</h2><span class="note" id="partName">Nothing picked</span></div>
         <p class="empty" id="partEmpty">Drag the colored controls to pose the figure, or tap a part to pick it.</p>
-        <p class="empty" id="partHow" hidden>Tap the yellow arrows to move it. Hold an arrow to keep it moving. You can also drag the part itself. Left and right are the figure's own.</p>
+        <p class="empty" id="partHow" hidden><span class="adv-only">Tap the yellow arrows to move it. Hold an arrow to keep it moving. You can also drag the part itself.</span><span class="simple-only">Drag it to move it. Advanced adds arrows that move it a little at a time.</span> Left and right are the figure's own.</p>
         <p class="empty" id="partDepth" hidden><b>◉</b> brings it toward you and <b>⊗</b> sends it away from you.</p>
         <div class="row" id="partButtons" hidden>
           <button type="button" class="btn" id="straighten">Straighten</button>
           <button type="button" class="btn" id="mirror">Copy to the other side</button>
         </div>
         <p class="legend"><span><i style="background:#ff5d52"></i>Figure's right</span><span><i style="background:#59b0ff"></i>Figure's left</span><span><i style="background:#ffb340"></i>Body</span></p>
-        <details class="more" id="rigMore">
+        <details class="more adv-only" id="rigMore">
           <summary>Rig controls <span class="sum-note" id="rigSum"></span></summary>
           <div class="more-body">
             <p class="lesson">Drag a hand's circle and the whole arm follows. The diamond at the elbow swings the elbow around while the hand stays put. The feet and the knees work the same way. Drag the ring around the hips to move the body: the legs bend and the feet stay put. The ring around the chest bends the body, and the arms and the head go with it.</p>
@@ -211,7 +220,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
         <div class="card-head"><h2 id="lightTitle">Light</h2><span class="note" id="lightName">Rembrandt</span></div>
         <div class="chips" id="lights"></div>
         <p class="lesson" id="lightLesson"></p>
-        <details class="more" id="lightMore">
+        <details class="more adv-only" id="lightMore">
           <summary>Light settings <span class="sum-note" id="lightSum"></span></summary>
           <div class="more-body">
             <div class="field"><div class="field-head"><label for="lAz">Around the figure</label><output id="lAzOut" for="lAz"></output></div><input type="range" id="lAz" min="-180" max="180" step="1"></div>
@@ -230,14 +239,14 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
           <input type="radio" name="look" id="lookGray" value="1"><label for="lookGray">Gray</label>
           <input type="radio" name="look" id="lookValues" value="2"><label for="lookValues">Dark, middle, light</label>
         </div>
-        <details class="more" id="splitFields" hidden>
+        <details class="more adv-only" id="splitFields" hidden>
           <summary>Where the values split <span class="sum-note" id="splitSum"></span></summary>
           <div class="more-body">
             <div class="field"><div class="field-head"><label for="t1">Dark / middle split</label><output id="t1Out" for="t1"></output></div><input type="range" id="t1" min="5" max="60" step="1" value="30"></div>
             <div class="field"><div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div><input type="range" id="t2" min="30" max="95" step="1" value="58"></div>
           </div>
         </details>
-        <details class="more" id="showMore">
+        <details class="more adv-only" id="showMore">
           <summary>Show or hide <span class="sum-note" id="showSum"></span></summary>
           <div class="more-body">
             <label class="check" for="showStand"><input type="checkbox" id="showStand" checked> Show the stand</label>
@@ -309,6 +318,10 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   // back (x), then out to the side (z), so a raised arm still twists about itself.
   const ORDER = 'ZXY';
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  // Simple or Advanced (see "Simple and Advanced" near the end), and in Simple the arm, leg or body
+  // last touched, whose elbow or knee diamond or chest ring shows
+  let simple = true, active = null;
+  const groupOf = (n) => (n === 'root' || n === 'waist' || n === 'neck' ? 'body' : (/^(shoulder|elbow|wrist)/.test(n) ? 'arm' : 'leg') + n.slice(-1));
   const srgb = (hex) => new T.Color(hex).convertSRGBToLinear();
 
   // ---- Renderer, scene, camera ---------------------------------------------------------
@@ -1027,6 +1040,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   let picked = null;
   function pick(name) {
     picked = name;
+    active = name ? groupOf(name) : null;
     outlines.forEach((o) => o.parent.remove(o));
     outlines = [];
     parts.forEach((m) => {
@@ -1106,7 +1120,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   function buildArrows() {
     $('arrows').textContent = '';
     arrows = [];
-    if (!picked) return;
+    if (!picked || simple) return;
     const name = picked, spec = SPEC[name];
     spec.axes.forEach((ax) => [1, -1].forEach((dir) => {
       const a = { kind: 'axis', ax, dir, name };
@@ -1725,6 +1739,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   const SVGNS = 'http://www.w3.org/2000/svg';
   const CTRLS = [];
   function addCtrl(c) {
+    c.group = groupOf(c.pick);
     c.g = document.createElementNS(SVGNS, 'g');
     c.paths = ['under back', 'over back', 'under', 'over'].map((cls) => {
       const el = document.createElementNS(SVGNS, 'path');
@@ -1755,6 +1770,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     const h = canvas.clientHeight;
     const camDir = camera.getWorldDirection(new T.Vector3());
     CTRLS.forEach((c) => {
+      // Simple: an elbow or knee diamond, or the chest ring, shows only for the arm, leg or body last touched
+      if (simple && (c.kind === 'pole' || c.id === 'torso') && c.group !== active) { c.screen = null; c.g.style.display = 'none'; return; }
       let pts, center;
       const far = [];          // for a ring: which points are on its far side
       if (c.kind === 'ring' || c.kind === 'foot') {
@@ -1838,6 +1855,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   const planeThrough = (pt) => new T.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new T.Vector3()), pt);
   const onPlane = (e, plane) => rayAt(e).ray.intersectPlane(plane, new T.Vector3());
   function ctrlStart(c, e) {
+    active = c.group;
     figure.updateMatrixWorld(true);
     const d = { kind: 'ctrl', c, at: { x: e.clientX, y: e.clientY }, moved: false, before: JSON.stringify(pose) };
     const ch = c.chain;
@@ -2152,6 +2170,38 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   });
   $('snapClose').addEventListener('click', () => $('snapDialog').close());
 
+  // ---- Simple and Advanced ------------------------------------------------------------------------
+
+  // Simple shows only what a beginner needs: the hand, foot and hip controls (an elbow or knee diamond,
+  // or the ring around the chest, appears once that arm, leg or the body is touched), no arrows, and
+  // the light presets without their sliders and options. Advanced shows every control. Inside Portrait
+  // Value Studio it follows the app's own switch (the app sends it); on its own page it has a switch of
+  // its own, remembered in this browser. Simple is where it starts.
+  const MODE_KEY = 'pose-and-light.mode';
+  const EMBEDDED = document.documentElement.classList.contains('embed');
+  function setMode(mode, keep) {
+    simple = mode !== 'advanced';
+    document.documentElement.classList.toggle('simple', simple);
+    document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === (simple ? 'simple' : 'advanced'))));
+    // Simple has no switches for these, so they go back to how they start
+    if (simple) ['showRig', 'plantFeet', 'showStand', 'showLamp'].forEach((id) => { if (!$(id).checked) { $(id).checked = true; $(id).dispatchEvent(new Event('change')); } });
+    if (keep) { try { localStorage.setItem(MODE_KEY, simple ? 'simple' : 'advanced'); } catch (err) { /* not kept */ } }
+    showPart();
+    buildArrows();
+    requestRender();
+  }
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode, true)));
+  if (EMBEDDED) {
+    window.addEventListener('message', (e) => {
+      const d = e.data;
+      if (e.source !== window.parent || !d || d.type !== 'pose-and-light:mode') return;
+      setMode(d.mode === 'advanced' ? 'advanced' : 'simple', false);
+    });
+  }
+  let modeWas = 'simple';
+  if (!EMBEDDED) { try { modeWas = localStorage.getItem(MODE_KEY) || 'simple'; } catch (err) { /* simple */ } }
+  setMode(modeWas, false);
+
   // ---- Start ----------------------------------------------------------------------------------
 
   const saved = restore();
@@ -2170,6 +2220,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   window.PoseAndLight = { pose, light, view, setPose, pick, POSES, LIGHTS, J, SPEC, render, camera, parts, scene, tipWorld, lamp, stand, applyPose, placeCamera, lightChanged,
     CHAINS, solveChain, keepFeet, plants, worldPos, worldQuat, BASE_Y, ctrlAt, legLow, lowestPoint, LOOK, TARGET, base,
     ctrls: () => CTRLS.map((c) => ({ id: c.id, kind: c.kind, pick: c.pick, center: c.screen && { x: c.screen.center.x, y: c.screen.center.y }, rad: c.rad, pts: c.screen && c.screen.pts.map((q) => ({ x: q.x, y: q.y })) })),
+    mode: () => (simple ? 'simple' : 'advanced'), setMode, active: () => active,
     picked: () => picked, outlines: () => outlines.length, arrows: () => arrows.map((x) => ({ label: x.el.getAttribute('aria-label'), disabled: x.el.disabled, shape: x.shape, turn: x.shape === 'turn', hidden: x.el.hidden })) };
 })();
 </script>
