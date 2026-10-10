@@ -7,7 +7,7 @@
 
   // the modules this one needs; without them the page shows the standing note instead of half an app
   if (!window.Study || !window.Mixing || !window.Paints) {
-    if (window.StudioGuard) StudioGuard.failed('app.js: processing.js, mixing.js or paints.js did not load');
+    if (window.StudioGuard) StudioGuard.failed('app.js: processing.js, mixing.js or paints.js did not load', 'all');
     return;
   }
 
@@ -476,7 +476,8 @@
         toast('That image has no usable size. Use a JPG, PNG or WebP photo.', 5000);
         return;
       }
-      done(shrinkIfHuge(img, w, h));
+      const r = shrinkIfHuge(img, w, h);
+      done(r.source, r.note);
     };
     const failed = () => {
       if (settled) return;
@@ -497,29 +498,32 @@
   // decoded image is let go.
   const HUGE_PIXELS = 24e6;
   const SHRINK_SIDE = 2800;
+  // Returns { source, note }: the image or its reduced copy, and the sentence to tell the visitor (or '').
   function shrinkIfHuge(img, w, h) {
-    if (w * h <= HUGE_PIXELS) return img;
+    if (w * h <= HUGE_PIXELS) return { source: img, note: '' };
     const scale = SHRINK_SIDE / Math.max(w, h);
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.round(w * scale));
     c.height = Math.max(1, Math.round(h * scale));
+    // a browser out of canvas memory gives no context (null) or refuses the draw: keep the photo as it is
     const g = c.getContext('2d');
-    g.imageSmoothingQuality = 'high';
+    if (!g) return { source: img, note: '' };
     try {
+      g.imageSmoothingQuality = 'high';
       g.drawImage(img, 0, 0, c.width, c.height);
     } catch (err) {
-      return img; // a canvas the browser cannot give: keep the photo as it is
+      return { source: img, note: '' };
     }
-    toast(`A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.`, 5000);
-    return c;
+    return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
   function loadFile(file) {
-    readImage(file, (img) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait'));
+    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', note));
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
-  function useSource(img, name, baseName) {
+  // note: a sentence about the photo itself (it was reduced), said together with the marks line below
+  function useSource(img, name, baseName, note) {
     state.source = img;
     state.baseName = baseName || 'portrait';
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
@@ -527,18 +531,22 @@
       state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
     ].filter(Boolean);
     clearMarks();
+    const said = [];
+    if (note) said.push(note);
     if (marks.length) {
       const list = marks.length > 1 ? marks.slice(0, -1).join(', ') + ' and ' + marks[marks.length - 1] : marks[0];
-      toast(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo`);
+      said.push(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo.`);
     }
+    if (said.length) toast(said.join(' '), note ? 6000 : 1800);
     if (state.art.isExample) setArt(null);
     prepareAndRun(true);
   }
 
   function loadArtFile(file) {
-    readImage(file, (img) => {
+    readImage(file, (img, note) => {
       setArt(img, file.name || 'Pasted painting', false);
       runSoon(0);
+      if (note) toast(note, 5000);
     });
   }
 

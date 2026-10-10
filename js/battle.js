@@ -20,7 +20,7 @@
 
   // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
   if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
-    if (window.StudioGuard) StudioGuard.failed('battle.js: app.js did not finish loading');
+    if (window.StudioGuard) StudioGuard.failed('battle.js: app.js did not finish loading', 'battle');
     return;
   }
   const $ = (id) => document.getElementById('vb-' + id);
@@ -409,7 +409,7 @@
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
     const isBest = score > 0 && (bests[key] == null || score > bests[key]);
-    if (isBest) { bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); }
+    if (isBest) { delete bests[key]; bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];

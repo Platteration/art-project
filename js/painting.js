@@ -15,7 +15,7 @@
 
   // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
   if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
-    if (window.StudioGuard) StudioGuard.failed('painting.js: app.js did not finish loading');
+    if (window.StudioGuard) StudioGuard.failed('painting.js: app.js did not finish loading', 'paint');
     return;
   }
   const root = document.getElementById('ps-root');
@@ -31,7 +31,7 @@
   const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const lab = (c) => Study.rgbToLab(c[0], c[1], c[2]);
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
-  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { return false; /* private mode, or storage blocked */ } }
 
   // ---- Paints and the mixing model (the same as the Study tab and the game use) ----------------
   const made = new Map();
@@ -411,11 +411,12 @@
     if (saveAgain) { saveAgain = false; saveSoon(); }
   }
   const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
-  let restored = false;
+  let restored = false, dbOk = false, restoreFailed = false; // dbOk: the database answered, so saving works here
   async function restore() {
     if (!hasDb) return;
     let saved;
     try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
+    dbOk = true;
     // only a record of the expected shape is used: sizes a canvas can hold, pictures that are blobs
     const size = (n) => Number.isInteger(n) && n > 0 && n <= 16384;
     if (!saved || typeof saved !== 'object' || !size(saved.w) || !size(saved.h)) return;
@@ -721,7 +722,7 @@
   showStatus();
   applyView();
   let welcomed = false;
-  const ready = restore().catch((err) => { if (window.StudioGuard) StudioGuard.report(err, { saved: true }); }); // a bad saved painting never stops the Studio
+  const ready = restore().catch((err) => { restoreFailed = true; if (window.StudioGuard) StudioGuard.report(err, { saved: true }); }); // a bad saved painting never stops the Studio
   // Forget my work on this device: stop saving, so the pending autosave (or the one on pagehide) can't bring the painting back
   window.addEventListener('studio:forget', () => { forgetting = true; clearTimeout(saveTimer); saveTimer = 0; });
 
@@ -736,9 +737,10 @@
     setTimeout(layout, 120);
     ready.then(() => {
       layout();
-      if (!welcomed) {
+      if (!welcomed && !restoreFailed) { // a failed restore has the guard's reset offer on screen: leave it there
         if (restored) Studio.toast('Your painting is back from last time');
-        else if (!load(NOTICE_KEY, false)) { Studio.toast('Your painting is saved in this browser as you go. "Forget my work on this device", under How to use, clears it.', 7000); save(NOTICE_KEY, true); }
+        // the one-time note is only true where the database works, and only once the flag could be kept
+        else if (dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) Studio.toast('Your painting is saved in this browser as you go. "Forget my work on this device", under How to use, clears it.', 7000);
       }
       welcomed = true;
     });

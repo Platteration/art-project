@@ -226,7 +226,7 @@ What the site keeps in the browser, and clears with **Forget my work on this dev
 
 | Where | What |
 | --- | --- |
-| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size; only the newest fifty are kept), and whether the Studio's one-time saving note was shown |
+| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo; only the fifty most recently played are kept), and whether the Studio's one-time saving note was shown |
 | IndexedDB database `portrait-value-studio` | The Studio painting: the paper, the underdrawing and the canvas settings, saved a moment after each change |
 
 Saved PNGs are drawn from the canvas and carry no camera metadata. The game's Share button hands the scorecard to the phone's share sheet only when pressed. A web server hosting the site sees only ordinary access logs.

@@ -16,7 +16,7 @@
 
   // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
   if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
-    if (window.StudioGuard) StudioGuard.failed('game.js: app.js did not finish loading');
+    if (window.StudioGuard) StudioGuard.failed('game.js: app.js did not finish loading', 'game');
     return;
   }
 
@@ -1256,7 +1256,7 @@
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
     const isBest = !bests[game.bestKey] || points > bests[game.bestKey];
-    if (isBest) { bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); }
+    if (isBest) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
 
     els.play.hidden = true;
     els.result.hidden = false;

@@ -264,4 +264,11 @@ Third round, in the commit after that:
 - **F19, F21, F02 leftovers — Fixed.** More binary types in `.gitattributes`; an unknown saved preset id falls back; the README's checklist names the sandboxed-iframe case.
 - **F42 — Not possible from here.** The eight palette-source links could not be reached from the audit sandbox; click them once before launch.
 
+An adversarial review of the third round (three reviewers, one refutation pass; 15 findings, 10 confirmed, 5 refuted) led to these corrections in the next commit:
+
+- `shrinkIfHuge()` checks for a missing 2D context (a browser out of canvas memory returns `null` rather than throwing) and keeps the photo as it is; the reduction note now travels with the image and is said in one toast together with the "marks cleared" line, instead of being overwritten by it.
+- The Studio's one-time saving note is shown only where the database answered and the flag could be stored, so a sandboxed embed or a blocked-storage profile never hears a false claim and never sees it repeat; it also yields to the guard's reset offer when the saved painting could not be read.
+- Best scores are re-added on each new best, so the fifty kept are the fifty most recently played, not the fifty oldest.
+- A module that did not start gets its own note ("Part of Portrait Value Studio did not start…") and its tab leaves the menu; the guard maps a boot-time error to the script it came from, so a module that throws is taken off the menu even though it could not do that itself, and a failure in `app.js` shows the guide only. A runtime error after load is still a passing note.
+
 Still open, as decisions for the owner (section 4): F10 (sub-path deploy), F11 (hashed asset names), F12 (the keys themselves), F20 (the URL-dependent part), F22, F26, F42 (manual link check), F43.

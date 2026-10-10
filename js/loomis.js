@@ -20,7 +20,7 @@
 
   // the modules this one needs; if app.js or painting.js did not finish loading, this tab stays out and the page says so
   if (!window.Study || !window.Mixing || !window.Paints || !window.Studio || !window.PaintStudio) {
-    if (window.StudioGuard) StudioGuard.failed('loomis.js: app.js or painting.js did not finish loading');
+    if (window.StudioGuard) StudioGuard.failed('loomis.js: app.js or painting.js did not finish loading', 'loomis');
     return;
   }
   const $ = (id) => document.getElementById('lh-' + id);

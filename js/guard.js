@@ -71,12 +71,27 @@
 
   // A module whose dependencies never loaded (a script that failed or threw) calls this: the standing
   // "has not started" note shows, and the module stays out instead of dying halfway with errors.
-  function failed(what) {
+  function failed(what, tab) {
     if (window.console && console.error) console.error(what);
-    document.documentElement.classList.add('load-failed');
+    var root = document.documentElement;
+    // a script that never loaded already has the standing load note; a script that did load but could
+    // not start gets the "part did not start" note, and its tab leaves the menu
+    if (!root.classList.contains('load-failed')) root.classList.add(tab === 'all' ? 'all-failed' : 'part-failed');
+    if (tab && tab !== 'all') {
+      var item = document.querySelector('[data-tab="' + tab + '"]');
+      var panel = document.getElementById('tab-' + tab);
+      if (item) item.hidden = true;
+      if (panel) panel.hidden = true;
+    }
   }
 
   window.StudioGuard = { report: report, forget: forget, failed: failed };
+
+  // Until the page has loaded, the scripts are still starting: an error from one of them then means
+  // that module did not start, and its tab is taken off the menu (a module cannot do that for itself).
+  var booting = true;
+  window.addEventListener('load', function () { booting = false; });
+  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis' };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
   // stylesheet failing to load shows the standing note at the top of the page, not a passing toast.
@@ -86,6 +101,10 @@
       var tag = el.tagName.toLowerCase();
       if (tag === 'script' || (tag === 'link' && el.rel === 'stylesheet')) document.documentElement.classList.add('load-failed');
       return; // images have their own handling in the app
+    }
+    if (booting && e.filename) {
+      var m = /\/js\/([a-z]+)\.js$/.exec(e.filename);
+      if (m && TAB_OF.hasOwnProperty(m[1])) { failed(m[1] + '.js did not start: ' + e.message, TAB_OF[m[1]]); return; }
     }
     note(APP_FAILED);
   }, true);
