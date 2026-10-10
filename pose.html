@@ -128,7 +128,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .pose-btn img:not([src]) { display: none; }
 .pose-name { position: absolute; inset: 0; display: grid; place-items: center; padding: 4px; text-align: center; font-size: 0.7rem; line-height: 1.2; color: #f5efe2; }
 .pose-btn.has-img .pose-name { display: none; }
-.pose-x { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: rgba(20, 24, 20, 0.72); color: #f5efe2; font: 600 14px/22px var(--body); cursor: pointer; }
+.pose-x { position: absolute; top: 2px; right: 2px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: rgba(20, 24, 20, 0.72); color: #f5efe2; font: 600 16px/28px var(--body); cursor: pointer; }
 .pose-x:hover { background: rgba(20, 24, 20, 0.9); }
 .lesson b { color: var(--ink); font-weight: 600; }
 
@@ -896,9 +896,17 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       const heel = plant.at.clone().add(new T.Vector3(0, -0.04, HEEL).applyQuaternion(plant.turn));
       const pivot = ball.y - heel.y > 0.005 ? heel : ball;       // standing on its heel, the toes come down first
       const side = new T.Vector3(1, 0, 0).applyQuaternion(plant.turn);
+      // on its heel, the foot rolls about the heel until the sole is flat, then on about its ball
+      const toFlat = pivot === heel ? Math.asin(clamp((ball.y - heel.y) / ball.distanceTo(heel), 0, 1)) / DEG : 0;
       const rollTo = (deg) => {
-        const spin = new T.Quaternion().setFromAxisAngle(side, deg * DEG);
-        const t = spin.clone().multiply(plant.turn), at = pivot.clone().add(plant.at.clone().sub(pivot).applyQuaternion(spin));
+        const d1 = Math.min(deg, toFlat), spin = new T.Quaternion().setFromAxisAngle(side, d1 * DEG);
+        let t = spin.clone().multiply(plant.turn), at = pivot.clone().add(plant.at.clone().sub(pivot).applyQuaternion(spin));
+        if (deg > d1) {
+          const b2 = pivot.clone().add(ball.clone().sub(pivot).applyQuaternion(spin));
+          const spin2 = new T.Quaternion().setFromAxisAngle(side, (deg - d1) * DEG);
+          t = spin2.clone().multiply(t);
+          at = b2.add(at.sub(b2).applyQuaternion(spin2));
+        }
         if (deg > 0) at.y += Math.max(0, 0.002 - lowest(s, at, t));      // the toes stay on the floor, not in it
         return [at, t];
       };
@@ -913,7 +921,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
         [at, turn] = rollTo(rolled);
       }
       footTurn(s, turn);
-      if (worldPos('ankle' + s).distanceTo(at) > 0.005 || worldPos('knee' + s).y < KNEE_R) fine = false;
+      if (worldPos('ankle' + s).distanceTo(at) > 0.005 || worldPos('knee' + s).y < KNEE_R - 0.002) fine = false;
       footShown[s] = { at: worldPos('ankle' + s), turn: worldQuat('ankle' + s) };
     }
     return fine;
@@ -949,10 +957,18 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       p.shift = { x: lerp(was.shift.x, want.shift.x, t), z: lerp(was.shift.z, want.shift.z, t) };
       p.root = { x: lerp(was.root.x, want.root.x, t), y: was.root.y + wrapAz(want.root.y - was.root.y) * t, z: lerp(was.root.z, want.root.z, t) };
       put(p);
-      return legsToFeet(poles);
+      return legsToFeet(poles) && lowestPoint() > -0.001;          // nothing goes into the floor, the hips included
     };
     if (tryAt(1)) { applyPose(false); return; }
-    if (!tryAt(0)) { tryAt(1); footShown.R = footShown.L = null; applyPose(true); return; }      // no good place to stop: the feet go where the legs put them
+    if (!tryAt(0)) {
+      // no good place to stop: the feet go where the legs put them, but never deeper into the floor than before
+      const low0 = Math.min(0.002, lowestPoint());
+      tryAt(1);
+      if (lowestPoint() < low0 - 1e-4) tryAt(0);
+      footShown.R = footShown.L = null;
+      applyPose(true);
+      return;
+    }
     let a = 0, b = 1;
     for (let k = 0; k < 7; k++) { const t = (a + b) / 2; if (tryAt(t)) a = t; else b = t; }
     tryAt(a);
@@ -1880,6 +1896,15 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
         const was = [ch.upper, ch.mid, ch.end].map((n) => ({ ...pose[n] })), floor = Math.min(-0.002, legLow(ch.side));
         const last = d.last || d.from;
         reach(target);
+        // a sole tilted by the ankle's limit dips a few millimetres: lift the foot by as much, so it still follows
+        for (let k = 0, up = 0; k < 4 && legLow(ch.side) < floor; k++) {
+          const lift = floor - legLow(ch.side) + 0.0005;
+          if ((up += lift) > 0.03) break;
+          target.y += lift;
+          [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = { ...was[i] }; });
+          fk();
+          reach(target);
+        }
         if (legLow(ch.side) < floor) {
           let a = 0, b = 1;
           for (let k = 0; k < 6; k++) {
