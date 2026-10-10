@@ -766,8 +766,12 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tab-game .rail, .tab-game .toolstrip, .tab-game .tool-options,
 .tab-battle .rail, .tab-battle .toolstrip, .tab-battle .tool-options,
 .tab-help .rail, .tab-help .toolstrip, .tab-help .tool-options,
-.tab-loomis .rail, .tab-loomis .toolstrip, .tab-loomis .tool-options { display: none !important; }
-@media (min-width: 960px) { .tab-game .layout, .tab-help .layout, .tab-battle .layout { grid-template-columns: minmax(0, 1fr); } }
+.tab-loomis .rail, .tab-loomis .toolstrip, .tab-loomis .tool-options,
+.tab-pose .rail, .tab-pose .toolstrip, .tab-pose .tool-options { display: none !important; }
+@media (min-width: 960px) { .tab-game .layout, .tab-help .layout, .tab-battle .layout, .tab-pose .layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- Pose and light: its own page in a frame that grows to fit it ---- */
+.pose-frame { display: block; width: 100%; height: 900px; border: 0; background: transparent; }
 
 .game-title { font: 700 1.6rem/1.1 var(--display); letter-spacing: -0.01em; text-transform: none; }
 .game-setup { display: grid; gap: 20px; align-items: start; }

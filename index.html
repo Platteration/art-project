@@ -29,6 +29,7 @@
       <div class="tab-menu" id="tabLearnMenu" role="menu" hidden>
         <button type="button" role="menuitemradio" class="tab-item" id="tabStudyBtn" data-tab="study" aria-checked="true"><span>Study the photo</span><small>Dark, middle, light; colors and paints; how close you got</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabLoomisBtn" data-tab="loomis" aria-checked="false"><span>Loomis head</span><small>Mark the features, get the head construction</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabPoseBtn" data-tab="pose" aria-checked="false"><span>Pose and light</span><small>Pose a wooden figure, move one lamp, see its values</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabHelpBtn" data-tab="help" aria-checked="false"><span>How to use</span><small>Every part of the app, with pictures</small></button>
       </div>
     </div>
@@ -404,6 +405,10 @@
             <button type="button" class="ps-ic" id="lh-save" title="Save as PNG" aria-label="Save as PNG" disabled><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 19h16"/></svg></button>
           </nav>
         </div>
+      </section>
+
+      <section class="tabpanel pose-panel" id="tab-pose" hidden>
+        <iframe class="pose-frame" id="poseFrame" title="Pose and light: a wooden drawing figure and one lamp" data-src="pose.html?embed=1"></iframe>
       </section>
 
       <section class="tabpanel" id="tab-paint" hidden>
@@ -890,7 +895,7 @@
             <ol>
               <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
               <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
-              <li>The three big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
+              <li>The three big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
             </ol>
           </div>
           <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo and the four tabs" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
@@ -943,6 +948,24 @@
             <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="Placing a mark on the Loomis head tab: the loupe shows the eye magnified under the finger" loading="lazy"><figcaption>Placing a mark with the loupe</figcaption></figure>
             <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face, with arrow buttons around the ball to turn, nod and tilt it" loading="lazy"><figcaption>The head and its arrows</figcaption></figure>
             <figure class="phone"><img src="img/help/loomis-adjust.jpg" alt="The head turned to the side after dragging its centre line" loading="lazy"><figcaption>Turned by dragging the centre line</figcaption></figure>
+          </div>
+        </section>
+        <section class="help-part" id="help-pose">
+          <div class="help-text">
+            <h3>Pose and light</h3>
+            <p>A wooden drawing figure, the kind artists keep on the desk, and one lamp. Pose the figure, move the light, and watch where the light side, the shadow side and the cast shadow fall.</p>
+            <ol>
+              <li><strong>Start from a pose.</strong> The <strong>Pose library</strong> shows each pose as a picture: tap one to put the figure in it. <strong>Save this pose</strong> keeps your own poses there too (in this browser), and the × takes one away.</li>
+              <li><strong>Pose it with the colored controls.</strong> Drag a hand's circle and the whole arm follows. The diamond at the elbow swings the elbow around while the hand stays put. Feet and knees work the same way. The ring around the hips moves the body, and the legs bend so the feet stay on the floor. The ring around the chest bends the body, and the arms and head go with it. Red is the figure's right, blue its left.</li>
+              <li><strong>Fine moves:</strong> tap any part to pick it (it gets a yellow outline) and use the yellow arrows. Hold an arrow to keep it moving.</li>
+              <li><strong>Move the light</strong> by dragging the lamp, or pick Front, Rembrandt, Side, Rim, Top or From below. <strong>Light settings</strong> opens the sliders for its height, distance, shadow edge and room light.</li>
+              <li><strong>See it as</strong> Gray or Dark, middle, light to check the values, then <strong>Snapshot</strong> to save a picture to draw from. Drag the background to walk around the figure.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/pose-rig.jpg" alt="The wooden figure in a throwing pose with its colored rig controls: circles at the hands, diamonds at the elbows and knees, ovals under the feet and rings around the hips and chest" loading="lazy"><figcaption>Posing with the rig controls</figcaption></figure>
+            <figure class="phone"><img src="img/help/pose-library.jpg" alt="The pose library: eighteen small pictures of the figure in different poses, with Throw picked" loading="lazy"><figcaption>The pose library</figcaption></figure>
+            <figure class="phone"><img src="img/help/pose-values.jpg" alt="The same pose seen as dark, middle and light values, with the lamp high to one side" loading="lazy"><figcaption>Dark, middle and light</figcaption></figure>
           </div>
         </section>
 

@@ -1,0 +1,2152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A wooden drawing figure with rig controls and one lamp: pose it, light it, and see its values.">
+<title>Pose and Light</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+[hidden] { display: none !important; }
+/* Layout: the stage (a gray studio with the figure and one lamp) is the main focus; a rail of
+   controls sits beside it on a wide screen and below it on a phone. Same tokens as Portrait Value Studio. */
+:root {
+  --ground: #efe7d6;
+  --surface: #faf5ea;
+  --ink: #1e2b22;
+  --muted: #5c6157;
+  --line: #d8ccb4;
+  --accent: #2c4a36;
+  --accent-ink: #faf5ea;
+  --earth: #a4472f;
+  --well: #8b8c8e;
+  --shadow: rgba(40, 32, 18, 0.18);
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #152019; --surface: #1d2b22; --ink: #efe6d3; --muted: #b2ad9a; --line: #34473a;
+    --accent: #a9c79b; --accent-ink: #14201a; --earth: #dc8c6a; --well: #3b3c3f; --shadow: rgba(0, 0, 0, 0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #152019; --surface: #1d2b22; --ink: #efe6d3; --muted: #b2ad9a; --line: #34473a;
+  --accent: #a9c79b; --accent-ink: #14201a; --earth: #dc8c6a; --well: #3b3c3f; --shadow: rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font: 14px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
+.app { padding-inline: max(16px, 2vw); padding-block: 18px 32px; max-width: 1500px; margin-inline: auto; display: grid; gap: 16px; }
+.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 20px; }
+.brand { display: grid; gap: 4px; min-width: 0; }
+h1 { font-family: var(--display); font-size: clamp(1.5rem, 1.1rem + 1.3vw, 2.1rem); font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; margin: 0; text-wrap: balance; }
+.brand p { margin: 0; color: var(--muted); max-width: 62ch; }
+.badge { font: 600 0.72rem/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--earth); border: 1px solid currentColor; border-radius: 99px; padding: 5px 9px; }
+h2 { font-family: var(--display); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; margin: 0; }
+
+.tool { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.stage { position: relative; height: min(80vh, 780px); min-height: 360px; border-radius: var(--r); overflow: hidden; background: var(--well); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.stage canvas.is-over { cursor: pointer; }
+.stage canvas.is-dragging { cursor: grabbing; }
+.hint { position: absolute; left: 10px; top: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.hint span { background: rgba(20, 24, 20, 0.62); color: #f5efe2; border-radius: 99px; padding: 4px 10px; font-size: 0.78rem; }
+.stage-bar { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.picked { position: absolute; left: 10px; bottom: 10px; background: rgba(20, 24, 20, 0.62); color: #f5efe2; border-radius: var(--r); padding: 5px 10px; font-size: 0.82rem; font-weight: 600; pointer-events: none; }
+.lamp { position: absolute; left: 0; top: 0; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; border: 2px solid rgba(255, 236, 170, 0.95); background: rgba(255, 230, 150, 0.12); color: #ffe9a8; display: grid; place-items: center; padding: 0; cursor: grab; touch-action: none; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.lamp svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; opacity: 0; }
+.lamp circle { fill: currentColor; }
+.lamp.is-off { background: rgba(30, 28, 20, 0.78); border-style: dashed; }
+.lamp.is-off svg { opacity: 1; }
+.lamp:active { cursor: grabbing; }
+.lamp.is-behind { opacity: 0.4; pointer-events: none; }
+/* the rig controls: drawn over the figure, picked up by the canvas underneath */
+.rig { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.rig path { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.rig .under { stroke: rgba(10, 12, 10, 0.6); stroke-width: 5.5; }
+.rig .over { stroke-width: 2.6; }
+.rig .back { opacity: 0.4; }
+.rig .is-hot .over { stroke-width: 4; }
+.rig .is-hot .under { stroke-width: 7; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; font-size: 0.8rem; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; box-shadow: 0 0 0 1.5px rgba(10, 12, 10, 0.55); }
+.arrows { position: absolute; inset: 0; pointer-events: none; }
+.arrow { position: absolute; left: 0; top: 0; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; border: 2px solid #1e2b22; background: #ffd23f; color: #1e2b22; display: grid; place-items: center; padding: 0; cursor: pointer; pointer-events: auto; touch-action: none; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); -webkit-tap-highlight-color: transparent; }
+.arrow svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.arrow:disabled { opacity: 0.35; cursor: default; }
+.arrow.is-held { background: #ffe680; transform-origin: center; }
+.arrow:focus-visible { outline: 3px solid #fff7d1; outline-offset: 2px; }
+.fail { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; color: #f5efe2; background: rgba(20, 24, 20, 0.7); }
+
+.rail { display: grid; gap: 12px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 12px; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.card-head .note { color: var(--muted); font-size: 0.8rem; }
+.empty { margin: 0; color: var(--muted); }
+.field { display: grid; gap: 4px; }
+.field-head { display: flex; justify-content: space-between; gap: 10px; font-size: 0.85rem; }
+.field-head output { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 500 0.85rem/1 var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn-small { padding: 5px 9px; font-size: 0.78rem; }
+.stage .btn { background: rgba(250, 245, 234, 0.92); color: #1e2b22; border-color: transparent; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 3px; gap: 2px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { flex: 1; text-align: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 0.82rem; font-weight: 500; color: var(--muted); }
+.seg input:checked + label { background: var(--ink); color: var(--ground); }
+.seg input:focus-visible + label, :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+.lesson { margin: 0; font-size: 0.85rem; color: var(--muted); }
+/* dropdowns: the sliders and options stay folded away until wanted */
+.more { border: 1px solid var(--line); border-radius: var(--r); background: var(--ground); }
+.more > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 0.85rem; font-weight: 600; border-radius: var(--r); }
+.more > summary::-webkit-details-marker { display: none; }
+.more > summary::after { content: ""; margin-left: auto; flex: none; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform 0.15s; }
+.more[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.more > summary:hover { background: rgba(0, 0, 0, 0.04); }
+.sum-note { font-weight: 400; color: var(--muted); font-family: var(--mono); font-size: 0.75rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more-body { display: grid; gap: 12px; padding: 4px 12px 12px; }
+/* the pose library: a picture of the figure in each pose */
+.library { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.pose-item { position: relative; min-width: 0; }
+.pose-btn { position: relative; display: block; width: 100%; aspect-ratio: 4 / 5; padding: 0; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: #8d8e8e; cursor: pointer; }
+.pose-btn:hover { border-color: var(--muted); }
+.pose-btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.pose-btn img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.pose-btn img:not([src]) { display: none; }
+.pose-name { position: absolute; inset: 0; display: grid; place-items: center; padding: 4px; text-align: center; font-size: 0.7rem; line-height: 1.2; color: #f5efe2; }
+.pose-btn.has-img .pose-name { display: none; }
+.pose-x { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: rgba(20, 24, 20, 0.72); color: #f5efe2; font: 600 14px/22px var(--body); cursor: pointer; }
+.pose-x:hover { background: rgba(20, 24, 20, 0.9); }
+.lesson b { color: var(--ink); font-weight: 600; }
+
+dialog { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); padding: 16px; max-width: min(92vw, 720px); }
+dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+dialog img { display: block; max-width: 100%; max-height: 70vh; border-radius: 4px; }
+dialog p { margin: 8px 0 12px; color: var(--muted); }
+
+@media (max-width: 880px) {
+  .tool { grid-template-columns: minmax(0, 1fr); }
+  .stage { height: 64vh; min-height: 340px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* inside Portrait Value Studio: no header of its own, and a stage sized from the app's window */
+.embed body { margin: 0; }
+.embed .top { display: none; }
+.embed .app { padding-block: 4px 16px; padding-inline: 0; }
+.embed .stage { height: var(--stage-h, 600px); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Pose and Light</h1>
+      <p>A wooden drawing figure and one lamp. Pose every limb, move the light, and watch where the light side, the shadow side and the cast shadow fall.</p>
+    </div>
+    <span class="badge">Test version</span>
+  </header>
+
+  <div class="tool">
+    <div class="stage" id="stage">
+      <canvas id="view" aria-label="The wooden figure and the lamp. Drag a hand, a foot, the ring around the hips or the ring around the chest to pose the figure. Tap a part of the figure to pick it, then use the arrows to move it. Drag the lamp to move the light, or drag the background to walk around."></canvas>
+      <div class="hint" id="hint"><span>Drag a colored control to pose</span><span>Tap a part for arrows</span><span>Drag the lamp to move the light</span><span>Drag the background to walk around</span></div>
+      <div class="picked" id="picked" hidden></div>
+      <svg class="rig" id="rig" aria-hidden="true"></svg>
+      <div class="arrows" id="arrows"></div>
+      <button type="button" class="lamp" id="lampHandle" aria-label="The lamp: drag it to move the light, or use the arrow keys"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+      <div class="stage-bar">
+        <button type="button" class="btn" id="undo" disabled>Undo</button>
+        <button type="button" class="btn" id="snap">Snapshot</button>
+      </div>
+      <div class="fail" id="fail" hidden><p><b>The 3D view could not start.</b><br>This browser has WebGL turned off, or the 3D library could not load. Try another browser, or check the connection and reload.</p></div>
+    </div>
+
+    <div class="rail">
+      <section class="card" aria-labelledby="partTitle">
+        <div class="card-head"><h2 id="partTitle">Pose</h2><span class="note" id="partName">Nothing picked</span></div>
+        <p class="empty" id="partEmpty">Drag the colored controls to pose the figure, or tap a part to pick it.</p>
+        <p class="empty" id="partHow" hidden>Tap the yellow arrows to move it. Hold an arrow to keep it moving. You can also drag the part itself. Left and right are the figure's own.</p>
+        <p class="empty" id="partDepth" hidden><b>◉</b> brings it toward you and <b>⊗</b> sends it away from you.</p>
+        <div class="row" id="partButtons" hidden>
+          <button type="button" class="btn" id="straighten">Straighten</button>
+          <button type="button" class="btn" id="mirror">Copy to the other side</button>
+        </div>
+        <p class="legend"><span><i style="background:#ff5d52"></i>Figure's right</span><span><i style="background:#59b0ff"></i>Figure's left</span><span><i style="background:#ffb340"></i>Body</span></p>
+        <details class="more" id="rigMore">
+          <summary>Rig controls <span class="sum-note" id="rigSum"></span></summary>
+          <div class="more-body">
+            <p class="lesson">Drag a hand's circle and the whole arm follows. The diamond at the elbow swings the elbow around while the hand stays put. The feet and the knees work the same way. Drag the ring around the hips to move the body: the legs bend and the feet stay put. The ring around the chest bends the body, and the arms and the head go with it.</p>
+            <label class="check" for="showRig"><input type="checkbox" id="showRig" checked> Show the rig controls</label>
+            <label class="check" for="plantFeet"><input type="checkbox" id="plantFeet" checked> Keep the feet planted when the body moves</label>
+          </div>
+        </details>
+        <div class="row"><button type="button" class="btn" id="ground">Put the feet on the floor</button></div>
+      </section>
+
+      <section class="card" aria-labelledby="libTitle">
+        <div class="card-head"><h2 id="libTitle">Pose library</h2><span class="note" id="libNote">Tap a pose to start from it</span></div>
+        <div class="library" id="poses"></div>
+        <div class="field" id="mineWrap" hidden>
+          <span class="field-head">Your poses <button type="button" class="btn btn-small" id="mineBack" hidden>Put back the pose you removed</button></span>
+          <div class="library" id="mine"></div>
+        </div>
+        <div class="row"><button type="button" class="btn" id="savePose">Save this pose</button></div>
+      </section>
+
+      <section class="card" aria-labelledby="lightTitle">
+        <div class="card-head"><h2 id="lightTitle">Light</h2><span class="note" id="lightName">Rembrandt</span></div>
+        <div class="chips" id="lights"></div>
+        <p class="lesson" id="lightLesson"></p>
+        <details class="more" id="lightMore">
+          <summary>Light settings <span class="sum-note" id="lightSum"></span></summary>
+          <div class="more-body">
+            <div class="field"><div class="field-head"><label for="lAz">Around the figure</label><output id="lAzOut" for="lAz"></output></div><input type="range" id="lAz" min="-180" max="180" step="1"></div>
+            <div class="field"><div class="field-head"><label for="lEl">Height</label><output id="lElOut" for="lEl"></output></div><input type="range" id="lEl" min="-20" max="85" step="1"></div>
+            <div class="field"><div class="field-head"><label for="lDist">Distance</label><output id="lDistOut" for="lDist"></output></div><input type="range" id="lDist" min="1.6" max="4.6" step="0.1"></div>
+            <div class="field"><div class="field-head"><label for="lSoft">Shadow edge</label><output id="lSoftOut" for="lSoft"></output></div><input type="range" id="lSoft" min="0" max="10" step="1"></div>
+            <div class="field"><div class="field-head"><label for="lFill">Room light</label><output id="lFillOut" for="lFill"></output></div><input type="range" id="lFill" min="0" max="100" step="5"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="viewTitle">
+        <div class="card-head"><h2 id="viewTitle">See it as</h2></div>
+        <div class="seg" role="radiogroup" aria-label="See it as">
+          <input type="radio" name="look" id="lookColor" value="0" checked><label for="lookColor">Color</label>
+          <input type="radio" name="look" id="lookGray" value="1"><label for="lookGray">Gray</label>
+          <input type="radio" name="look" id="lookValues" value="2"><label for="lookValues">Dark, middle, light</label>
+        </div>
+        <details class="more" id="splitFields" hidden>
+          <summary>Where the values split <span class="sum-note" id="splitSum"></span></summary>
+          <div class="more-body">
+            <div class="field"><div class="field-head"><label for="t1">Dark / middle split</label><output id="t1Out" for="t1"></output></div><input type="range" id="t1" min="5" max="60" step="1" value="30"></div>
+            <div class="field"><div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div><input type="range" id="t2" min="30" max="95" step="1" value="58"></div>
+          </div>
+        </details>
+        <details class="more" id="showMore">
+          <summary>Show or hide <span class="sum-note" id="showSum"></span></summary>
+          <div class="more-body">
+            <label class="check" for="showStand"><input type="checkbox" id="showStand" checked> Show the stand</label>
+            <label class="check" for="showLamp"><input type="checkbox" id="showLamp" checked> Show the lamp</label>
+          </div>
+        </details>
+        <div class="row">
+          <button type="button" class="btn" id="resetView">Front view</button>
+          <button type="button" class="btn" id="resetAll">Start over</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<dialog id="snapDialog">
+  <img id="snapImg" alt="A snapshot of the posed figure">
+  <p>Press and hold the picture (or right-click it) to save it.</p>
+  <button type="button" class="btn btn-primary" id="snapClose">Close</button>
+</dialog>
+
+<script>
+// Opened inside Portrait Value Studio (pose.html?embed=1 in a frame): no header, the stage sized from
+// the app's window rather than the frame's (the frame grows to fit the page), the app's light or dark
+// theme, and the page's height sent to the app so it can make the frame that tall.
+(function () {
+  if (!/[?&]embed=1(&|$)/.test(location.search) || window.parent === window) return;
+  const root = document.documentElement;
+  root.classList.add('embed');
+  let host = null;
+  try { if (window.parent.document) host = window.parent; } catch (err) { host = null; }
+  const size = () => {
+    const vh = host ? host.innerHeight : 800;
+    const h = window.innerWidth < 880 ? Math.max(340, vh * 0.62) : Math.max(380, Math.min(780, vh - 225));
+    root.style.setProperty('--stage-h', Math.round(h) + 'px');
+  };
+  const theme = () => {
+    const t = host && host.document.documentElement.getAttribute('data-theme');
+    if (t) root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
+  };
+  size();
+  theme();
+  window.addEventListener('resize', size);
+  if (host) {
+    host.addEventListener('resize', size);
+    new MutationObserver(theme).observe(host.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  }
+  let told = 0;
+  const tell = () => {
+    const app = document.querySelector('.app');
+    if (!app) return;
+    const h = Math.ceil(app.getBoundingClientRect().bottom + window.scrollY);
+    if (h !== told) { told = h; window.parent.postMessage({ type: 'pose-and-light:height', height: h }, '*'); }
+  };
+  document.addEventListener('DOMContentLoaded', () => { tell(); if (window.ResizeObserver) new ResizeObserver(tell).observe(document.querySelector('.app')); });
+  window.addEventListener('load', tell);
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; };
+  if (!window.THREE) { fail(); return; }
+  const T = window.THREE;
+  const DEG = Math.PI / 180;
+  // Joint angles turn the part about its own length first (y, the twist), then swing it forward or
+  // back (x), then out to the side (z), so a raised arm still twists about itself.
+  const ORDER = 'ZXY';
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const srgb = (hex) => new T.Color(hex).convertSRGBToLinear();
+
+  // ---- Renderer, scene, camera ---------------------------------------------------------
+
+  const canvas = $('view');
+  let renderer;
+  try {
+    renderer = new T.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+  } catch (err) { fail(); return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputEncoding = T.sRGBEncoding;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFShadowMap;      // its radius sets how soft the shadow edge is
+
+  const scene = new T.Scene();
+  scene.background = new T.Color(0x5d5e5f);      // only seen above the top of the backdrop; drawn as given
+  const camera = new T.PerspectiveCamera(38, 1, 0.05, 60);
+  const TARGET = new T.Vector3(0, 0.95, 0);          // the middle of the figure: the lamp aims here
+  const LOOK = new T.Vector3(0, 1.12, 0);            // the camera turns around a point a little higher, leaving room for the lamp
+  const view = { az: 32, el: 8, dist: 5.2 };
+  const MAX_DIST = 5.3;                               // the camera stays inside the backdrop
+  // a point at angle az, el and distance d from c, moved in toward c until it is clear of the backdrop
+  function inside(c, az, el, d, clearance) {
+    const a = az * DEG, e = el * DEG, p = new T.Vector3();
+    for (let k = d; k > 0.5; k -= 0.05) {
+      p.set(c.x + k * Math.cos(e) * Math.sin(a), c.y + k * Math.sin(e), c.z + k * Math.cos(e) * Math.cos(a));
+      if (p.y >= sweepHeight(Math.hypot(p.x, p.z)) + clearance) break;
+    }
+    return p;
+  }
+  function placeCamera() {
+    camera.position.copy(inside(LOOK, view.az, view.el, view.dist, 0.25));
+    camera.lookAt(LOOK);
+  }
+
+  // A seamless primer-gray backdrop, as in a photo studio: the floor sweeps up into the wall in one
+  // curve with no corner, all the way round, so there is no horizon from any side you walk to.
+  // Matte, and a gray near the middle of the value scale, so it reads the light and shadow honestly.
+  const SWEEP = { floor: 3.4, bend: 2.2, height: 9 };     // flat floor radius, the radius of the curve, the wall's height
+  const WALL_R = SWEEP.floor + SWEEP.bend;
+  function sweepGeometry() {
+    const pts = [new T.Vector2(0.001, 0)];
+    for (let i = 1; i <= 8; i++) pts.push(new T.Vector2(SWEEP.floor * i / 8, 0));
+    for (let i = 1; i <= 24; i++) {
+      const a = (i / 24) * Math.PI / 2;
+      pts.push(new T.Vector2(SWEEP.floor + SWEEP.bend * Math.sin(a), SWEEP.bend * (1 - Math.cos(a))));
+    }
+    for (let i = 1; i <= 10; i++) pts.push(new T.Vector2(WALL_R, SWEEP.bend + (SWEEP.height - SWEEP.bend) * i / 10));
+    return new T.LatheGeometry(pts, 96);
+  }
+  // how high the backdrop's surface is at a distance r from the middle
+  function sweepHeight(r) {
+    if (r <= SWEEP.floor) return 0;
+    if (r >= WALL_R - 0.02) return Infinity;
+    const a = Math.asin((r - SWEEP.floor) / SWEEP.bend);
+    return SWEEP.bend * (1 - Math.cos(a));
+  }
+  const backdrop = new T.Mesh(sweepGeometry(), new T.MeshStandardMaterial({ color: srgb(0x8d8e8e), roughness: 1, metalness: 0, side: T.DoubleSide }));
+  backdrop.receiveShadow = true;
+  scene.add(backdrop);
+
+  // ---- The lamp --------------------------------------------------------------------------
+
+  const lamp = new T.SpotLight(0xfff4e2, 2.3, 22, 34 * DEG, 0.6, 1.6);
+  lamp.castShadow = true;
+  lamp.shadow.mapSize.set(2048, 2048);
+  lamp.shadow.bias = -0.0004;
+  lamp.shadow.normalBias = 0.02;
+  lamp.shadow.camera.near = 0.3;
+  lamp.shadow.camera.far = 16;
+  lamp.target.position.copy(TARGET);
+  scene.add(lamp, lamp.target);
+  const room = new T.HemisphereLight(srgb(0xe9e6df), srgb(0x3a3936), 0.3);
+  scene.add(room);
+
+  const bulb = new T.Group();
+  bulb.add(new T.Mesh(new T.SphereGeometry(0.06, 20, 14), new T.MeshBasicMaterial({ color: 0xfff1c9 })));
+  const halo = new T.Mesh(new T.SphereGeometry(0.11, 20, 14), new T.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.28, depthWrite: false }));
+  bulb.add(halo);
+  scene.add(bulb);
+  const beamGeo = new T.BufferGeometry();
+  beamGeo.setAttribute('position', new T.BufferAttribute(new Float32Array(6), 3));
+  beamGeo.setAttribute('lineDistance', new T.BufferAttribute(new Float32Array(2), 1));
+  const beam = new T.Line(beamGeo, new T.LineDashedMaterial({ color: 0xffe9a8, dashSize: 0.06, gapSize: 0.05, transparent: true, opacity: 0.7 }));
+  scene.add(beam);
+
+  const light = { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 };
+  const LIGHTS = [
+    { id: 'front', name: 'Front', az: 0, el: 12, lesson: 'Light from the front shows the least shadow. The figure looks <b>flat</b>: there is little light and shadow to turn its form.' },
+    { id: 'rembrandt', name: 'Rembrandt', az: 45, el: 30, lesson: 'Light <b>high and to one side</b>, the classic portrait light. One side of the head is lit, the other turns into shadow, and the form looks round.' },
+    { id: 'side', name: 'Side', az: 90, el: 8, lesson: 'Light from the side <b>splits the figure in half</b>: one half light, one half shadow. Find the line where they meet, the terminator.' },
+    { id: 'rim', name: 'Rim', az: 160, el: 30, lesson: 'Light from <b>behind</b>: the figure is mostly shadow, with a thin rim of light along its edge. The cast shadow falls toward you.' },
+    { id: 'top', name: 'Top', az: 0, el: 82, lesson: 'Light from <b>straight above</b>: the top of the head and the shoulders are lit, and the chest, the arms and the feet throw dark shadows straight down.' },
+    { id: 'under', name: 'From below', az: 10, el: -14, lesson: 'Light from <b>below</b>, like a flashlight under the chin. Every shadow goes upward, which is why it looks spooky.' },
+  ];
+
+  // where the lamp sits for a direction: above the floor and inside the backdrop
+  const LAMP_CLEAR = 0.3;
+  function lampAt(az, el) {
+    const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
+    return inside(TARGET, az, Math.max(el, minEl), light.dist, LAMP_CLEAR);
+  }
+  // raise the height until the lamp really sits at the distance and height the sliders say
+  function reachable() {
+    for (let k = 0; k < 120 && light.el < 85; k++) {
+      const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
+      if (light.el < minEl) { light.el = Math.ceil(minEl); continue; }
+      if (lampAt(light.az, light.el).distanceTo(TARGET) >= light.dist - 0.01) return;
+      light.el = Math.floor(light.el) + 1;
+    }
+  }
+  function placeLamp() {
+    lamp.position.copy(lampAt(light.az, light.el));
+    lamp.angle = clamp(Math.atan(1.6 / light.dist) * 1.5, 24 * DEG, 70 * DEG);   // wide enough to spill onto the backdrop
+    lamp.shadow.radius = 1 + light.soft * 0.45;     // larger radii in this shadow filter turn into streaks
+    room.intensity = (light.fill / 100) * 0.9;
+    bulb.position.copy(lamp.position);
+    const pos = beamGeo.attributes.position, ld = beamGeo.attributes.lineDistance;
+    pos.setXYZ(0, lamp.position.x, lamp.position.y, lamp.position.z);
+    pos.setXYZ(1, TARGET.x, TARGET.y, TARGET.z);
+    pos.needsUpdate = true;
+    ld.setX(1, lamp.position.distanceTo(TARGET));
+    ld.needsUpdate = true;
+    beamGeo.computeBoundingSphere();
+  }
+
+  // ---- The wooden figure -----------------------------------------------------------------
+
+  function woodTexture(base, grain) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = base; g.fillRect(0, 0, 256, 512);
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 90; k++) {
+      const x0 = rnd() * 256, w = 0.5 + rnd() * 2.2, amp = 2 + rnd() * 9, f = 0.004 + rnd() * 0.012, ph = rnd() * 6.3;
+      g.strokeStyle = `rgba(${grain}, ${(0.05 + rnd() * 0.16).toFixed(3)})`;
+      g.lineWidth = w;
+      for (const shift of [0, -256, 256]) {          // drawn three times, so the grain wraps without a seam
+        g.beginPath();
+        for (let y = 0; y <= 512; y += 8) {
+          const x = x0 + shift + amp * Math.sin(y * f + ph);
+          if (y) g.lineTo(x, y); else g.moveTo(x, y);
+        }
+        g.stroke();
+      }
+    }
+    const t = new T.CanvasTexture(c);
+    t.encoding = T.sRGBEncoding;
+    t.wrapS = t.wrapT = T.RepeatWrapping;
+    t.anisotropy = 4;
+    return t;
+  }
+  const woodMat = new T.MeshStandardMaterial({ map: woodTexture('#d2a877', '96, 58, 28'), roughness: 0.55, metalness: 0 });
+  const ballMat = new T.MeshStandardMaterial({ map: woodTexture('#bf9263', '82, 48, 22'), roughness: 0.5, metalness: 0 });
+  const standMat = new T.MeshStandardMaterial({ color: srgb(0x5a3a22), roughness: 0.45 });
+
+  // a turned-wood spindle: round ends, a slight swell, along -y (down) or +y (up) from the joint
+  function spindle(len, r0, r1, swell, up) {
+    const pts = [];
+    const N = 28;
+    for (let i = N; i >= 0; i--) {
+      const t = i / N;
+      const edge = Math.abs(2 * t - 1);
+      const round = edge > 0.8 ? Math.sqrt(Math.max(0, 1 - Math.pow((edge - 0.8) / 0.2, 2))) : 1;
+      const r = (r0 + (r1 - r0) * t) * (1 + swell * Math.sin(Math.PI * t)) * round;
+      pts.push(new T.Vector2(Math.max(r, 0.0005), (up ? t : -t) * len));
+    }
+    if (up) pts.reverse();
+    return new T.LatheGeometry(pts, 32);
+  }
+  // an egg: a sphere narrowed toward one end
+  function egg(rx, ry, rz, taper, flatBottom) {
+    const geo = new T.SphereGeometry(1, 36, 24);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const k = 1 - taper * Math.max(0, -y);
+      if (flatBottom != null && y < flatBottom) y = flatBottom;
+      p.setXYZ(i, x * rx * k, y * ry, z * rz * k);
+    }
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  const figure = new T.Group();
+  scene.add(figure);
+  const parts = [];        // every picked mesh
+  const J = {};            // joint name -> { obj, ... }
+
+  function mesh(geo, parent, jointName, opts = {}) {
+    const m = new T.Mesh(geo, (opts.mat || woodMat).clone());
+    if (opts.pos) m.position.set(...opts.pos);
+    if (opts.rot) m.rotation.set(...opts.rot);
+    if (opts.scale) m.scale.set(...opts.scale);
+    m.castShadow = m.receiveShadow = true;
+    m.userData.joint = jointName;
+    parent.add(m);
+    parts.push(m);
+    return m;
+  }
+  function joint(name, parent, pos, ball) {
+    const o = new T.Group();
+    o.position.set(...pos);
+    o.rotation.order = ORDER;
+    parent.add(o);
+    if (ball) mesh(new T.SphereGeometry(ball, 24, 16), o, name, { mat: ballMat });
+    J[name] = { obj: o };
+    return o;
+  }
+
+  const root = joint('root', figure, [0, 0.98, 0]);
+  mesh(spindle(0.17, 0.155, 0.1, 0.05, true), root, 'root', { pos: [0, -0.1, 0], scale: [1, 1, 0.72] });       // pelvis
+  const waist = joint('waist', root, [0, 0.09, 0], 0.07);
+  mesh(spindle(0.11, 0.1, 0.12, 0.05, true), waist, 'waist', { pos: [0, 0.03, 0], scale: [1, 1, 0.75] });      // belly
+  mesh(egg(0.165, 0.2, 0.11, 0.28), waist, 'waist', { pos: [0, 0.27, 0], rot: [Math.PI, 0, 0] });               // chest, wide at the shoulders
+  const neck = joint('neck', waist, [0, 0.445, 0], 0.045);
+  mesh(spindle(0.09, 0.042, 0.038, 0, true), neck, 'neck', { pos: [0, 0, 0] });
+  mesh(egg(0.092, 0.125, 0.1, 0.22), neck, 'neck', { pos: [0, 0.19, 0.012] });                                  // head, narrower at the chin
+
+  function arm(side) {           // side: -1 the figure's right (at -x), +1 its left
+    const s = side < 0 ? 'R' : 'L';
+    const sh = joint('shoulder' + s, waist, [side * 0.205, 0.375, 0], 0.056);
+    mesh(spindle(0.28, 0.048, 0.035, 0.12), sh, 'shoulder' + s, { pos: [0, -0.02, 0] });
+    const el = joint('elbow' + s, sh, [0, -0.31, 0], 0.037);
+    mesh(spindle(0.245, 0.037, 0.028, 0.12), el, 'elbow' + s, { pos: [0, -0.012, 0] });
+    const wr = joint('wrist' + s, el, [0, -0.265, 0], 0.027);
+    mesh(egg(0.024, 0.085, 0.046, 0.15), wr, 'wrist' + s, { pos: [0, -0.1, 0.004] });                             // the hand, a flat paddle
+    mesh(egg(0.016, 0.04, 0.016, 0), wr, 'wrist' + s, { pos: [side * -0.012, -0.05, 0.04], rot: [0.5, 0, 0] });   // thumb
+  }
+  function leg(side) {
+    const s = side < 0 ? 'R' : 'L';
+    const hip = joint('hip' + s, root, [side * 0.095, -0.075, 0], 0.062);
+    mesh(spindle(0.42, 0.07, 0.048, 0.1), hip, 'hip' + s, { pos: [0, -0.025, 0] });
+    const kn = joint('knee' + s, hip, [0, -0.455, 0], 0.048);
+    mesh(spindle(0.39, 0.05, 0.034, 0.14), kn, 'knee' + s, { pos: [0, -0.012, 0] });
+    const an = joint('ankle' + s, kn, [0, -0.415, 0], 0.031);
+    mesh(egg(0.046, 0.04, 0.125, 0, -0.55), an, 'ankle' + s, { pos: [0, -0.018, 0.055] });                        // foot, flat sole
+  }
+  arm(-1); arm(1); leg(-1); leg(1);
+
+  // the stand: a round base and a rod up to the pelvis
+  const stand = new T.Group();
+  const base = new T.Mesh(new T.CylinderGeometry(0.2, 0.22, 0.035, 48), standMat);
+  base.position.set(0, 0.0175, -0.34);
+  const rod = new T.Mesh(new T.CylinderGeometry(0.011, 0.011, 1, 12), standMat);
+  base.castShadow = base.receiveShadow = rod.castShadow = true;
+  stand.add(base, rod);
+  scene.add(stand);
+  const ROD_FROM = new T.Vector3(0, 0.035, -0.34);     // in the stand's own frame, which turns with the figure
+  const standInv = new T.Matrix4(), standM = new T.Matrix4(), standV = new T.Vector3();
+  function placeRod() {
+    stand.position.set(pose.shift.x, 0, pose.shift.z);
+    stand.rotation.y = pose.root.y * DEG;
+    stand.updateMatrixWorld(true);
+    // the base sits behind the hips, and further back when a leg down on the floor would be in it
+    standInv.copy(stand.matrixWorld).invert();
+    const clear = 0.23;                       // the base's radius, and a little room
+    let back = 0.34;
+    parts.forEach((m) => {
+      if (!/^(root|hip|knee|ankle)/.test(m.userData.joint)) return;
+      standM.multiplyMatrices(standInv, m.matrixWorld);
+      const a = m.geometry.attributes.position;
+      for (let i = 0; i < a.count; i++) {
+        standV.fromBufferAttribute(a, i).applyMatrix4(standM);
+        if (standV.y < 0.045 && Math.abs(standV.x) < clear && standV.z < 0.3) back = Math.max(back, Math.sqrt(clear * clear - standV.x * standV.x) - standV.z);
+      }
+    });
+    back = Math.min(back, 1.2);
+    base.position.z = ROD_FROM.z = -back;
+    const to = stand.worldToLocal(root.localToWorld(new T.Vector3(0, -0.05, -0.06)));
+    const d = to.clone().sub(ROD_FROM);
+    rod.scale.set(1, d.length(), 1);
+    rod.position.copy(ROD_FROM).addScaledVector(d, 0.5);
+    rod.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), d.normalize());
+  }
+
+  // ---- Joints: names, slider labels and limits ------------------------------------------
+  // Angles are degrees on each joint's own x, y, z axes (order ZXY, see ORDER). The figure faces +z; its right
+  // side is at -x. A slider shows a friendly direction: value = sign * angle.
+
+  // label: what the arrow that raises the friendly value does; back: what the other one does
+  const AX = (axis, label, min, max, sign = 1, back = label) => ({ axis, label, back, min, max, sign });
+  const SPEC = {
+    root: { name: 'Hips (the whole body)', axes: [AX('y', 'Turn around', -180, 180), AX('x', 'Lean forward', -40, 40, 1, 'Lean back'), AX('z', 'Tilt sideways', -30, 30, 1, 'Tilt the other way')], height: true },
+    waist: { name: 'Body (waist)', axes: [AX('x', 'Bend forward', -30, 75, 1, 'Bend back'), AX('y', 'Twist', -45, 45), AX('z', 'Lean sideways', -35, 35, 1, 'Lean the other way')] },
+    neck: { name: 'Head', axes: [AX('x', 'Nod down', -40, 50, 1, 'Look up'), AX('y', 'Turn the head', -75, 75), AX('z', 'Tilt the head', -35, 35, 1, 'Tilt the head the other way')] },
+  };
+  for (const [s, side] of [['R', -1], ['L', 1]]) {
+    const who = s === 'R' ? 'Right' : 'Left';
+    SPEC['shoulder' + s] = { name: who + ' upper arm', axes: [AX('x', 'Swing forward', -180, 60, -1, 'Swing back'), AX('z', 'Raise out to the side', side < 0 ? -175 : -20, side < 0 ? 20 : 175, side, 'Lower toward the body'), AX('y', 'Twist the arm', -90, 90, side)] };
+    SPEC['elbow' + s] = { name: who + ' forearm', axes: [AX('x', 'Bend the elbow', -150, 0, -1, 'Straighten the elbow')] };
+    SPEC['wrist' + s] = { name: who + ' hand', axes: [AX('z', 'Bend the hand in', -70, 70, side, 'Bend the hand back'), AX('x', 'Tip the hand forward', -40, 40, -1, 'Tip the hand back'), AX('y', 'Twist the hand', -90, 90, side)] };
+    SPEC['hip' + s] = { name: who + ' thigh', axes: [AX('x', 'Swing forward', -120, 40, -1, 'Swing back'), AX('z', 'Out to the side', side < 0 ? -70 : -15, side < 0 ? 15 : 70, side, 'In toward the other leg'), AX('y', 'Twist the leg', -45, 45, side)] };
+    SPEC['knee' + s] = { name: who + ' shin', axes: [AX('x', 'Bend the knee', 0, 150, 1, 'Straighten the knee')] };
+    SPEC['ankle' + s] = { name: who + ' foot', axes: [AX('x', 'Point the toes', -30, 50, 1, 'Lift the toes'), AX('y', 'Turn the foot', -25, 25, side), AX('z', 'Roll the foot', -20, 20, side)] };
+  }
+  const NAMES = Object.keys(SPEC);
+  const HINGE = (n) => SPEC[n].axes.length === 1;
+  const limitOf = (n, axis) => { const a = SPEC[n].axes.find((q) => q.axis === axis); return a ? [a.min, a.max] : [0, 0]; };
+
+  // the pose: every joint's angles, the figure's height, and where the hips stand on the floor
+  const pose = {};
+  const LOW = -0.95, HIGH = 0.1;      // how far the hips go down (to sit on the floor) and up
+  const SHIFT = 0.8;                  // how far the body walks from the middle of the floor
+  function blankPose() {
+    const p = { height: 0, shift: { x: 0, z: 0 } };
+    NAMES.forEach((n) => { p[n] = { x: 0, y: 0, z: 0 }; });
+    return p;
+  }
+  const num = (v, fallback = 0) => (v !== null && v !== '' && typeof v !== 'object' && Number.isFinite(+v) ? +v : fallback);
+  // a whole pose from one that may give only some joints (or come from storage): the rest stand straight
+  function cleanPose(p) {
+    p = p && typeof p === 'object' ? p : {};
+    const b = blankPose();
+    b.height = clamp(num(p.height), LOW, HIGH);
+    const sh = p.shift && typeof p.shift === 'object' ? p.shift : {};
+    b.shift = { x: clamp(num(sh.x), -SHIFT, SHIFT), z: clamp(num(sh.z), -SHIFT, SHIFT) };
+    NAMES.forEach((n) => { const a = p[n] && typeof p[n] === 'object' ? p[n] : {}; b[n] = { x: num(a.x), y: num(a.y), z: num(a.z) }; });
+    return b;
+  }
+  function setPose(p) {
+    Object.assign(pose, cleanPose(p));
+    applyPose();
+    centreOnFigure();
+  }
+  // The camera turns around, and the lamp aims at, the hips' place on the floor. It follows the body
+  // when a move ends (not during a drag, or the figure would run away from the finger).
+  const centred = { x: 0, z: 0 };
+  function centreOnFigure() {
+    const sx = pose.shift ? pose.shift.x : 0, sz = pose.shift ? pose.shift.z : 0;
+    if (Math.abs(sx - centred.x) < 1e-4 && Math.abs(sz - centred.z) < 1e-4) return;
+    centred.x = sx; centred.z = sz;
+    LOOK.set(sx, 1.12, sz);
+    TARGET.set(sx, 0.95, sz);
+    lamp.target.position.copy(TARGET);
+    placeCamera();
+    lightChanged(false);
+  }
+  // every joint from the pose (forward kinematics)
+  function fk() {
+    NAMES.forEach((n) => {
+      const a = pose[n];
+      ['x', 'y', 'z'].forEach((k) => { const [lo, hi] = limitOf(n, k); a[k] = clamp(a[k], lo, hi); });
+      J[n].obj.rotation.set(a.x * DEG, a.y * DEG, a.z * DEG, ORDER);
+    });
+    root.position.set(pose.shift.x, BASE_Y + pose.height, pose.shift.z);
+    figure.updateMatrixWorld(true);
+  }
+  // `plant`: the feet are planted where they now stand. Moving the body with the feet planted leaves it off.
+  let shown = null;          // the pose as last shown: a move the legs cannot follow stops on the way from it
+  function applyPose(plant = true) {
+    fk();
+    if (plant) plantFeet();
+    shown = JSON.parse(JSON.stringify(pose));
+    placeRod();
+    requestRender();
+  }
+
+  // stand the figure on the floor: its lowest point at the floor in the standing pose
+  let BASE_Y = 0.98;
+  figure.updateMatrixWorld(true);
+  {
+    const box = new T.Box3();
+    parts.forEach((m) => box.expandByObject(m));
+    BASE_Y = 0.98 - box.min.y + 0.002;
+  }
+
+  // poses: only what differs from standing straight; the right side is at -x
+  const POSES = [
+    { id: 'stand', name: 'Stand', p: { shoulderR: { z: -7 }, shoulderL: { z: 7 }, elbowR: { x: -10 }, elbowL: { x: -10 } }, thumbView: { az: 25, el: 8 } },
+    { id: 'relaxed', name: 'Weight on one leg', p: { root: { z: 5, y: 8 }, waist: { z: -7, y: -4 }, neck: { z: 5, y: -10 }, hipR: { x: -2, z: -2 }, hipL: { x: -10, z: 6 }, kneeL: { x: 22 }, ankleL: { x: -6 }, shoulderR: { z: -9 }, shoulderL: { z: 5, x: -6 }, elbowR: { x: -12 }, elbowL: { x: -25 } }, thumbView: { az: 20, el: 8 } },
+    { id: 'walk', name: 'Walk', p: { waist: { y: 7 }, hipR: { x: -26 }, kneeR: { x: 8 }, ankleR: { x: -8 }, hipL: { x: 20 }, kneeL: { x: 30 }, ankleL: { x: 14 }, shoulderR: { x: 22, z: -6 }, elbowR: { x: -14 }, shoulderL: { x: -28, z: 6 }, elbowL: { x: -32 } }, thumbView: { az: 60, el: 8 } },
+    { id: 'run', name: 'Run', p: { root: { x: 12 }, waist: { x: 10, y: 10 }, neck: { x: -12 }, hipR: { x: -70 }, kneeR: { x: 75 }, ankleR: { x: 10 }, hipL: { x: 30 }, kneeL: { x: 95 }, ankleL: { x: 30 }, shoulderR: { x: 45, z: -10 }, elbowR: { x: -95 }, shoulderL: { x: -55, z: 10 }, elbowL: { x: -95 } }, thumbView: { az: 65, el: 8 } },
+    { id: 'wave', name: 'Wave', p: { neck: { y: 10, z: -5 }, shoulderL: { z: 95, y: 90 }, elbowL: { x: -105 }, wristL: { z: -10 }, shoulderR: { z: -7 }, elbowR: { x: -10 } }, thumbView: { az: 20, el: 8 } },
+    { id: 'reach', name: 'Reach', p: { waist: { x: 12 }, neck: { x: -10 }, shoulderR: { x: -150, z: -10 }, shoulderL: { x: -150, z: 10 }, elbowR: { x: -8 }, elbowL: { x: -8 } }, thumbView: { az: 35, el: 8 } },
+    { id: 'crouch', name: 'Crouch', p: { height: -0.38, root: { x: 18 }, waist: { x: 20 }, neck: { x: -25 }, hipR: { x: -105, z: -8 }, kneeR: { x: 125 }, ankleR: { x: -25 }, hipL: { x: -105, z: 8 }, kneeL: { x: 125 }, ankleL: { x: -25 }, shoulderR: { x: -40, z: -10 }, elbowR: { x: -60 }, shoulderL: { x: -40, z: 10 }, elbowL: { x: -60 } }, thumbView: { az: 50, el: 8 } },
+    { id: 'think', name: 'Think', p: { neck: { x: 12, y: -15 }, shoulderR: { x: -35, z: -14, y: 20 }, elbowR: { x: -145 }, wristR: { x: -20 }, shoulderL: { x: -10, z: 22, y: -40 }, elbowL: { x: -100 }, hipL: { z: 4 }, hipR: { x: -6 } }, thumbView: { az: 30, el: 8 } },
+    { id: 'hips', name: 'Hands on hips', p: { root: { y: -8, z: -7 }, waist: { x: -6, y: 5, z: 13 }, neck: { x: -8, y: 14, z: -6 }, shoulderR: { x: 29, y: 66, z: -39 }, elbowR: { x: -105 }, wristR: { x: 23, y: 3, z: -37 }, hipR: { z: 9 }, shoulderL: { x: 14, y: -71, z: 31 }, elbowL: { x: -82 }, wristL: { x: 2, y: 28, z: 23 }, hipL: { x: -15, y: 12, z: 15 }, kneeL: { x: 33 }, ankleL: { x: -10, z: -4 } }, thumbView: { az: 25, el: 10 } },
+    { id: 'point', name: 'Point', p: { root: { y: -10, z: 5 }, waist: { x: 4, y: -25, z: 14 }, neck: { x: -6, y: -35 }, shoulderR: { x: -43, y: -90, z: -131 }, hipR: { x: -8, z: -11 }, kneeR: { x: 16 }, ankleR: { x: -4 }, shoulderL: { x: 10, z: 20 }, elbowL: { x: -25 }, hipL: { x: 4, z: 14 }, ankleL: { x: 26, z: 6 } }, thumbView: { az: 25, el: 10 } },
+    { id: 'lunge', name: 'Lunge', p: { root: { x: 14 }, waist: { x: -4, y: -6, z: 2 }, neck: { x: -12, y: 6 }, shoulderR: { x: -26, y: 67, z: -6 }, elbowR: { x: -46 }, wristR: { x: 8, y: 46, z: -43 }, hipR: { x: -95, y: 18, z: 15 }, kneeR: { x: 82 }, ankleR: { x: -1, y: -7, z: 4 }, shoulderL: { x: 37, y: -70, z: 38 }, elbowL: { x: -112 }, wristL: { x: 36, y: 29, z: 33 }, hipL: { x: 40, z: 3 }, kneeL: { x: 22 }, ankleL: { x: -21, y: -3, z: -2 } }, thumbView: { az: 55, el: 12 } },
+    { id: 'kneel', name: 'Kneel', p: { root: { y: -25 }, waist: { x: 10, y: 6, z: -2 }, neck: { x: -8, y: 6, z: 3 }, shoulderR: { x: 10, y: 10, z: -12 }, elbowR: { x: -22 }, hipR: { x: 4, z: -3 }, kneeR: { x: 105 }, ankleR: { x: -28 }, shoulderL: { x: -21, y: -37, z: -2 }, elbowL: { x: -47 }, wristL: { x: -6, y: -72, z: 26 }, hipL: { x: -84, z: 5 }, kneeL: { x: 84 }, ankleL: { y: 6, z: -5 } }, thumbView: { az: 40, el: 12 } },
+    { id: 'sit', name: 'Sit', p: { root: { x: -27 }, waist: { x: 52, y: 5, z: 3 }, neck: { x: 20, y: -10, z: 9 }, shoulderR: { x: -71, y: 55, z: -33 }, elbowR: { x: -56 }, wristR: { x: -40, y: -40, z: 20 }, hipR: { x: -119, y: -3, z: -2 }, kneeR: { x: 130 }, ankleR: { x: 16, y: -8 }, shoulderL: { x: -81, y: 5, z: 94 }, elbowL: { x: -86 }, wristL: { x: -35, y: 60, z: -15 }, hipL: { x: -116, y: -4, z: -1 }, kneeL: { x: 119 }, ankleL: { x: 26, y: 6, z: -1 } }, thumbView: { az: 55, el: 12 } },
+    { id: 'jump', name: 'Jump', p: { root: { x: 8, z: 3 }, waist: { x: -28, y: 5, z: -4 }, neck: { x: -28, y: 10, z: -5 }, shoulderR: { x: -12, y: 30, z: -150 }, elbowR: { x: -12 }, wristR: { z: -20 }, hipR: { x: 22, y: 20, z: -8 }, kneeR: { x: 115 }, ankleR: { x: 38 }, shoulderL: { x: -28, y: -30, z: 136 }, elbowL: { x: -24 }, wristL: { z: -20 }, hipL: { y: -15, z: 7 }, kneeL: { x: 95 }, ankleL: { x: 30 } }, lift: 0.25, thumbView: { az: 40, el: 8 } },
+    { id: 'throw', name: 'Throw', p: { root: { x: 10, y: -31, z: 6 }, waist: { x: 5, y: -40, z: -14 }, neck: { x: -14, y: 40, z: 8 }, shoulderR: { x: 32, y: -90, z: -97 }, elbowR: { x: -95 }, wristR: { z: -45 }, hipR: { x: 19, y: -8, z: -12 }, kneeR: { x: 35 }, ankleR: { x: -13, y: -24, z: 6 }, shoulderL: { x: -52, y: -25, z: 112 }, elbowL: { x: -28 }, hipL: { x: -68, y: 14, z: 11 }, kneeL: { x: 37 }, ankleL: { x: 20, y: -12, z: 2 } }, thumbView: { az: 40, el: 10 } },
+    { id: 'kick', name: 'Kick', p: { root: { x: -15, y: -47, z: -11 }, waist: { x: -8, y: 10, z: 5 }, neck: { x: 18, y: -8 }, shoulderR: { x: -50, z: -65 }, elbowR: { x: -35 }, hipR: { x: 15, y: -1 }, kneeR: { x: 16 }, ankleR: { x: -13, y: -22, z: -3 }, shoulderL: { x: 35, z: 65 }, elbowL: { x: -30 }, hipL: { x: -98, z: 4 }, kneeL: { x: 8 }, ankleL: { x: 25 } }, thumbView: { az: 40, el: 10 } },
+    { id: 'dance', name: 'Dance', p: { root: { x: 37, y: -25, z: 16 }, waist: { x: -18, y: 10 }, neck: { x: -28, y: -10 }, shoulderR: { x: -120, z: -3 }, elbowR: { x: -8 }, wristR: { z: -10 }, hipR: { x: 40, y: 15 }, ankleR: { x: 45 }, shoulderL: { x: 12, z: 100 }, elbowL: { x: -15 }, wristL: { z: -12 }, hipL: { x: -40, y: 20, z: -5 } }, thumbView: { az: 40, el: 10 } },
+    { id: 'box', name: 'Box', p: { root: { x: 2, y: 40, z: -8 }, waist: { x: 8, y: 8 }, neck: { x: 12, y: 22 }, shoulderR: { x: -45, y: 34, z: 14 }, elbowR: { x: -141 }, wristR: { x: 15, y: -75 }, hipR: { x: -24, y: -5, z: -11 }, kneeR: { x: 49 }, ankleR: { x: -13, y: -5 }, shoulderL: { x: -57, y: -23, z: -11 }, elbowL: { x: -105 }, wristL: { x: 20, y: -75 }, hipL: { x: -30, y: 45, z: 31 }, kneeL: { x: 39 }, ankleL: { x: -5, y: -15, z: -4 } }, thumbView: { az: 35, el: 10 } },
+  ];
+
+  // ---- The rig: arms and legs that follow their hand or foot (inverse kinematics) -------------------
+
+  // Each limb is two bones: the upper one turns at the shoulder or hip, the lower one bends at the
+  // elbow or knee. `fold` is the way the lower bone bends in the upper one's frame: a forearm folds
+  // toward +z (forward), a shin toward -z (back). So the elbow points back and the knee points forward.
+  const CHAINS = {};
+  for (const s of ['R', 'L']) {
+    CHAINS['arm' + s] = { upper: 'shoulder' + s, mid: 'elbow' + s, end: 'wrist' + s, fold: 1, side: s, leg: false };
+    CHAINS['leg' + s] = { upper: 'hip' + s, mid: 'knee' + s, end: 'ankle' + s, fold: -1, side: s, leg: true };
+  }
+  const setRot = (n) => J[n].obj.rotation.set(pose[n].x * DEG, pose[n].y * DEG, pose[n].z * DEG, ORDER);
+  const worldPos = (n) => J[n].obj.getWorldPosition(new T.Vector3());
+  const worldQuat = (n) => J[n].obj.getWorldQuaternion(new T.Quaternion());
+  const bones = (ch) => [J[ch.mid].obj.position.length(), J[ch.end].obj.position.length()];
+  // the way the elbow or knee points: the back of the elbow, the front of the knee
+  const pointing = (ch) => new T.Vector3(0, 0, -ch.fold).applyQuaternion(worldQuat(ch.upper));
+  // a spot for the elbow or knee to point at, the way it points now
+  const poleNow = (ch) => worldPos(ch.mid).addScaledVector(pointing(ch), 0.3);
+
+  // Set a joint's angles from a turn. A turn has two sets of angles: take the one that fits the joint's
+  // limits; when both or neither fit, the one nearer how it is now (so it does not flip between them
+  // mid-drag). Then hold the limits. True when a limit stopped it.
+  function setTurn(n, q) {
+    const e = new T.Euler().setFromQuaternion(q, ORDER);
+    const one = [e.x / DEG, e.y / DEG, e.z / DEG];
+    const two = [wrapAz(180 - one[0]), wrapAz(one[1] + 180), wrapAz(one[2] + 180)];
+    const cur = pose[n], K = ['x', 'y', 'z'];
+    const fits = (c) => K.every((k, i) => { const [lo, hi] = limitOf(n, k); return c[i] >= lo && c[i] <= hi; });
+    const near = (c) => K.reduce((sum, k, i) => { const [lo, hi] = limitOf(n, k); return sum + Math.abs(wrapAz(clamp(c[i], lo, hi) - cur[k])); }, 0);
+    const best = fits(one) !== fits(two) ? (fits(one) ? one : two) : near(one) <= near(two) ? one : two;
+    let stopped = false;
+    K.forEach((k, i) => {
+      const [lo, hi] = limitOf(n, k), v = clamp(best[i], lo, hi);
+      if (Math.abs(v - best[i]) > 0.5) stopped = true;
+      cur[k] = v;
+    });
+    setRot(n);
+    return stopped;
+  }
+
+  // Turn the upper bone and bend the elbow or knee so the end (the wrist or the ankle) reaches
+  // `target`, with the elbow or knee pointing toward `pole`. Worked out exactly (two bones make a
+  // triangle); when a joint's limit stops that, small steps bring the end as close as the limits allow.
+  function solveChain(ch, target, pole, smooth = false) {
+    figure.updateMatrixWorld(true);
+    const up = J[ch.upper].obj, [L1, L2] = bones(ch);
+    const was = [{ ...pose[ch.upper] }, { ...pose[ch.mid] }], midWas = worldPos(ch.mid);
+    const [lo, hi] = limitOf(ch.mid, 'x');
+    const most = Math.max(Math.abs(lo), Math.abs(hi)) * DEG;
+    const R = worldPos(ch.upper);
+    const v = target.clone().sub(R);
+    const dMin = Math.sqrt(L1 * L1 + L2 * L2 - 2 * L1 * L2 * Math.cos(Math.PI - most)) + 1e-4;
+    const d = clamp(v.length(), dMin, L1 + L2 - 1e-7);
+    const a = v.lengthSq() > 1e-12 ? v.normalize() : new T.Vector3(0, -1, 0);
+    // b: across the line from the shoulder to the hand, toward the pole
+    const across = (w) => w.addScaledVector(a, -w.dot(a));
+    let b = across(pole.clone().sub(R));
+    if (b.lengthSq() < 1e-10) b = across(pointing(ch));
+    if (b.lengthSq() < 1e-10) b = new T.Vector3(0, 0, 1).cross(a);
+    b.normalize();
+    const cosA = clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1), sinA = Math.sqrt(1 - cosA * cosA);
+    const u = a.clone().multiplyScalar(cosA).addScaledVector(b, sinA);              // along the upper bone
+    const Y = u.clone().negate();
+    const Z = b.clone().addScaledVector(u, -b.dot(u)).normalize().multiplyScalar(-ch.fold);
+    const X = new T.Vector3().crossVectors(Y, Z);
+    const q = new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(X, Y, Z));
+    const stopped = setTurn(ch.upper, up.parent.getWorldQuaternion(new T.Quaternion()).invert().multiply(q));
+    const bend = Math.PI - Math.acos(clamp((L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2), -1, 1));
+    pose[ch.mid].x = clamp(-ch.fold * bend / DEG, lo, hi);
+    setRot(ch.mid);
+    up.updateMatrixWorld(true);
+    // `smooth` (a limb being dragged): when a limit stops the exact answer, or it would throw the elbow
+    // or knee far from where it was, step there from how the limb was, a little at a time, so it moves
+    // smoothly rather than jumping. Otherwise a limit only means stepping on from the limited answer.
+    const jump = smooth && worldPos(ch.mid).distanceTo(midWas) > 0.12;
+    if (stopped || jump) {
+      if (smooth) { pose[ch.upper] = was[0]; pose[ch.mid] = was[1]; }
+      settle(ch, R.clone().addScaledVector(a, d), R.clone().addScaledVector(u, L1), smooth ? 25 : 360);
+    }
+  }
+  // Small steps of the four angles (damped least squares) that move the end to `goal` inside every
+  // limit. The first steps also steer the elbow or knee toward `midGoal`; the last ones are for the end alone.
+  function settle(ch, goal, midGoal, most = 360) {
+    const vars = [[ch.upper, 'x'], [ch.upper, 'y'], [ch.upper, 'z'], [ch.mid, 'x']];
+    const up = J[ch.upper].obj;
+    const state = () => { setRot(ch.upper); setRot(ch.mid); up.updateMatrixWorld(true); return [worldPos(ch.end), worldPos(ch.mid)]; };
+    let errNow = goal.distanceTo(state()[0]);
+    const from = vars.map(([n, k]) => pose[n][k]);           // no joint turns more than `most` degrees in one go
+    for (let it = 0; it < 24; it++) {
+      const W = it < 4 ? 0.15 : 0;
+      if (W === 0 && errNow < 0.001) break;
+      const [p, m] = state();
+      const err = [...goal.clone().sub(p).toArray(), ...midGoal.clone().sub(m).multiplyScalar(W).toArray()];
+      const cols = vars.map(([n, k]) => {
+        const [lo, hi] = limitOf(n, k), v0 = pose[n][k], h = v0 + 1 <= hi ? 1 : -1;
+        pose[n][k] = v0 + h;
+        const [p2, m2] = state();
+        pose[n][k] = v0;
+        return [...p2.sub(p).divideScalar(h).toArray(), ...m2.sub(m).multiplyScalar(W / h).toArray()];
+      });
+      const A = cols.map((ci) => cols.map((cj) => ci.reduce((sum, x, r) => sum + x * cj[r], 0)));
+      A.forEach((row, i) => { row[i] += 6e-5; });          // damping: a move that hardly helps is hardly used
+      const step = linSolve(A, cols.map((ci) => ci.reduce((sum, x, r) => sum + x * err[r], 0)));
+      if (!step) break;
+      const keep = vars.map(([n, k]) => pose[n][k]);
+      vars.forEach(([n, k], i) => { const [lo, hi] = limitOf(n, k); pose[n][k] = clamp(clamp(pose[n][k] + clamp(step[i], -4, 4), from[i] - most, from[i] + most), lo, hi); });
+      const errNew = goal.distanceTo(state()[0]);
+      // stuck against the limits: a step that no longer brings the end nearer is taken back, and that is as far as it goes
+      if (W === 0 && errNew > errNow - 0.0003) { vars.forEach(([n, k], i) => { pose[n][k] = keep[i]; }); break; }
+      errNow = errNew;
+    }
+    state();
+  }
+
+  function linSolve(A, B) {                 // Gaussian elimination
+    const n = B.length, M = A.map((row, i) => [...row, B[i]]);
+    for (let c = 0; c < n; c++) {
+      let p = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+      if (Math.abs(M[p][c]) < 1e-14) return null;
+      [M[c], M[p]] = [M[p], M[c]];
+      for (let r = 0; r < n; r++) {
+        if (r === c) continue;
+        const f = M[r][c] / M[c][c];
+        for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+      }
+    }
+    return M.map((row, i) => row[n] / row[i]);
+  }
+
+  // Where each foot stands on the floor, and how it is turned. With "Keep the feet planted", moving
+  // the hips bends the legs so the feet stay there.
+  const plants = { R: null, L: null };
+  const footShown = { R: null, L: null };      // where keepFeet last put each foot (maybe up on its toes)
+  function plantFeet() {
+    for (const s of ['R', 'L']) {
+      const at = worldPos('ankle' + s), turn = worldQuat('ankle' + s), f = footShown[s];
+      // a foot still where the legs were bent to keep it stays planted as it stood, flat, even with its heel up now
+      if (f && plants[s] && at.distanceTo(f.at) < 0.002 && turn.angleTo(f.turn) < 0.01) continue;
+      plants[s] = { at, turn };
+      footShown[s] = null;
+    }
+  }
+  // the foot keeps its turn in the room (flat on the floor stays flat) as the shin moves
+  function footTurn(s, q) {
+    setTurn('ankle' + s, worldQuat('knee' + s).invert().multiply(q));
+    J['ankle' + s].obj.updateMatrixWorld(true);
+  }
+  const planted = () => $('plantFeet').checked;
+  const CHAIN_LEGS = ['hipR', 'kneeR', 'ankleR', 'hipL', 'kneeL', 'ankleL'];
+  const TOE = 0.158, HEEL = -0.045;     // the front and back edges of the flat sole, in the ankle's frame
+  // the foot's surface in its ankle's frame, to find its lowest point for any place and turn
+  const footPts = { R: [], L: [] };
+  parts.forEach((m) => {
+    const s = m.userData.joint.slice(-1);
+    if (m.userData.joint !== 'ankle' + s) return;
+    m.updateMatrix();
+    const a = m.geometry.attributes.position;
+    for (let i = 0; i < a.count; i++) footPts[s].push(new T.Vector3().fromBufferAttribute(a, i).applyMatrix4(m.matrix));
+  });
+  const tmpW = new T.Vector3();
+  const lowest = (s, at, turn) => footPts[s].reduce((low, v) => Math.min(low, at.y + tmpW.copy(v).applyQuaternion(turn).y), Infinity);
+  // Pulled further than the legs reach, the hips slide along the edge of where both legs still reach
+  // their feet (no further than a straight leg from each).
+  function hipsInReach(to) {
+    root.position.copy(to);
+    root.updateMatrixWorld(true);
+    const [L1, L2] = bones(CHAINS.legR), far = L1 + L2 - 0.0002;
+    // where the hips would be with each hip joint right on its foot
+    const c = ['R', 'L'].map((s) => plants[s].at.clone().sub(worldPos('hip' + s).sub(to)));
+    const inFar = (q) => c.every((cc) => q.distanceTo(cc) <= far + 1e-5);
+    if (inFar(to)) return to;
+    const onEdge = c.map((cc) => cc.clone().add(to.clone().sub(cc).setLength(far))).filter(inFar);
+    if (onEdge.length) return onEdge.sort((a, b) => a.distanceTo(to) - b.distanceTo(to))[0];
+    // on the circle where the two reaches meet
+    const n = c[1].clone().sub(c[0]), D = n.length();
+    if (D > 1e-9) n.divideScalar(D); else n.set(1, 0, 0);
+    const m = c[0].clone().addScaledVector(n, D / 2), rho = Math.sqrt(Math.max(0, far * far - D * D / 4));
+    const w = to.clone().sub(m);
+    w.addScaledVector(n, -w.dot(n));
+    if (w.lengthSq() < 1e-12) w.set(0, 1, 0).addScaledVector(n, -n.y);
+    return m.add(w.setLength(rho));
+  }
+  // Bend each leg to its planted foot, with each knee pointing toward its pole. True when both feet
+  // stay where they stand and no knee goes into the floor.
+  function legsToFeet(poles) {
+    let fine = true;
+    for (const s of ['R', 'L']) {
+      const ch = CHAINS['leg' + s], pole = root.localToWorld(poles[s].clone());
+      // The ankle bends only so far. When the shin leans further forward than that, the heel lifts
+      // and the foot tips up onto its toes, as yours does in a deep crouch.
+      const plant = plants[s];
+      const ball = plant.at.clone().add(new T.Vector3(0, -0.04, TOE).applyQuaternion(plant.turn));
+      const heel = plant.at.clone().add(new T.Vector3(0, -0.04, HEEL).applyQuaternion(plant.turn));
+      const pivot = ball.y - heel.y > 0.005 ? heel : ball;       // standing on its heel, the toes come down first
+      const side = new T.Vector3(1, 0, 0).applyQuaternion(plant.turn);
+      const rollTo = (deg) => {
+        const spin = new T.Quaternion().setFromAxisAngle(side, deg * DEG);
+        const t = spin.clone().multiply(plant.turn), at = pivot.clone().add(plant.at.clone().sub(pivot).applyQuaternion(spin));
+        if (deg > 0) at.y += Math.max(0, 0.002 - lowest(s, at, t));      // the toes stay on the floor, not in it
+        return [at, t];
+      };
+      let at = plant.at, turn = plant.turn, rolled = 0;
+      const lo = limitOf('ankle' + s, 'x')[0] + 0.5;
+      for (let k = 0; k < 10; k++) {
+        solveChain(ch, at, pole);
+        const need = new T.Euler().setFromQuaternion(worldQuat('knee' + s).invert().multiply(turn), ORDER).x / DEG;
+        const next = clamp(rolled + lo - need, 0, 80);
+        if (Math.abs(next - rolled) < 0.3) break;
+        rolled = next;
+        [at, turn] = rollTo(rolled);
+      }
+      footTurn(s, turn);
+      if (worldPos('ankle' + s).distanceTo(at) > 0.005 || worldPos('knee' + s).y < KNEE_R) fine = false;
+      footShown[s] = { at: worldPos('ankle' + s), turn: worldQuat('ankle' + s) };
+    }
+    return fine;
+  }
+  const KNEE_R = 0.05;          // a knee's ball: it stays above the floor
+  // with the feet planted, can the hips go up any more? (not once both legs are straight)
+  function canRise() {
+    if (!planted() || !plants.R) return true;
+    const [L1, L2] = bones(CHAINS.legR), far = L1 + L2 - 0.0002;
+    return ['R', 'L'].every((s) => worldPos('hip' + s).add(new T.Vector3(0, 0.004, 0)).distanceTo(plants[s].at) <= far);
+  }
+  const copyPose = (p) => JSON.parse(JSON.stringify(p));
+  // The hips moved or turned (by a drag or an arrow): bend the legs so the feet stay planted. A move
+  // the legs cannot follow (the knees fold no further, or would go into the floor) stops part way,
+  // as far as it can go from the pose as it was. `poles`: where each knee points, in the hips' frame
+  // (kept through a drag); otherwise the way the knees pointed before the move.
+  function keepFeet(poles) {
+    if (!planted() || !plants.R || !shown) { fk(); aboveFloor(); applyPose(); return; }
+    const want = copyPose(pose), was = shown;
+    const put = (p) => { Object.keys(p).forEach((k) => { pose[k] = copyPose(p[k]); }); fk(); };
+    if (!poles) { put(was); poles = { R: root.worldToLocal(poleNow(CHAINS.legR)), L: root.worldToLocal(poleNow(CHAINS.legL)) }; }
+    // the hips' asked-for place, slid back within reach of the feet
+    put(want);
+    const q = hipsInReach(root.position.clone());
+    want.shift = { x: clamp(q.x, -SHIFT, SHIFT), z: clamp(q.z, -SHIFT, SHIFT) };
+    want.height = clamp(q.y - BASE_Y, LOW, HIGH);
+    // the hips part way (t) from where they were to where they are asked to go, with the legs as they were
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const tryAt = (t) => {
+      const p = copyPose(want);
+      CHAIN_LEGS.forEach((n) => { p[n] = copyPose(was[n]); });
+      p.height = lerp(was.height, want.height, t);
+      p.shift = { x: lerp(was.shift.x, want.shift.x, t), z: lerp(was.shift.z, want.shift.z, t) };
+      p.root = { x: lerp(was.root.x, want.root.x, t), y: was.root.y + wrapAz(want.root.y - was.root.y) * t, z: lerp(was.root.z, want.root.z, t) };
+      put(p);
+      return legsToFeet(poles);
+    };
+    if (tryAt(1)) { applyPose(false); return; }
+    if (!tryAt(0)) { tryAt(1); footShown.R = footShown.L = null; applyPose(true); return; }      // no good place to stop: the feet go where the legs put them
+    let a = 0, b = 1;
+    for (let k = 0; k < 7; k++) { const t = (a + b) / 2; if (tryAt(t)) a = t; else b = t; }
+    tryAt(a);
+    applyPose(false);
+  }
+  // ---- Undo ---------------------------------------------------------------------------------
+
+  const history = [];
+  const snapshot = () => JSON.stringify({ pose, light });
+  let last = null;
+  function remember() {
+    centreOnFigure();
+    const s = snapshot();
+    if (s === last) return;
+    if (last) history.push(last);
+    if (history.length > 60) history.shift();
+    last = s;
+    $('undo').disabled = !history.length;
+    save(s);
+    markLibrary();
+  }
+  $('undo').addEventListener('click', () => {
+    if (!history.length) return;
+    const s = JSON.parse(history.pop());
+    last = JSON.stringify(s);
+    setPose(s.pose); Object.assign(light, s.light); lightChanged(false);
+    $('undo').disabled = !history.length;
+    save(last);
+    markLibrary();
+  });
+  const KEY = 'pose-and-light.v2';
+  function save(s) { try { localStorage.setItem(KEY, s); } catch (err) { /* not kept */ } }
+  function restore() { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (err) { return null; } }
+
+  // ---- Picking a part: a yellow outline and arrows ------------------------------------------------
+
+  // The outline: each picked mesh gets a copy pushed out along its normals by a few pixels and
+  // drawn from behind, so only a rim shows around the part. It writes alpha 0, which the gray and
+  // three-value views read as "keep this yellow".
+  const outlineMat = new T.ShaderMaterial({
+    uniforms: { px: { value: 4.5 }, size: { value: new T.Vector2(800, 600) } },
+    side: T.BackSide,
+    vertexShader: `
+      uniform float px; uniform vec2 size;
+      void main() {
+        vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec3 n = normalize(normalMatrix * normal);
+        vec2 dir = (projectionMatrix * vec4(n, 0.0)).xy;
+        float len = length(dir);
+        if (len > 1e-5) clip.xy += dir / len * px * 2.0 / size * clip.w;
+        gl_Position = clip;
+      }`,
+    fragmentShader: 'void main() { gl_FragColor = vec4(1.0, 0.824, 0.247, 0.0); }',
+  });
+  let outlines = [];
+  let picked = null;
+  function pick(name) {
+    picked = name;
+    outlines.forEach((o) => o.parent.remove(o));
+    outlines = [];
+    parts.forEach((m) => {
+      if (!name || (name !== 'root' && m.userData.joint !== name)) return;     // the whole figure is outlined when it is picked
+      const o = new T.Mesh(m.geometry, outlineMat);
+      o.renderOrder = -1;
+      m.add(o);
+      outlines.push(o);
+    });
+    showPart();
+    buildArrows();
+    requestRender();
+  }
+  function showPart() {
+    $('partEmpty').hidden = !!picked;
+    $('partHow').hidden = !picked;
+    $('partDepth').hidden = true;
+    $('partButtons').hidden = !picked;
+    $('picked').hidden = !picked;
+    if (!picked) { $('partName').textContent = 'Nothing picked'; return; }
+    const spec = SPEC[picked];
+    $('partName').textContent = spec.name;
+    $('picked').textContent = spec.name;
+    $('mirror').hidden = !/[RL]$/.test(picked);
+  }
+
+  // Where each part's end is (its arrows sit there) and where it turns from.
+  const TIP = {
+    root: ['neck', [0, 0.32, 0]], waist: ['neck', [0, 0, 0]], neck: ['neck', [0, 0.32, 0]],
+    shoulder: ['elbow', [0, 0, 0]], elbow: ['wrist', [0, 0, 0]], wrist: ['wrist', [0, -0.19, 0]],
+    hip: ['knee', [0, 0, 0]], knee: ['ankle', [0, 0, 0]], ankle: ['ankle', [0, -0.03, 0.18]],
+  };
+  function tipWorld(name) {
+    const base = name.replace(/[RL]$/, ''), side = name.slice(-1);
+    const [j, local] = TIP[base];
+    const joint = J[j] ? j : j + side;
+    return J[joint].obj.localToWorld(new T.Vector3(...local));
+  }
+  function toScreen(v) {
+    const p = v.clone().project(camera);
+    return { x: (p.x + 1) / 2 * canvas.clientWidth, y: (1 - p.y) / 2 * canvas.clientHeight, z: p.z };
+  }
+  const STEP = 6;               // degrees a tap moves; holding keeps going
+  const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5"/></svg>';
+  const TURN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M18 2.8v4h-4"/></svg>';
+  const TOWARD = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.8" fill="currentColor"/></svg>';
+  const AWAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8"/></svg>';
+  let arrows = [];
+  function arrowAt(label, run) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'arrow';
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    let timer = null, wait = null;
+    const stop = () => { clearTimeout(wait); clearInterval(timer); wait = timer = null; if (b.classList.contains('is-held')) { b.classList.remove('is-held'); remember(); } };
+    b.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      b.setPointerCapture(e.pointerId);
+      $('hint').hidden = true;
+      b.classList.add('is-held');
+      run(1);
+      // held: keep going at a steady speed (about 70 degrees a second), however fast the screen draws
+      wait = setTimeout(() => {
+        let last = performance.now();
+        timer = setInterval(() => { const now = performance.now(); run(Math.min(250, now - last) / 1000 * 70 / STEP); last = now; }, 30);
+      }, 320);
+    });
+    b.addEventListener('pointerup', stop);
+    b.addEventListener('pointercancel', stop);
+    b.addEventListener('lostpointercapture', stop);
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(1); remember(); } });
+    $('arrows').appendChild(b);
+    return b;
+  }
+  // one arrow per direction of every way the picked part moves
+  function buildArrows() {
+    $('arrows').textContent = '';
+    arrows = [];
+    if (!picked) return;
+    const name = picked, spec = SPEC[name];
+    spec.axes.forEach((ax) => [1, -1].forEach((dir) => {
+      const a = { kind: 'axis', ax, dir, name };
+      a.el = arrowAt(dir > 0 ? ax.label : ax.back, (f) => nudge(a, f));
+      arrows.push(a);
+    }));
+    if (spec.height) [1, -1].forEach((dir) => {
+      const a = { kind: 'height', dir, name };
+      a.el = arrowAt(dir > 0 ? 'Raise the body' : 'Lower the body', (f) => { pose.height = clamp(pose.height + dir * 0.02 * f, LOW, HIGH); keepFeet(); });
+      arrows.push(a);
+    });
+    placeArrows();
+  }
+  function nudge(a, f) {
+    const v = pose[a.name][a.ax.axis] + a.dir * a.ax.sign * STEP * f;
+    pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max);
+    // leaning or tilting the hips bends the legs, so the feet stay planted; turning around turns it all
+    if (a.name === 'root' && a.ax.axis !== 'y') keepFeet(); else applyPose();
+  }
+  // Each arrow shows where the part's end goes when it is pressed, as seen from here:
+  //  - a straight arrow when the end moves across the screen, pointing that way;
+  //  - ◉ and ⊗ when it mostly moves toward or away from you;
+  //  - a curved arrow beside the part when the end hardly moves (a twist about the part's own length).
+  function placeArrows() {
+    if (!picked || !arrows.length) return;
+    const name = picked, o = J[name].obj;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    figure.updateMatrixWorld(true);
+    const tipW = tipWorld(name), tip = toScreen(tipW);
+    const pivotW = o.getWorldPosition(new T.Vector3());
+    const pivot = toScreen(name === 'root' ? root.localToWorld(new T.Vector3(0, -0.05, 0)) : pivotW);
+    const mid = { x: (tip.x + pivot.x) / 2, y: (tip.y + pivot.y) / 2 };
+    let along = { x: tip.x - pivot.x, y: tip.y - pivot.y };
+    const alen = Math.hypot(along.x, along.y) || 1;
+    along = { x: along.x / alen, y: along.y / alen };
+    const across = { x: -along.y, y: along.x };
+    const toEye = camera.position.clone().sub(tipW).normalize();
+
+    // where the end goes when one angle changes by `delta` degrees: on screen, and in the room
+    const probe = (axis, delta) => {
+      const e = o.rotation.clone();
+      const t = { x: e.x, y: e.y, z: e.z };
+      t[axis] += delta * DEG;
+      o.rotation.set(t.x, t.y, t.z, ORDER);
+      o.updateMatrixWorld(true);
+      const pw = tipWorld(name), s = toScreen(pw);
+      o.rotation.copy(e);
+      o.updateMatrixWorld(true);
+      return { x: s.x - tip.x, y: s.y - tip.y, room: pw.sub(tipW) };
+    };
+    const reach = tipW.distanceTo(name === 'root' ? root.getWorldPosition(new T.Vector3()) : pivotW);
+    const info = {};
+    SPEC[name].axes.forEach((ax) => {
+      // probed with a bigger turn than one tap, so a short part still shows which way it goes
+      let d = probe(ax.axis, 15 * ax.sign);
+      if (d.room.length() < 1e-4) { const back = probe(ax.axis, -15 * ax.sign); d = { x: -back.x, y: -back.y, room: back.room.negate() }; }
+      const moved = d.room.length();
+      const toward = d.room.dot(toEye);                               // + comes toward you
+      const sideways = Math.sqrt(Math.max(0, moved * moved - toward * toward));
+      const kind = moved < 0.25 * reach * Math.sin(15 * DEG) ? 'turn'
+        : Math.abs(toward) > 1.3 * sideways || Math.hypot(d.x, d.y) < 4 ? 'depth' : 'side';
+      info[ax.axis] = { kind, ang: Math.atan2(d.y, d.x), mag: Math.hypot(d.x, d.y), toward };
+    });
+    // two moves that shift the end the same way on screen: the one that is more toward or away from you
+    // gets ◉ and ⊗ instead, so no two arrows point the same way and do different things
+    const sides = Object.values(info).filter((i) => i.kind === 'side').sort((a, b) => b.mag - a.mag);
+    sides.forEach((i, n) => { if (sides.slice(0, n).some((k) => k.kind === 'side' && Math.abs(Math.cos(k.ang - i.ang)) > 0.94)) i.kind = 'depth'; });
+
+    const placed = [];
+    // the small rig controls stay uncovered, so they can still be grabbed
+    const taken = showRig() ? CTRLS.filter((c) => c.screen && c.kind !== 'ring').map((c) => ({ x: c.screen.center.x, y: c.screen.center.y, r: 22 + (c.kind === 'hand' ? c.rad : c.kind === 'foot' ? 14 : 10) })) : [];
+    const ok = (x, y) => x >= 22 && x <= w - 22 && y >= 22 && y <= h - 22 && placed.every((q) => Math.hypot(q.x - x, q.y - y) >= 44)
+      && taken.every((q) => Math.hypot(q.x - x, q.y - y) >= q.r);
+    // the first free spot on rings around (cx, cy), starting at angle `ang`
+    const spot = (cx, cy, ang, radii) => {
+      for (const r of radii) for (const off of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.75, -1.75]) {
+        const x = cx + Math.cos(ang + off) * r, y = cy + Math.sin(ang + off) * r;
+        if (ok(x, y)) return { x, y };
+      }
+      return { x: clamp(cx + Math.cos(ang) * radii[0], 22, w - 22), y: clamp(cy + Math.sin(ang) * radii[0], 22, h - 22) };
+    };
+    const ICON = { arrow: ARROW, turn: TURN, toward: TOWARD, away: AWAY };
+    const put = (a, at, shape, transform) => {
+      if (a.shape !== shape) { a.el.innerHTML = ICON[shape]; a.shape = shape; }
+      a.el.firstChild.style.transform = transform || '';
+      a.el.style.transform = `translate(${at.x}px, ${at.y}px)`;
+      a.el.hidden = false;
+      placed.push(at);
+    };
+    const limited = (a) => {
+      const cur = pose[name][a.ax.axis];
+      return Math.abs(clamp(cur + a.dir * a.ax.sign * STEP, a.ax.min, a.ax.max) - cur) < 1e-6;
+    };
+    const camToPivot = camera.position.clone().sub(pivotW);
+    let depthShown = false;
+    const of = (k) => arrows.filter((a) => a.kind === 'axis' && info[a.ax.axis].kind === k);
+
+    // straight arrows first: they are the main moves
+    of('side').forEach((a) => {
+      const ang = info[a.ax.axis].ang + (a.dir > 0 ? 0 : Math.PI);
+      put(a, spot(tip.x, tip.y, ang, [50, 76, 102]), 'arrow', `rotate(${ang}rad)`);
+      a.el.disabled = limited(a);
+    });
+    // toward and away: a pair across the end of the part
+    of('depth').forEach((a) => {
+      const comes = (info[a.ax.axis].toward > 0) === (a.dir > 0);
+      const side = comes ? 1 : -1;
+      const ang = Math.atan2(across.y * side, across.x * side);
+      put(a, spot(tip.x, tip.y, ang, [50, 76, 102]), comes ? 'toward' : 'away');
+      a.el.setAttribute('aria-label', `${a.dir > 0 ? a.ax.label : a.ax.back} (${comes ? 'toward you' : 'away from you'})`);
+      a.el.title = a.el.getAttribute('aria-label');
+      a.el.disabled = limited(a);
+      depthShown = true;
+    });
+    // then the twists: curved arrows beside the part, counterclockwise on the left, clockwise on the right
+    of('turn').forEach((a) => {
+      const q = o.parent.getWorldQuaternion(new T.Quaternion());
+      const e = o.rotation;
+      let axis;
+      if (a.ax.axis === 'z') axis = new T.Vector3(0, 0, 1).applyQuaternion(q);
+      else if (a.ax.axis === 'x') axis = new T.Vector3(1, 0, 0).applyQuaternion(q.multiply(new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 0, 1), e.z)));
+      else axis = new T.Vector3(0, 1, 0).applyQuaternion(o.getWorldQuaternion(new T.Quaternion()));
+      const ccw = (axis.dot(camToPivot) > 0) === (a.dir * a.ax.sign > 0);
+      const side = (ccw ? -1 : 1) * Math.sign(across.x || 1);
+      const ang = Math.atan2(across.y * side, across.x * side);
+      put(a, spot(mid.x, mid.y, ang, [48, 74, 100]), 'turn', ccw ? 'scaleX(-1)' : '');
+      a.el.disabled = limited(a);
+    });
+    // raise and lower, for the whole figure, to its left
+    arrows.filter((a) => a.kind === 'height').forEach((a) => {
+      const ang = a.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+      put(a, spot(pivot.x - 66, pivot.y, ang, [26, 50, 74]), 'arrow', `rotate(${ang}rad)`);
+      a.el.disabled = a.dir > 0 ? pose.height >= HIGH - 1e-6 || !canRise() : pose.height <= LOW + 1e-6;
+    });
+    $('partDepth').hidden = !depthShown;
+  }
+  $('straighten').addEventListener('click', () => {
+    if (!picked) return;
+    pose[picked] = { x: 0, y: 0, z: 0 };
+    if (picked === 'root') { pose.height = 0; applyPose(); ground(); } else applyPose();
+    remember();
+  });
+  $('mirror').addEventListener('click', () => {
+    if (!picked || !/[RL]$/.test(picked)) return;
+    const other = picked.slice(0, -1) + (picked.endsWith('R') ? 'L' : 'R');
+    const a = pose[picked];
+    pose[other] = { x: a.x, y: -a.y, z: -a.z };
+    // the rest of the limb follows, so the whole arm or leg matches
+    const chain = { shoulder: ['elbow', 'wrist'], hip: ['knee', 'ankle'], elbow: ['wrist'], knee: ['ankle'] }[picked.slice(0, -1)] || [];
+    chain.forEach((c) => { const b = pose[c + picked.slice(-1)]; pose[c + other.slice(-1)] = { x: b.x, y: -b.y, z: -b.z }; });
+    applyPose(); remember();
+  });
+
+  // ---- Light controls ----------------------------------------------------------------------
+
+  const LF = [
+    ['lAz', 'az', (v) => `${Math.round(v)}°`],
+    ['lEl', 'el', (v) => `${Math.round(v)}°`],
+    ['lDist', 'dist', (v) => `${(+v).toFixed(1)} m`],
+    ['lSoft', 'soft', (v) => (v <= 1 ? 'Sharp' : v >= 8 ? 'Very soft' : v >= 5 ? 'Soft' : 'Medium')],
+    ['lFill', 'fill', (v) => `${Math.round(v)}%`],
+  ];
+  function wrapAz(a) { return ((a % 360) + 540) % 360 - 180; }
+  function lightChanged(fromSlider) {
+    light.az = wrapAz(light.az);
+    const asked = light.el;
+    reachable();
+    if (fromSlider && light.el !== asked) fromSlider = false;          // show the height the lamp can really reach
+    LF.forEach(([id, k, f]) => { if (!fromSlider) $(id).value = light[k]; $(id + 'Out').textContent = f(light[k]); });
+    const match = LIGHTS.find((l) => Math.abs(wrapAz(l.az - light.az)) < 6 && Math.abs(l.el - light.el) < 6);
+    $('lightName').textContent = match ? match.name : 'Your own';
+    $('lightLesson').innerHTML = match ? match.lesson : 'Move the light and watch the <b>shadow side</b> and the <b>cast shadow</b> on the backdrop change shape.';
+    document.querySelectorAll('#lights .btn').forEach((b) => b.setAttribute('aria-pressed', String(!!match && b.dataset.id === match.id)));
+    $('lightSum').textContent = `${Math.round(light.az)}° around, ${Math.round(light.el)}° up`;
+    placeLamp();
+    requestRender();
+  }
+  LF.forEach(([id, k]) => {
+    $(id).addEventListener('input', () => { light[k] = +$(id).value; lightChanged(true); });
+    $(id).addEventListener('change', remember);
+  });
+  LIGHTS.forEach((l) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn'; b.textContent = l.name; b.dataset.id = l.id;
+    b.addEventListener('click', () => { light.az = l.az; light.el = l.el; lightChanged(false); remember(); });
+    $('lights').appendChild(b);
+  });
+  // the lowest point of the whole figure
+  const tmpV = new T.Vector3();
+  function lowestPoint() {
+    figure.updateMatrixWorld(true);
+    let low = Infinity;
+    parts.forEach((m) => {
+      const a = m.geometry.attributes.position;
+      for (let i = 0; i < a.count; i++) { tmpV.fromBufferAttribute(a, i).applyMatrix4(m.matrixWorld); if (tmpV.y < low) low = tmpV.y; }
+    });
+    return low;
+  }
+  // lower or raise the figure so its lowest point touches the floor
+  function ground() {
+    pose.height = clamp(pose.height - (lowestPoint() - 0.002), LOW, HIGH);
+    applyPose();
+  }
+  // with the feet not planted, a move of the body still keeps the figure out of the floor
+  function aboveFloor() {
+    const low = lowestPoint();
+    if (low < 0.002) { pose.height = clamp(pose.height + 0.002 - low, LOW, HIGH); fk(); }
+  }
+  $('ground').addEventListener('click', () => { ground(); remember(); });
+
+  // ---- Pose library: a picture of the figure in each pose ------------------------------------------
+
+  // Each picture is drawn from the figure itself, off screen, from the side the pose reads best and in
+  // the same studio light, so the library always matches the figure. Until a picture is ready (or if
+  // it cannot be drawn), the button shows the pose's name.
+  const THUMB = { w: 160, h: 200 };              // drawn at twice this size and scaled down, for smooth edges
+  const thumbCam = new T.PerspectiveCamera(30, THUMB.w / THUMB.h, 0.05, 60);
+  let thumbTarget = null;
+  function drawThumb(entry) {
+    const W2 = THUMB.w * 2, H2 = THUMB.h * 2;
+    const keep = copyPose(pose), keepLight = Object.assign({}, light), keepTarget = TARGET.clone();
+    const vis = [bulb.visible, beam.visible, stand.visible, outlineMat.visible];
+    try {
+      Object.assign(pose, cleanPose(entry.p));
+      fk();
+      if (entry.ground !== false) {
+        pose.height = clamp(pose.height - (lowestPoint() - 0.002) + (entry.lift || 0), LOW, HIGH);
+        fk();
+      }
+      bulb.visible = beam.visible = stand.visible = outlineMat.visible = false;
+      // the camera: around the pose's middle, far enough back to fit all of it
+      const box = new T.Box3();
+      parts.forEach((m) => box.expandByObject(m));
+      const mid = box.getCenter(new T.Vector3()), r = box.getBoundingSphere(new T.Sphere()).radius;
+      const v = entry.thumbView || { az: 30, el: 8 }, a = v.az * DEG, e = v.el * DEG;
+      // the camera stays inside the studio; when a wide pose would put it beyond the backdrop, the lens widens instead
+      thumbCam.fov = 30;
+      const far = r / Math.sin(thumbCam.fov * DEG / 2) * 1.02;
+      thumbCam.position.copy(inside(mid, v.az, v.el, far, 0.25));
+      const got = thumbCam.position.distanceTo(mid);
+      if (got < far - 1e-3) thumbCam.fov = 2 * Math.asin(Math.min(1, r * 1.02 / got)) / DEG;
+      thumbCam.updateProjectionMatrix();
+      thumbCam.lookAt(mid);
+      // the light: high, from the picture's front left
+      Object.assign(light, { az: v.az + 40, el: 32, dist: 2.6, soft: 3, fill: 45 });
+      TARGET.set(pose.shift.x, 0.95, pose.shift.z);
+      lamp.target.position.copy(TARGET);
+      placeLamp();
+      if (!thumbTarget) thumbTarget = new T.WebGLRenderTarget(W2, H2, { encoding: T.sRGBEncoding });
+      renderer.setRenderTarget(thumbTarget);
+      renderer.render(scene, thumbCam);
+      const px = new Uint8Array(W2 * H2 * 4);
+      renderer.readRenderTargetPixels(thumbTarget, 0, 0, W2, H2, px);
+      const big = document.createElement('canvas');
+      big.width = W2; big.height = H2;
+      const g = big.getContext('2d'), img = g.createImageData(W2, H2);
+      for (let y = 0; y < H2; y++) img.data.set(px.subarray((H2 - 1 - y) * W2 * 4, (H2 - y) * W2 * 4), y * W2 * 4);      // rows come bottom first
+      for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+      g.putImageData(img, 0, 0);
+      const small = document.createElement('canvas');
+      small.width = THUMB.w; small.height = THUMB.h;
+      const sg = small.getContext('2d');
+      sg.imageSmoothingQuality = 'high';
+      sg.drawImage(big, 0, 0, THUMB.w, THUMB.h);
+      return small.toDataURL('image/jpeg', 0.86);
+    } catch (err) {
+      return null;
+    } finally {
+      renderer.setRenderTarget(null);
+      Object.keys(keep).forEach((k) => { pose[k] = keep[k]; });
+      fk();
+      Object.assign(light, keepLight);
+      TARGET.copy(keepTarget);
+      lamp.target.position.copy(TARGET);
+      placeLamp();
+      [bulb.visible, beam.visible, stand.visible, outlineMat.visible] = vis;
+    }
+  }
+  // pictures are drawn one at a time after the page is up, so it opens quickly
+  const thumbQueue = [];
+  let thumbBusy = false;
+  function thumbLater(entry, btn) {
+    thumbQueue.push([entry, btn]);
+    if (thumbBusy) return;
+    thumbBusy = true;
+    const next = () => {
+      const job = thumbQueue.shift();
+      if (!job) { thumbBusy = false; requestRender(); return; }
+      if (job[1].isConnected) {
+        const url = drawThumb(job[0]);
+        if (url) { job[1].querySelector('img').src = url; job[1].classList.add('has-img'); if (job[0].id) thumbs.set(job[0].id, url); }
+      }
+      setTimeout(next, 16);
+    };
+    setTimeout(next, 60);
+  }
+  function poseButton(name, entry, onPick) {
+    const item = document.createElement('div');
+    item.className = 'pose-item';
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'pose-btn';
+    b.title = name;
+    b.setAttribute('aria-label', name);
+    b.setAttribute('aria-pressed', 'false');
+    const label = document.createElement('span');
+    label.className = 'pose-name'; label.textContent = name;
+    const img = document.createElement('img');
+    img.alt = '';
+    b.append(label, img);
+    b.addEventListener('click', onPick);
+    item.appendChild(b);
+    if (entry.id && thumbs.has(entry.id)) { img.src = thumbs.get(entry.id); b.classList.add('has-img'); }
+    else thumbLater(entry, b);
+    return item;
+  }
+  const thumbs = new Map();                  // pictures already drawn, by pose id
+  // the library's pose now on the figure: its button stays pressed until the pose changes
+  let chosen = null;
+  function choose(id, name) {
+    chosen = { id, name, pose: JSON.stringify(pose) };
+    markLibrary();
+  }
+  function markLibrary() {
+    const on = chosen && chosen.pose === JSON.stringify(pose) ? chosen.id : null;
+    document.querySelectorAll('#poses .pose-btn, #mine .pose-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === on)));
+    $('libNote').textContent = on ? chosen.name : 'Tap a pose to start from it';
+  }
+  POSES.forEach((ps) => {
+    const item = poseButton(ps.name, ps, () => {
+      setPose(ps.p);
+      ground();
+      if (ps.lift) { pose.height = clamp(pose.height + ps.lift, LOW, HIGH); applyPose(); }
+      choose(ps.id, ps.name);
+      remember();
+    });
+    item.firstChild.dataset.id = ps.id;
+    $('poses').appendChild(item);
+  });
+
+  // your own poses, kept in this browser
+  const MINE_KEY = 'pose-and-light.mine.v1', MINE_MAX = 12;
+  let mine = [];
+  try {
+    const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
+    if (Array.isArray(m)) mine = m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX);
+  } catch (err) { /* none kept */ }
+  const keepMine = () => { try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); } catch (err) { /* not kept */ } };
+  let removed = null;                        // the last pose taken away, until it is put back or another changes
+  function showMine() {
+    $('mine').textContent = '';
+    $('mineWrap').hidden = !mine.length && !removed;
+    $('mineBack').hidden = !removed;
+    mine.forEach((m, i) => {
+      const name = `Your pose ${i + 1}`;
+      const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
+      const item = poseButton(name, { id: m.id, p: m.p, ground: false, thumbView: view }, () => { setPose(m.p); choose(m.id, name); remember(); });
+      item.firstChild.dataset.id = m.id;
+      const x = document.createElement('button');
+      x.type = 'button'; x.className = 'pose-x'; x.textContent = '×';
+      x.setAttribute('aria-label', `Remove ${name.toLowerCase()}`);
+      x.title = `Remove ${name.toLowerCase()}`;
+      x.addEventListener('click', () => {
+        removed = { m, at: i };
+        mine = mine.filter((q) => q !== m);
+        keepMine();
+        showMine();
+        markLibrary();
+        // focus stays in the list: the next pose's ×, or the way back
+        const xs = $('mine').querySelectorAll('.pose-x');
+        (xs[Math.min(i, xs.length - 1)] || $('mineBack')).focus();
+      });
+      item.appendChild(x);
+      $('mine').appendChild(item);
+    });
+    $('savePose').disabled = false;
+  }
+  $('mineBack').addEventListener('click', () => {
+    if (!removed) return;
+    mine.splice(Math.min(removed.at, mine.length), 0, removed.m);
+    if (mine.length > MINE_MAX) mine.shift();
+    removed = null;
+    keepMine();
+    showMine();
+    markLibrary();
+    $('savePose').focus();
+  });
+  $('savePose').addEventListener('click', () => {
+    removed = null;
+    const id = 'mine-' + Date.now().toString(36);
+    mine.push({ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } });
+    if (mine.length > MINE_MAX) mine.shift();
+    keepMine();
+    showMine();
+    choose(id, `Your pose ${mine.length}`);
+  });
+  showMine();
+
+  // ---- How it is shown: color, gray, or the three values ----------------------------------------
+
+  let look = 0;
+  const post = {
+    target: null,
+    scene: new T.Scene(),
+    camera: new T.OrthographicCamera(-1, 1, 1, -1, 0, 1),
+    mat: new T.ShaderMaterial({
+      uniforms: { tex: { value: null }, mode: { value: 1 }, t1: { value: 30 }, t2: { value: 58 } },
+      depthTest: false,
+      depthWrite: false,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: `
+        uniform sampler2D tex; uniform int mode; uniform float t1; uniform float t2; varying vec2 vUv;
+        float toLin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+        float toSrgb(float c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+        float lstar(float y) { return y > 0.008856 ? 116.0 * pow(y, 1.0 / 3.0) - 16.0 : 903.3 * y; }
+        float yOf(float L) { return L > 8.0 ? pow((L + 16.0) / 116.0, 3.0) : L / 903.3; }
+        void main() {
+          vec4 s = texture2D(tex, vUv);
+          vec3 c = s.rgb;
+          float L = lstar(dot(vec3(toLin(c.r), toLin(c.g), toLin(c.b)), vec3(0.2126, 0.7152, 0.0722)));
+          if (mode == 2) L = L < t1 ? 20.0 : (L < t2 ? 50.0 : 85.0);
+          // the picked part's outline (written with alpha 0) stays yellow
+          gl_FragColor = vec4(mix(c, vec3(toSrgb(yOf(L))), s.a), 1.0);
+        }`,
+    }),
+  };
+  post.scene.add(new T.Mesh(new T.PlaneGeometry(2, 2), post.mat));
+  function postTarget(w, h) {
+    if (post.target && post.target.width === w && post.target.height === h) return post.target;
+    if (post.target) post.target.dispose();
+    const opts = { encoding: T.sRGBEncoding };
+    post.target = renderer.capabilities.isWebGL2 && T.WebGLMultisampleRenderTarget
+      ? new T.WebGLMultisampleRenderTarget(w, h, opts)
+      : new T.WebGLRenderTarget(w, h, opts);
+    return post.target;
+  }
+  document.querySelectorAll('input[name="look"]').forEach((r) => r.addEventListener('change', () => {
+    look = +document.querySelector('input[name="look"]:checked').value;
+    post.mat.uniforms.mode.value = look;
+    $('splitFields').hidden = look !== 2;
+    requestRender();
+  }));
+  for (const id of ['t1', 't2']) {
+    $(id).addEventListener('input', () => {
+      if (+$('t1').value > +$('t2').value - 5) { if (id === 't1') $('t2').value = +$('t1').value + 5; else $('t1').value = +$('t2').value - 5; }
+      post.mat.uniforms.t1.value = +$('t1').value;
+      post.mat.uniforms.t2.value = +$('t2').value;
+      $('t1Out').textContent = `V ${(+$('t1').value / 10).toFixed(1)}`;
+      $('splitSum').textContent = `V ${(+$('t1').value / 10).toFixed(1)} / ${(+$('t2').value / 10).toFixed(1)}`;
+      $('t2Out').textContent = `V ${(+$('t2').value / 10).toFixed(1)}`;
+      requestRender();
+    });
+  }
+  $('t1Out').textContent = 'V 3.0'; $('t2Out').textContent = 'V 5.8';
+  $('splitSum').textContent = 'V 3.0 / 5.8';
+  // what each folded menu holds, said on its button
+  function sayShown() {
+    const off = [['showStand', 'stand'], ['showLamp', 'lamp']].filter(([id]) => !$(id).checked).map(([, w]) => w);
+    $('showSum').textContent = off.length ? `${off.join(' and ')} hidden` : 'all shown';
+    $('rigSum').textContent = !$('showRig').checked ? 'hidden' : $('plantFeet').checked ? 'feet planted' : 'feet free';
+  }
+  $('showStand').addEventListener('change', () => { stand.visible = $('showStand').checked; sayShown(); requestRender(); });
+  $('showLamp').addEventListener('change', () => { bulb.visible = beam.visible = $('showLamp').checked; $('lampHandle').hidden = !$('showLamp').checked; sayShown(); requestRender(); });
+  $('plantFeet').addEventListener('change', sayShown);
+  sayShown();
+
+  // ---- Drawing --------------------------------------------------------------------------------
+
+  let queued = false;
+  function requestRender() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(render);
+  }
+  // the handle sits on the lamp, or at the edge of the stage in the lamp's direction when it is out of view
+  const handle = $('lampHandle');
+  const ray = new T.Raycaster();
+  function placeHandle() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    camera.updateMatrixWorld();
+    const cam = bulb.position.clone().applyMatrix4(camera.matrixWorldInverse);
+    const v = bulb.position.clone().project(camera);
+    let x = v.x, y = v.y;
+    const behind = cam.z > 0;
+    if (behind) { x = -x; y = -y; }
+    const off = behind || Math.abs(x) > 0.94 || Math.abs(y) > 0.94;
+    if (off) { const k = 0.94 / Math.max(Math.abs(x), Math.abs(y), 1e-6); x *= k; y *= k; }
+    handle.style.transform = `translate(${clamp((x + 1) / 2 * w, 26, w - 26)}px, ${clamp((1 - y) / 2 * h, 26, h - 64)}px)`;
+    handle.classList.toggle('is-off', off);
+    // hidden behind the figure: the ring dims and lets taps through to the figure
+    let behindFigure = false;
+    if (!off) {
+      const toBulb = bulb.position.clone().sub(camera.position);
+      const far = toBulb.length();
+      ray.set(camera.position, toBulb.normalize());
+      const h0 = ray.intersectObjects(parts, false)[0];
+      behindFigure = !!h0 && h0.distance < far - 0.05;
+    }
+    handle.classList.toggle('is-behind', behindFigure);
+    handle.dataset.x = clamp((x + 1) / 2 * w, 26, w - 26);
+    handle.dataset.y = clamp((1 - y) / 2 * h, 26, h - 64);
+  }
+  function render() {
+    queued = false;
+    placeHandle();
+    drawRig();
+    placeArrows();
+    if (look === 0) {
+      renderer.setRenderTarget(null);
+      renderer.render(scene, camera);
+      return;
+    }
+    const size = renderer.getDrawingBufferSize(new T.Vector2());
+    const target = postTarget(size.x, size.y);
+    renderer.setRenderTarget(target);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    post.mat.uniforms.tex.value = target.texture;
+    renderer.render(post.scene, post.camera);
+  }
+  function resize() {
+    const r = canvas.parentElement.getBoundingClientRect();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(Math.max(1, r.width), Math.max(1, r.height), false);
+    outlineMat.uniforms.size.value.set(Math.max(1, r.width), Math.max(1, r.height));
+    camera.aspect = r.width / Math.max(1, r.height);
+    camera.updateProjectionMatrix();
+    requestRender();
+  }
+  new ResizeObserver(resize).observe(canvas.parentElement);
+  // moving to another screen changes the pixel ratio without a resize
+  (function watchRatio() {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    const on = () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); resize(); watchRatio(); };
+    if (mq.addEventListener) mq.addEventListener('change', on); else if (mq.addListener) mq.addListener(on);
+  })();
+
+  // ---- Pointer: pose a part, move the lamp, walk around, pinch to zoom ----------------------------
+
+  const ndc = new T.Vector2();
+  function rayAt(e) {
+    const r = canvas.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    return ray;
+  }
+  function hitAt(e) {
+    rayAt(e);
+    const h = ray.intersectObjects(parts, false)[0];
+    return h ? { joint: h.object.userData.joint, point: h.point } : null;
+  }
+
+  const pointers = new Map();
+  let drag = null;
+  // a drag moves the swings, not the twist (the curved arrows twist)
+  const dragAxes = (name) => { const a = SPEC[name].axes.filter((q) => q.axis !== 'y'); return a.length ? a : SPEC[name].axes; };
+  function startPose(name, point) {
+    if (name === 'root') return { kind: 'turn', yaw: pose.root.y };
+    const o = J[name].obj;
+    return { kind: 'pose', name, local: o.worldToLocal(point.clone()), grab: toScreen(point), start: Object.assign({}, pose[name]) };
+  }
+  // Moves the grabbed spot toward the pointer with small steps of the part's own angles (damped
+  // least squares on how the spot moves on screen per degree), so limits hold, nothing flips past
+  // 90 degrees and the twist stays as it was.
+  function movePose(d, e) {
+    const goal = { x: d.grab.x + (e.clientX - d.at.x), y: d.grab.y + (e.clientY - d.at.y) };
+    const o = J[d.name].obj, axes = dragAxes(d.name), a = pose[d.name];
+    const spotNow = () => { o.rotation.set(a.x * DEG, a.y * DEG, a.z * DEG, ORDER); o.updateMatrixWorld(true); return toScreen(o.localToWorld(d.local.clone())); };
+    for (let it = 0; it < 5; it++) {
+      const now = spotNow();
+      const ex = goal.x - now.x, ey = goal.y - now.y;
+      if (Math.hypot(ex, ey) < 0.5) break;
+      let cols = axes.map((ax) => {
+        a[ax.axis] += 1; const s = spotNow(); a[ax.axis] -= 1;
+        return { ax, x: s.x - now.x, y: s.y - now.y, m: Math.hypot(s.x - now.x, s.y - now.y) };
+      });
+      // a move that barely shows from here (mostly toward or away from you) is left to the arrows
+      const strongest = Math.max(...cols.map((c) => c.m));
+      cols = cols.filter((c) => c.m >= 0.3 * strongest);
+      const L = 6;             // damping: a move that hardly shows on screen is barely used
+      let steps;
+      if (cols.length === 1) {
+        const c = cols[0];
+        steps = [(c.x * ex + c.y * ey) / (c.x * c.x + c.y * c.y + L)];
+      } else {
+        const [c1, c2] = cols;
+        const a11 = c1.x * c1.x + c1.y * c1.y + L, a22 = c2.x * c2.x + c2.y * c2.y + L, a12 = c1.x * c2.x + c1.y * c2.y;
+        const b1 = c1.x * ex + c1.y * ey, b2 = c2.x * ex + c2.y * ey, det = a11 * a22 - a12 * a12;
+        steps = [(a22 * b1 - a12 * b2) / det, (a11 * b2 - a12 * b1) / det];
+      }
+      cols.forEach((c, k) => { a[c.ax.axis] = clamp(a[c.ax.axis] + clamp(steps[k], -10, 10), c.ax.min, c.ax.max); });
+    }
+    applyPose();
+  }
+  // a tap that just misses a thin part (a hand, a foot) still picks it
+  function nearPart(e, tolerance) {
+    const r = canvas.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    let best = null, bestD = tolerance;
+    NAMES.forEach((n) => {
+      const a = toScreen(n === 'root' ? root.localToWorld(new T.Vector3(0, -0.12, 0)) : J[n].obj.getWorldPosition(new T.Vector3()));
+      const b = toScreen(n === 'root' ? root.localToWorld(new T.Vector3(0, 0.04, 0)) : tipWorld(n));
+      const vx = b.x - a.x, vy = b.y - a.y, len2 = vx * vx + vy * vy || 1;
+      const t = clamp(((px - a.x) * vx + (py - a.y) * vy) / len2, 0, 1);
+      const dist = Math.hypot(px - (a.x + t * vx), py - (a.y + t * vy));
+      if (dist < bestD) { bestD = dist; best = n; }
+    });
+    return best;
+  }
+
+  // ---- Rig controls: drag a hand, a foot, an elbow or a knee, the hips or the chest -------------------
+
+  // Colored as in animation rigs: the figure's right is red, its left blue, the middle of the body amber.
+  // Drawn over the stage (not in the 3D scene), so snapshots and the value views leave them out.
+  const RIG = { R: '#ff5d52', L: '#59b0ff', C: '#ffb340' };
+  const rigSvg = $('rig');
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const CTRLS = [];
+  function addCtrl(c) {
+    c.g = document.createElementNS(SVGNS, 'g');
+    c.paths = ['under back', 'over back', 'under', 'over'].map((cls) => {
+      const el = document.createElementNS(SVGNS, 'path');
+      el.setAttribute('class', cls);
+      if (cls.startsWith('over')) el.style.stroke = c.color;
+      if (c.kind === 'pole' && cls === 'over') el.style.fill = c.color;
+      c.g.appendChild(el);
+      return el;
+    });
+    rigSvg.appendChild(c.g);
+    CTRLS.push(c);
+  }
+  // drawn in this order, so the small ones sit on top
+  addCtrl({ id: 'torso', kind: 'ring', joint: 'waist', at: [0, 0.27, 0], r: [0.235, 0.17], pick: 'waist', color: RIG.C });
+  addCtrl({ id: 'pelvis', kind: 'ring', joint: 'root', at: [0, -0.05, 0], r: [0.24, 0.19], pick: 'root', color: RIG.C });
+  for (const s of ['R', 'L']) {
+    addCtrl({ id: 'foot' + s, kind: 'foot', joint: 'ankle' + s, at: [0, -0.04, 0.05], r: [0.08, 0.16], chain: CHAINS['leg' + s], pick: 'ankle' + s, color: RIG[s] });
+    addCtrl({ id: 'knee' + s, kind: 'pole', chain: CHAINS['leg' + s], pick: 'hip' + s, color: RIG[s] });
+    addCtrl({ id: 'hand' + s, kind: 'hand', joint: 'wrist' + s, at: [0, -0.075, 0], chain: CHAINS['arm' + s], pick: 'wrist' + s, color: RIG[s] });
+    addCtrl({ id: 'elbow' + s, kind: 'pole', chain: CHAINS['arm' + s], pick: 'shoulder' + s, color: RIG[s] });
+  }
+  let hot = null;            // the control under the mouse, or being dragged
+  const showRig = () => $('showRig').checked;
+  const xy = (q) => `${q.x.toFixed(1)} ${q.y.toFixed(1)}`;
+  function drawRig() {
+    rigSvg.style.display = showRig() ? '' : 'none';
+    if (!showRig()) return;
+    const h = canvas.clientHeight;
+    const camDir = camera.getWorldDirection(new T.Vector3());
+    CTRLS.forEach((c) => {
+      let pts, center;
+      const far = [];          // for a ring: which points are on its far side
+      if (c.kind === 'ring' || c.kind === 'foot') {
+        const o = J[c.joint].obj, C = o.localToWorld(new T.Vector3(...c.at));
+        center = toScreen(C);
+        pts = [];
+        for (let i = 0; i <= 48; i++) {
+          const t = i / 48 * 2 * Math.PI;
+          const w = o.localToWorld(new T.Vector3(c.at[0] + c.r[0] * Math.cos(t), c.at[1], c.at[2] + c.r[1] * Math.sin(t)));
+          pts.push(toScreen(w));
+          far.push(w.sub(C).dot(camDir) > 0);
+        }
+      } else if (c.kind === 'hand') {
+        const C = J[c.joint].obj.localToWorld(new T.Vector3(...c.at));
+        center = toScreen(C);
+        // at least 15 px, so a hand far away is still easy to grab
+        c.rad = Math.max(15, 0.085 * h / (2 * camera.position.distanceTo(C) * Math.tan(camera.fov * DEG / 2)));
+        pts = [];
+        for (let i = 0; i <= 36; i++) { const t = i / 36 * 2 * Math.PI; pts.push({ x: center.x + c.rad * Math.cos(t), y: center.y + c.rad * Math.sin(t), z: center.z }); }
+      } else {
+        // an elbow or knee: a diamond on the joint
+        center = toScreen(worldPos(c.chain.mid));
+        pts = [[0, -8], [8, 0], [0, 8], [-8, 0], [0, -8]].map(([x, y]) => ({ x: center.x + x, y: center.y + y, z: center.z }));
+      }
+      const off = pts.some((q) => !(q.z < 1));            // behind the camera
+      c.screen = off ? null : { pts, center };
+      c.g.style.display = off ? 'none' : '';
+      if (off) return;
+      // the far half of a ring is drawn fainter, so it reads as going round the body
+      let dNear = '', dFar = '', was = null;
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const isFar = !!(far[i] && far[i + 1]);
+        if (isFar !== was) { if (isFar) dFar += 'M' + xy(pts[i]); else dNear += 'M' + xy(pts[i]); }
+        if (isFar) dFar += 'L' + xy(pts[i + 1]); else dNear += 'L' + xy(pts[i + 1]);
+        was = isFar;
+      }
+      if (c.kind === 'pole') dNear += 'Z';
+      [dFar, dFar, dNear, dNear].forEach((dd, i) => c.paths[i].setAttribute('d', dd));
+      c.g.classList.toggle('is-hot', hot === c);
+    });
+  }
+  function segDist(px, py, a, b) {
+    const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy || 1;
+    const t = clamp(((px - a.x) * vx + (py - a.y) * vy) / l2, 0, 1);
+    return Math.hypot(px - a.x - t * vx, py - a.y - t * vy);
+  }
+  function insidePts(px, py, pts) {
+    let inn = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[i], b = pts[j];
+      if ((a.y > py) !== (b.y > py) && px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) inn = !inn;
+    }
+    return inn;
+  }
+  // the control under a pointer: the small ones first (elbows and knees, hands, feet), then the rings,
+  // which only take a pointer on their line, so a tap on the chest or the hips still picks it; over
+  // another part (an arm or a thigh in front), a ring takes only its drawn line
+  function ctrlAt(e) {
+    if (!showRig()) return null;
+    const r = canvas.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    let best = null, bestScore = Infinity, under;
+    CTRLS.forEach((c) => {
+      if (!c.screen) return;
+      const { pts, center } = c.screen;
+      const mid = Math.hypot(px - center.x, py - center.y);
+      let edge = Infinity;
+      for (let i = 0; i + 1 < pts.length; i++) edge = Math.min(edge, segDist(px, py, pts[i], pts[i + 1]));
+      let score = Infinity;
+      if (c.kind === 'pole') { if (mid <= 13) score = mid - 300; }
+      else if (c.kind === 'hand') { if (mid <= c.rad + 6) score = mid - 200; }
+      else if (c.kind === 'foot') { if (edge <= 10 || mid <= 16 || insidePts(px, py, pts)) score = Math.min(edge, mid) - 100; }
+      else if (edge <= 9) {
+        if (under === undefined) { const h = hitAt(e); under = h ? h.joint : null; }
+        if (edge <= (!under || under === c.pick ? 9 : 4)) score = edge;
+      }
+      if (score < bestScore) { bestScore = score; best = c; }
+    });
+    return best;
+  }
+
+  const planeThrough = (pt) => new T.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new T.Vector3()), pt);
+  const onPlane = (e, plane) => rayAt(e).ray.intersectPlane(plane, new T.Vector3());
+  function ctrlStart(c, e) {
+    figure.updateMatrixWorld(true);
+    const d = { kind: 'ctrl', c, at: { x: e.clientX, y: e.clientY }, moved: false, before: JSON.stringify(pose) };
+    const ch = c.chain;
+    if (c.kind === 'hand' || c.kind === 'foot') {
+      // the hand or foot moves across the screen, at its own distance from you
+      d.from = worldPos(ch.end);
+      d.plane = planeThrough(J[c.joint].obj.localToWorld(new T.Vector3(...c.at)));
+      d.grab = onPlane(e, d.plane);
+      // the elbow or knee keeps pointing the same way; a nearly straight arm points its elbow back and down,
+      // as a real one does when the hand comes up
+      let pole = poleNow(ch);
+      if (!ch.leg && Math.abs(pose[ch.mid].x) < 20) pole = worldPos(ch.mid).addScaledVector(pointing(ch).multiplyScalar(0.35).add(new T.Vector3(0, -1, 0)).normalize(), 0.3);
+      d.pole = J[ch.upper].obj.parent.worldToLocal(pole);
+      if (c.kind === 'foot') {
+        d.turn = worldQuat(ch.end);
+        // the sole stays above the floor
+        let low = Infinity;
+        parts.forEach((m) => {
+          if (m.userData.joint !== ch.end) return;
+          const pa = m.geometry.attributes.position;
+          for (let i = 0; i < pa.count; i++) low = Math.min(low, tmpV.fromBufferAttribute(pa, i).applyMatrix4(m.matrixWorld).y);
+        });
+        d.minY = d.from.y - Math.min(low, d.from.y) + 0.002;
+      }
+    } else if (c.kind === 'pole') {
+      d.end = worldPos(ch.end);
+      d.turn = worldQuat(ch.end);
+      const s = toScreen(worldPos(ch.mid)), r = canvas.getBoundingClientRect();
+      d.off = { x: s.x - (e.clientX - r.left), y: s.y - (e.clientY - r.top) };
+    } else if (c.id === 'pelvis') {
+      d.from = root.getWorldPosition(new T.Vector3());
+      d.plane = planeThrough(d.from);
+      d.grab = onPlane(e, d.plane);
+      d.poles = { R: root.worldToLocal(poleNow(CHAINS.legR)), L: root.worldToLocal(poleNow(CHAINS.legL)) };
+    } else {
+      // the ring around the chest bends the body, as dragging the chest does
+      d.pose = Object.assign(startPose('waist', J.waist.obj.localToWorld(new T.Vector3(...c.at))), { at: d.at });
+    }
+    return d;
+  }
+  function ctrlMove(d, e) {
+    if (!d.moved) {
+      if (Math.abs(e.clientX - d.at.x) + Math.abs(e.clientY - d.at.y) <= (e.pointerType === 'mouse' ? 3 : 8)) return;
+      d.moved = true;
+    }
+    const c = d.c, ch = c.chain;
+    if (c.kind === 'hand' || c.kind === 'foot') {
+      const hit = d.grab && onPlane(e, d.plane);
+      if (!hit) return;
+      const target = d.from.clone().add(hit.sub(d.grab));
+      if (c.kind === 'foot') target.y = Math.max(target.y, d.minY);
+      const pole = J[ch.upper].obj.parent.localToWorld(d.pole.clone());
+      const reach = (t) => { solveChain(ch, t, pole, true); if (ch.leg) footTurn(ch.side, d.turn); };
+      if (ch.leg) {
+        // a limb stopped by a limit could end up in the floor: then stop it on the way from where it was
+        const was = [ch.upper, ch.mid, ch.end].map((n) => ({ ...pose[n] })), floor = Math.min(-0.002, legLow(ch.side));
+        const last = d.last || d.from;
+        reach(target);
+        if (legLow(ch.side) < floor) {
+          let a = 0, b = 1;
+          for (let k = 0; k < 6; k++) {
+            const t = (a + b) / 2;
+            [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = { ...was[i] }; });
+            fk();
+            reach(last.clone().lerp(target, t));
+            if (legLow(ch.side) < floor) b = t; else a = t;
+          }
+          [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = { ...was[i] }; });
+          fk();
+          if (a > 0) reach(last.clone().lerp(target, a));
+          d.last = last.clone().lerp(target, a);
+        } else d.last = target;
+      } else reach(target);
+      applyPose(ch.leg);               // a foot that moved is planted where it is put
+    } else if (c.kind === 'pole') {
+      swivel(d, e);
+    } else if (c.id === 'pelvis') {
+      const hit = d.grab && onPlane(e, d.plane);
+      if (!hit) return;
+      const to = d.from.clone().add(hit.sub(d.grab));
+      pose.shift.x = clamp(to.x, -SHIFT, SHIFT);
+      pose.shift.z = clamp(to.z, -SHIFT, SHIFT);
+      pose.height = clamp(to.y - BASE_Y, LOW, HIGH);
+      if (planted()) keepFeet(d.poles); else { fk(); aboveFloor(); applyPose(); }
+    } else {
+      movePose(d.pose, e);
+    }
+  }
+  // Drag an elbow or a knee: it swings around the line from the shoulder to the hand (or the hip to the
+  // foot), turning the shoulder or the hip, while the hand or foot stays where it is. The swing is
+  // measured from the drag's start, a small swing circle acts like one 30 px across (so a nearly
+  // straight limb turns like a dial instead of jumping), and each move swings at most 20 degrees.
+  function swivel(d, e) {
+    const ch = d.c.chain, [L1, L2] = bones(ch);
+    figure.updateMatrixWorld(true);
+    const R = worldPos(ch.upper), v = d.end.clone().sub(R);
+    const dist = clamp(v.length(), Math.abs(L1 - L2) + 1e-4, L1 + L2 - 1e-7);
+    const a = v.normalize();
+    const cosA = clamp((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1, 1);
+    const C = R.clone().addScaledVector(a, L1 * cosA), rad = L1 * Math.sqrt(1 - cosA * cosA);
+    const across = (w) => w.addScaledVector(a, -w.dot(a));
+    if (!d.e1) {
+      let w = across(worldPos(ch.mid).sub(R));
+      if (w.lengthSq() < 1e-10) w = across(pointing(ch));
+      if (w.lengthSq() < 1e-10) return;
+      d.e1 = w.normalize();
+      d.swing = 0;
+    }
+    const e1 = across(d.e1.clone()).normalize(), e2 = new T.Vector3().crossVectors(a, e1);
+    const spotAt = (deg) => C.clone().addScaledVector(e1, rad * Math.cos(deg * DEG)).addScaledVector(e2, rad * Math.sin(deg * DEG));
+    const c0 = toScreen(C), s0 = toScreen(spotAt(0)), s90 = toScreen(spotAt(90));
+    const radPx = Math.max(1e-9, Math.hypot(s0.x - c0.x, s0.y - c0.y), Math.hypot(s90.x - c0.x, s90.y - c0.y));
+    const k = Math.max(1, 30 / radPx);
+    const spotPx = (deg) => { const s = toScreen(spotAt(deg)); return { x: c0.x + (s.x - c0.x) * k, y: c0.y + (s.y - c0.y) * k }; };
+    if (!d.g0) d.g0 = spotPx(0);
+    // the joint's spot at the start, moved as far as the finger has moved
+    const goal = { x: d.g0.x + e.clientX - d.at.x, y: d.g0.y + e.clientY - d.at.y };
+    // when two swings look alike from here (one toward you, one away), the one nearer the way it is now
+    const score = (deg) => { const s = spotPx(deg); return (s.x - goal.x) ** 2 + (s.y - goal.y) ** 2 + 0.05 * (radPx * k) ** 2 * ((deg - d.swing) / 90) ** 2; };
+    let best = d.swing, bestS = score(best);
+    for (let deg = d.swing - 20; deg <= d.swing + 20; deg += 0.5) { const sc = score(deg); if (sc < bestS) { bestS = sc; best = deg; } }
+    if (Math.abs(best - d.swing) < 0.05) return;
+    const keep = [ch.upper, ch.mid, ch.end].map((n) => ({ ...pose[n] }));
+    const floor = ch.leg && Math.min(-0.002, legLow(ch.side));
+    solveChain(ch, d.end, spotAt(best));
+    if (ch.leg) footTurn(ch.side, d.turn);
+    // a limit stopped it (the hand or foot would move), or the leg would go into the floor: stay as it was
+    if (worldPos(ch.end).distanceTo(d.end) > 0.003 || (ch.leg && legLow(ch.side) < floor)) {
+      [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = keep[i]; });
+      fk();
+      return;
+    }
+    d.swing = best;
+    applyPose(ch.leg);
+  }
+  // the lowest point of a leg: its thigh, shin and foot
+  function legLow(s) {
+    figure.updateMatrixWorld(true);
+    let low = Infinity;
+    parts.forEach((m) => {
+      const j = m.userData.joint;
+      if (j !== 'hip' + s && j !== 'knee' + s && j !== 'ankle' + s) return;
+      const pa = m.geometry.attributes.position;
+      for (let i = 0; i < pa.count; i++) low = Math.min(low, tmpV.fromBufferAttribute(pa, i).applyMatrix4(m.matrixWorld).y);
+    });
+    return low;
+  }
+  $('showRig').addEventListener('change', () => { hot = null; sayShown(); requestRender(); });
+
+  // ---- The lamp: drag the ring and it stays under the finger ----------------------------------------
+  let lampDrag = null;
+  function lampStart(e) {
+    $('hint').hidden = true;
+    lampDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, from: toScreen(lamp.position), az: light.az, el: light.el };
+  }
+  function lampMove(e) {
+    const dx = e.clientX - lampDrag.x, dy = e.clientY - lampDrag.y;
+    camera.updateMatrixWorld();
+    const inFront = lamp.position.clone().applyMatrix4(camera.matrixWorldInverse).z < -0.2;
+    if (!inFront) {
+      // behind the camera: a plain drag, swinging the way the finger goes
+      const sign = Math.cos((light.az - view.az) * DEG) < 0 ? -1 : 1;
+      light.az = lampDrag.az + dx * 0.3 * sign;
+      light.el = clamp(lampDrag.el - dy * 0.3, -20, 85);
+      lightChanged(false);
+      return;
+    }
+    const goal = { x: lampDrag.from.x + dx, y: lampDrag.from.y + dy };
+    for (let it = 0; it < 4; it++) {
+      const now = toScreen(lampAt(light.az, light.el));
+      const ex = goal.x - now.x, ey = goal.y - now.y;
+      if (Math.hypot(ex, ey) < 0.5) break;
+      const pa = toScreen(lampAt(light.az + 1, light.el)), pe = toScreen(lampAt(light.az, light.el + 1));
+      const c1 = { x: pa.x - now.x, y: pa.y - now.y }, c2 = { x: pe.x - now.x, y: pe.y - now.y };
+      const L = 2;
+      const a11 = c1.x * c1.x + c1.y * c1.y + L, a22 = c2.x * c2.x + c2.y * c2.y + L, a12 = c1.x * c2.x + c1.y * c2.y;
+      const b1 = c1.x * ex + c1.y * ey, b2 = c2.x * ex + c2.y * ey, det = a11 * a22 - a12 * a12;
+      light.az += clamp((a22 * b1 - a12 * b2) / det, -15, 15);
+      light.el = clamp(light.el + clamp((a11 * b2 - a12 * b1) / det, -15, 15), -20, 85);
+    }
+    lightChanged(false);
+  }
+  function lampEnd(e) { if (lampDrag && e.pointerId === lampDrag.id) { lampDrag = null; remember(); } }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    $('hint').hidden = true;
+    if (pointers.size === 2) {
+      // the first finger was posing: put the part back, this is a pinch
+      if (drag && drag.kind === 'pose') { pose[drag.name] = Object.assign({}, drag.start); applyPose(); }
+      if (drag && drag.kind === 'turn') { pose.root.y = drag.yaw; applyPose(); }
+      if (drag && drag.kind === 'ctrl') { if (drag.moved) setPose(JSON.parse(drag.before)); hot = null; }
+      if (lampDrag) { light.az = lampDrag.az; light.el = lampDrag.el; lampDrag = null; lightChanged(false); }
+      const [a, b] = [...pointers.values()];
+      drag = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y), dist: view.dist };
+      return;
+    }
+    if (pointers.size > 2) return;
+    const at = { x: e.clientX, y: e.clientY };
+    // a rig control takes the pointer first: a drag poses, a tap picks its part
+    const ctl = ctrlAt(e);
+    if (ctl) { drag = ctrlStart(ctl, e); hot = ctl; canvas.classList.add('is-dragging'); requestRender(); return; }
+    const hit = hitAt(e);
+    // the ring lets taps through while the lamp is behind the figure: grab the lamp only off the figure
+    if (!hit && handle.classList.contains('is-behind') && !handle.hidden) {
+      const r = canvas.getBoundingClientRect();
+      if (Math.hypot(e.clientX - r.left - +handle.dataset.x, e.clientY - r.top - +handle.dataset.y) < 26) { lampStart(e); drag = { kind: 'lamp', at }; canvas.classList.add('is-dragging'); return; }
+    }
+    const near = hit ? hit.joint : nearPart(e, 20);
+    // a part already picked can be dragged; anything else turns the view, and a tap picks
+    if (hit && hit.joint === picked) drag = Object.assign(startPose(hit.joint, hit.point), { at });
+    else drag = { kind: 'orbit', at, az: view.az, el: view.el, moved: false, tap: near };
+    canvas.classList.add('is-dragging');
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!drag) {
+      if (e.pointerType === 'mouse') {
+        const c = ctrlAt(e);
+        canvas.classList.toggle('is-over', !!(c || hitAt(e)));
+        if (c !== hot) { hot = c; requestRender(); }
+      }
+      return;
+    }
+    if (drag.kind === 'pinch') {
+      if (pointers.size < 2) return;
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      view.dist = clamp(drag.dist * drag.d0 / Math.max(d, 1), 2, MAX_DIST);
+      placeCamera(); requestRender();
+      return;
+    }
+    if (drag.kind === 'lamp') { if (lampDrag) lampMove(e); return; }
+    const dx = e.clientX - drag.at.x, dy = e.clientY - drag.at.y;
+    if (drag.kind === 'orbit') {
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      view.az = drag.az - dx * 0.4;
+      view.el = clamp(drag.el + dy * 0.3, -8, 80);
+      placeCamera(); requestRender();
+    } else if (drag.kind === 'turn') {
+      pose.root.y = wrapAz(drag.yaw + dx * 0.5);
+      applyPose();
+    } else if (drag.kind === 'pose') {
+      movePose(drag, e);
+    } else if (drag.kind === 'ctrl') {
+      ctrlMove(drag, e);
+    }
+  });
+  function end(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0) canvas.classList.remove('is-dragging');
+    if (!drag) return;
+    if (drag.kind === 'orbit' && !drag.moved && pointers.size === 0) pick(drag.tap);   // a tap picks a part; a tap on the background lets go
+    if (drag.kind === 'pose' || drag.kind === 'turn') remember();
+    if (drag.kind === 'ctrl') {
+      if (drag.moved) remember(); else if (pointers.size === 0) pick(drag.c.pick);     // a tap on a control picks its part
+      hot = null;
+      requestRender();
+    }
+    if (drag.kind === 'lamp') lampEnd(e);
+    if (pointers.size === 0) drag = null;
+    else if (drag.kind === 'pinch') drag = null;
+  }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    view.dist = clamp(view.dist * Math.exp(e.deltaY * 0.0012), 2, MAX_DIST);
+    placeCamera(); requestRender();
+  }, { passive: false });
+
+  handle.addEventListener('pointerdown', (e) => {
+    handle.setPointerCapture(e.pointerId);
+    lampStart(e);
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => { if (lampDrag && e.pointerId === lampDrag.id) lampMove(e); });
+  handle.addEventListener('pointerup', lampEnd);
+  handle.addEventListener('pointercancel', lampEnd);
+  handle.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 15 : 5;
+    const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
+    if (!move) return;
+    e.preventDefault();
+    light.az += move[0]; light.el = clamp(light.el + move[1], -20, 85);
+    lightChanged(false); remember();
+  });
+
+  $('resetView').addEventListener('click', () => { Object.assign(view, { az: 0, el: 8, dist: 5.2 }); placeCamera(); requestRender(); });
+  $('resetAll').addEventListener('click', () => {
+    Object.assign(view, { az: 32, el: 8, dist: 5.2 }); placeCamera();
+    Object.assign(light, { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 }); lightChanged(false);
+    setPose(POSES[0].p); ground(); pick(null); remember();
+  });
+
+  // ---- Snapshot ------------------------------------------------------------------------------
+
+  $('snap').addEventListener('click', () => {
+    render();
+    $('snapImg').src = canvas.toDataURL('image/png');
+    $('snapDialog').showModal();
+  });
+  $('snapClose').addEventListener('click', () => $('snapDialog').close());
+
+  // ---- Start ----------------------------------------------------------------------------------
+
+  const saved = restore();
+  setPose(saved && saved.pose ? saved.pose : POSES[0].p);
+  if (saved && saved.light && typeof saved.light === 'object') {
+    const range = { az: [-180, 180], el: [-20, 85], dist: [1.6, 4.6], soft: [0, 10], fill: [0, 100] };
+    Object.entries(range).forEach(([k, [lo, hi]]) => { const v = num(saved.light[k], NaN); if (Number.isFinite(v)) light[k] = clamp(v, lo, hi); });
+  }
+  placeCamera();
+  lightChanged(false);
+  showPart();
+  last = snapshot();
+  resize();
+
+  // for tests and for the app later on
+  window.PoseAndLight = { pose, light, view, setPose, pick, POSES, LIGHTS, J, SPEC, render, camera, parts, scene, tipWorld, lamp, stand, applyPose, placeCamera, lightChanged,
+    CHAINS, solveChain, keepFeet, plants, worldPos, worldQuat, BASE_Y, ctrlAt, legLow, lowestPoint, LOOK, TARGET, base,
+    ctrls: () => CTRLS.map((c) => ({ id: c.id, kind: c.kind, pick: c.pick, center: c.screen && { x: c.screen.center.x, y: c.screen.center.y }, rad: c.rad, pts: c.screen && c.screen.pts.map((q) => ({ x: q.x, y: q.y })) })),
+    picked: () => picked, outlines: () => outlines.length, arrows: () => arrows.map((x) => ({ label: x.el.getAttribute('aria-label'), disabled: x.el.disabled, shape: x.shape, turn: x.shape === 'turn', hidden: x.el.hidden })) };
+})();
+</script>
+</body>
+</html>

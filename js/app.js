@@ -27,7 +27,7 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), paint: $('tab-paint'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
+    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), paint: $('tab-paint'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -2042,11 +2042,11 @@
 
   // ---- Tabs ---------------------------------------------------------------
 
-  // Three sections at the top: Learning tools (a menu: Study the photo, Loomis head, How to use),
+  // Three sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, How to use),
   // Studio, and Games (a menu: Paint by numbers, with more to come). The group button shows which
   // of its pages is open.
-  const GROUP_OF = { study: 'learn', loomis: 'learn', help: 'learn', paint: 'paint', game: 'games', battle: 'games' };
-  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', help: 'How to use', paint: 'Studio', game: 'Paint by numbers', battle: 'Value battle' };
+  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', help: 'learn', paint: 'paint', game: 'games', battle: 'games' };
+  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', help: 'How to use', paint: 'Studio', game: 'Paint by numbers', battle: 'Value battle' };
   const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), games: $('tabGamesBtn') };
   const groupSubs = { learn: $('tabLearnSub'), games: $('tabGamesSub') };
   function closeMenus() {
@@ -2069,11 +2069,26 @@
     document.body.classList.toggle('tab-game', name === 'game');
     document.body.classList.toggle('tab-help', name === 'help');
     document.body.classList.toggle('tab-battle', name === 'battle');
+    document.body.classList.toggle('tab-pose', name === 'pose');
+    if (name === 'pose') openPose();
     if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
   }
   document.querySelectorAll('.tab-item').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab, true)));
+
+  // Pose and light is its own page (pose.html), shown in a frame that loads the first time the tab
+  // opens. The page says how tall it is, and the frame grows to fit, so it scrolls with the app.
+  const poseFrame = $('poseFrame');
+  function openPose() {
+    if (!poseFrame.getAttribute('src')) poseFrame.setAttribute('src', poseFrame.dataset.src);
+  }
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (e.source !== poseFrame.contentWindow || !d || d.type !== 'pose-and-light:height') return;
+    const h = Math.round(+d.height);
+    if (Number.isFinite(h) && h > 0) poseFrame.style.height = Math.min(h, 6000) + 'px';
+  });
   $('tabPaintBtn').addEventListener('click', () => switchTab('paint'));
   document.querySelectorAll('.tab[aria-haspopup]').forEach((btn) => {
     const menu = $(btn.getAttribute('aria-controls'));
@@ -2560,6 +2575,7 @@
     if (location.hash === '#paint') switchTab('paint');
     if (location.hash === '#help') switchTab('help');
     if (location.hash === '#loomis') switchTab('loomis');
+    if (location.hash === '#pose') switchTab('pose');
     if (location.hash === '#battle') switchTab('battle');
   }
 
