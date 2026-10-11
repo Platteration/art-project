@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Shop for Portrait Value Studio and DrawDraw: one account, bought once, unlocked everywhere.">
+<title>Shop · Portrait Value Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app shop-page">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Shop</h1>
+      <p>One account for the studio and the DrawDraw app. Buy once with your Google account and it is yours on every device you sign in on.</p>
+    </div>
+    <div class="topbar-actions">
+      <a class="btn" href="./">← Back to the studio</a>
+      <div class="account" id="account" hidden></div>
+    </div>
+  </header>
+
+  <main class="shop">
+    <p class="notice" id="shopNotice" role="status" hidden></p>
+    <section class="products" id="products" aria-label="Products" aria-live="polite"></section>
+    <section class="orders" id="orders" hidden>
+      <h2>Your orders</h2>
+      <ul class="orders-list" id="ordersList"></ul>
+    </section>
+    <footer class="shop-foot">
+      <p>Payments are handled by <a href="https://stripe.com" rel="noopener">Stripe</a>; card details never reach this site. Receipts come from Stripe by email. One-time purchases, no subscriptions.</p>
+    </footer>
+  </main>
+</div>
+<script src="js/account.js"></script>
+<script src="js/shop.js"></script>
+</body>
+</html>

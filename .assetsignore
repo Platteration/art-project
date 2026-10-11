@@ -1,0 +1,12 @@
+# Not part of the static site: never uploaded as a public asset.
+server/
+docs/
+.git/
+.github/
+node_modules/
+.wrangler/
+README.md
+wrangler.jsonc
+package.json
+.assetsignore
+.gitignore

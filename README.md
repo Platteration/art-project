@@ -165,6 +165,14 @@ No build step or install. Open `index.html` in a browser, or serve the folder:
 python3 -m http.server 8000   # then visit http://localhost:8000
 ```
 
+Served that way, the studio has no account: the Sign in button and the shop stay hidden and everything else works as before. To run it with sign-in and the shop, run the account service instead, which serves the same folder and adds `/api`:
+
+```sh
+node server/dev.mjs           # http://localhost:8000, configuration in server/.dev.vars
+```
+
+See [docs/sso-setup.md](docs/sso-setup.md) for the Google and Cloudflare set-up, [docs/stripe-setup.md](docs/stripe-setup.md) for payments and [docs/shop.md](docs/shop.md) for the shop.
+
 To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
 
 ## Settings
@@ -207,5 +215,9 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `pose.html`: Pose and light, a page of its own (shown in a frame on its tab, and hidden in another to draw Figure study's pictures)
 - `js/battle.js`: the Value battle game
 - `img/help/`: the phone screenshots the How to use tab shows
+- `js/account.js`: the sign-in control in the top bar (Google, through the account service); it only appears when the service answers
+- `shop.html`, `js/shop.js`: the shop, where a signed-in visitor buys through Stripe Checkout
+- `server/`: the account service, a Cloudflare Worker with no dependencies: Google sign-in shared with the DrawDraw app, sessions, the Stripe shop and the entitlements purchases grant. `node server/dev.mjs` runs it with the site locally; `npm test` runs its tests. Set-up tutorials: [docs/sso-setup.md](docs/sso-setup.md), [docs/stripe-setup.md](docs/stripe-setup.md), [docs/shop.md](docs/shop.md)
+- `wrangler.jsonc`: deploys the site and the service together to Cloudflare Workers (`npm run deploy`)
 
 Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html). The spectral data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) (MIT license).

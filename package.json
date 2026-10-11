@@ -1,0 +1,12 @@
+{
+  "name": "portrait-value-studio",
+  "private": true,
+  "description": "Static site plus the account service (Google sign-in, Stripe shop). The site itself needs no install; these scripts run and deploy the service.",
+  "type": "module",
+  "scripts": {
+    "dev": "node server/dev.mjs",
+    "test": "node --test server/test/*.test.mjs",
+    "deploy": "npx wrangler@4 deploy",
+    "tail": "npx wrangler@4 tail"
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+.dev.vars
+server/.dev.vars
+server/.dev-store.json
+.DS_Store

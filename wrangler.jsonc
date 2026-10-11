@@ -1,0 +1,32 @@
+// Cloudflare Workers: serves the static site from this directory and runs the
+// account service (server/worker.js) on /api/*, all on one origin, so the
+// session cookie is first-party and the pages need no CORS.
+//
+//   npx wrangler login
+//   npx wrangler kv namespace create STORE      # paste the id below
+//   npx wrangler secret put SESSION_SECRET      # and the others in docs/sso-setup.md
+//   npx wrangler deploy
+{
+  "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
+  "name": "portrait-value-studio",
+  "main": "server/worker.js",
+  "compatibility_date": "2026-01-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]
+  },
+  "kv_namespaces": [
+    { "binding": "STORE", "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }
+  ],
+  "vars": {
+    // Set to the site's https origin once the domain is attached, e.g. "https://studio.example.com".
+    // Google's redirect URI and Stripe's return URLs are built from it. Leave empty to use the request's origin.
+    "PUBLIC_ORIGIN": "",
+    // URL schemes the DrawDraw app may be sent back to after sign-in. Production: the app's scheme only.
+    "APP_REDIRECT_SCHEMES": "drawdraw",
+    "SESSION_DAYS": "30"
+  },
+  "observability": { "enabled": true }
+}
