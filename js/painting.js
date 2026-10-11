@@ -123,12 +123,6 @@
 
     // ---- The paper -----------------------------------------------------------------------------
     const paper = $('paper'), sketch = $('sketch'), wrap = $('paperWrap'), ground = $('ground'), weave = $('weave');
-    // a layer over everything for the owner to draw on (Figure study's gesture check): never part of
-    // the drawing, its undo, its saving or its picture
-    let overlay = null;
-    if (o.overlay) { overlay = document.createElement('canvas'); overlay.className = 'ps-overlay'; overlay.setAttribute('aria-hidden', 'true'); wrap.appendChild(overlay); }
-    function sizeOverlay() { if (overlay) { overlay.width = paper.width; overlay.height = paper.height; } }
-    sizeOverlay();
     // strokes go to the paint layer, or to the underdrawing layer beneath it
     let layer = paper, g = paper.getContext('2d');
     function useLayer(c) { layer = c; g = c.getContext('2d'); }
@@ -391,12 +385,11 @@
         const cx = c.getContext('2d');
         cx.save(); cx.translate(c.width / 2, c.height / 2); cx.rotate(land ? -Math.PI / 2 : Math.PI / 2); cx.drawImage(keep, -keep.width / 2, -keep.height / 2); cx.restore();
       });
-      paintGround(); paintWeave(); sizeOverlay();
+      paintGround(); paintWeave();
       undoStack.length = 0; $('undo').disabled = true;
       layout();
       showStatus();
       saveSoon();
-      if (o.onPaper) o.onPaper();
     });
 
     // ---- Autosave: the paper, the underdrawing and the canvas are kept in the browser (IndexedDB,
@@ -452,11 +445,9 @@
       renderWash(); applyCanvas();
       showSketch(saved.sketchShown !== false);
       undoStack.length = 0; $('undo').disabled = true;
-      sizeOverlay();
       restored = true;
       layout();
       showStatus();
-      if (o.onPaper) o.onPaper();
     }
     window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveNow(); } });
 
@@ -810,7 +801,6 @@
       [sketch, paper].forEach((c) => { useLayer(c); blank(); });
       useLayer(paper); state.lastLayer = 'paint';
       undoStack.length = 0; $('undo').disabled = true;
-      if (overlay) overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
       last = null; dragFrom = null;
       saveSoon();
     }
@@ -826,7 +816,7 @@
       x.drawImage(paper, 0, 0);
       return c;
     }
-    return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, overlay: () => overlay, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
+    return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
   }
 
   const main = createStudio({ root: psRoot, prefix: 'ps-', tab: 'paint', bodyClass: 'tab-paint', welcome: 'Your painting is back from last time' });
