@@ -335,6 +335,11 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tool-plumb .view.is-dragging { cursor: grabbing; }
 
 /* ---- Tabs: four big buttons; Learning tools and Games open menus ---- */
+/* until the screen is wide enough for every subtitle, a menu's (which page is open) wraps, the others go */
+@media (max-width: 860px) {
+  .tab[aria-haspopup] .tab-sub { white-space: normal; }
+  .tabs > .tab .tab-sub { display: none; }
+}
 .tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .tab-group { position: relative; min-width: 0; display: grid; }
 .tab {
@@ -378,8 +383,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .tab { flex-direction: column; gap: 4px; min-height: 76px; padding: 10px 4px; font-size: 0.8rem; }
   .tab-sub { font-size: 0.66rem; max-width: 100%; }
   /* four buttons leave no room for every subtitle: a menu's (which page is open) wraps, the others go */
-  .tab[aria-haspopup] .tab-sub { white-space: normal; font-size: 0.62rem; }
-  .tabs > .tab .tab-sub { display: none; }
+  .tab[aria-haspopup] .tab-sub { font-size: 0.62rem; }
   .tab-caret { display: none; }
   .tab-icon { width: 24px; height: 24px; }
   .tab-menu { min-width: 0; width: max(100%, 240px); }
@@ -1507,7 +1511,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-acts { flex: none; display: flex; align-items: center; gap: 6px; }
 .fig-btn { display: inline-flex; align-items: center; gap: 5px; }
 .fig-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.fig-analyze[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.fig-analyze[aria-pressed="true"], .fig-btn.is-held { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .fig-end { appearance: none; width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: none; color: var(--muted); cursor: pointer; }
 .fig-end svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .fig-end:hover { color: var(--ink); border-color: var(--ink); }
@@ -1518,6 +1522,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-notes-acts [aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .fig-tips { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 0.82rem; line-height: 1.35; }
 .fig-key { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 0.74rem; color: var(--muted); }
+.fig-key-item { display: inline-flex; align-items: center; white-space: nowrap; }
 .fig-swatch { display: inline-block; width: 18px; height: 4px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
 .fig-sw-action { height: 7px; background: #e8590c; opacity: 0.8; }
 .fig-sw-bones { background: #1c6dd0; }
@@ -1526,10 +1531,15 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-banner { position: absolute; left: 50%; top: 42%; translate: -50% -50%; z-index: 6; margin: 0; padding: 14px 22px; font: 700 1.35rem/1.2 var(--display); text-align: center; background: var(--ink); color: var(--ground); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow); pointer-events: none; }
 @media (min-width: 760px) { .fig-studio { grid-template-rows: auto minmax(0, 1fr); } .fig-bar { padding-left: 16px; border-radius: 12px 12px 0 0; } }
 /* on a wide screen the paper moves over, so the reference sits beside it rather than on it */
-@media (min-width: 1000px) { .fig-studio .ps-stage { padding-right: calc(min(380px, 42%) + 30px); } }
+@media (min-width: 1000px) {
+  .fig-studio .ps-stage { padding-right: calc(min(380px, 42%) + 30px); }
+  /* while the notes show, under it, the pose fits the top half */
+  .fig-studio.is-noting .ps-ref { max-width: min(380px, calc((52cqh - 64px) * 0.8)); }
+}
 @media (max-width: 600px) {
   .fig-bar { gap: 6px; padding: 6px 8px; }
   .fig-btn-text { display: none; }
+  .fig-btn.is-held .fig-btn-text { display: inline; }
   .fig-name { font-size: 0.86rem; }
   .fig-clock { font-size: 1.3rem; }
   .fig-acts { gap: 4px; }

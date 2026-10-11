@@ -1,6 +1,6 @@
 /*
  * Figure study: drawing the wooden figure from the pose library, the way an art class draws from a
- * model. A class is Relaxed (no clock: tap Next pose when you are ready) or Timed (a new pose every
+ * model. A class is Relaxed (no time limit: tap Next pose when you are ready) or Timed (a new pose every
  * 10 s, 30 s, 1, 5 or 10 minutes, each on a fresh sheet). The Pose and light page draws the pictures
  * (pose.html?render=1, in a hidden frame): the library's buttons, and each pose's reference with
  * where its joints land in it. The drawing is done on a second copy of the Studio (painting.js),
@@ -44,7 +44,7 @@
     state: { tool: 'pencil', lastBrush: 'pencil', lead: 'charcoal', hard: 'medium', pencil: 4 },
     canvas: { weave: 'paper' },
     onExit: () => endClass(),
-    onLocked: () => Studio.toast('Pencils down: the next pose is coming'),
+    onLocked: () => Studio.toast(cls && cls.over && cls.i >= cls.ids.length - 1 ? 'Pencils down: that was the last pose' : 'Pencils down: the next pose is coming'),
     onPaper: () => { if (shownAnalysis) analyzeNow(); },
   });
 
@@ -54,15 +54,21 @@
   let poses = null, groups = [], failed = false, req = 0;
   const thumbs = new Map(), shots = new Map(), pending = new Map();
   const byId = (id) => poses && poses.find((q) => q.id === id);
+  let loads = 0;
   function openFrame() {
     if (frame.getAttribute('src')) return;
+    failed = false;
+    if (!poses) $('libNote').textContent = 'Setting up the poses…';
     frame.setAttribute('src', frame.dataset.src);
-    setTimeout(() => { if (!poses) noPictures(); }, 25000);
+    const n = ++loads;
+    setTimeout(() => { if (!poses && n === loads) noPictures(); }, 25000);
   }
+  // (the frame is let go, so coming back to the tab tries again)
   function noPictures() {
-    if (failed) return;
+    if (failed || poses) return;
     failed = true;
-    $('libNote').textContent = 'The poses could not be drawn here: Pose and light needs WebGL (3D drawing), which this browser has turned off or does not have.';
+    frame.removeAttribute('src');
+    $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library from the internet. Check the connection, then come back to this tab or reload the page.';
     showSetup();
   }
   const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, '*'); };
@@ -108,6 +114,7 @@
   // ---- Setting up a class --------------------------------------------------------------------------
 
   const kept = load();
+  let last = null;           // the class before, for the review
   let chosen = Array.isArray(kept.ids) ? kept.ids.filter((x) => typeof x === 'string').slice(0, 60) : [];
   if (kept.mode === 'timed') $('timed').checked = true;
   if (TIMES[kept.secs]) $('t' + kept.secs).checked = true;
@@ -181,9 +188,10 @@
     });
     const n = ready.length;
     $('chosen').textContent = n ? `${n} pose${n > 1 ? 's' : ''}, drawn in this order. Tap one here to take it out.` : 'Tap poses in the library to draw them, in the order you tap them.';
-    $('plan').textContent = !n ? '' : timed ? `${n} pose${n > 1 ? 's' : ''} · ${TIMES[secs]} each · ${span(n * secs)} in all` : `${n} pose${n > 1 ? 's' : ''} · no clock: tap Next pose when you are ready`;
+    $('plan').textContent = !n ? '' : timed ? `${n} pose${n > 1 ? 's' : ''} · ${TIMES[secs]} each · ${span(n * secs)} in all` : `${n} pose${n > 1 ? 's' : ''} · no time limit: tap Next pose when you are ready`;
     $('none').hidden = !n;
     $('start').disabled = !n || failed;
+    $('back').hidden = !(last && last.results.length);
     save({ mode: timed ? 'timed' : 'relaxed', secs, ids: chosen });
   }
   panel.querySelectorAll('input[name="figClass"], input[name="figTime"]').forEach((r) => r.addEventListener('change', showSetup));
@@ -211,8 +219,10 @@
   function startClass(ids) {
     if (!ids.length) return;
     click();
-    cls = { mode: modeNow(), secs: secsNow(), ids: ids.slice(), i: -1, results: [], used: 0, from: 0, running: false, held: false, shot: null, kept: -1 };
+    cls = { mode: modeNow(), secs: secsNow(), ids: ids.slice(), i: -1, results: [], used: 0, from: 0, running: false, held: false, over: false, shot: null, kept: -1, since: 0 };
+    hold(false);
     show('draw');
+    $('analyze').focus({ preventScroll: true });
     $('pause').hidden = cls.mode !== 'timed';
     clearInterval(ticker);
     ticker = setInterval(tick, 200);
@@ -220,7 +230,7 @@
   }
   async function showPose(i) {
     const c = cls;
-    c.i = i; c.shot = null; c.used = 0; c.running = false; c.kept = -1;
+    c.i = i; c.shot = null; c.used = 0; c.running = false; c.kept = -1; c.over = false;
     const id = c.ids[i], q = byId(id) || { name: 'Pose' };
     studio.setLocked(true);
     studio.clearAll();
@@ -238,17 +248,19 @@
       if (i < c.ids.length - 1) showPose(i + 1); else finish();
       return;
     }
-    c.shot = shot;
+    c.shot = shot; c.since = performance.now();
     studio.setReference(img, `${q.name}: pose ${i + 1} of ${c.ids.length}. Drawn from the Pose and light figure.`);
     studio.setLocked(false);
-    run(!c.held);
+    $('say').textContent = `Pose ${i + 1} of ${c.ids.length}: ${q.name}`;
+    // the clock starts when the pose can be seen
+    run(!c.held && Studio.tab() === 'figure' && !document.hidden);
     if (c.ids[i + 1]) shotOf(c.ids[i + 1]);       // the next one, ready in time
   }
   // the clock: time used on this pose, counting only while it runs
   const usedMs = () => (cls ? cls.used + (cls.running ? performance.now() - cls.from : 0) : 0);
   function run(on) {
     if (!cls) return;
-    if (on && !cls.running && cls.shot) { cls.from = performance.now(); cls.running = true; }
+    if (on && !cls.running && cls.shot && !cls.over) { cls.from = performance.now(); cls.running = true; }
     else if (!on && cls.running) { cls.used += performance.now() - cls.from; cls.running = false; }
     tick();
   }
@@ -272,15 +284,24 @@
   function hold(on) {
     if (!cls) return;
     cls.held = on;
-    $('pause').setAttribute('aria-pressed', String(on));
-    $('pause').querySelector('.fig-btn-text').textContent = on ? 'Resume' : 'Pause';
-    $('pause').setAttribute('aria-label', on ? 'Start the clock again' : 'Pause the clock');
+    const b = $('pause');
+    b.classList.toggle('is-held', on);
+    b.querySelector('.fig-btn-text').textContent = on ? 'Resume' : 'Pause';
+    b.querySelector('path').setAttribute('d', on ? 'M8 5l11 7-11 7z' : 'M9 6v12M15 6v12');
+    b.setAttribute('aria-label', on ? 'Resume the clock' : 'Pause the clock');
     run(!on && !shownAnalysis);
   }
   $('pause').addEventListener('click', () => hold(!cls.held));
-  document.addEventListener('visibilitychange', () => { if (document.hidden && cls && cls.mode === 'timed' && !cls.held) hold(true); });
-  function banner(text) { $('banner').hidden = !text; $('banner').textContent = text || ''; }
+  // a hidden page holds a timed class until Resume; a relaxed one stops its clock until the page is back
+  document.addEventListener('visibilitychange', () => {
+    if (!cls) return;
+    if (cls.mode === 'timed') { if (document.hidden && !cls.held) hold(true); return; }
+    if (document.hidden) run(false);
+    else if (Studio.tab() === 'figure' && !shownAnalysis) run(true);
+  });
+  function banner(text) { $('banner').hidden = !text; $('banner').textContent = text || ''; if (text) $('say').textContent = text; }
   function timeUp() {
+    cls.over = true;            // this pose's time is spent: neither Resume nor Analyze starts its clock again
     run(false);
     studio.setLocked(true);
     if (window.GameSound && GameSound.on()) GameSound.chime();
@@ -303,7 +324,8 @@
     cls.results.push({ id: cls.ids[cls.i], name: (byId(cls.ids[cls.i]) || { name: 'Pose' }).name, shot: cls.shot, image: pic.toDataURL('image/jpeg', 0.88), w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) });
   }
   $('next').addEventListener('click', () => {
-    if (!cls || !cls.shot) return;
+    // (a pose just shown takes no Next for half a second, so a double tap cannot skip the one after)
+    if (!cls || !cls.shot || performance.now() - cls.since < 500) return;
     run(false);
     keep();
     if (cls.i >= cls.ids.length - 1) finish(); else showPose(cls.i + 1);
@@ -315,7 +337,8 @@
     if (performance.now() - endArmed > 3000) { endArmed = performance.now(); Studio.toast('Tap ✕ again to end the class'); return; }
     endArmed = 0;
     run(false);
-    if (studio.ink && hasInk(studio.ink())) keep();
+    if (hasInk(studio.ink())) keep();
+    Studio.toast('The class is over');
     finish();
   }
   $('end').addEventListener('click', endClass);
@@ -327,11 +350,13 @@
     hideAnalysis();
     studio.setLocked(false);
     cls = null;
+    // a class with nothing drawn in it goes straight back to the setup (the drawings before stay)
+    if (!c.results.some((r) => r.analysis && r.analysis.marked)) { show('setup'); showSetup(); $('start').focus(); return; }
     last = c;
-    if (!c.results.length) { show('setup'); showSetup(); return; }
     showReview(c);
     show('review');
     window.scrollTo(0, 0);
+    $('reviewTitle').focus({ preventScroll: true });
   }
 
   // ---- The gesture: a stick figure from the model's joints -------------------------------------------
@@ -502,7 +527,7 @@
       }
       sizes.push(n);
     }
-    const big = sizes.reduce((a, b) => Math.max(a, b), 0), keep = sizes.map((n) => n >= Math.max(3, big * 0.04));
+    const big = sizes.reduce((a, b) => Math.max(a, b), 0), keep = sizes.map((n) => n >= big * 0.04);
     const on = new Uint8Array(w * h);
     let n = 0;
     for (let i = 0; i < w * h; i++) if (m.on[i] && keep[label[i]]) { on[i] = 1; n++; }
@@ -570,20 +595,25 @@
         const mp = mapAt(k, mx, my);
         let sum = 0;
         for (let i = 0; i < samples.length; i += 2) sum += near(mp, samples[i].p);
-        // a light pull toward the box around the marks, so a few marks cannot drag it far
-        return sum / Math.ceil(samples.length / 2) + cap * 0.05 * (Math.abs(Math.log(k / k0)) / 0.3 + Math.abs(mx - mid.x) / (0.15 * unit) + Math.abs(my - mid.y) / (0.15 * unit)) / 3;
+        // a light pull toward the size of the box around the marks
+        return sum / Math.ceil(samples.length / 2) + cap * 0.05 * Math.abs(Math.log(k / k0)) / 0.3;
       };
-      // Tried from a few starts (the box, its height alone, its width alone, where the reference would
-      // be), each over a spread of sizes and places. The best few are then each polished (a step each
-      // way in size and place, the steps halving), since the very best on the coarse spread can be a
-      // fit that locks onto one end of the drawing and misses the other.
+      // Tried from many starts: a few sizes (to fit the box around the marks, its height alone, its width
+      // alone, or larger, since a part left out of the drawing shrinks the box), each with the gesture's box
+      // meeting the marks' box at a corner, the middle of a side or the middle (one side of the box may be
+      // short, the others still line up), and where the reference would be. Around each a small spread of
+      // sizes and places; the best few are then polished (a step each way in size and place, the steps
+      // halving), since the best on the spread can be a fit that locks onto one end of the drawing.
       const tried = [];
       const steps = (n, by) => Array.from({ length: 2 * n + 1 }, (_, i) => (i - n) * by);
-      [{ k: k0, mx: mid.x, my: mid.y }, { k: kH, mx: mid.x, my: mid.y }, { k: kW, mx: mid.x, my: mid.y }, { k: refMap.k, mx: refMap.ox + cx * refMap.k, my: refMap.oy + cy * refMap.k }]
-        .forEach((from) => steps(5, 0.05).forEach((f) => steps(5, 0.03).forEach((dx) => steps(5, 0.03).forEach((dy) => {
-          const k = from.k * (1 + f), mx = from.mx + dx * g.size * from.k, my = from.my + dy * g.size * from.k;
-          tried.push({ k, mx, my, c: cost(k, mx, my) });
-        }))));
+      const starts = [{ k: refMap.k, mx: refMap.ox + cx * refMap.k, my: refMap.oy + cy * refMap.k }];
+      [k0, kH, kW, Math.max(kW, kH) * 1.3, k0 * 1.6].forEach((k) => [0, 0.5, 1].forEach((ax) => [0, 0.5, 1].forEach((ay) => {
+        starts.push({ k, mx: inkBox.x + ax * inkBox.w + (0.5 - ax) * g.box.w * k, my: inkBox.y + ay * inkBox.h + (0.5 - ay) * g.box.h * k });
+      })));
+      starts.forEach((from) => steps(2, 0.06).forEach((f) => steps(2, 0.04).forEach((dx) => steps(2, 0.04).forEach((dy) => {
+        const k = from.k * (1 + f), mx = from.mx + dx * g.size * from.k, my = from.my + dy * g.size * from.k;
+        tried.push({ k, mx, my, c: cost(k, mx, my) });
+      }))));
       tried.sort((p, q) => p.c - q.c);
       // The polish also measures the other way, from the marks to the gesture, so it cannot shrink the
       // gesture inside an outline drawing (where every bone runs a little in from the drawn edges).
@@ -613,7 +643,7 @@
       const both = (k, mx, my) => cost(k, mx, my) + back(k, mx, my);
       const seeds = [{ k: k0, mx: mid.x, my: mid.y }];
       for (const t of tried) {
-        if (seeds.length >= 7) break;
+        if (seeds.length >= 8) break;
         if (seeds.every((q) => Math.abs(Math.log(q.k / t.k)) > 0.04 || Math.hypot(q.mx - t.mx, q.my - t.my) > 0.04 * unit)) seeds.push(t);
       }
       let best = null;
@@ -633,21 +663,25 @@
       // which parts have marks near them, along half their length or more (an outline of the body sits
       // further from the spine than an outline of an arm from its bone)
       const tolOf = (key) => Math.max(1.5, (key === 'body' ? 0.09 : key === 'head' ? 0.06 : 0.045) * g.size * map.k * m.s);
+      // (measured without the fit's cap, which can be smaller than a part's own allowance)
+      const at = (mp, p) => { const x = Math.round((mp.ox + p.x * mp.k) * m.s), y = Math.round((mp.oy + p.y * mp.k) * m.s); return x < 0 || y < 0 || x >= m.w || y >= m.h ? Infinity : d[y * m.w + x]; };
       const hits = {}, counts = {};
-      samples.forEach(({ key, p }) => { counts[key] = (counts[key] || 0) + 1; if (near(map, p) <= tolOf(key)) hits[key] = (hits[key] || 0) + 1; });
+      samples.forEach(({ key, p }) => { counts[key] = (counts[key] || 0) + 1; if (at(map, p) <= tolOf(key)) hits[key] = (hits[key] || 0) + 1; });
       match = {};
       Object.keys(counts).forEach((key) => { match[key] = (hits[key] || 0) / counts[key] >= 0.45; });
     } else map = refMap;
-    return { g, map, match, inkBox, marked, asReference: !!asReference, tips: notes(g, marked ? inkBox : null, match, live) };
+    return { g, map, match, inkBox, marked, asReference: !!asReference, tips: notes(g, marked ? inkBox : null, asReference ? null : match, live) };
   }
   // what to look for: the line of action, the tilts, the size in heads, the drawing's shape, missed parts
   function notes(g, inkBox, match, live) {
-    const tips = [], P = g.P, head = g.head.a * 2;
+    const tips = [], P = g.P, head = g.head.a * 2, a = g.action;
+    const lean = Math.abs(Math.atan2(a.p3.x - a.p0.x, a.p3.y - a.p0.y)) * 180 / Math.PI, slant = Math.min(lean, 180 - lean);
     tips.push(['Line of action', {
-      straight: 'nearly straight: a calm, upright pose. Even so, draw it first: one line from the head to the foot.',
+      straight: slant < 25 ? 'nearly straight: a calm, upright pose. Even so, draw it first: one line from the head to the foot.'
+        : 'nearly straight, on a slant: the whole body leans along one line. Draw it first: one line from the head to the foot.',
       C: 'a C curve: the whole body bends one way. Draw this curve first, then hang the body on it.',
       S: 'an S curve: the body bends one way, then the other. Draw this curve first, then hang the body on it.',
-    }[g.action.shape]]);
+    }[a.shape]]);
     // the tilts are the body's own (from the model), not as perspective shows them; seen end on, the
     // shoulders or the hips show no tilt to compare, so then nothing is said
     const wide = ([a, b]) => Math.abs(a.x - b.x);
@@ -668,9 +702,12 @@
       tips.push(['Your drawing', ratio > 1.15 ? 'is wider for its height than the pose. Check the height, from the head down to the feet.'
         : ratio < 0.87 ? 'is taller and thinner than the pose. Check how far the arms and legs reach out to the sides.'
           : 'has the pose\'s overall shape: about as wide for its height.']);
-      const missed = g.parts.filter((p) => match && match[p.key] === false).map((p) => p.name);
-      const list = missed.length > 1 ? `${missed.slice(0, -1).join(', ')} and ${missed[missed.length - 1]}` : missed[0];
-      tips.push(missed.length ? ['Dashed', `no marks near ${list}. Look again at where ${missed.length > 1 ? 'they go' : 'it goes'}.`] : ['Well matched', 'your marks follow every part of the gesture.']);
+      // (placed as the reference, the gesture is not laid on the drawing, so it says nothing of the parts)
+      if (match) {
+        const missed = g.parts.filter((p) => match[p.key] === false).map((p) => p.name);
+        const list = missed.length > 1 ? `${missed.slice(0, -1).join(', ')} and ${missed[missed.length - 1]}` : missed[0];
+        tips.push(missed.length ? ['Dashed', `no marks near ${list}. Look again at where ${missed.length > 1 ? 'they go' : 'it goes'}.`] : ['Well matched', 'your marks follow every part of the gesture.']);
+      }
     } else if (live) tips.push(['Nothing drawn yet', 'the gesture sits where the reference would. Draw the pose, then check again.']);
     else tips.push(['Nothing drawn', 'the gesture is shown where the reference would sit.']);
     return tips;
@@ -691,10 +728,12 @@
     drawGesture(ctx, shownAnalysis.g, shownAnalysis.map, shownAnalysis.asReference ? null : shownAnalysis.match);
     showTips($('tips'), shownAnalysis.tips);
   }
+  // while the notes show, a wide screen makes room for them under the reference
+  function notesShown(on) { $('notes').hidden = !on; root.classList.toggle('is-noting', on); }
   function showAnalysis() {
     if (!cls || !cls.shot) return;
     analyzeNow();
-    $('notes').hidden = false;
+    notesShown(true);
     $('analyze').setAttribute('aria-pressed', 'true');
     run(false);
   }
@@ -703,13 +742,13 @@
     shownAnalysis = null;
     const over = studio.overlay();
     over.getContext('2d').clearRect(0, 0, over.width, over.height);
-    $('notes').hidden = true;
+    notesShown(false);
     $('analyze').setAttribute('aria-pressed', 'false');
     if (was && cls && !cls.held) run(true);
   }
   $('analyze').addEventListener('click', () => { if (shownAnalysis) hideAnalysis(); else showAnalysis(); });
   // the notes can go while the gesture stays on the paper; Analyze takes both away
-  $('notesClose').addEventListener('click', () => { $('notes').hidden = true; $('analyze').focus(); });
+  $('notesClose').addEventListener('click', () => { notesShown(false); $('analyze').focus(); });
   $('recheck').addEventListener('click', analyzeNow);
   $('place').addEventListener('click', () => {
     placeAsRef = !placeAsRef;
@@ -719,7 +758,7 @@
 
   // ---- The review ------------------------------------------------------------------------------------
 
-  let last = null, gesturesShown = true;
+  let gesturesShown = true;
   function drawCard(canvas, r, img) {
     const g = canvas.getContext('2d');
     g.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -780,6 +819,8 @@
   }));
   $('again').addEventListener('click', () => { if (last) startClass(last.ids.filter((id) => byId(id))); });
   $('new').addEventListener('click', () => { show('setup'); showSetup(); window.scrollTo(0, 0); });
+  // the drawings of the class before stay until another class starts
+  $('back').addEventListener('click', () => { show('review'); window.scrollTo(0, 0); $('reviewTitle').focus({ preventScroll: true }); });
 
   // ---- The tab ---------------------------------------------------------------------------------------
 

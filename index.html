@@ -600,7 +600,7 @@
             <fieldset class="field">
               <legend>Class</legend>
               <div class="seg seg-full game-levels" role="radiogroup" aria-label="Class">
-                <input type="radio" name="figClass" id="fig-relaxed" value="relaxed" checked><label for="fig-relaxed">Relaxed<small>no clock</small></label>
+                <input type="radio" name="figClass" id="fig-relaxed" value="relaxed" checked><label for="fig-relaxed">Relaxed<small>no time limit</small></label>
                 <input type="radio" name="figClass" id="fig-timed" value="timed"><label for="fig-timed">Timed<small>a new pose on the clock</small></label>
               </div>
             </fieldset>
@@ -622,6 +622,7 @@
             </div>
             <p class="game-best" id="fig-plan"></p>
             <button type="button" class="btn btn-primary game-start" id="fig-start" disabled>Start drawing</button>
+            <button type="button" class="btn game-start" id="fig-back" hidden>Back to your drawings</button>
           </div>
           <div class="game-card fig-library">
             <div class="field-head"><h3>Pose library</h3><button type="button" class="btn btn-small" id="fig-none" hidden>Clear the choice</button></div>
@@ -631,23 +632,24 @@
         </div>
         <div class="fig-review" id="fig-review" hidden>
           <div class="game-card fig-review-head">
-            <h2 class="game-title">Your figure drawings</h2>
+            <h2 class="game-title" id="fig-reviewTitle" tabindex="-1">Your figure drawings</h2>
             <p class="game-lede" id="fig-reviewLede"></p>
             <div class="fig-review-acts">
               <div class="pill-switch" role="group" aria-label="The gesture over each drawing"><button type="button" data-fig-gesture="1" aria-pressed="true">Gestures shown</button><button type="button" data-fig-gesture="0" aria-pressed="false">Hidden</button></div>
               <button type="button" class="btn btn-primary" id="fig-again">Draw these poses again</button>
               <button type="button" class="btn" id="fig-new">New class</button>
             </div>
-            <p class="hint fig-key"><span class="fig-swatch fig-sw-action"></span>Line of action <span class="fig-swatch fig-sw-bones"></span>Stick figure <span class="fig-swatch fig-sw-tilt"></span>Shoulder and hip tilt <span class="fig-swatch fig-sw-miss"></span>No marks near it</p>
+            <p class="hint fig-key"><span class="fig-key-item"><span class="fig-swatch fig-sw-action"></span>Line of action</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-bones"></span>Stick figure</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-tilt"></span>Shoulder and hip tilt</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-miss"></span>No marks near it</span></p>
           </div>
           <div class="fig-cards" id="fig-cards"></div>
         </div>
         <!-- moved into Figure study's copy of the Studio when it is set up -->
         <div class="fig-bar" id="fig-bar">
           <div class="fig-now"><span class="fig-count" id="fig-count">Pose 1 of 1</span><span class="fig-name" id="fig-name"></span></div>
+          <p class="visually-hidden" id="fig-say" role="status" aria-live="assertive"></p>
           <div class="fig-clock" id="fig-clock" role="timer" aria-label="Time left">0:00</div>
           <div class="fig-acts">
-            <button type="button" class="btn btn-small fig-btn" id="fig-pause" aria-pressed="false" aria-label="Pause the clock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg><span class="fig-btn-text">Pause</span></button>
+            <button type="button" class="btn btn-small fig-btn" id="fig-pause" aria-label="Pause the clock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg><span class="fig-btn-text">Pause</span></button>
             <button type="button" class="btn btn-small fig-btn fig-analyze" id="fig-analyze" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg><span>Analyze</span></button>
             <button type="button" class="btn btn-small btn-primary fig-btn" id="fig-next" aria-label="Next pose"><span class="fig-btn-text" id="fig-nextText">Next pose</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
             <button type="button" class="fig-end" id="fig-end" aria-label="End the class" title="End the class"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
@@ -655,11 +657,11 @@
         </div>
         <aside class="fig-notes" id="fig-notes" hidden aria-label="Analysis">
           <div class="fig-notes-head"><h3>The gesture</h3><button type="button" class="ps-x" id="fig-notesClose" aria-label="Hide these notes">×</button></div>
-          <p class="fig-key"><span class="fig-swatch fig-sw-action"></span>Line of action <span class="fig-swatch fig-sw-bones"></span>Stick figure <span class="fig-swatch fig-sw-tilt"></span>Tilt <span class="fig-swatch fig-sw-miss"></span>No marks near it</p>
+          <p class="fig-key"><span class="fig-key-item"><span class="fig-swatch fig-sw-action"></span>Line of action</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-bones"></span>Stick figure</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-tilt"></span>Tilt</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-miss"></span>No marks near it</span></p>
           <ul class="fig-tips" id="fig-tips"></ul>
           <div class="fig-notes-acts"><button type="button" class="btn btn-small" id="fig-recheck">Check again</button><button type="button" class="btn btn-small" id="fig-place" aria-pressed="false">Place it as the reference</button></div>
         </aside>
-        <p class="fig-banner" id="fig-banner" hidden aria-live="assertive"></p>
+        <p class="fig-banner" id="fig-banner" hidden aria-hidden="true"></p>
         <iframe class="fig-render" id="fig-render" title="Pose pictures for Figure study" aria-hidden="true" tabindex="-1" data-src="pose.html?render=1"></iframe>
       </section>
       <section class="tabpanel" id="tab-game" hidden>
@@ -1082,11 +1084,11 @@
             <h3>Figure study</h3>
             <p>A drawing class with the wooden figure from Pose and light as the model. Each pose is the reference, and the paper is a Studio of its own, with all the Studio's tools, kept apart from your painting.</p>
             <ol>
-              <li><strong>Choose a class.</strong> <strong>Relaxed</strong> has no clock: tap <strong>Next pose</strong> when you are ready. <strong>Timed</strong> brings a new pose every 10 s, 30 s, 1 min, 5 min or 10 min, each on a fresh sheet. Short poses are for the gesture; long ones have time for the shapes and the light.</li>
+              <li><strong>Choose a class.</strong> <strong>Relaxed</strong> has no time limit (its clock only counts up): tap <strong>Next pose</strong> when you are ready. <strong>Timed</strong> brings a new pose every 10 s, 30 s, 1 min, 5 min or 10 min, each on a fresh sheet. Short poses are for the gesture; long ones have time for the shapes and the light.</li>
               <li><strong>Choose the poses</strong> from the pose library, in the order to draw them, or tap <strong>Pick 5 for me</strong>. The poses you saved in Pose and light are there too. Tap one in the row under Poses to take it out.</li>
-              <li><strong>Draw.</strong> The pencil starts as charcoal. The bar on top shows the pose, the clock, <strong>Pause</strong> (in Timed) and <strong>Next pose</strong>. ✕ twice ends the class.</li>
+              <li><strong>Draw.</strong> The pencil starts as charcoal. The bar on top shows the pose, the clock, <strong>Pause</strong> (in Timed) and <strong>Next pose</strong>. ✕ twice ends the class. Leaving the tab or the page pauses a timed class; tap <strong>Resume</strong> to start the clock again.</li>
               <li><strong>Analyze</strong> lays the pose's gesture over your drawing: a stick figure made from the figure's own joints (blue), its line of action (orange) and the tilt of the shoulders and hips (green). It finds your drawing on the paper and fits itself to it. A part with no marks near it is dashed in pink. The notes say what to look for. The clock waits while it shows. <strong>Place it as the reference</strong> puts it where the reference would sit instead.</li>
-              <li>At the end, every drawing comes back beside its pose, with its gesture and notes. <strong>Save as PNG</strong> keeps one. <strong>Draw these poses again</strong> starts the same class over.</li>
+              <li>At the end, every drawing comes back beside its pose, with its gesture and notes. <strong>Save as PNG</strong> keeps one. <strong>Draw these poses again</strong> starts the same class over. After <strong>New class</strong>, <strong>Back to your drawings</strong> returns to them until the next class starts.</li>
             </ol>
           </div>
           <div class="help-shots">

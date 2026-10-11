@@ -540,14 +540,18 @@
     }
     function dealReference() { ref.kind = 'painting'; ref.id = Subjects.random(ref.id); ref.prep = ref.res = null; ref.shown = true; refreshReference(); }
     $('refAnother').addEventListener('click', dealReference);
-    q('[data-ref-kind]').forEach((b) => b.addEventListener('click', () => {
-      if (b.dataset.refKind === 'painting') { if (ref.kind !== 'painting') dealReference(); }
-      else { ref.kind = 'studio'; ref.shown = true; refreshReference(); }
-    }));
-    // a photo loaded here goes to the Study tab, and the reference follows it
     if (o.followStudy !== false) {
+      q('[data-ref-kind]').forEach((b) => b.addEventListener('click', () => {
+        if (b.dataset.refKind === 'painting') { if (ref.kind !== 'painting') dealReference(); }
+        else { ref.kind = 'studio'; ref.shown = true; refreshReference(); }
+      }));
+      // a photo loaded here goes to the Study tab, and the reference follows it
       document.getElementById('file').addEventListener('change', () => { if (active) { ref.kind = 'studio'; ref.shown = true; } });
       window.addEventListener('studio:result', () => { if (ref.kind === 'studio') refreshReference(); });
+    } else {
+      // a studio whose owner gives the reference has none of the Study tab's controls: the choice of
+      // picture, Load a photo, Copy the Study lines
+      q('.ps-follow').forEach((e) => { e.hidden = true; });
     }
     q('[data-ref-view]').forEach((b) => b.addEventListener('click', () => { ref.view = b.dataset.refView; drawReference(); }));
     q('[data-ref-show]').forEach((b) => b.addEventListener('click', () => { ref.shown = !!+b.dataset.refShow; drawReference(); }));
