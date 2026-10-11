@@ -278,7 +278,7 @@
     run(!on && !shownAnalysis);
   }
   $('pause').addEventListener('click', () => hold(!cls.held));
-  document.addEventListener('visibilitychange', () => { if (document.hidden && cls && cls.mode === 'timed' && cls.running) hold(true); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && cls && cls.mode === 'timed' && !cls.held) hold(true); });
   function banner(text) { $('banner').hidden = !text; $('banner').textContent = text || ''; }
   function timeUp() {
     run(false);
@@ -787,7 +787,8 @@
     const on = name === 'figure';
     if (!on) {
       // away from the tab the clock stops: a timed class waits on Resume
-      if (cls && cls.mode === 'timed' && cls.running) hold(true); else run(false);
+      // (held even between poses, or the next pose's clock would start while you are away)
+      if (cls && cls.mode === 'timed') hold(true); else run(false);
       studio.activate(false);
       return;
     }

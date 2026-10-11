@@ -1494,7 +1494,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 
 .fig-studio { grid-template-rows: auto minmax(0, 1fr) auto; }
 .fig-studio .ps-exit { display: none !important; }
-.fig-studio .ps-ref { max-width: 380px; }
+.fig-studio .ps-stage { container-type: size; }
+/* the pose is a tall picture: never taller than the stage, under its switch */
+.fig-studio .ps-ref { max-width: 380px; max-width: min(380px, calc((100cqh - 64px) * 0.8)); }
 .fig-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .fig-now { flex: 1 1 auto; min-width: 0; display: grid; }
 .fig-count { font: 600 0.68rem var(--body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
@@ -1523,6 +1525,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-sw-miss { background: repeating-linear-gradient(90deg, #c2255c 0 5px, transparent 5px 8px); }
 .fig-banner { position: absolute; left: 50%; top: 42%; translate: -50% -50%; z-index: 6; margin: 0; padding: 14px 22px; font: 700 1.35rem/1.2 var(--display); text-align: center; background: var(--ink); color: var(--ground); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow); pointer-events: none; }
 @media (min-width: 760px) { .fig-studio { grid-template-rows: auto minmax(0, 1fr); } .fig-bar { padding-left: 16px; border-radius: 12px 12px 0 0; } }
+/* on a wide screen the paper moves over, so the reference sits beside it rather than on it */
+@media (min-width: 1000px) { .fig-studio .ps-stage { padding-right: calc(min(380px, 42%) + 30px); } }
 @media (max-width: 600px) {
   .fig-bar { gap: 6px; padding: 6px 8px; }
   .fig-btn-text { display: none; }
