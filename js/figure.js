@@ -38,6 +38,7 @@
   panel.appendChild(root);
   root.insertBefore($('bar'), root.firstChild);
   root.appendChild($('result'));
+  panel.appendChild($('say'));         // (outside the studio, which goes inert behind the card)
   const studio = PaintStudio.create({
     root, prefix: 'fs-', bodyClass: 'figure-focus', followStudy: false, autosave: false,
     mixesKey: 'portrait-value-studio.figureMixes', fileName: 'figure-drawing.png', refSize: 0.42,
@@ -174,7 +175,7 @@
     panel.querySelectorAll('.fig-group-btn').forEach((b) => {
       const ids = poses.filter((q) => q.group === b.dataset.group).map((q) => q.id), anyIn = ids.some((id) => !out.has(id));
       b.textContent = anyIn ? 'Take these out' : 'Put these back';
-      b.setAttribute('aria-label', `${anyIn ? 'Take out' : 'Put back'} the ${b.dataset.title.toLowerCase()} poses`);
+      b.setAttribute('aria-label', `${anyIn ? 'Take out' : 'Put back'} ${b.dataset.group === 'mine' ? 'your saved poses' : `the ${b.dataset.title.toLowerCase()} poses`}`);
     });
     const n = pool().length, all = poses ? poses.length : 0;
     if (poses) $('mix').textContent = n === all ? `All ${all} poses are in the class, in a random order. Tap a pose, or a group's button, to take it out.` : n ? `${n} of the ${all} poses are in the class, in a random order.` : 'Every pose is out of the class. Tap one to put it back.';
@@ -343,6 +344,8 @@
     hideResult();
     studio.setLocked(false);
     cls = null;
+    // the poses saved in Pose and light may have changed during the class
+    if (poses) tellFrame({ type: 'pose-and-light:list' });
     // a class with nothing drawn in it goes straight back to the setup (the drawings before stay)
     if (!c.results.some((r) => r.analysis.marked)) { show('setup'); showSetup(); $('start').focus(); return; }
     last = c;
@@ -478,11 +481,14 @@
   // have any mark in them; x0, y0 is where the grid starts on the paper
   const GRID = 240;
   function inkMap(ink, r) {
+    const whole = !r;
     r = r || { x: 0, y: 0, w: ink.width, h: ink.height };
     const s = Math.min(1, GRID / Math.max(r.w, r.h));
     const w = Math.max(1, Math.round(r.w * s)), h = Math.max(1, Math.round(r.h * s));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const x = c.getContext('2d', { willReadFrequently: true });
+    // (the whole sheet is shrunk a lot: averaged, so a thin light line is not skipped between samples)
+    if (whole) x.imageSmoothingQuality = 'high';
     x.drawImage(ink, r.x, r.y, r.w, r.h, 0, 0, w, h);
     const d = x.getImageData(0, 0, w, h).data, on = new Uint8Array(w * h);
     let n = 0;
@@ -526,7 +532,7 @@
     const on = new Uint8Array(w * h);
     let n = 0;
     for (let i = 0; i < w * h; i++) if (m.on[i] && keep[label[i]]) { on[i] = 1; n++; }
-    return { w, h, s: m.s, x0: m.x0, y0: m.y0, on, n };
+    return { w, h, s: m.s, x0: m.x0, y0: m.y0, on, n, label, pieces: sizes.length };
   }
   // how far each cell is from the nearest mark, in cells (two sweeps, steps of 3 straight and 4 across)
   function distances(m) {
@@ -560,8 +566,9 @@
     return out;
   }
   // The wooden figure's own shape in its reference picture (the wood, told from the gray studio by its
-  // color), as a grid of cells and how far each is from the figure. Made once for a pose, when its picture
-  // has been loaded (shot.img).
+  // color), as a grid of cells and how far each is from the figure, and its cast shadow on the floor
+  // (gray, darker than the floor, in the lower half, touching the figure, and a little past its soft
+  // edge). Made once for a pose, when its picture has been loaded (shot.img).
   function figureMask(shot) {
     if (shot.mask !== undefined) return shot.mask;
     if (!shot.img) return null;
@@ -569,9 +576,34 @@
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const x = c.getContext('2d', { willReadFrequently: true });
     x.drawImage(shot.img, 0, 0, w, h);
-    const px = x.getImageData(0, 0, w, h).data, on = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) { const r = px[i * 4], b = px[i * 4 + 2]; on[i] = r - b > 20 && r > 55 ? 1 : 0; }
-    shot.mask = { w, h, s, d: distances({ w, h, on }) };
+    const px = x.getImageData(0, 0, w, h).data, on = new Uint8Array(w * h), cast = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const r = px[i * 4], gr = px[i * 4 + 1], b = px[i * 4 + 2];
+      on[i] = r - b > 20 && r > 55 ? 1 : 0;
+      cast[i] = !on[i] && Math.abs(r - b) < 12 && 0.3 * r + 0.59 * gr + 0.11 * b < 110 && i >= w * Math.floor(h * 0.5) ? 1 : 0;
+    }
+    const dc = distances({ w, h, on: cast }), d = distances({ w, h, on });
+    for (let i = 0; i < w * h; i++) cast[i] = !on[i] && dc[i] <= 3 ? 1 : 0;
+    // only the patches that touch the figure, as a cast shadow does (the studio's dark edges do not)
+    let x0 = w, x1 = 0, y0 = h, y1 = 0;
+    for (let i = 0; i < w * h; i++) if (on[i]) { const x = i % w, y = Math.floor(i / w); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const near = 0.1 * Math.max(1, x1 - x0, y1 - y0), seen = new Uint8Array(w * h), stack = [];
+    for (let start = 0; start < w * h; start++) {
+      if (!cast[start] || seen[start]) continue;
+      const patch = [];
+      let low = Infinity;
+      seen[start] = 1; stack.push(start);
+      while (stack.length) {
+        const c = stack.pop(), x = c % w, y = (c - x) / w;
+        patch.push(c); low = Math.min(low, d[c]);
+        if (x > 0 && cast[c - 1] && !seen[c - 1]) { seen[c - 1] = 1; stack.push(c - 1); }
+        if (x < w - 1 && cast[c + 1] && !seen[c + 1]) { seen[c + 1] = 1; stack.push(c + 1); }
+        if (y > 0 && cast[c - w] && !seen[c - w]) { seen[c - w] = 1; stack.push(c - w); }
+        if (y < h - 1 && cast[c + w] && !seen[c + w]) { seen[c + w] = 1; stack.push(c + w); }
+      }
+      if (low > near) patch.forEach((c) => { cast[c] = 0; });
+    }
+    shot.mask = { w, h, s, d, cast };
     return shot.mask;
   }
   /*
@@ -583,7 +615,7 @@
   function analyze(shot, ink) {
     const g = gestureOf(shot), W = ink.width, H = ink.height;
     const m0 = inkMap(ink), marked = m0.n >= 25;
-    let map, match = null, inkBox = null, score = 0, scoreParts = null;
+    let map, match = null, inkBox = null, shapeBox = null, score = 0, scoreParts = null;
     const kRef = Math.min(W / shot.w, H / shot.h);
     const refMap = { k: kRef, ox: (W - shot.w * kRef) / 2, oy: (H - shot.h * kRef) / 2 };
     if (marked) {
@@ -688,26 +720,49 @@
       // how near a cell of the grid is to the figure in the reference: its distance from the wood, as a
       // part of the gesture's size, turned into credit
       const fig = figureMask(shot);
-      const onFigure = fig && ((cx2, cy2) => {
+      // a cell of the grid, in the reference's figure mask (-1 off it)
+      const figCell = (cx2, cy2) => {
         const x = Math.round(((m.x0 + (cx2 + 0.5) / m.s) - map.ox) / map.k * fig.s), y = Math.round(((m.y0 + (cy2 + 0.5) / m.s) - map.oy) / map.k * fig.s);
-        if (x < 0 || y < 0 || x >= fig.w || y >= fig.h) return 0;
-        const f = fig.d[y * fig.w + x] / fig.s / g.size;
-        return Math.max(0, Math.min(1, 1 - (f - 0.02) / 0.03));
+        return x < 0 || y < 0 || x >= fig.w || y >= fig.h ? -1 : y * fig.w + x;
+      };
+      const onFigure = fig && ((cx2, cy2) => {
+        const i = figCell(cx2, cy2);
+        return i < 0 ? 0 : Math.max(0, Math.min(1, 1 - (fig.d[i] / fig.s / g.size - 0.02) / 0.03));
       });
+      // the cast shadow, as the reference shows it: drawing it is no scribble, and no part of the figure
+      const onCast = (cx2, cy2) => { if (!fig) return false; const i = figCell(cx2, cy2); return i >= 0 && fig.cast[i] === 1; };
       // how much of the room around the figure (inside the drawing's box) has marks in it: a drawing
-      // leaves it nearly empty (a floor line, a cast shadow), a scribble fills it as much as the figure
+      // leaves it nearly empty (a floor line, the cast shadow), a scribble fills it as much as the figure
       let room = 0, filled = 0;
       if (fig) {
         for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) {
-          const fx = Math.round(((m.x0 + (x + 0.5) / m.s) - map.ox) / map.k * fig.s), fy = Math.round(((m.y0 + (y + 0.5) / m.s) - map.oy) / map.k * fig.s);
-          const off = fx < 0 || fy < 0 || fx >= fig.w || fy >= fig.h || fig.d[fy * fig.w + fx] / fig.s / g.size > 0.06;
-          if (off) { room++; if (m.on[y * m.w + x]) filled++; }
+          const i = figCell(x, y), off = i < 0 || fig.d[i] / fig.s / g.size > 0.06;
+          if (off && !onCast(x, y)) { room++; if (m.on[y * m.w + x]) filled++; }
         }
       }
       const clean = room > 20 ? Math.max(0, Math.min(1, 1 - (filled / room - 0.04) / 0.12)) : 1;
-      ({ score, ...scoreParts } = scoreOf(g, samples.map(({ key, p }) => ({ key, d: at(map, p) })), unitPx, inkPts, g.parts.map((part) => part.pts.map((q) => [gx(map.ox + q.x * map.k), gy(map.oy + q.y * map.k)])), inkBox, onFigure, clean, Object.values(match).filter((ok) => !ok).length));
+      // The drawing's own box, for its overall shape: the pieces of marks that are mostly on the figure
+      // (a name, a label or a line across the sheet is not part of it), leaving out the cast shadow.
+      shapeBox = inkBox;
+      if (fig) {
+        const onIt = new Uint32Array(main.pieces), all = new Uint32Array(main.pieces);
+        for (let i = 0; i < m.w * m.h; i++) {
+          if (!main.on[i]) continue;
+          const x = i % m.w, y = Math.floor(i / m.w);
+          all[main.label[i]]++;
+          if (onFigure(x, y) > 0) onIt[main.label[i]]++;
+        }
+        const kept = { w: m.w, h: m.h, on: new Uint8Array(m.w * m.h), n: 0 };
+        for (let i = 0; i < m.w * m.h; i++) {
+          if (!main.on[i] || onIt[main.label[i]] < 0.3 * all[main.label[i]] || onCast(i % m.w, Math.floor(i / m.w))) continue;
+          kept.on[i] = 1; kept.n++;
+        }
+        if (kept.n >= 25) { const kb = boxOf(kept); shapeBox = { x: m.x0 + kb.x / m.s, y: m.y0 + kb.y / m.s, w: kb.w / m.s, h: kb.h / m.s }; }
+      }
+      const figPts = inkPts.filter(([px, py]) => !onCast(px, py));
+      ({ score, ...scoreParts } = scoreOf(g, samples.map(({ key, p }) => ({ key, d: at(map, p) })), unitPx, figPts, g.parts.map((part) => part.pts.map((q) => [gx(map.ox + q.x * map.k), gy(map.oy + q.y * map.k)])), shapeBox, onFigure, clean, Object.values(match).filter((ok) => !ok).length));
     } else map = refMap;
-    return { g, map, match, inkBox, marked, score, scoreParts, stars: marked ? starsFor(score) : 0, tips: notes(g, marked ? inkBox : null, match) };
+    return { g, map, match, inkBox, marked, score, scoreParts, stars: marked ? starsFor(score) : 0, tips: notes(g, marked ? shapeBox : null, match, scoreParts) };
   }
   /*
    * How well a drawing follows its pose's gesture, from 0 to 100 (all lengths are parts of the gesture's
@@ -756,7 +811,7 @@
   const GRADES = ['Keep drawing', 'Keep drawing', 'Getting there', 'Good gesture', 'Strong gesture!', 'Gesture master!'];
   const starsFor = (pct) => STARS.filter((min) => pct >= min).length;
   // what to look for: the line of action, the tilts, the size in heads, the drawing's shape, missed parts
-  function notes(g, inkBox, match) {
+  function notes(g, inkBox, match, sp) {
     const tips = [], P = g.P, head = g.head.a * 2, a = g.action;
     const lean = Math.abs(Math.atan2(a.p3.x - a.p0.x, a.p3.y - a.p0.y)) * 180 / Math.PI, slant = Math.min(lean, 180 - lean);
     tips.push(['Line of action', {
@@ -787,7 +842,11 @@
           : 'has the pose\'s overall shape: about as wide for its height.']);
       const missed = g.parts.filter((p) => match[p.key] === false).map((p) => p.name);
       const list = missed.length > 1 ? `${missed.slice(0, -1).join(', ')} and ${missed[missed.length - 1]}` : missed[0];
-      tips.push(missed.length ? ['Dashed', `no marks near ${list}. Look again at where ${missed.length > 1 ? 'they go' : 'it goes'}.`] : ['Well matched', 'your marks follow every part of the gesture.']);
+      // (praise only when nothing else took the stars down: marks around the figure, or off it)
+      if (missed.length) tips.push(['Dashed', `no marks near ${list}. Look again at where ${missed.length > 1 ? 'they go' : 'it goes'}.`]);
+      else if (sp && sp.clean < 0.9) tips.push(['Extra marks', 'marks fill the space around the figure, and they count against the match. Draw the figure, and leave the room around it empty.']);
+      else if (sp && sp.along < 0.8) tips.push(['Off the figure', 'much of your drawing lies off the figure. Keep your marks on the body, the head and the limbs.']);
+      else tips.push(['Well matched', 'your marks follow every part of the gesture.']);
     } else tips.push(['Nothing drawn', 'the gesture is shown where the reference would sit.']);
     return tips;
   }
@@ -802,7 +861,9 @@
   // Under it the drawing with the gesture over it, beside the pose, and the notes. The rest of the
   // studio waits behind it until Next pose or Stop class.
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let resultShown = false, countUp = 0;
+  let resultShown = false, countUp = 0, cardAt = 0;
+  // a tap already on its way when the card comes, or a second Enter on Done, does not answer it
+  const cardSettled = () => performance.now() - cardAt >= 600;
   function drawWithGesture(canvas, r, img) {
     const g = canvas.getContext('2d');
     g.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -812,6 +873,7 @@
   function showResult(r, timedOut) {
     const a = r.analysis, pct = a.score, stars = a.stars;
     resultShown = true;
+    cardAt = performance.now();
     $('kicker').textContent = timedOut ? 'Time’s up!' : `Pose ${r.n} done`;
     $('grade').textContent = a.marked ? GRADES[stars] : 'Nothing drawn';
     $('stars').setAttribute('aria-label', `${stars} out of 5 stars, ${pct}% gesture match`);
@@ -843,7 +905,7 @@
       };
       countUp = requestAnimationFrame(step);
     }
-    $('say').textContent = `${$('kicker').textContent} ${r.name}: ${a.marked ? `${stars} out of 5 stars, ${pct}% gesture match. ${GRADES[stars]}` : 'nothing drawn'}.`;
+    $('say').textContent = `${$('kicker').textContent} ${r.name}: ${a.marked ? `${stars} out of 5 stars, ${pct}% gesture match. ${GRADES[stars]}` : 'nothing drawn'}`.replace(/([^!.])$/, '$1.');
     $('nextPose').focus({ preventScroll: true });
   }
   function hideResult() {
@@ -853,13 +915,13 @@
     [...root.children].forEach((el) => { el.inert = false; });
   }
   $('nextPose').addEventListener('click', () => {
-    if (!cls || !resultShown) return;
+    if (!cls || !resultShown || !cardSettled()) return;
     $('nextPose').disabled = true;            // (one pose for one tap)
     hideResult();
     $('done').focus({ preventScroll: true });
     showPose();
   });
-  $('stop').addEventListener('click', () => { if (cls) finish(); });
+  $('stop').addEventListener('click', () => { if (cls && cardSettled()) finish(); });
 
   // ---- The review ------------------------------------------------------------------------------------
 
@@ -873,7 +935,8 @@
   function showReview(c) {
     const list = drawn(c), n = list.length;
     const avg = list.reduce((sum, r) => sum + r.analysis.stars, 0) / n;
-    $('reviewLede').textContent = `${n} drawing${n > 1 ? 's' : ''} from ${c.mode === 'timed' ? `a timed class, ${TIMES[c.secs]} a pose` : 'a relaxed class'}, ${half(avg)} star${avg === 1 ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`;
+    const shown = half(avg);
+    $('reviewLede').textContent = `${n} drawing${n > 1 ? 's' : ''} from ${c.mode === 'timed' ? `a timed class, ${TIMES[c.secs]} a pose` : 'a relaxed class'}, ${shown} star${shown === '1' || shown === '½' ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`;
     const box = $('cards');
     box.textContent = '';
     list.forEach((r, i) => {
@@ -900,8 +963,10 @@
       st.className = 'fig-rating-stars';
       st.textContent = starText(r.analysis.stars);
       st.setAttribute('aria-hidden', 'true');
-      rating.append(st, ` ${r.analysis.score}% · ${GRADES[r.analysis.stars]}`);
-      rating.setAttribute('aria-label', `${r.analysis.stars} out of 5 stars, ${r.analysis.score}% gesture match`);
+      const said = document.createElement('span');
+      said.className = 'visually-hidden';
+      said.textContent = `${r.analysis.stars} out of 5 stars,`;
+      rating.append(st, said, ` ${r.analysis.score}% · ${GRADES[r.analysis.stars]}`);
       const tips = document.createElement('ul');
       tips.className = 'fig-tips';
       showTips(tips, r.analysis.tips.filter(([lead]) => lead !== 'Measure'));
@@ -959,5 +1024,5 @@
   showSetup();
 
   // for tests
-  window.FigureStudy = { gestureOf, fitCurve, analyze, drawGesture, studio, state: () => cls, poses: () => poses, shotOf, starsFor };
+  window.FigureStudy = { gestureOf, fitCurve, analyze, drawGesture, studio, state: () => cls, poses: () => poses, shotOf, starsFor, figureMaskOf: figureMask };
 })();

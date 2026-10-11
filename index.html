@@ -601,7 +601,7 @@
               <legend>Class</legend>
               <div class="seg seg-full game-levels" role="radiogroup" aria-label="Class">
                 <input type="radio" name="figClass" id="fig-relaxed" value="relaxed" checked><label for="fig-relaxed">Relaxed<small>no time limit</small></label>
-                <input type="radio" name="figClass" id="fig-timed" value="timed"><label for="fig-timed">Timed<small>a new pose on the clock</small></label>
+                <input type="radio" name="figClass" id="fig-timed" value="timed"><label for="fig-timed">Timed<small>a time limit on each pose</small></label>
               </div>
             </fieldset>
             <fieldset class="field" id="fig-times" hidden>
@@ -655,7 +655,7 @@
         </div>
         <!-- the card after each pose, over the paper -->
         <div class="fig-result" id="fig-result" hidden>
-          <div class="game-popup fig-popup" id="fig-popup" role="dialog" aria-modal="true" aria-labelledby="fig-kicker">
+          <div class="game-popup fig-popup" id="fig-popup" role="dialog" aria-labelledby="fig-kicker" aria-describedby="fig-stars fig-grade">
             <p class="game-kicker" id="fig-kicker">Pose 1 done</p>
             <p class="game-pct"><span id="fig-pct">0</span><span class="game-pct-sign">%</span></p>
             <p class="game-pct-label">gesture match</p>
@@ -1108,8 +1108,8 @@
           </div>
           <div class="help-shots">
             <figure class="phone"><img src="img/help/figure-setup.jpg" alt="The Figure study setup on a phone: Timed, with 1 minute a pose, 27 of the 30 poses in the class, and the pose library with a tick on each pose in it" loading="lazy"><figcaption>Setting up a class</figcaption></figure>
-            <figure class="phone"><img src="img/help/figure-draw.jpg" alt="Drawing the Lunge pose: the bar with the clock and Done on top, the reference in the corner and a quick charcoal gesture drawing on the paper" loading="lazy"><figcaption>Drawing a pose</figcaption></figure>
-            <figure class="phone"><img src="img/help/figure-card.jpg" alt="The card after the pose: 99% gesture match, five stars and Gesture master!, the drawing with the blue stick figure, orange line of action and green tilt lines over it beside the pose, the notes, and Next pose and Stop class" loading="lazy"><figcaption>The card after each pose</figcaption></figure>
+            <figure class="phone"><img src="img/help/figure-draw.jpg" alt="Drawing a pose: the bar with the pose, the clock and Done on top, the reference in the corner and a quick charcoal gesture drawing on the paper" loading="lazy"><figcaption>Drawing a pose</figcaption></figure>
+            <figure class="phone"><img src="img/help/figure-card.jpg" alt="The card after a pose: the gesture match, five stars and Gesture master!, the drawing with the blue stick figure, orange line of action and green tilt lines over it beside the pose, the notes, and Next pose and Stop class" loading="lazy"><figcaption>The card after each pose</figcaption></figure>
             <figure class="phone"><img src="img/help/figure-review.jpg" alt="The review after the class: each drawing beside its pose, with its stars, the gesture over it and its notes" loading="lazy"><figcaption>The review</figcaption></figure>
           </div>
         </section>

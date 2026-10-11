@@ -1529,8 +1529,10 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-popup .game-pct { font-size: 3.6rem; }
 .fig-popup .game-stars { margin: 4px 0 0; }
 .fig-popup .game-star { width: 32px; height: 32px; }
-.fig-popup-pair { margin-top: 6px; grid-template-columns: auto auto; justify-content: center; }
-.fig-popup-pair canvas, .fig-popup-pair img { width: auto; max-width: 100%; max-height: 32vh; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+.fig-popup .fig-popup-pair { margin-top: 6px; grid-template-columns: auto auto; justify-content: center; }
+.fig-popup .fig-popup-pair canvas, .fig-popup .fig-popup-pair img { width: auto; height: auto; max-width: 100%; max-height: 32vh; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+/* Next pose and Stop class stay in view at the bottom of the card while the rest scrolls under them */
+.fig-popup .game-popup-actions { position: sticky; bottom: -18px; justify-self: stretch; margin-bottom: -18px; padding: 8px 0 18px; background: #1e2b22; }
 .fig-popup .fig-key { justify-content: center; color: rgba(250, 245, 234, 0.75); }
 .fig-popup .fig-tips { justify-self: stretch; text-align: left; color: #faf5ea; }
 .fig-popup .fig-tips strong { color: #e3b04b; }
@@ -1547,7 +1549,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .fig-acts { gap: 4px; }
   .fig-studio .ps-status { display: none; }
   .fig-popup .game-pct { font-size: 3rem; }
-  .fig-popup-pair canvas, .fig-popup-pair img { max-height: 28vh; }
+  .fig-popup .fig-popup-pair canvas, .fig-popup .fig-popup-pair img { max-height: 28vh; }
   .fig-popup .fig-tips { font-size: 0.78rem; }
 }
 
