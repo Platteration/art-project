@@ -1167,7 +1167,7 @@
 
   // Photo or Blocks: how the reference beside the board is shown, remembered between games
   let refView = load(REF_VIEW_KEY, 'photo') === 'blocks' ? 'blocks' : 'photo';
-  const refViewButtons = document.querySelectorAll('[data-ref-view]');
+  const refViewButtons = document.querySelectorAll('#tab-game [data-ref-view]');
   function showRefView() {
     refViewButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.refView === refView)));
     els.ref.setAttribute('aria-label', refView === 'blocks' ? 'The reference as a color-block study' : 'The reference photo');

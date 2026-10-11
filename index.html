@@ -34,6 +34,7 @@
       </div>
     </div>
     <button type="button" class="tab" id="tabPaintBtn" data-tab="paint" aria-selected="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span class="tab-text"><span>Studio</span><span class="tab-sub">Paint on the paper</span></span></button>
+    <button type="button" class="tab" id="tabFigureBtn" data-tab="figure" aria-selected="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg><span class="tab-text"><span>Figure study</span><span class="tab-sub">Draw from a pose</span></span></button>
     <div class="tab-group" data-group="games">
       <button type="button" class="tab" id="tabGamesBtn" aria-selected="false" aria-haspopup="menu" aria-expanded="false" aria-controls="tabGamesMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span class="tab-text"><span>Games</span><span class="tab-sub" id="tabGamesSub">Paint by numbers</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       <div class="tab-menu" id="tabGamesMenu" role="menu" hidden>
@@ -415,10 +416,10 @@
         <div class="ps" id="ps-root">
           <div class="ps-stage" id="ps-stage">
             <div class="ps-paper-wrap" id="ps-paperWrap">
-              <canvas id="ps-ground" width="900" height="1200" aria-hidden="true"></canvas>
-              <canvas id="ps-sketch" width="900" height="1200" aria-hidden="true"></canvas>
-              <canvas id="ps-paper" width="900" height="1200" aria-label="Drawing paper"></canvas>
-              <canvas id="ps-weave" width="900" height="1200" aria-hidden="true"></canvas>
+              <canvas id="ps-ground" class="ps-layer-ground" width="900" height="1200" aria-hidden="true"></canvas>
+              <canvas id="ps-sketch" class="ps-layer-sketch" width="900" height="1200" aria-hidden="true"></canvas>
+              <canvas id="ps-paper" class="ps-layer-paper" width="900" height="1200" aria-label="Drawing paper"></canvas>
+              <canvas id="ps-weave" class="ps-layer-weave" width="900" height="1200" aria-hidden="true"></canvas>
             </div>
             <figure class="ps-ref" id="ps-refFig" hidden>
               <div class="pill-switch" role="group" aria-label="Show the reference as">
@@ -484,8 +485,8 @@
                 <div class="ps-row"><span class="ps-label">Size</span><output id="ps-sketchOut">3 px</output></div>
                 <input type="range" id="ps-sketchSize" min="1" max="30" value="3" aria-label="Underdrawing size">
                 <div class="ps-toggle"><span class="ps-label">Layer</span><div class="ps-seg" role="group" aria-label="Underdrawing layer"><button type="button" data-sketch-show="1" aria-pressed="true">Shown</button><button type="button" data-sketch-show="0" aria-pressed="false">Hidden</button></div></div>
-                <div class="ps-row"><button type="button" class="btn" id="ps-sketchFromStudy">Copy the Study lines</button><button type="button" class="btn btn-danger" id="ps-sketchClear">Clear the underdrawing</button></div>
-                <p class="hint">Draws the grid, lines, measures and plumb lines from the Study tab on this layer in pencil, with the lead, hardness, size and color set here, fitted to the paper as the reference would be.</p>
+                <div class="ps-row"><button type="button" class="btn ps-follow" id="ps-sketchFromStudy">Copy the Study lines</button><button type="button" class="btn btn-danger" id="ps-sketchClear">Clear the underdrawing</button></div>
+                <p class="hint ps-follow">Draws the grid, lines, measures and plumb lines from the Study tab on this layer in pencil, with the lead, hardness, size and color set here, fitted to the paper as the reference would be.</p>
               </div>
               <div class="ps-opts" id="ps-blendOpts" hidden>
                 <div class="ps-row"><span class="ps-label">Size</span><output id="ps-blendOut">60 px</output></div>
@@ -515,12 +516,12 @@
             </section>
             <section class="ps-sheet ps-sheet-small" id="ps-refSheet" hidden aria-label="Reference">
               <h2>Reference <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
-              <div class="ps-seg" role="group" aria-label="Paint from">
+              <div class="ps-seg ps-follow" role="group" aria-label="Paint from">
                 <button type="button" data-ref-kind="studio" aria-pressed="true">The Study photo</button>
                 <button type="button" data-ref-kind="painting" aria-pressed="false">A portrait</button>
               </div>
               <p class="hint" id="ps-refName">The reference from the Study tab, with its studies as that tab makes them.</p>
-              <div class="ps-row">
+              <div class="ps-row ps-follow">
                 <label class="btn" for="file">Load a photo</label>
                 <button type="button" class="btn" id="ps-refAnother" hidden>Another portrait</button>
               </div>
@@ -530,7 +531,7 @@
                 <button type="button" data-ref-view="values" aria-pressed="false">Values</button>
                 <button type="button" data-ref-view="blocks" aria-pressed="false">Blocks</button>
               </div>
-              <p class="hint">Values shows dark, middle and light. Blocks shows the big color shapes. Both come from the Study tab.</p>
+              <p class="hint" id="ps-refViewHint">Values shows dark, middle and light. Blocks shows the big color shapes. Both come from the Study tab.</p>
               <div class="ps-row"><span class="ps-label">Size</span><output id="ps-refSizeOut">36%</output></div>
               <input type="range" id="ps-refSize" min="20" max="70" value="36" aria-label="Reference size">
               <div class="ps-toggle"><span class="ps-label">On the paper</span><div class="ps-seg" role="group" aria-label="Reference shown"><button type="button" data-ref-show="1" aria-pressed="true">Shown</button><button type="button" data-ref-show="0" aria-pressed="false">Hidden</button></div></div>
@@ -566,7 +567,7 @@
                   <button type="button" class="btn btn-danger" id="ps-wellClear" disabled>Clear</button>
                 </div>
               </div>
-              <span class="ps-label">My mixes <small id="ps-mixNote">· skin tones from this palette to start</small></span>
+              <span class="ps-label">My mixes <small class="ps-mix-note" id="ps-mixNote">· skin tones from this palette to start</small></span>
               <div class="ps-mixes" id="ps-mixes"></div>
               <div class="ps-row ps-picked" id="ps-picked" hidden>
                 <p id="ps-pickedRecipe"></p>
@@ -591,6 +592,76 @@
         </div>
       </section>
 
+      <section class="tabpanel" id="tab-figure" hidden>
+        <div class="game-setup" id="fig-setup">
+          <div class="game-card">
+            <h2 class="game-title">Figure study</h2>
+            <p class="game-lede">Draw the wooden figure from the pose library, the way an art class draws from a model. Choose a class and the poses, then draw each one on the paper. <strong>Analyze</strong> lays the pose's gesture over your drawing: a stick figure made from the model's own joints.</p>
+            <fieldset class="field">
+              <legend>Class</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Class">
+                <input type="radio" name="figClass" id="fig-relaxed" value="relaxed" checked><label for="fig-relaxed">Relaxed<small>no clock</small></label>
+                <input type="radio" name="figClass" id="fig-timed" value="timed"><label for="fig-timed">Timed<small>a new pose on the clock</small></label>
+              </div>
+            </fieldset>
+            <fieldset class="field" id="fig-times" hidden>
+              <legend>Time for each pose</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Time for each pose">
+                <input type="radio" name="figTime" id="fig-t10" value="10"><label for="fig-t10">10 s<small>gesture</small></label>
+                <input type="radio" name="figTime" id="fig-t30" value="30" checked><label for="fig-t30">30 s<small>gesture</small></label>
+                <input type="radio" name="figTime" id="fig-t60" value="60"><label for="fig-t60">1 min<small>shapes</small></label>
+                <input type="radio" name="figTime" id="fig-t300" value="300"><label for="fig-t300">5 min<small>study</small></label>
+                <input type="radio" name="figTime" id="fig-t600" value="600"><label for="fig-t600">10 min<small>study</small></label>
+              </div>
+              <p class="hint">When the time is up the next pose comes, on a fresh sheet. Short poses are for the gesture: one line for the whole movement. Long poses have time for the shapes and the light.</p>
+            </fieldset>
+            <div class="field">
+              <div class="field-head"><span class="fig-label">Poses</span><button type="button" class="btn btn-small" id="fig-random">Pick 5 for me</button></div>
+              <p class="hint" id="fig-chosen">Tap poses in the library to draw them, in the order you tap them.</p>
+              <div class="fig-chosen-row" id="fig-order" aria-label="The poses to draw, in order"></div>
+            </div>
+            <p class="game-best" id="fig-plan"></p>
+            <button type="button" class="btn btn-primary game-start" id="fig-start" disabled>Start drawing</button>
+          </div>
+          <div class="game-card fig-library">
+            <div class="field-head"><h3>Pose library</h3><button type="button" class="btn btn-small" id="fig-none" hidden>Clear the choice</button></div>
+            <p class="hint" id="fig-libNote" aria-live="polite">Setting up the poses…</p>
+            <div id="fig-poses"></div>
+          </div>
+        </div>
+        <div class="fig-review" id="fig-review" hidden>
+          <div class="game-card fig-review-head">
+            <h2 class="game-title">Your figure drawings</h2>
+            <p class="game-lede" id="fig-reviewLede"></p>
+            <div class="fig-review-acts">
+              <div class="pill-switch" role="group" aria-label="The gesture over each drawing"><button type="button" data-fig-gesture="1" aria-pressed="true">Gestures shown</button><button type="button" data-fig-gesture="0" aria-pressed="false">Hidden</button></div>
+              <button type="button" class="btn btn-primary" id="fig-again">Draw these poses again</button>
+              <button type="button" class="btn" id="fig-new">New class</button>
+            </div>
+            <p class="hint fig-key"><span class="fig-swatch fig-sw-action"></span>Line of action <span class="fig-swatch fig-sw-bones"></span>Stick figure <span class="fig-swatch fig-sw-tilt"></span>Shoulder and hip tilt <span class="fig-swatch fig-sw-miss"></span>No marks near it</p>
+          </div>
+          <div class="fig-cards" id="fig-cards"></div>
+        </div>
+        <!-- moved into Figure study's copy of the Studio when it is set up -->
+        <div class="fig-bar" id="fig-bar">
+          <div class="fig-now"><span class="fig-count" id="fig-count">Pose 1 of 1</span><span class="fig-name" id="fig-name"></span></div>
+          <div class="fig-clock" id="fig-clock" role="timer" aria-label="Time left">0:00</div>
+          <div class="fig-acts">
+            <button type="button" class="btn btn-small fig-btn" id="fig-pause" aria-pressed="false" aria-label="Pause the clock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg><span class="fig-btn-text">Pause</span></button>
+            <button type="button" class="btn btn-small fig-btn fig-analyze" id="fig-analyze" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg><span>Analyze</span></button>
+            <button type="button" class="btn btn-small btn-primary fig-btn" id="fig-next" aria-label="Next pose"><span class="fig-btn-text" id="fig-nextText">Next pose</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+            <button type="button" class="fig-end" id="fig-end" aria-label="End the class" title="End the class"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+        </div>
+        <aside class="fig-notes" id="fig-notes" hidden aria-label="Analysis">
+          <div class="fig-notes-head"><h3>The gesture</h3><button type="button" class="ps-x" id="fig-notesClose" aria-label="Hide these notes">×</button></div>
+          <p class="fig-key"><span class="fig-swatch fig-sw-action"></span>Line of action <span class="fig-swatch fig-sw-bones"></span>Stick figure <span class="fig-swatch fig-sw-tilt"></span>Tilt <span class="fig-swatch fig-sw-miss"></span>No marks near it</p>
+          <ul class="fig-tips" id="fig-tips"></ul>
+          <div class="fig-notes-acts"><button type="button" class="btn btn-small" id="fig-recheck">Check again</button><button type="button" class="btn btn-small" id="fig-place" aria-pressed="false">Place it as the reference</button></div>
+        </aside>
+        <p class="fig-banner" id="fig-banner" hidden aria-live="assertive"></p>
+        <iframe class="fig-render" id="fig-render" title="Pose pictures for Figure study" aria-hidden="true" tabindex="-1" data-src="pose.html?render=1"></iframe>
+      </section>
       <section class="tabpanel" id="tab-game" hidden>
         <div class="game-setup" id="gameSetup">
           <div class="game-card">
@@ -895,10 +966,10 @@
             <ol>
               <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
               <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
-              <li>The three big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
+              <li>The four big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Figure study</strong> is a drawing class with the wooden figure as the model. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
             </ol>
           </div>
-          <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo and the four tabs" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
+          <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo, the four big buttons and the Learning tools menu open under the first" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
         </section>
 
         <section class="help-part" id="help-study">
@@ -1006,6 +1077,25 @@
           </div>
         </section>
 
+        <section class="help-part" id="help-figure">
+          <div class="help-text">
+            <h3>Figure study</h3>
+            <p>A drawing class with the wooden figure from Pose and light as the model. Each pose is the reference, and the paper is a Studio of its own, with all the Studio's tools, kept apart from your painting.</p>
+            <ol>
+              <li><strong>Choose a class.</strong> <strong>Relaxed</strong> has no clock: tap <strong>Next pose</strong> when you are ready. <strong>Timed</strong> brings a new pose every 10 s, 30 s, 1 min, 5 min or 10 min, each on a fresh sheet. Short poses are for the gesture; long ones have time for the shapes and the light.</li>
+              <li><strong>Choose the poses</strong> from the pose library, in the order to draw them, or tap <strong>Pick 5 for me</strong>. The poses you saved in Pose and light are there too. Tap one in the row under Poses to take it out.</li>
+              <li><strong>Draw.</strong> The pencil starts as charcoal. The bar on top shows the pose, the clock, <strong>Pause</strong> (in Timed) and <strong>Next pose</strong>. ✕ twice ends the class.</li>
+              <li><strong>Analyze</strong> lays the pose's gesture over your drawing: a stick figure made from the figure's own joints (blue), its line of action (orange) and the tilt of the shoulders and hips (green). It finds your drawing on the paper and fits itself to it. A part with no marks near it is dashed in pink. The notes say what to look for. The clock waits while it shows. <strong>Place it as the reference</strong> puts it where the reference would sit instead.</li>
+              <li>At the end, every drawing comes back beside its pose, with its gesture and notes. <strong>Save as PNG</strong> keeps one. <strong>Draw these poses again</strong> starts the same class over.</li>
+            </ol>
+          </div>
+          <div class="help-shots">
+            <figure class="phone"><img src="img/help/figure-setup.jpg" alt="The Figure study setup on a phone: Timed, with 1 minute a pose, and four poses lined up in order" loading="lazy"><figcaption>Setting up a class</figcaption></figure>
+            <figure class="phone"><img src="img/help/figure-draw.jpg" alt="Drawing the Weight on one leg pose: the reference in the corner, and over the pencil drawing the blue stick figure, the orange line of action and the green tilt lines, with the notes below" loading="lazy"><figcaption>Analyze</figcaption></figure>
+            <figure class="phone"><img src="img/help/figure-review.jpg" alt="The review after a class: each drawing beside its pose, with the gesture over it and its notes" loading="lazy"><figcaption>The review</figcaption></figure>
+          </div>
+        </section>
+
         <section class="help-part" id="help-check">
           <div class="help-text">
             <h3>How close did I get?</h3>
@@ -1067,7 +1157,8 @@
               <li>Nothing is uploaded. Photos, paintings and scores stay in this browser.</li>
               <li>The Studio saves your painting as you go. Close the tab, come back later, and it is still there.</li>
               <li>Undo is everywhere: on the Studio strip, in the mixing well, and under the game's paints.</li>
-              <li>On a phone, the tabs hide while you paint or play. The arrow at the left of the Studio strip, or ✕ twice in a game, brings them back.</li>
+              <li>On a phone, the tabs hide while you paint, draw or play. The arrow at the left of the Studio strip, or ✕ twice in a game or a Figure study class, brings them back.</li>
+              <li>Figure study keeps a class's drawings until you start another or close the page. Save the ones you want to keep.</li>
               <li>Stuck? Switch to <strong>Simple</strong> at the top of the page, and start again with the sample portrait.</li>
             </ul>
           </div>
@@ -1128,6 +1219,7 @@
 <script src="js/subjects.js"></script>
 <script src="js/game.js"></script>
 <script src="js/painting.js"></script>
+<script src="js/figure.js"></script>
 <script src="js/loomis.js"></script>
 <script src="js/battle.js"></script>
 </body>

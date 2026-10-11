@@ -331,7 +331,9 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; };
+  // pose.html?render=1 in a hidden frame: the page draws pictures for Portrait Value Studio's Figure study
+  const RENDER = /[?&]render=1(&|$)/.test(location.search) && window.parent !== window;
+  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, '*'); };
   if (!window.THREE) { fail(); return; }
   const T = window.THREE;
   const DEG = Math.PI / 180;
@@ -1372,9 +1374,21 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   // it cannot be drawn), the button shows the pose's name.
   const THUMB = { w: 160, h: 200 };              // drawn at twice this size and scaled down, for smooth edges
   const thumbCam = new T.PerspectiveCamera(30, THUMB.w / THUMB.h, 0.05, 60);
-  let thumbTarget = null;
-  function drawThumb(entry) {
-    const W2 = THUMB.w * 2, H2 = THUMB.h * 2;
+  const shotTargets = new Map();                // render targets by size, kept for the next picture
+  // the points a gesture drawing is made from, each on its joint (in the joint's own frame)
+  const GESTURE = [['pelvis', 'root', [0, -0.03, 0]], ['waist', 'waist', [0, 0, 0]], ['chest', 'waist', [0, 0.27, 0]], ['neck', 'neck', [0, 0, 0]],
+    ['head', 'neck', [0, 0.19, 0.012]], ['crown', 'neck', [0, 0.315, 0.012]], ['chin', 'neck', [0, 0.075, 0.045]], ['face', 'neck', [0, 0.19, 0.112]]];
+  ['R', 'L'].forEach((s) => {
+    GESTURE.push(['shoulder' + s, 'shoulder' + s, [0, 0, 0]], ['elbow' + s, 'elbow' + s, [0, 0, 0]], ['wrist' + s, 'wrist' + s, [0, 0, 0]], ['hand' + s, 'wrist' + s, [0, -0.175, 0.004]],
+      ['hip' + s, 'hip' + s, [0, 0, 0]], ['knee' + s, 'knee' + s, [0, 0, 0]], ['ankle' + s, 'ankle' + s, [0, 0, 0]], ['toe' + s, 'ankle' + s, [0, -0.035, 0.175]], ['heel' + s, 'ankle' + s, [0, -0.04, -0.06]]);
+  });
+  // A picture of a pose: the pose stood on the floor, seen from its own side, lit high from the
+  // picture's front left, drawn at twice the size and scaled down for smooth edges. With `snug`, the
+  // figure fills the picture (a little room all round) and `joints` says where each gesture point lands:
+  // [across, down] from 0 to 1, and how much nearer than the middle of the body it is; `tilts` gives the
+  // shoulders' and hips' tilt.
+  function shoot(entry, w, h, snug) {
+    const W2 = w * 2, H2 = h * 2;
     const keep = copyPose(pose), keepLight = Object.assign({}, light), keepTarget = TARGET.clone();
     const vis = [bulb.visible, beam.visible, stand.visible, outlineMat.visible];
     try {
@@ -1391,6 +1405,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       const mid = box.getCenter(new T.Vector3()), r = box.getBoundingSphere(new T.Sphere()).radius;
       const v = entry.thumbView || { az: 30, el: 8 }, a = v.az * DEG, e = v.el * DEG;
       // the camera stays inside the studio; when a wide pose would put it beyond the backdrop, the lens widens instead
+      thumbCam.aspect = w / h;
+      thumbCam.clearViewOffset();
       thumbCam.fov = 30;
       const far = r / Math.sin(thumbCam.fov * DEG / 2) * 1.02;
       thumbCam.position.copy(inside(mid, v.az, v.el, far, 0.25));
@@ -1398,16 +1414,33 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       if (got < far - 1e-3) thumbCam.fov = 2 * Math.asin(Math.min(1, r * 1.02 / got)) / DEG;
       thumbCam.updateProjectionMatrix();
       thumbCam.lookAt(mid);
+      thumbCam.updateMatrixWorld();
+      if (snug) {
+        // the part of the view the figure takes up, with 6% room on every side
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        const q = new T.Vector3();
+        parts.forEach((m) => {
+          const at = m.geometry.attributes.position;
+          for (let i = 0; i < at.count; i++) {
+            q.fromBufferAttribute(at, i).applyMatrix4(m.matrixWorld).project(thumbCam);
+            x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y);
+          }
+        });
+        const half = Math.max(x1 - x0, y1 - y0) / 2 / 0.88, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        thumbCam.setViewOffset(w, h, (cx - half + 1) / 2 * w, (1 - cy - half) / 2 * h, half * w, half * h);
+      }
       // the light: high, from the picture's front left
       Object.assign(light, { az: v.az + 40, el: 32, dist: 2.6, soft: 3, fill: 45 });
       TARGET.set(pose.shift.x, 0.95, pose.shift.z);
       lamp.target.position.copy(TARGET);
       placeLamp();
-      if (!thumbTarget) thumbTarget = new T.WebGLRenderTarget(W2, H2, { encoding: T.sRGBEncoding });
-      renderer.setRenderTarget(thumbTarget);
+      const key = W2 + 'x' + H2;
+      if (!shotTargets.has(key)) shotTargets.set(key, new T.WebGLRenderTarget(W2, H2, { encoding: T.sRGBEncoding }));
+      const target = shotTargets.get(key);
+      renderer.setRenderTarget(target);
       renderer.render(scene, thumbCam);
       const px = new Uint8Array(W2 * H2 * 4);
-      renderer.readRenderTargetPixels(thumbTarget, 0, 0, W2, H2, px);
+      renderer.readRenderTargetPixels(target, 0, 0, W2, H2, px);
       const big = document.createElement('canvas');
       big.width = W2; big.height = H2;
       const g = big.getContext('2d'), img = g.createImageData(W2, H2);
@@ -1415,15 +1448,31 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
       g.putImageData(img, 0, 0);
       const small = document.createElement('canvas');
-      small.width = THUMB.w; small.height = THUMB.h;
+      small.width = w; small.height = h;
       const sg = small.getContext('2d');
       sg.imageSmoothingQuality = 'high';
-      sg.drawImage(big, 0, 0, THUMB.w, THUMB.h);
-      return small.toDataURL('image/jpeg', 0.86);
+      sg.drawImage(big, 0, 0, w, h);
+      let joints = null, tilts = null;
+      if (snug) {
+        // the true tilt of the shoulders and the hips, in degrees (the figure's left side up is more),
+        // which a three-quarter view's perspective would hide or fake
+        const tilt = (a, b) => { const p = J[a].obj.getWorldPosition(new T.Vector3()), q = J[b].obj.getWorldPosition(new T.Vector3()); return +(Math.atan2(q.y - p.y, Math.hypot(q.x - p.x, q.z - p.z)) / DEG).toFixed(1); };
+        tilts = { shoulders: tilt('shoulderR', 'shoulderL'), hips: tilt('hipR', 'hipL') };
+        joints = {};
+        const toCam = thumbCam.position.distanceTo(mid);
+        GESTURE.forEach(([name, on, at]) => {
+          const wp = J[on].obj.localToWorld(new T.Vector3(...at));
+          const near = toCam - wp.distanceTo(thumbCam.position);
+          const q = wp.project(thumbCam);
+          joints[name] = [+((q.x + 1) / 2).toFixed(4), +((1 - q.y) / 2).toFixed(4), +near.toFixed(3)];
+        });
+      }
+      return { canvas: small, joints, tilts };
     } catch (err) {
       return null;
     } finally {
       renderer.setRenderTarget(null);
+      thumbCam.clearViewOffset();
       Object.keys(keep).forEach((k) => { pose[k] = keep[k]; });
       fk();
       Object.assign(light, keepLight);
@@ -1433,10 +1482,15 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
       [bulb.visible, beam.visible, stand.visible, outlineMat.visible] = vis;
     }
   }
+  function drawThumb(entry) {
+    const shot = shoot(entry, THUMB.w, THUMB.h, false);
+    return shot ? shot.canvas.toDataURL('image/jpeg', 0.86) : null;
+  }
   // pictures are drawn one at a time after the page is up, so it opens quickly
   const thumbQueue = [];
   let thumbBusy = false;
   function thumbLater(entry, btn, first) {
+    if (RENDER) return;                      // nobody sees the buttons; Figure study asks for the pictures it needs
     if (first) thumbQueue.unshift([entry, btn]); else thumbQueue.push([entry, btn]);
     if (thumbBusy) return;
     thumbBusy = true;
@@ -1690,7 +1744,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
 
   let queued = false;
   function requestRender() {
-    if (queued) return;
+    if (queued || RENDER) return;              // a page drawing pictures for Figure study shows nothing itself
     queued = true;
     requestAnimationFrame(render);
   }
@@ -1750,7 +1804,7 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(Math.max(1, r.width), Math.max(1, r.height), false);
     outlineMat.uniforms.size.value.set(Math.max(1, r.width), Math.max(1, r.height));
-    camera.aspect = r.width / Math.max(1, r.height);
+    camera.aspect = Math.max(1, r.width) / Math.max(1, r.height);
     camera.updateProjectionMatrix();
     requestRender();
   }
@@ -2321,8 +2375,55 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   showPart();
   last = snapshot();
   resize();
-  if (saved && saved.pose) offerContinue();
-  openLibrary(true);
+  if (!RENDER) {
+    if (saved && saved.pose) offerContinue();
+    openLibrary(true);
+  }
+
+  // ---- Pictures for Figure study ------------------------------------------------------------------
+
+  // Portrait Value Studio's Figure study opens this page hidden (pose.html?render=1) and asks it for
+  // the library: each pose's name, group and picture (the poses saved here too), and for a pose's
+  // reference picture, with where each joint lands in it for the gesture drawing it checks against.
+  if (RENDER) {
+    const poseList = () => {
+      const list = POSES.map((ps) => ({ entry: ps, id: ps.id, name: ps.name, group: ps.group || 'standing' }));
+      let saved = [];
+      try { const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]'); if (Array.isArray(m)) saved = m; } catch (err) { /* none */ }
+      saved.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX).forEach((m, i) => {
+        const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
+        list.push({ entry: { id: m.id, p: m.p, ground: false, thumbView: view }, id: m.id, name: `Your pose ${i + 1}`, group: 'mine' });
+      });
+      return list;
+    };
+    const tell = (msg) => window.parent.postMessage(msg, '*');
+    let pictures = 0;                         // a newer list stops the pictures of the one before
+    window.addEventListener('message', (e) => {
+      const d = e.data;
+      if (e.source !== window.parent || !d || typeof d.type !== 'string') return;
+      if (d.type === 'pose-and-light:list') {
+        const list = poseList(), run = ++pictures;
+        tell({ type: 'pose-and-light:list', groups: GROUPS.concat([['mine', 'Your poses']]), poses: list.map((q) => ({ id: q.id, name: q.name, group: q.group })) });
+        let i = 0;
+        const next = () => {
+          if (run !== pictures || i >= list.length) return;
+          const q = list[i++];
+          let url = thumbs.get(q.id);
+          if (!url) { url = drawThumb(q.entry); if (url && q.group !== 'mine') thumbs.set(q.id, url); }
+          if (url) tell({ type: 'pose-and-light:thumb', id: q.id, url });
+          setTimeout(next, 10);
+        };
+        next();
+      } else if (d.type === 'pose-and-light:render') {
+        const q = poseList().find((x) => x.id === d.id);
+        const w = clamp(Math.round(num(d.w, 600)), 80, 1200), h = clamp(Math.round(num(d.h, 750)), 80, 1500);
+        const shot = q && shoot(q.entry, w, h, true);
+        if (!shot) { tell({ type: 'pose-and-light:shot', req: d.req, id: d.id, error: true }); return; }
+        tell({ type: 'pose-and-light:shot', req: d.req, id: d.id, name: q.name, w, h, url: shot.canvas.toDataURL('image/jpeg', 0.9), joints: shot.joints, tilts: shot.tilts });
+      }
+    });
+    tell({ type: 'pose-and-light:ready' });
+  }
 
   // for tests and for the app later on
   window.PoseAndLight = { pose, light, view, setPose, pick, POSES, LIGHTS, J, SPEC, render, camera, parts, scene, tipWorld, lamp, stand, applyPose, placeCamera, lightChanged,

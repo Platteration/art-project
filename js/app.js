@@ -27,7 +27,7 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), paint: $('tab-paint'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
+    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), paint: $('tab-paint'), figure: $('tab-figure'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -2033,8 +2033,9 @@
       document.activeElement.type !== 'radio' && document.activeElement.type !== 'range';
     // Ctrl/⌘+Z only: with Shift (or Alt) it is redo, which has nothing to redo here. Not while a
     // plumb point is held, since undoing could renumber the points under it.
+    // (the Studio and Figure study undo their own strokes)
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' &&
-      state.history.length && !typing && !state.dragging) {
+      state.history.length && !typing && !state.dragging && state.tab !== 'paint' && state.tab !== 'figure') {
       e.preventDefault();
       toast(undo());
     }
@@ -2042,12 +2043,12 @@
 
   // ---- Tabs ---------------------------------------------------------------
 
-  // Three sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, How to use),
-  // Studio, and Games (a menu: Paint by numbers, with more to come). The group button shows which
-  // of its pages is open.
-  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', help: 'learn', paint: 'paint', game: 'games', battle: 'games' };
-  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', help: 'How to use', paint: 'Studio', game: 'Paint by numbers', battle: 'Value battle' };
-  const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), games: $('tabGamesBtn') };
+  // Four sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, How to use),
+  // Studio, Figure study, and Games (a menu: Paint by numbers and Value battle). A menu's button shows
+  // which of its pages is open.
+  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', help: 'learn', paint: 'paint', figure: 'figure', game: 'games', battle: 'games' };
+  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', help: 'How to use', paint: 'Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
+  const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), figure: $('tabFigureBtn'), games: $('tabGamesBtn') };
   const groupSubs = { learn: $('tabLearnSub'), games: $('tabGamesSub') };
   function closeMenus() {
     document.querySelectorAll('.tab-menu').forEach((m) => { m.hidden = true; });
@@ -2070,6 +2071,7 @@
     document.body.classList.toggle('tab-help', name === 'help');
     document.body.classList.toggle('tab-battle', name === 'battle');
     document.body.classList.toggle('tab-pose', name === 'pose');
+    document.body.classList.toggle('tab-figure', name === 'figure');
     if (name === 'pose') openPose();
     if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
@@ -2097,6 +2099,7 @@
     if (Number.isFinite(h) && h > 0) poseFrame.style.height = Math.min(h, 6000) + 'px';
   });
   $('tabPaintBtn').addEventListener('click', () => switchTab('paint'));
+  $('tabFigureBtn').addEventListener('click', () => switchTab('figure'));
   document.querySelectorAll('.tab[aria-haspopup]').forEach((btn) => {
     const menu = $(btn.getAttribute('aria-controls'));
     btn.addEventListener('click', () => {
@@ -2583,6 +2586,7 @@
     if (location.hash === '#help') switchTab('help');
     if (location.hash === '#loomis') switchTab('loomis');
     if (location.hash === '#pose') switchTab('pose');
+    if (location.hash === '#figure') switchTab('figure');
     if (location.hash === '#battle') switchTab('battle');
   }
 
