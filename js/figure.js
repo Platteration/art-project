@@ -317,10 +317,11 @@
     if (timedOut && window.GameSound && GameSound.on()) GameSound.chime();
     showResult(keep(), timedOut);
   }
-  // the drawing of this pose, with its gesture and score, kept for the end of the class
+  // the drawing of this pose, with its gesture and score, kept for the end of the class (as a JPEG: the
+  // full picture is only held until the card has shown it, and an empty sheet keeps no picture at all)
   function keep() {
     const pic = studio.composite(), a = analyze(cls.shot, studio.ink());
-    const r = { n: cls.n, id: cls.id, name: (byId(cls.id) || { name: 'Pose' }).name, shot: cls.shot, pic, image: pic.toDataURL('image/jpeg', 0.88), w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) };
+    const r = { n: cls.n, id: cls.id, name: (byId(cls.id) || { name: 'Pose' }).name, shot: cls.shot, pic, image: a.marked ? pic.toDataURL('image/jpeg', 0.88) : null, w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) };
     cls.results.push(r);
     return r;
   }
@@ -331,7 +332,7 @@
     if (performance.now() - endArmed > 3000) { endArmed = performance.now(); Studio.toast('Tap ✕ again to stop the class'); return; }
     endArmed = 0;
     run(false);
-    if (!cls.over && cls.shot && hasInk(studio.ink())) keep();
+    if (!cls.over && cls.shot && hasInk(studio.ink())) keep().pic = null;
     Studio.toast('The class is over');
     finish();
   }
@@ -818,6 +819,7 @@
     const cv = $('drawing');
     cv.width = Math.round(r.w / 2); cv.height = Math.round(r.h / 2);
     drawWithGesture(cv, r, r.pic);
+    r.pic = null;
     $('pose').src = r.shot.url;
     $('pose').alt = `The pose: ${r.name}`;
     showTips($('tips'), a.tips.filter(([lead]) => lead !== 'Measure'));
