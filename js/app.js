@@ -113,6 +113,7 @@
     isSample: true,    // the built-in sample is showing
     prep: null,        // Study.prepare() output
     result: null,      // Study.process() output
+    resultPrep: null,  // the preparation used by the completed result
     pixels: {},        // view id -> RGBA array, used by the loupe
     palette: loadPalette(),
     hover: null,       // last sampled { r, g, b }
@@ -255,6 +256,7 @@
     if (!state.prep) return;
     const r = Study.process(state.prep, settings());
     state.result = r;
+    state.resultPrep = state.prep;
     paint(els.canvases.value, r.valueImage, r.w, r.h);
     state.pixels.value = r.valueImage;
     showBlocks();
@@ -356,8 +358,8 @@
     syncOverlay(canvas);
   }
 
-  function prepareAndRun(resetSplit) {
-    state.prep = Study.prepare(state.source, +els.detail.value);
+  function prepareAndRun(resetSplit, prepared) {
+    state.prep = prepared || Study.prepare(state.source, +els.detail.value);
     const { w, h, rgba } = state.prep;
     paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
     state.pixels.orig = rgba;
@@ -422,31 +424,64 @@
 
   // ---- Loading photos -----------------------------------------------------
 
-  function readImage(file, done) {
+  const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
+  const MAX_IMAGE_PIXELS = 64 * 1000 * 1000;
+  const MAX_IMAGE_SIDE = 32768;
+  // Reference and painting imports may decode concurrently. Only the latest
+  // selection for each destination may replace its image or report a failure.
+  let sourceImport = 0, artImport = 0;
+
+  function readImage(file, done, isCurrent) {
     if (!file) return;
     if (file.type && !file.type.startsWith('image/')) {
       toast('That file is not an image. Choose a JPG, PNG or WebP photo.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast('This image is too large. Choose a file under 40 MiB.');
       return;
     }
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      done(img);
+      if (!isCurrent()) return;
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!w || !h || w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE || w * h > MAX_IMAGE_PIXELS) {
+        toast('This image is too large or has no size. Use at most 64 megapixels and 32,768 pixels per side.');
+        return;
+      }
+      try {
+        // Check readability before changing either the reference or the painting.
+        // Some SVGs decode successfully but taint a canvas when drawn into it.
+        const probe = document.createElement('canvas');
+        probe.width = probe.height = 1;
+        const ctx = probe.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, 1, 1);
+        ctx.getImageData(0, 0, 1, 1);
+        done(img);
+      } catch (err) {
+        toast('This image could not be processed. Try saving it as JPG or PNG first.');
+      }
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      toast('This image could not be opened. Try saving it as JPG or PNG first.');
+      if (isCurrent()) toast('This image could not be opened. Try saving it as JPG or PNG first.');
     };
     img.src = url;
   }
 
   function loadFile(file) {
-    readImage(file, (img) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait'));
+    if (!file) return;
+    const request = ++sourceImport;
+    readImage(file, (img) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait'), () => request === sourceImport);
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
   function useSource(img, name, baseName) {
+    // Complete pixel preparation before replacing the source, marks or labels.
+    const prepared = Study.prepare(img, +els.detail.value);
+    ++sourceImport;
     state.source = img;
     state.baseName = baseName || 'portrait';
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
@@ -459,14 +494,16 @@
       toast(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo`);
     }
     if (state.art.isExample) setArt(null);
-    prepareAndRun(true);
+    prepareAndRun(true, prepared);
   }
 
   function loadArtFile(file) {
+    if (!file) return;
+    const request = ++artImport;
     readImage(file, (img) => {
       setArt(img, file.name || 'Pasted painting', false);
       runSoon(0);
-    });
+    }, () => request === artImport);
   }
 
   // Loads whichever image the open tab is about
@@ -898,7 +935,9 @@
     try {
       const raw = localStorage.getItem(PALETTE_KEY);
       const list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list.filter((c) => c && Number.isInteger(c.r)) : [];
+      return Array.isArray(list) ? list.filter((c) => c && typeof c === 'object' && !Array.isArray(c)
+        && ['r', 'g', 'b'].every((key) => Number.isInteger(c[key]) && c[key] >= 0 && c[key] <= 255))
+        .map(({ r, g, b }) => ({ r, g, b })) : [];
     } catch (err) {
       return null;
     }
@@ -2228,6 +2267,9 @@
   }
 
   function runCheck() {
+    // A drawer toggle or alignment timer can run before a newly loaded reference
+    // finishes its scheduled study. Keep the previous comparison until they match.
+    if (state.resultPrep !== state.prep) { state.art.dirty = true; return; }
     state.art.dirty = false;
     const ready = !!(state.art.source && state.result);
     els.checkEmpty.hidden = ready;
@@ -2453,7 +2495,11 @@
     const ps = window.PaintStudio;
     if (!ps) return;
     const r = ps.reference();
-    if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
+    if (r.kind === 'painting' && r.id) {
+      ++sourceImport;
+      if (Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
+    }
+    ++artImport;
     setArt(ps.composite(), 'Studio painting', false);
     els.drawers.check.open = true;
     runSoon(0);

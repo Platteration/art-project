@@ -70,7 +70,7 @@
     const q = (sel) => root.querySelectorAll(sel);
     const mixesKey = o.mixesKey || MIXES_KEY;
     const AMOUNTS = [0.25, 0.5, 1, 2, 4];
-    const fmt = (v) => { const qv = Math.round(v * 4) / 4, w = Math.floor(qv), f = ['', '¼', '½', '¾'][Math.round((qv - w) * 4)]; return w ? `${w}${f}` : f || '0'; };
+    const fmt = (v) => { if (v > Number.MAX_SAFE_INTEGER / 4) return v.toExponential(2); const qv = Math.round(v * 4) / 4, w = Math.floor(qv), f = ['', '¼', '½', '¾'][Math.round((qv - w) * 4)]; return w ? `${w}${f}` : f || '0'; };
     const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
     const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const lab = (c) => Study.rgbToLab(c[0], c[1], c[2]);
@@ -88,7 +88,9 @@
     // the predicted color of parts [{ code, amount }] mixed together
     function mixColor(parts) {
       const by = new Map();
-      parts.forEach((p) => { if (Paints.byCode(p.code)) by.set(p.code, (by.get(p.code) || 0) + p.amount); });
+      // Mixing depends on ratios; scale first so finite saved quantities cannot overflow.
+      const scale = parts.reduce((max, p) => Math.max(max, p.amount), 0) || 1;
+      parts.forEach((p) => { if (Paints.byCode(p.code)) by.set(p.code, (by.get(p.code) || 0) + p.amount / scale); });
       if (!by.size) return null;
       const codes = [...by.keys()];
       const m = Mixing.mix(codes.map(paintFor), codes.map((c) => by.get(c)));
@@ -100,7 +102,8 @@
     // current palette when it is neither
     function palettes() {
       const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
-      const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+      const savedMine = load(MINE_KEY, []);
+      const mine = Array.isArray(savedMine) ? [...new Set(savedMine.filter((c) => typeof c === 'string' && Paints.byCode(c)))] : [];
       if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
       const cur = window.StudioPalette && StudioPalette.current();
       if (cur && cur.codes.length >= 2 && !list.some((p) => sameCodes(p.codes, cur.codes))) list.push({ id: 'study', name: `Study tab: ${cur.name}`, codes: cur.codes.slice() });
@@ -176,7 +179,7 @@
     }
     // the textures, tiled over the canvas: linen (warp and weft threads with a little unevenness)
     // and paper (the fine tooth of a cold-pressed sheet)
-    const tiles = {};
+    const tiles = Object.create(null);
     const seeded = (seed) => { let a = seed; return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; }; };
     function tile(kind) {
       if (tiles[kind]) return tiles[kind];
@@ -228,9 +231,9 @@
       $('washName').textContent = canvasState.washCode ? paintName(canvasState.washCode) : '';
     }
     // the wash can be any paint in the palette; an earth is the usual choice, so one starts chosen
-    function renderWash() {
+    function renderWash(keepSavedWash = false) {
       const codes = codesNow();
-      if (!codes.includes(canvasState.washCode)) canvasState.washCode = codes.find((c) => ['YO', 'RS', 'BS', 'RU', 'BU', 'LR', 'NY', 'CO', 'TR', 'YOP', 'TOR'].includes(c)) || codes[1] || codes[0];
+      if (!keepSavedWash && !codes.includes(canvasState.washCode)) canvasState.washCode = codes.find((c) => ['YO', 'RS', 'BS', 'RU', 'BU', 'LR', 'NY', 'CO', 'TR', 'YOP', 'TOR'].includes(c)) || codes[1] || codes[0];
       $('washRow').innerHTML = '';
       codes.forEach((code) => {
         const b = document.createElement('button'); b.type = 'button'; b.style.setProperty('--c', paintHex(code)); b.title = paintName(code); b.setAttribute('aria-label', `Wash of ${paintName(code)}`);
@@ -396,7 +399,34 @@
     // since the pictures are too big for localStorage) a moment after each change, and come back
     // on the next visit, so a closed tab or a sleeping iPad loses nothing.
     const DB_NAME = 'portrait-value-studio', DB_STORE = 'studio', SAVE_KEY = o.saveKey || 'painting';
-    const hasDb = o.autosave !== false && typeof indexedDB !== 'undefined';
+    const autosaveEnabled = o.autosave !== false;
+    const hasDb = autosaveEnabled && typeof indexedDB !== 'undefined';
+    const MAX_PAINT_EDGE = Math.max(paper.width, paper.height);
+    const MAX_PAINT_PIXELS = paper.width * paper.height;
+    const MAX_LAYER_BYTES = MAX_PAINT_PIXELS * 4 + 65536;
+    const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+    function savedCanvas(value) {
+      if (value == null) return { ...canvasState };
+      if (!isRecord(value)) throw new Error('Invalid saved canvas');
+      const next = { ...canvasState };
+      if (value.ground !== undefined) {
+        if (!['raw', 'wash', 'gray'].includes(value.ground)) throw new Error('Invalid saved ground');
+        next.ground = value.ground;
+      }
+      if (value.weave !== undefined) {
+        if (!['off', 'linen', 'paper'].includes(value.weave)) throw new Error('Invalid saved texture');
+        next.weave = value.weave;
+      }
+      if (value.washCode !== undefined) {
+        if (value.washCode !== null && !(typeof value.washCode === 'string' && Paints.byCode(value.washCode))) throw new Error('Invalid saved wash');
+        next.washCode = value.washCode;
+      }
+      if (value.washStr !== undefined) {
+        if (!Number.isFinite(value.washStr) || value.washStr < 0.1 || value.washStr > 0.6) throw new Error('Invalid saved wash strength');
+        next.washStr = value.washStr;
+      }
+      return next;
+    }
     function openDb() {
       return new Promise((resolve, reject) => {
         const r = indexedDB.open(DB_NAME, 1);
@@ -407,47 +437,80 @@
     }
     async function dbPut(key, value) {
       const db = await openDb();
-      await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); });
-      db.close();
+      try {
+        await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = t.onabort = () => reject(t.error); });
+      } finally { db.close(); }
     }
     async function dbGet(key) {
       const db = await openDb();
-      const v = await new Promise((resolve, reject) => { const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
-      db.close();
-      return v;
+      try {
+        return await new Promise((resolve, reject) => { const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      } finally { db.close(); }
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
-    let saveTimer = 0, saving = false, saveAgain = false;
-    function saveSoon() { if (!hasDb) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
+    let saveTimer = 0, saving = false, saveAgain = false, restoring = hasDb, restoreFailed = false, saveFailed = false;
+    function saveSoon() { if (!hasDb || restoring || restoreFailed) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
     async function saveNow() {
-      if (!hasDb) return;
+      if (!hasDb || restoring || restoreFailed) return;
       if (saving) { saveAgain = true; return; }
       saving = true;
       try {
+        const saved = { w: paper.width, h: paper.height, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: Date.now() };
         const [paperBlob, sketchBlob] = await Promise.all([toBlob(paper), toBlob(sketch)]);
-        await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: Date.now() });
-      } catch (e) { /* storage unavailable: the painting lives in this visit only */ }
+        if (!paperBlob || !sketchBlob) throw new Error('The painting could not be saved');
+        await dbPut(SAVE_KEY, { ...saved, paper: paperBlob, sketch: sketchBlob });
+        saveFailed = false;
+      } catch (e) { saveFailed = true; }
       saving = false;
+      showStatus();
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
-    const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
+    async function loadBlob(blob, w, h) {
+      try {
+        if (!(blob instanceof Blob) || blob.type !== 'image/png' || !blob.size || blob.size > MAX_LAYER_BYTES) return null;
+        const header = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+        const signature = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82];
+        if (header.length !== 24 || !signature.every((v, i) => header[i] === v)) return null;
+        const size = new DataView(header.buffer);
+        if (size.getUint32(16) !== w || size.getUint32(20) !== h) return null;
+        return await new Promise((resolve) => {
+          const img = new Image(), url = URL.createObjectURL(blob);
+          const finish = (image) => { URL.revokeObjectURL(url); resolve(image); };
+          img.onload = () => finish(img.naturalWidth === w && img.naturalHeight === h ? img : null);
+          img.onerror = () => finish(null);
+          try { img.src = url; } catch (e) { finish(null); }
+        });
+      } catch (e) { return null; }
+    }
     let restored = false;
     async function restore() {
       if (!hasDb) return;
-      let saved;
-      try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
-      if (!saved || !saved.w || !saved.h) return;
-      const [pImg, sImg] = await Promise.all([loadBlob(saved.paper), loadBlob(saved.sketch)]);
-      [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
-      if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
-      if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
-      if (saved.canvas) Object.assign(canvasState, saved.canvas);
-      renderWash(); applyCanvas();
-      showSketch(saved.sketchShown !== false);
-      undoStack.length = 0; $('undo').disabled = true;
-      restored = true;
-      layout();
-      showStatus();
+      root.inert = true;
+      try {
+        const saved = await dbGet(SAVE_KEY);
+        if (saved === undefined) return;
+        if (!isRecord(saved) || ![saved.w, saved.h].every((n) => Number.isInteger(n) && n > 0 && n <= MAX_PAINT_EDGE) || saved.w * saved.h > MAX_PAINT_PIXELS) throw new Error('Invalid saved dimensions');
+        if (saved.sketchShown !== undefined && typeof saved.sketchShown !== 'boolean') throw new Error('Invalid saved visibility');
+        const nextCanvas = savedCanvas(saved.canvas);
+        const [pImg, sImg] = await Promise.all([loadBlob(saved.paper, saved.w, saved.h), loadBlob(saved.sketch, saved.w, saved.h)]);
+        if (!pImg || !sImg) throw new Error('Invalid saved layer');
+        [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
+        paper.getContext('2d').drawImage(pImg, 0, 0);
+        sketch.getContext('2d').drawImage(sImg, 0, 0);
+        Object.assign(canvasState, nextCanvas);
+        renderWash(true); applyCanvas();
+        $('washStr').value = Math.round(canvasState.washStr * 100);
+        showSketch(saved.sketchShown !== false);
+        undoStack.length = 0; $('undo').disabled = true;
+        restored = true;
+        layout();
+      } catch (e) {
+        restoreFailed = true;
+      } finally {
+        restoring = false;
+        root.inert = false;
+        showStatus();
+      }
     }
     window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveNow(); } });
 
@@ -591,7 +654,10 @@
     function showStatus() {
       const leadLabel = (lead, hard) => (lead === 'charcoal' ? `Charcoal · ${CHAR[hard].label}` : HARD[hard].short);
       const t = { chisel: `Chisel · ${state.chisel.toUpperCase()}`, round: `Round · ${state.round} px`, pencil: `Pencil · ${state.pcolor} · ${leadLabel(state.lead, state.hard)} · ${state.pencil} px`, sketch: `Underdrawing · ${state.scolor} · ${leadLabel(state.slead, state.shard)} · ${state.sketch} px`, blend: `Blend · ${state.blend} px · ${Math.round(state.blendStr * 100)}%`, eraser: `Eraser · ${state.eraser} px · ${state.lastLayer === 'sketch' ? 'underdrawing' : 'paint'}` }[state.tool];
-      $('status').textContent = `${t} · ${paper.width} × ${paper.height}`;
+      $('status').textContent = restoreFailed ? 'Saved painting could not be restored. Autosave paused; use Save PNG to keep new work.'
+        : autosaveEnabled && !hasDb ? 'Autosave is unavailable. Use Save PNG to keep your work.'
+        : saveFailed ? 'Painting could not be saved. Use Save PNG to keep your work.'
+        : `${t} · ${paper.width} × ${paper.height}`;
       const subs = { chisel: state.chisel.toUpperCase(), round: state.round, pencil: state.lead === 'charcoal' ? 'Ch' : HARD[state.hard].short, sketch: state.slead === 'charcoal' ? 'Ch' : HARD[state.shard].short, blend: state.blend };
       $('chiselSub').textContent = subs.chisel; $('roundSub').textContent = subs.round; $('pencilSub').textContent = subs.pencil; $('sketchSub').textContent = subs.sketch; $('blendSub').textContent = subs.blend;
       q('[data-hard]').forEach((b) => { b.textContent = state.lead === 'charcoal' ? CHAR[b.dataset.hard].label : HARD[b.dataset.hard].label; });
@@ -733,9 +799,10 @@
         const t = lab(hexOf(target));
         let best = null, bd = Infinity;
         candidates.forEach((k) => { if (used.has(k)) return; const d = Math.hypot(k.lab[0] - t[0], k.lab[1] - t[1], k.lab[2] - t[2]); if (d < bd) { bd = d; best = k; } });
+        if (!best) return null;
         used.add(best);
         return { name, c: best.c, parts: best.parts.map((p) => ({ ...p })), starter: true };
-      });
+      }).filter(Boolean);
     }
     function seedMixes() {
       state.mixes = state.mixes.filter((m) => !m.starter);
@@ -762,7 +829,14 @@
 
     // ---- Start ---------------------------------------------------------------------------------------
     renderPalettes();
-    state.mixes = load(mixesKey, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && p.amount > 0), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
+    const savedMixes = load(mixesKey, []);
+    state.mixes = (Array.isArray(savedMixes) ? savedMixes : []).filter((m) =>
+      isRecord(m) && Array.isArray(m.parts) && m.parts.length > 0 &&
+      m.parts.every((p) => isRecord(p) && typeof p.code === 'string' && Paints.byCode(p.code) && Number.isFinite(p.amount) && p.amount > 0)
+    ).map((m) => {
+      const parts = m.parts.map((p) => ({ code: p.code, amount: p.amount }));
+      return { parts, c: mixColor(parts) };
+    });
     blank();
     applyPalette();
     showStatus();

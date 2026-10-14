@@ -54,8 +54,15 @@
   }
 
   const known = new Set(Paints.LIBRARY.map((p) => p.code));
-  const choice = Object.assign({ source: 'preset', preset: '', max: 6 }, load(CHOICE_KEY, {}));
-  const mine = new Set(load(MINE_KEY, []).filter((c) => known.has(c)));
+  const choice = { source: 'preset', preset: '', max: 6 };
+  const savedChoice = load(CHOICE_KEY, {});
+  if (savedChoice && typeof savedChoice === 'object' && !Array.isArray(savedChoice)) {
+    if (savedChoice.source === 'preset' || savedChoice.source === 'mine') choice.source = savedChoice.source;
+    if (Paints.PRESETS.some((p) => p.id === savedChoice.preset)) choice.preset = savedChoice.preset;
+    if (Number.isInteger(savedChoice.max) && savedChoice.max >= +els.max.min && savedChoice.max <= +els.max.max) choice.max = savedChoice.max;
+  }
+  const savedMine = load(MINE_KEY, []);
+  const mine = new Set((Array.isArray(savedMine) ? savedMine : []).filter((c) => known.has(c)));
 
   // Paints ready to mix, made once each
   const made = new Map();

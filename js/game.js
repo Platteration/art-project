@@ -92,6 +92,14 @@
   function save(key, value) {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* storage unavailable: kept for this visit */ }
   }
+  const knownKey = (choices, value, fallback) => typeof value === 'string' && Object.prototype.hasOwnProperty.call(choices, value) ? value : fallback;
+  function loadBests() {
+    const saved = load(BEST_KEY, {}), bests = Object.create(null);
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      Object.entries(saved).forEach(([key, score]) => { if (Number.isSafeInteger(score) && score >= 0) bests[key] = score; });
+    }
+    return bests;
+  }
 
   const toHex = (c) => Studio.toHex({ r: c[0], g: c[1], b: c[2] });
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -102,7 +110,8 @@
   // ---- Palettes -------------------------------------------------------------
 
   function paletteChoices() {
-    const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+    const savedMine = load(MINE_KEY, []);
+    const mine = [...new Set((Array.isArray(savedMine) ? savedMine : []).filter((c) => Paints.byCode(c)))];
     const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
     if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
     return list;
@@ -310,8 +319,8 @@
   let game = null;       // the game in progress or just scored
   let setupFor = null;   // { from, level } the setup board was built for
 
-  const level = () => document.querySelector('input[name="gameLevel"]:checked').value;
-  const mode = () => els.mode.value;
+  const level = () => knownKey(LEVELS, (document.querySelector('input[name="gameLevel"]:checked') || {}).value, 'medium');
+  const mode = () => knownKey(MODES, els.mode.value, 'classic');
   // bests are kept per mode; Classic's keys stay as they were
   const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
 
@@ -495,7 +504,7 @@
         });
       }
     }
-    const best = load(BEST_KEY, {})[bestKey()];
+    const best = loadBests()[bestKey()];
     els.best.textContent = best ? `Your best on this portrait at this level in ${MODES[mode()].name} mode: ${best} points` : '';
   }
 
@@ -1192,7 +1201,8 @@
     const a = perTap();
     els.amountOut.textContent = `${fmtParts(a)} part${a > 1 ? 's' : ''} per tap`;
   }
-  els.amount.value = Math.max(0, AMOUNTS.indexOf(load(AMOUNT_KEY, 1)));
+  const savedAmount = load(AMOUNT_KEY, 1);
+  els.amount.value = AMOUNTS.indexOf(AMOUNTS.includes(savedAmount) ? savedAmount : 1);
   els.amount.addEventListener('input', () => { save(AMOUNT_KEY, perTap()); showAmount(); });
   showAmount();
 
@@ -1267,7 +1277,7 @@
     const colorPts = Math.round(accuracy * (valueMode ? 9 : 10));
     const valuePts = valueMode ? Math.round(valueAcc) : 0;
     const points = colorPts + valuePts + bonus;
-    const bests = load(BEST_KEY, {});
+    const bests = loadBests();
     const isBest = !bests[game.bestKey] || points > bests[game.bestKey];
     if (isBest) { bests[game.bestKey] = points; save(BEST_KEY, bests); }
 
@@ -1601,8 +1611,7 @@
 
   // ---- Wiring ---------------------------------------------------------------
 
-  const savedMode = load(MODE_KEY, 'classic');
-  els.mode.value = MODES[savedMode] ? savedMode : 'classic';
+  els.mode.value = knownKey(MODES, load(MODE_KEY, 'classic'), 'classic');
   showMode();
   els.mode.addEventListener('change', () => {
     save(MODE_KEY, mode());
@@ -1611,7 +1620,7 @@
     if (board) renderPalettes();
   });
   els.deal.addEventListener('click', () => { dealMystery(); renderPalettes(); });
-  const savedLevel = load(LEVEL_KEY, 'medium');
+  const savedLevel = knownKey(LEVELS, load(LEVEL_KEY, 'medium'), 'medium');
   document.querySelectorAll('input[name="gameLevel"]').forEach((r) => {
     r.checked = r.value === savedLevel;
     r.addEventListener('change', () => { if (Studio.tab() === 'game') refreshSetup(); });

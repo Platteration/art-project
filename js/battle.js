@@ -27,6 +27,13 @@
   const MINE_KEY = 'portrait-value-studio.myPaints';
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  function loadBests() {
+    const saved = load(BEST_KEY, {}), bests = Object.create(null);
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      Object.entries(saved).forEach(([key, score]) => { if (Number.isSafeInteger(score) && score >= 0) bests[key] = score; });
+    }
+    return bests;
+  }
 
   // ---- Colors from the palette ------------------------------------------------------------------
   const made = new Map();
@@ -36,7 +43,8 @@
   }
   function palettes() {
     const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
-    const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+    const savedMine = load(MINE_KEY, []);
+    const mine = [...new Set((Array.isArray(savedMine) ? savedMine : []).filter((c) => Paints.byCode(c)))];
     if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
     return list;
   }
@@ -159,9 +167,11 @@
     popup: $('popup'), kicker: $('kicker'), pct: $('pct'), stars: $('stars'), grade: $('grade'), newBest: $('newBest'), again: $('again'), settings: $('settings'),
   };
   let game = null, countUp = 0;
-  const count = () => (root.querySelector('input[name="vbCount"]:checked') || {}).value || 'mix';
+  const validCount = (value) => ['2', '3', '4', 'mix'].includes(value) ? value : 'mix';
+  const validMode = (value) => ['streak', '60', '120', '300'].includes(value) ? value : 'streak';
+  const count = () => validCount((root.querySelector('input[name="vbCount"]:checked') || {}).value);
   // the mode: a streak until the first miss, or as many as you can in 1, 2 or 5 minutes
-  const mode = () => (root.querySelector('input[name="vbMode"]:checked') || {}).value || 'streak';
+  const mode = () => validMode((root.querySelector('input[name="vbMode"]:checked') || {}).value);
   const timed = () => game && game.seconds > 0;
   const paletteNow = () => palettes().find((p) => p.id === els.palette.value) || palettes()[0];
   const bestKey = () => `${paletteNow().id}:${count()}:${mode()}`;
@@ -170,13 +180,13 @@
     els.palette.innerHTML = '';
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const ct = load(COUNT_KEY, 'mix'), md = load(MODE_KEY, 'streak');
+    const ct = validCount(load(COUNT_KEY, 'mix')), md = validMode(load(MODE_KEY, 'streak'));
     root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
     root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
     showBest();
   }
   function showBest() {
-    const best = load(BEST_KEY, {})[bestKey()];
+    const best = loadBests()[bestKey()];
     els.best.textContent = best == null ? (mode() === 'streak' ? 'No streak yet for these settings.' : 'No score yet for these settings.') : mode() === 'streak' ? `Your best streak here: ${best} in a row.` : `Your best here: ${best} right in ${mode() / 60} minute${mode() === '60' ? '' : 's'}.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
@@ -186,6 +196,7 @@
   function start() {
     const pal = paletteNow();
     const pool = mixPool(pal.codes, 220);
+    if (!pool.length) { Studio.toast('Choose a palette with at least one color besides white.'); return; }
     const seconds = mode() === 'streak' ? 0 : +mode();
     game = { pool, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
     els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true; els.miss.hidden = true;
@@ -394,7 +405,7 @@
     const onClock = game.seconds > 0;
     const score = onClock ? game.right : game.streak;
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
-    const bests = load(BEST_KEY, {}), key = bestKey();
+    const bests = loadBests(), key = bestKey();
     const isBest = score > 0 && (bests[key] == null || score > bests[key]);
     if (isBest) { bests[key] = score; save(BEST_KEY, bests); }
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';

@@ -160,15 +160,21 @@ The switch at the top of the page chooses how much to show. **Simple**, the defa
 
 The Studio keeps your work: the paper, the underdrawing, the ground and texture and which way the paper is turned are saved in the browser a moment after each change (in IndexedDB, as the pictures are too big for localStorage) and come back on the next visit. **Clear the paper** takes two taps, and Undo brings a cleared paper back.
 
+If a saved painting cannot be restored, the Studio preserves that record and displays an **Autosave paused** message. Use **Save PNG** to keep any new work from that session.
+
+If browser storage is unavailable or a save fails, the Studio displays a persistent warning to use **Save PNG**. When storage is available, later edits retry saving; the warning clears only when a save succeeds. Export important work before closing the page.
+
 ## Running it
 
 No build step or install. Open `index.html` in a browser, or serve the folder:
 
 ```sh
-python3 -m http.server 8000   # then visit http://localhost:8000
+python3 -m http.server 8000 --bind 127.0.0.1   # then visit http://localhost:8000
 ```
 
-To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
+This command is for local development. When publishing, serve only the app's HTML, CSS, JavaScript and image assets; do not publish Git metadata or the whole checkout.
+
+To load a photo, use **Load photo**, drag it onto the page, or paste it. Files are limited to 40 MiB; decoded images must be at most 64 megapixels and 32,768 pixels on either side. The pixel limit is checked after browser decoding, so it is not a decoder memory guarantee. If an image cannot be read or processed, the previous reference stays in place. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
 
 ## Settings
 
