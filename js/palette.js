@@ -389,7 +389,8 @@
   function fitSimple() {
     if (!isSimple()) return;
     const simpleIds = Object.keys(SIMPLE_WHY);
-    if (choice.source === 'preset' && simpleIds.includes(choice.preset)) return;
+    // none chosen stays none (the best of the three is shown for it), so a fresh visit writes nothing
+    if (choice.source === 'preset' && (!choice.preset || simpleIds.includes(choice.preset))) return;
     const best = (ranking || []).map((x) => x.preset.id).find((id) => simpleIds.includes(id)) || simpleIds[0];
     const was = choice.source === 'mine' ? 'My paints' : (choice.preset ? presetName(choice.preset) : '');
     choice.source = 'preset'; choice.preset = best;
