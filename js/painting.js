@@ -859,7 +859,15 @@
     }
     function applyPalette() { state.well = []; renderPaints(); renderWash(); applyCanvas(); seedMixes(); }
     $('palette').addEventListener('change', () => { paletteTouched = true; applyPalette(); });
-    function followPalette() { if (paletteTouched) return; const was = $('palette').value; renderPalettes(); if ($('palette').value !== was) applyPalette(); }
+    // the menu always learns of My paints and the Study tab's palette; a palette chosen here stays chosen
+    // (renderPalettes keeps it), and the paints change only when the choice or its paints did (My paints
+    // ticked again)
+    function followPalette() {
+      const was = $('palette').value, wasCodes = (paletteList.find((p) => p.id === was) || {}).codes;
+      renderPalettes();
+      const now = paletteList.find((p) => p.id === $('palette').value);
+      if ($('palette').value !== was || !now || !wasCodes || !sameCodes(now.codes, wasCodes)) applyPalette();
+    }
     window.addEventListener('studio:palette', followPalette);
     // a new study while the Studio is open (a photo loaded from here) can change the Study tab's palette
     window.addEventListener('studio:result', () => { if (active) followPalette(); });

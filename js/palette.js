@@ -123,7 +123,7 @@
     d.title = p.name;
     return d;
   }
-  const reachText = (cov, n) => `Mixes ${cov.reached} of ${n} colors`;
+  const reachText = (cov, n) => `Mixes ${cov.reached} of ${n} color${n === 1 ? '' : 's'}`;
 
   function setState(name) {
     els.drawerState.textContent = `${els.colors.value} per value${name ? ' · ' + name : ''}`;
@@ -440,6 +440,16 @@
   }
 
   let mineChanged = false;
+  // paints ticked in another open tab of this site: this tab's list (and its chooser, if open) follows,
+  // so a tick here adds to that list instead of writing an older one over it
+  window.addEventListener('storage', (e) => {
+    if (e.key !== MINE_KEY) return;
+    mine.clear();
+    load(MINE_KEY, []).filter((c) => known.has(c)).forEach((c) => mine.add(c));
+    els.cats.querySelectorAll('input[type="checkbox"]').forEach((b) => { b.checked = mine.has(b.value); });
+    renderMine();
+    mineChanged = true; // the suggestion from My paints is made again from the new list
+  });
   function saveMine() {
     save(MINE_KEY, [...mine]);
     mineChanged = true;
