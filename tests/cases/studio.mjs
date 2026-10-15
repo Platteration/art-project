@@ -551,7 +551,7 @@ export default async function studio(t, site) {
   { const since3 = Date.now(); await stroke(page, '#ps-paper', [[0.6, 0.2], [0.7, 0.4]]); const inkS = await alphaInk(page, '#ps-paper'); await tab(page, 'study'); const rec3 = await waitSaved(page, since3); await tab(page, 'paint'); t.check(!!rec3 && (await alphaInk(page, '#ps-paper')) === inkS && inkS > saved.paper, 'a stroke followed at once by a tab switch is kept and saved', { rec3: !!rec3, inkS }); }
   // a stroke, then a reload at once (inside the save delay, 800 ms)
   { const last = await waitSaved(page, 0); await stroke(page, '#ps-paper', [[0.7, 0.2], [0.8, 0.8]]); const inkBefore = await alphaInk(page, '#ps-paper'); await page.reload({ waitUntil: 'load' }); await sleep(500); await tab(page, 'paint'); await studioReady(page); const inkAfter = await alphaInk(page, '#ps-paper'); const lastSaved = await alphaInk(page, '#ps-paper');
-    t.note(inkAfter === inkBefore ? 'a stroke followed at once by a reload is kept (the save on pagehide made it)' : `a stroke followed at once by a reload, inside the 1.5 s autosave delay, is lost (${inkBefore} → ${inkAfter}); everything saved before it is kept`);
+    t.note(inkAfter === inkBefore ? 'a stroke followed at once by a reload is kept (the save on pagehide made it)' : `a stroke followed at once by a reload, inside the 0.8 s autosave delay, is lost (${inkBefore} → ${inkAfter}); everything saved before it is kept`);
     t.check(inkAfter === inkBefore || (last && lastSaved > 0 && inkAfter < inkBefore), 'a reload right after a stroke keeps the painting as last saved, or with the stroke', { inkBefore, inkAfter }); }
   await clean(t, page, 'canvas, save, copy, autosave');
   await page.context().close();
@@ -896,17 +896,20 @@ export async function gaps(t, site) {
     Object.assign(fast, { red: await red(), early: await early() });
     t.check(fast.red > 1000 && fast.early > 50, 'gap: a stroke made as soon as the page has loaded lands on the saved painting, which stays', fast);
     await waitSaved(page, since);
-    // with the database slow to open (1.5 s here, as a phone waking it can be): a stroke and a ground change made while
-    // the saved painting is still on its way
+    // with the database slow to open (3 s here, once: slower than the 0.8 s autosave delay plus the moment it takes to
+    // start painting, as a phone waking its storage can be): a stroke and a ground change made while the saved painting
+    // is still on its way
     await putRecord(page, RED);
     await page.addInitScript(() => {
+      if (sessionStorage.getItem('slowOnce')) return;
+      sessionStorage.setItem('slowOnce', '1');
       const open = IDBFactory.prototype.open; let first = true;
       IDBFactory.prototype.open = function (...a) {
         const r = open.apply(this, a);
         if (!first) return r;
         first = false; let h = null;
         Object.defineProperty(r, 'onsuccess', { configurable: true, get: () => h, set: (f) => { h = f; } });
-        r.addEventListener('success', (e) => setTimeout(() => h && h.call(r, e), 1500));
+        r.addEventListener('success', (e) => setTimeout(() => h && h.call(r, e), 3000));
         return r;
       };
     });
@@ -921,7 +924,7 @@ export async function gaps(t, site) {
     if (!slow.pending) t.note('the slow database did not hold the restore back; the check below is not meaningful this run');
     const kept = slow.red > 1000 && slow.redNextVisit > 1000;
     t.check(kept, 'gap: with a slow database, a stroke made while the saved painting is still being restored does not replace the saved painting', slow);
-    if (!kept) t.finding({ title: 'A stroke made while the saved painting is still loading overwrites it: the painting is lost, and the Studio says "Your painting is back from last time" over the new stroke alone', severity: 'high', steps: 'Have a painting saved (paint, wait a second). Reload on a device where opening IndexedDB is slow (simulated here: the first indexedDB.open request\'s success delayed by 1.5 s with an init script). As the Studio appears, paint a stroke at once. Wait, then reload again.', expected: 'The saved painting comes back (with the new stroke on it, or the stroke refused until it is back), and the record is never replaced by an unrestored paper.', actual: `The saved painting is gone (its red square: ${slow.red} inked pixels after the restore, ${slow.redNextVisit} on the next visit), the paper holds only the early stroke (${slow.early}), and the toast says "${slow.toast}". The early stroke's autosave (800 ms) wrote the blank paper plus the stroke before restore() read the record, so restore() brought back that.`, cause: 'js/painting.js:349-361 and 457-482: pointerdown and saveSoon()/saveNow() do not wait for restore() (line 485, the `ready` promise at 875); a save that lands before restore() reads the record (lines 488-498) replaces it' });
+    if (!kept) t.finding({ title: 'A stroke made while the saved painting is still loading overwrites it: the painting is lost, and the Studio says "Your painting is back from last time" over the new stroke alone', severity: 'high', steps: 'Have a painting saved (paint, wait a second). Reload on a device where opening IndexedDB is slower than the 0.8 s autosave delay (simulated here: the first indexedDB.open request\'s success delayed by 3 s with an init script). As the Studio appears, paint a stroke at once. Wait, then reload again.', expected: 'The saved painting comes back (with the new stroke on it, or the stroke refused until it is back), and the record is never replaced by an unrestored paper.', actual: `The saved painting is gone (its red square: ${slow.red} inked pixels after the restore, ${slow.redNextVisit} on the next visit), the paper holds only the early stroke (${slow.early}), and the toast says "${slow.toast}". The early stroke's autosave (800 ms) wrote the blank paper plus the stroke before restore() read the record, so restore() brought back that.`, cause: 'js/painting.js:349-361 and 457-482: pointerdown and saveSoon()/saveNow() do not wait for restore() (line 485, the `ready` promise at 875); a save that lands before restore() reads the record (lines 488-498) replaces it' });
     t.note(`a change made before the restore: the early stroke ${slow.early > 50 ? 'is on the paper' : 'is gone'} after it; the ground clicked to gray ${slow.ground === 'gray' ? 'stays gray' : `is reset to the saved "${slow.ground}"`}`);
     await clean(t, page, 'gap: changes while the painting is restored');
     await page.context().close();
