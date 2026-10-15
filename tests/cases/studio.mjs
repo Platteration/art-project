@@ -325,11 +325,12 @@ export default async function studio(t, site) {
   t.check(rs.distinct > 3 && rs.distinct <= 40, 'a dealt portrait shows its color blocks', rs);
   await click(page, '#ps-refSheet [data-ref-view="original"]');
   // size: the slider's ends, and what the picture does
-  const stageW = (await box(page, '#ps-stage')).w;
+  const sBox = await box(page, '#ps-stage'), stageW = sBox.w, side = Math.min(sBox.w, sBox.h);
   await setRange(page, 'ps-refSize', 20); const w20 = (await refState()).figW;
   await setRange(page, 'ps-refSize', 36); const w36 = (await refState()).figW;
   await setRange(page, 'ps-refSize', 70); const r70 = await refState();
-  t.check(Math.abs(w20 - stageW * 0.2) < 6 && r70.sizeOut === '70%', 'reference size 20%: a fifth of the stage; at 70 the readout says 70%', { w20, stageW, sizeOut: r70.sizeOut });
+  // the size is a share of the stage's shorter side, so the slider's whole range shows on a wide screen too
+  t.check(Math.abs(w20 - side * 0.2) < 6 && Math.abs(r70.figW - side * 0.7) < 6 && r70.sizeOut === '70%', 'reference size 20% and 70%: a fifth and seven tenths of the stage\'s shorter side, the readout agreeing', { w20, w70: r70.figW, side, sizeOut: r70.sizeOut });
   const grows = r70.figW > w36 + 10;
   t.check(grows, 'reference size 70%: the picture is larger than at 36%', { w36, w70: r70.figW, stageW });
   if (!grows) t.finding({ title: 'On a wide screen the reference size slider does nothing past about a fifth of the stage, while its readout keeps climbing', severity: 'low', steps: 'Open the site at 1400 × 900, Studio tab, Reference icon, drag Size from 20% to 70%.', expected: 'The floating reference grows with the slider, as the README\'s "size it" promises, or the slider stops where the picture stops.', actual: `The picture stops at 300 px (styles.css line 1464, .ps-ref { max-width: 300px }) while the readout says 70%: here ${Math.round(w36)} px at 36% and ${Math.round(r70.figW)} px at 70% on a ${Math.round(stageW)} px stage. On a phone the slider works (checked below).` });
@@ -512,7 +513,7 @@ export default async function studio(t, site) {
       ['prototype names in the canvas settings, washStr a string', { w: 900, h: 1200, paper: { __blob: 'png' }, canvas: { ground: 'constructor', weave: '__proto__', washCode: 'constructor', washStr: '0.3' } }, { kept: true, ground: 'raw', weave: 'off' }],
       ['washStr out of range, washCode toString, valid ground and texture', { w: 900, h: 1200, paper: { __blob: 'png' }, canvas: { ground: 'wash', weave: 'paper', washCode: 'toString', washStr: 5 } }, { kept: true, ground: 'wash', weave: 'paper' }],
       ['__proto__ and constructor as keys in the canvas settings', { w: 900, h: 1200, paper: { __blob: 'png' }, canvas: { __json: '{"__proto__": {"ground": "gray"}, "constructor": {"weave": "linen"}, "ground": "gray"}' } }, { kept: true, ground: 'gray', weave: 'off' }],
-      ['the largest width the Studio accepts (16384 × 16)', { w: 16384, h: 16, paper: { __blob: 'png' } }, { kept: 'strip' }],
+      ['a strip no paper can be shown at (16384 × 16)', { w: 16384, h: 16, paper: { __blob: 'png' }, sketch: { __blob: 'png' } }, { kept: false }],
     ];
     const blankWelcome = [];
     for (const [label, spec, want] of records) {

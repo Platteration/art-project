@@ -1461,7 +1461,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .ps-picked .ps-acts { display: flex; gap: 6px; }
 
 /* the reference floats over the paper and can be dragged anywhere on it */
-.ps-ref { position: absolute; right: 12px; top: 12px; z-index: 3; width: 36%; max-width: 300px; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: end; touch-action: none; }
+.ps-ref { position: absolute; right: 12px; top: 12px; z-index: 3; width: 36%; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: end; touch-action: none; }
 /* the switch may be wider than a small reference: it then runs out to the left, never off the screen */
 .ps-ref .pill-switch { justify-self: end; }
 .ps-ref .pill-switch { box-shadow: 0 1px 4px var(--shadow); }

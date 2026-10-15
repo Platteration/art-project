@@ -88,7 +88,7 @@ The Studio tab is a paper to paint on, with the studio's own paints and mixing m
 - **Reference**: the Study tab's photo, or a generated portrait as the game deals them, floating over the paper where you drag it. Show it as the original, the three-value study or the color-block study, as the Study tab makes them; size it, or hide it.
 - **Canvas**: the ground (raw canvas, a thin wash of one of your paints at a chosen strength, or a mid-value gray), a linen or paper texture over everything, and **Save as PNG**, which flattens the ground, underdrawing, paint and texture into one picture.
 - **Zoom and pan**: zoom up to four times with sliders that slide the paper under the brush, and **Fit to screen**.
-- **Undo** (or Ctrl/⌘+Z), **Turn the paper** (portrait or landscape, keeping what is on it) and **Clear**.
+- **Undo** (or Ctrl/⌘+Z; the last 20 steps), **Turn the paper** (portrait or landscape, keeping what is on it) and **Clear**.
 
 ### Figure study
 

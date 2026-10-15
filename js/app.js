@@ -542,6 +542,7 @@
   function useSource(img, name, baseName, note) {
     state.source = img;
     state.baseName = baseName || 'portrait';
+    window.dispatchEvent(new CustomEvent('studio:source')); // a new reference photo (its studies follow with studio:result)
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
     const marks = [
       state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',

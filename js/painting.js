@@ -144,6 +144,7 @@
       wrap.style.width = `${Math.floor(paper.width * k)}px`;
       wrap.style.height = `${Math.floor(paper.height * k)}px`;
       applyView();
+      sizeReference();
     }
     let active = false;
     function layout() {
@@ -425,7 +426,7 @@
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
     let saveTimer = 0, saving = false, saveAgain = false, forgetting = false, saveFailed = false;
-    function saveSoon() { if (!hasDb || forgetting) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
+    function saveSoon() { if (!hasDb || forgetting) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = 0; saveNow(); }, 800); }
     async function saveNow() {
       if (!hasDb || forgetting) return;
       if (saving) { saveAgain = true; return; }
@@ -441,23 +442,29 @@
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
     const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
-    let restored = false, dbOk = false, restoreFailed = false; // dbOk: the database answered, so saving works here
+    let restored = false, dbOk = false, restoreFailed = false, badRecord = false; // dbOk: the database answered, so saving works here
     async function restore() {
       if (!hasDb) return;
       let saved;
       try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
       dbOk = true;
-      // only a record of the expected shape is used: sizes a canvas can hold, pictures that are blobs
-      const size = (n) => Number.isInteger(n) && n > 0 && n <= 16384;
-      if (!saved || typeof saved !== 'object' || !size(saved.w) || !size(saved.h)) return;
-      const [pImg, sImg] = await Promise.all([saved.paper instanceof Blob ? loadBlob(saved.paper) : null, saved.sketch instanceof Blob ? loadBlob(saved.sketch) : null]);
+      if (saved == null) return;
+      // only a record of the expected shape is used: sizes a paper can be shown at (each side 64 to
+      // 16384, neither more than eight times the other), a paper that is a blob and reads as an image,
+      // and an underdrawing that reads when it is there; anything else (a bad write, a tampered record)
+      // leaves a fresh paper and is said so when the Studio opens
+      const size = (n) => Number.isInteger(n) && n >= 64 && n <= 16384;
+      const usable = typeof saved === 'object' && size(saved.w) && size(saved.h) && saved.w <= saved.h * 8 && saved.h <= saved.w * 8 && saved.paper instanceof Blob;
+      const hasSketch = usable && saved.sketch instanceof Blob;
+      const [pImg, sImg] = usable ? await Promise.all([loadBlob(saved.paper), hasSketch ? loadBlob(saved.sketch) : null]) : [null, null];
+      if (!pImg || (hasSketch && !sImg)) { badRecord = true; return; }
       [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
-      if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
+      paper.getContext('2d').drawImage(pImg, 0, 0);
       if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
       if (saved.canvas && typeof saved.canvas === 'object') { // field by field, each to what the sheet offers
         const c = saved.canvas;
         if (['raw', 'wash', 'gray'].includes(c.ground)) canvasState.ground = c.ground;
-        if (Object.prototype.hasOwnProperty.call(WEAVE_ALPHA, c.weave)) canvasState.weave = c.weave;
+        if (typeof c.weave === 'string' && Object.prototype.hasOwnProperty.call(WEAVE_ALPHA, c.weave)) canvasState.weave = c.weave;
         if (typeof c.washCode === 'string' && c.washCode.length <= 8) canvasState.washCode = c.washCode;
         const sl = $('washStr');
         if (Number.isFinite(c.washStr) && c.washStr >= +sl.min / 100 && c.washStr <= +sl.max / 100) canvasState.washStr = c.washStr;
@@ -469,7 +476,11 @@
       layout();
       showStatus();
     }
-    window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveNow(); } });
+    // a change still waiting is saved as the page goes (pagehide), and as soon as it is hidden (a phone
+    // switching apps, which may never show it again): a save begun at pagehide may not finish
+    const saveNowIfDue = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0; saveNow(); } };
+    window.addEventListener('pagehide', saveNowIfDue);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNowIfDue(); });
 
     // ---- Sheets ----------------------------------------------------------------------------------
     const SHEETS = { brushSheet: 'brushBtn', eraserSheet: null, refSheet: 'refBtn', canvasSheet: 'canvasBtn', viewSheet: 'viewBtn', paintSheet: 'colorBtn' };
@@ -545,9 +556,15 @@
       q('[data-ref-kind]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.refKind === ref.kind)));
       $('refAnother').hidden = ref.kind !== 'painting';
       $('refFig').hidden = !ref.shown || !ref.prep;
-      $('refFig').style.width = `${ref.size * 100}%`;
+      sizeReference();
       $('refSizeOut').textContent = `${Math.round(ref.size * 100)}%`;
       q('[data-ref-show]').forEach((b) => b.setAttribute('aria-pressed', String(!!+b.dataset.refShow === ref.shown)));
+    }
+    // the size is a share of the stage's shorter side, so every step of the slider shows on a wide screen
+    // as on a phone (a hidden stage has no size: the width stays until the next layout)
+    function sizeReference() {
+      const st = $('stage'), side = Math.min(st.clientWidth, st.clientHeight);
+      if (side > 0) $('refFig').style.width = `${Math.round(ref.size * side)}px`;
     }
     function dealReference() {
       if (!window.Subjects) { Studio.toast('The generated portraits are not available: a script did not load. Reload the page.'); return; }
@@ -561,8 +578,9 @@
         if (b.dataset.refKind === 'painting') { if (ref.kind !== 'painting') dealReference(); }
         else { ref.kind = 'studio'; ref.shown = true; refreshReference(); }
       }));
-      // a photo loaded here goes to the Study tab, and the reference follows it
-      document.getElementById('file').addEventListener('change', () => { if (active) { ref.kind = 'studio'; ref.shown = true; } });
+      // a photo loaded while the Studio is open (its Load a photo, a drop or a paste) goes to the Study tab,
+      // and the reference follows it once it has arrived: a file refused there changes nothing here
+      window.addEventListener('studio:source', () => { if (active) { ref.kind = 'studio'; ref.shown = true; ref.prep = ref.res = null; drawReference(); } });
       window.addEventListener('studio:result', () => { if (ref.kind === 'studio') refreshReference(); });
     } else {
       // a studio whose owner gives the reference has none of the Study tab's controls: the choice of
@@ -598,6 +616,8 @@
     const view = { zoom: 1, px: 0, py: 0 };
     function applyView() {
       const st = $('stage'), z = view.zoom;
+      // at 100% the pan sliders are off: the paper sits centred, and a pan left over from a zoom is cleared
+      if (z === 1 && (view.px || view.py)) { view.px = view.py = 0; $('panX').value = 0; $('panY').value = 0; }
       const w = wrap.clientWidth * z, h = wrap.clientHeight * z;
       const ox = Math.max(0, (w - st.clientWidth) / 2 + 24), oy = Math.max(0, (h - st.clientHeight) / 2 + 24);
       wrap.style.transform = `translate(${-view.px * ox}px, ${-view.py * oy}px) scale(${z})`;
@@ -789,7 +809,10 @@
     }
     function applyPalette() { state.well = []; renderPaints(); renderWash(); applyCanvas(); seedMixes(); }
     $('palette').addEventListener('change', () => { paletteTouched = true; applyPalette(); });
-    window.addEventListener('studio:palette', () => { if (paletteTouched) return; const was = $('palette').value; renderPalettes(); if ($('palette').value !== was) applyPalette(); });
+    function followPalette() { if (paletteTouched) return; const was = $('palette').value; renderPalettes(); if ($('palette').value !== was) applyPalette(); }
+    window.addEventListener('studio:palette', followPalette);
+    // a new study while the Studio is open (a photo loaded from here) can change the Study tab's palette
+    window.addEventListener('studio:result', () => { if (active) followPalette(); });
 
     // ---- Start ---------------------------------------------------------------------------------------
     renderPalettes();
@@ -808,7 +831,7 @@
       if (o.bodyClass) document.body.classList.toggle(o.bodyClass, active);
       if (!active) { closeSheets(); return; }
       window.scrollTo(0, 0);
-      if (!paletteTouched) { const was = $('palette').value; renderPalettes(); if ($('palette').value !== was) applyPalette(); }
+      followPalette();
       refreshReference();
       layout();
       setTimeout(layout, 120);
@@ -816,6 +839,7 @@
         layout();
         if (!welcomed && !restoreFailed) { // a failed restore has the guard's reset offer on screen: leave it there
           if (restored && o.welcome) Studio.toast(o.welcome);
+          else if (badRecord && o.welcome) Studio.toast('The painting saved last time could not be read, so this is a fresh paper.', 6000);
           // the one-time note is only true where the database works, and only once the flag could be kept
           else if (o.notice && dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) Studio.toast(o.notice, 7000);
         }
