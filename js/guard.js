@@ -74,9 +74,9 @@
   function failed(what, tab) {
     if (window.console && console.error) console.error(what);
     var root = document.documentElement;
-    // a script that never loaded already has the standing load note; a script that did load but could
-    // not start gets the "part did not start" note, and its tab leaves the menu
-    if (!root.classList.contains('load-failed')) root.classList.add(tab === 'all' ? 'all-failed' : 'part-failed');
+    // the class hides the module's controls (all of them, or its tab); the "part did not start" note it
+    // also shows stays hidden while the standing load note is up (styles.css), so one note says it
+    root.classList.add(tab === 'all' ? 'all-failed' : 'part-failed');
     if (tab && tab !== 'all') {
       var item = document.querySelector('[data-tab="' + tab + '"]');
       var panel = document.getElementById('tab-' + tab);
@@ -94,12 +94,17 @@
   var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure' };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
-  // stylesheet failing to load shows the standing note at the top of the page, not a passing toast.
+  // stylesheet failing to load shows the standing note at the top of the page, not a passing toast,
+  // and the module that script was takes its controls off the page (app.js: everything but the guide).
   window.addEventListener('error', function (e) {
     var el = e.target;
     if (el && el !== window && el.tagName) {
       var tag = el.tagName.toLowerCase();
-      if (tag === 'script' || (tag === 'link' && el.rel === 'stylesheet')) document.documentElement.classList.add('load-failed');
+      if (tag === 'script' || (tag === 'link' && el.rel === 'stylesheet')) {
+        document.documentElement.classList.add('load-failed');
+        var src = /\/js\/([a-z-]+)\.js$/.exec(el.src || '');
+        if (src && TAB_OF.hasOwnProperty(src[1])) failed(src[1] + '.js did not load', TAB_OF[src[1]]);
+      }
       return; // images have their own handling in the app
     }
     if (booting && e.filename) {
