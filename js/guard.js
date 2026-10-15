@@ -62,9 +62,26 @@
       });
       toast.append(' ', btn);
     }
+    show(toast, offerReset ? 20000 : 6000);
+  }
+
+  // The app's notes and the guard's share the one toast, so they share one hide timer: a note never goes
+  // early on a timer that a note before it set. Hidden, the toast drops its reset button, so nothing
+  // invisible can be pressed (or reached by Tab) where the note was.
+  function show(toast, ms) {
     toast.classList.add('show');
     clearTimeout(timer);
-    timer = setTimeout(function () { toast.classList.remove('show'); }, offerReset ? 20000 : 6000);
+    timer = setTimeout(function () {
+      toast.classList.remove('show');
+      var btn = toast.querySelector('.toast-action');
+      if (btn) btn.remove();
+    }, ms);
+  }
+  function toastNote(msg, ms) {
+    var toast = document.getElementById('toast');
+    if (!toast) return;
+    toast.textContent = msg;
+    show(toast, ms);
   }
 
   // Modules report errors here. { saved: true } means the error came from reading saved state, which
@@ -87,8 +104,11 @@
     if (tab && tab !== 'all') {
       var item = document.querySelector('[data-tab="' + tab + '"]');
       var panel = document.getElementById('tab-' + tab);
-      // the Study tab's "Use my Studio painting" needs the Studio: it goes with it
+      // the Study tab's "Use my Studio painting" needs the Studio: it goes with it, as do the guide's buttons
+      // that open the tab ("Go to Studio")
       if (tab === 'paint') { var fromStudio = document.getElementById('artFromStudio'); if (fromStudio) fromStudio.hidden = true; }
+      var goes = document.querySelectorAll('[data-go="' + tab + '"]');
+      for (var g = 0; g < goes.length; g++) goes[g].hidden = true;
       if (item) {
         item.hidden = true;
         // the group's button names one of its items: not this one any more; a group with none left goes too
@@ -122,7 +142,7 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', syncNotes); else syncNotes();
 
-  window.StudioGuard = { report: report, forget: forget, failed: failed };
+  window.StudioGuard = { report: report, forget: forget, failed: failed, toast: toastNote };
 
   // Forget my work on this device, pressed in another tab of this site: this tab stops saving and starts
   // over as well (the Studio hears studio:forget and drops its pending autosave)

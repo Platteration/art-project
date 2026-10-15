@@ -11,11 +11,12 @@ A bar of tool icons sits beside the images (a row pinned to the top of the scree
 - **Lines**, **Measure** and **Plumb**: the drawing and measuring tools below. Each shows how many lines, measures or plumb points it has drawn. While one is on, its options (line color, undo, clear, the unit on your canvas) and a short how-to sit above the images.
 - **Grid**: steps through off, 3 × 3 and 4 × 4.
 
-The settings fold away into three drawers beside the tool bar (above it on a phone), so the page shows only the studies until you need more. Each drawer's header says what it is set to, such as `Splits at V 2.7 and 4.6`, so it can stay closed. The drawers you leave open are opened again on your next visit.
+The settings fold away into four drawers beside the tool bar (above it on a phone), so the page shows only the studies until you need more. Each drawer's header says what it is set to, such as `Splits at V 2.7 and 4.6`, so it can stay closed. The drawers you leave open are opened again on your next visit.
 
 - **Dark, middle, light**: in Simple mode a Detail preset (Soft, Normal, Sharp); in Advanced mode Simplify, Smoothing, Merge small shapes, Working size, the value splits and gray values.
 - **Colors and paints**: Colors in each value, and paints for the study: known palettes ranked for this photo, or a palette chosen from the paints you own, with a starting mix for every color.
 - **Picked colors**: the colors you clicked. Sort them dark to light, copy them as hex codes, or save them as a PNG. They are kept in your browser between visits and shared by every tab you have the tool open in.
+- **How close did I get?**: scores a photo of your finished painting against the reference (see below).
 
 ### Grid and reference lines
 

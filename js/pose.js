@@ -1533,7 +1533,8 @@
     camera.updateProjectionMatrix();
     requestRender();
   }
-  new ResizeObserver(resize).observe(canvas.parentElement);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas.parentElement);
+  else window.addEventListener('resize', resize); // an old browser opening pose.html itself
   // moving to another screen changes the pixel ratio without a resize
   (function watchRatio() {
     if (!window.matchMedia) return;

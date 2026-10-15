@@ -156,6 +156,8 @@
   let toastTimer = 0;
   // ms: how long it stays; a problem the visitor has to read gets longer than a passing confirmation
   function toast(msg, ms = 1800) {
+    // the guard's toast shares its hide timer with the guard's own notes (a reset offer keeps its 20 s)
+    if (window.StudioGuard && StudioGuard.toast) { StudioGuard.toast(msg, ms); return; }
     els.toast.textContent = msg;
     els.toast.classList.add('show');
     clearTimeout(toastTimer);
@@ -534,8 +536,19 @@
     return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
+  // the tabs that show the loaded photo (the Studio and the Loomis head follow it; the game's setup takes it)
+  const SHOWS_PHOTO = ['study', 'paint', 'loomis', 'game'];
   function loadFile(file, extra) {
-    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', [extra, note].filter(Boolean).join(' ')), 'photo', extra);
+    readImage(file, (img, note) => {
+      // a photo loaded where it is not shown: from the guide or Pose and light, Study the photo opens with it;
+      // in the middle of a Figure study class or a battle the tab stays, and the note says where the photo went
+      let where = '';
+      if (!SHOWS_PHOTO.includes(state.tab)) {
+        if (state.tab === 'figure' || state.tab === 'battle') where = 'The new photo is on Study the photo.';
+        else switchTab('study');
+      }
+      useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', [extra, note, where].filter(Boolean).join(' '));
+    }, 'photo', extra);
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
@@ -2217,6 +2230,8 @@
   // sender window either way
   const FRAME_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
   function openPose() {
+    // an old browser has the standing note and the guide instead of the tabs: the Pose page is not loaded
+    if (document.documentElement.classList.contains('old-browser')) return;
     if (!poseFrame.getAttribute('src')) poseFrame.setAttribute('src', poseFrame.dataset.src);
   }
   // it follows the app's Simple or Advanced switch: told when it loads and whenever the switch changes
@@ -2239,19 +2254,25 @@
     // Tab (or anything) taking the focus out of the group closes its menu, as Esc and a tap elsewhere do
     const group = btn.closest('.tab-group');
     if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
+    // the items the guard has not taken off the menu (a hidden one cannot take the focus)
+    const items = () => [...menu.querySelectorAll('.tab-item')].filter((b) => !b.hidden);
+    const focusIn = () => { const on = items().find((b) => b.getAttribute('aria-checked') === 'true') || items()[0]; if (on) on.focus(); };
     btn.addEventListener('click', () => {
       const open = menu.hidden;
       closeMenus();
-      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); const on = menu.querySelector('.tab-item[aria-checked="true"]') || menu.querySelector('.tab-item'); if (on) on.focus(); }
+      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); focusIn(); }
     });
-    btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); btn.click(); } });
+    // ArrowDown opens the menu, or moves into it when it is already open (it never closes it)
+    btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); if (menu.hidden) btn.click(); else focusIn(); } });
     menu.addEventListener('keydown', (e) => {
-      const items = [...menu.querySelectorAll('.tab-item')], i = items.indexOf(document.activeElement);
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+      const list = items(), i = list.indexOf(document.activeElement);
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && list.length) { e.preventDefault(); list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1) + (i < 0 && e.key === 'ArrowUp' ? 1 : 0)) % list.length].focus(); }
       if (e.key === 'Escape') { closeMenus(); btn.focus(); }
     });
   });
   document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.tab-group')) closeMenus(); });
+  // a click into the Pose and light frame never reaches this document, but it takes the focus from this window
+  window.addEventListener('blur', closeMenus);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
   // ---- Check my painting --------------------------------------------------
@@ -2641,9 +2662,15 @@
   // the guide's Try it buttons lead to the part they describe
   document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
     const go = b.dataset.go;
-    switchTab(go === 'check' ? 'study' : go);
-    if (go === 'check') { els.drawers.check.open = true; els.drawers.check.scrollIntoView({ block: 'start' }); }
-    else window.scrollTo(0, 0);
+    // the button pressed is hidden with the guide: the focus goes to the section opened (as a menu item's
+    // does), or to the drawer opened, so the next Tab starts there and not from the top of the page
+    switchTab(go === 'check' ? 'study' : go, true);
+    if (go === 'check') {
+      els.drawers.check.open = true;
+      els.drawers.check.scrollIntoView({ block: 'start' });
+      const summary = els.drawers.check.querySelector('summary');
+      if (summary) summary.focus({ preventScroll: true });
+    } else window.scrollTo(0, 0);
   }));
 
   // ---- Simple and advanced ------------------------------------------------
