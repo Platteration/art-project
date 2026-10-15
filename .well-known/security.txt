@@ -1,5 +1,6 @@
-# Portrait Value Studio
-Contact: https://github.com/Platteration/art-project/issues
-Expires: 2027-10-01T00:00:00.000Z
+﻿# Portrait Value Studio
+Contact: https://github.com/Platteration/art-project/security/advisories/new
+Expires: 2027-10-14T00:00:00.000Z
 Preferred-Languages: en
-Policy: https://github.com/Platteration/art-project/blob/master/SECURITY.md
+Policy: https://github.com/Platteration/art-project/blob/main/SECURITY.md
+Canonical: https://SITE.example/.well-known/security.txt
