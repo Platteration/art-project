@@ -1162,7 +1162,7 @@
   }
 
   // the tabs are hidden while playing, so the bar has a way out: tap ✕ twice
-  let quitArmed = 0;
+  let quitArmed = -1e9; // long ago: the first ✕ asks even in the page's first three seconds
   els.quit.addEventListener('click', () => {
     if (!game || game.over) return;
     if (performance.now() - quitArmed > 3000) {
@@ -1170,7 +1170,7 @@
       Studio.toast('Tap ✕ again to quit this game');
       return;
     }
-    quitArmed = 0;
+    quitArmed = -1e9;
     game.over = true;
     clearInterval(timer);
     endCopy();

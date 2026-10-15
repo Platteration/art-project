@@ -439,11 +439,11 @@
   els.again.addEventListener('click', start);
   els.settings.addEventListener('click', () => { clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null; els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); renderSetup(); });
   // the tabs are hidden while playing on a phone, so the bar has a way out: tap ✕ twice
-  let quitArmed = -1e9;
+  let quitArmed = -1e9; // long ago: the first ✕ asks even in the page's first three seconds
   els.quit.addEventListener('click', () => {
     if (!game || game.over) { els.settings.click(); return; }
     if (performance.now() - quitArmed > 3000) { quitArmed = performance.now(); Studio.toast('Tap ✕ again to quit this battle'); return; }
-    quitArmed = 0;
+    quitArmed = -1e9;
     els.settings.click();
   });
   // While a game is on, the board is pinned to the screen the Studio's way: the whole visual

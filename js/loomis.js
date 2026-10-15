@@ -208,20 +208,23 @@
       { key: 'pitch', d: -1, x: cx - pad * 0.9, y: cy - R - pad, glyph: 'up' }, { key: 'pitch', d: 1, x: cx + pad * 0.9, y: cy - R - pad, glyph: 'down' },
       { key: 'roll', d: -1, x: cx - R * 0.78 - pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'ccw' }, { key: 'roll', d: 1, x: cx + R * 0.78 + pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'cw' },
     ].map(inside);
-    // a row of arrows pushed down into the picture (a small head cut off at its top) would land the tilt
-    // arrows on the nod or the turn arrows: each tilt arrow takes the first spot clear of every other arrow
-    // by a disc and a half: its own place, the ball's lower corner, outward beside the nod arrow, under
-    // the turn arrow (or, with none clear, the clearest of the four)
-    const [left, right, up, down] = all, r = 15 * (W / 400) * 2.3;
-    const nearest = (p, others) => Math.min(...others.map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
-    const place = (h, sign, others) => {
-      const nod = sign < 0 ? up : down, turn = sign < 0 ? left : right;
-      const spots = [{ x: h.x, y: h.y }, { x: cx + sign * (R * 0.78 + pad * 0.6), y: cy + R * 0.78 + pad * 0.6 }, { x: nod.x + sign * r, y: m }, { x: turn.x, y: turn.y + r }].map((p) => inside(p));
-      const best = spots.find((p) => nearest(p, others) >= r) || spots.reduce((p, q) => (nearest(q, others) > nearest(p, others) ? q : p));
-      h.x = best.x; h.y = best.y;
+    // arrows pushed into the picture (a small head cut off at its top, or near a corner) would land on
+    // each other: the arrows are placed in turn, turn then nod then tilt, each taking the first of its
+    // spots clear of those already placed by a disc and a half (or, with none clear, the clearest):
+    // its own place, below it, outward, and for the tilt arrows the ball's lower corner
+    const [left, right, up, down, ccw, cw] = all, r = 15 * (W / 400) * 2.3, placed = [];
+    const nearest = (p) => Math.min(...placed.map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
+    const take = (h, spots) => {
+      const cands = [{ x: h.x, y: h.y }, ...spots].map((p) => inside(p));
+      const best = cands.find((p) => nearest(p) >= r) || cands.reduce((p, q) => (nearest(q) > nearest(p) ? q : p));
+      h.x = best.x; h.y = best.y; placed.push(h);
     };
-    place(all[4], -1, [left, right, up, down]);
-    place(all[5], 1, [left, right, up, down, all[4]]);
+    take(left, [{ x: left.x, y: left.y + r }]);
+    take(right, [{ x: right.x, y: right.y + r }]);
+    take(up, [{ x: up.x, y: up.y + r }, { x: up.x - r, y: up.y }, { x: cx - pad * 0.9, y: cy + R + pad }]);
+    take(down, [{ x: down.x, y: down.y + r }, { x: down.x + r, y: down.y }, { x: cx + pad * 0.9, y: cy + R + pad }]);
+    take(ccw, [{ x: cx - R * 0.78 - pad * 0.6, y: cy + R * 0.78 + pad * 0.6 }, { x: up.x - r, y: m }, { x: left.x, y: left.y + r }, { x: up.x, y: up.y + r }, { x: cx - R * 0.78 - pad * 0.6, y: cy + R * 0.78 + pad * 0.6 + r }]);
+    take(cw, [{ x: cx + R * 0.78 + pad * 0.6, y: cy + R * 0.78 + pad * 0.6 }, { x: down.x + r, y: m }, { x: right.x, y: right.y + r }, { x: down.x, y: down.y + r }, { x: cx + R * 0.78 + pad * 0.6, y: cy + R * 0.78 + pad * 0.6 + r }]);
     return all;
   }
   function nudge(key, d) {
