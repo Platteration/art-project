@@ -195,9 +195,9 @@
   })();
 
   let saveImgUrl = '';
-  function savePng(canvas, name) {
+  function savePng(canvas, name, advice = 'Try a smaller Working size.') {
     canvas.toBlob((blob) => {
-      if (!blob) { toast('The PNG could not be made. Try a smaller Working size.', 5000); return; }
+      if (!blob) { toast(`The PNG could not be made. ${advice}`, 5000); return; }
       downloadBlob(blob, name);
       if (!downloadsMayBeBlocked) return;
       // the same blob is the preview to save by hand, so the page needs no data: URLs
@@ -531,6 +531,7 @@
     const marks = [
       state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
     ].filter(Boolean);
+    cancelDrag(); state.drawing = null; // a line, measure or plumb point begun on the photo before does not land on this one
     clearMarks();
     const said = [];
     if (note) said.push(note);
@@ -1115,9 +1116,11 @@
 
   els.palSave.addEventListener('click', () => {
     const list = state.palette;
-    const cols = Math.min(6, list.length);
+    // a long list goes in more, smaller columns: a canvas taller than the browser allows makes no picture
+    const k = list.length > 200 ? 0.5 : 1;
+    const cols = Math.max(Math.min(6, list.length), Math.ceil(list.length / 60));
     const rows = Math.ceil(list.length / cols);
-    const sw = 180, lab = 54, pad = 24, gap = 16;
+    const sw = 180 * k, lab = 54 * k, pad = 24 * k, gap = 16 * k;
     const c = document.createElement('canvas');
     c.width = pad * 2 + cols * sw + (cols - 1) * gap;
     c.height = pad * 2 + rows * (sw + lab) + (rows - 1) * gap;
@@ -1132,13 +1135,13 @@
       g.strokeStyle = 'rgba(0,0,0,0.15)';
       g.strokeRect(x + 0.5, y + 0.5, sw - 1, sw - 1);
       g.fillStyle = '#1e2b22';
-      g.font = '600 20px "IBM Plex Mono", monospace';
-      g.fillText(toHex(col), x, y + sw + 26);
+      g.font = `600 ${20 * k}px "IBM Plex Mono", monospace`;
+      g.fillText(toHex(col), x, y + sw + 26 * k);
       g.fillStyle = '#5c6157';
-      g.font = '16px "IBM Plex Mono", monospace';
-      g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47);
+      g.font = `${16 * k}px "IBM Plex Mono", monospace`;
+      g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47 * k);
     });
-    savePng(c, `${state.baseName}-palette.png`);
+    savePng(c, `${state.baseName}-palette.png`, 'Save fewer colors at a time.');
   });
 
   let clearArmed = 0;
@@ -2124,7 +2127,7 @@
     // plumb point is held, since undoing could renumber the points under it.
     // (the Studio and Figure study undo their own strokes)
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' &&
-      state.history.length && !typing && !state.dragging && state.tab !== 'paint' && state.tab !== 'figure') {
+      state.history.length && !typing && !state.dragging && state.tab === 'study') { // only where the marks are in sight
       e.preventDefault();
       toast(undo());
     }

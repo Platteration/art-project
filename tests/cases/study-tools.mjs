@@ -196,7 +196,7 @@ export default async function studyTools(t, site) {
     await tapAt(page, 0.5, 0.5);
     await dragPx(page, 0.5, 0.5, 1, 0, { mid: false });
     t.check((await count(page, 'line')) === 0, 'a tap and a 1 px slip draw no line');
-    t.note('Lines: a tap or a slip draws nothing and says nothing (app.js 939–941: a line under 4 px is dropped without a word; a measure of that length gets a hint). The README promises no message, so this is noted, not failed.');
+    t.note('Lines: a tap or a slip draws nothing and says nothing (app.js 938–940: a line under 4 px is dropped without a word; a measure of that length gets a hint). The README promises no message, so this is noted, not failed.');
     await dragFrac(page, [0.2, 0.3], [0.8, 0.3]);
     t.check((await count(page, 'line')) === 1 && !(await disabled(page, '#lineUndo')) && !(await disabled(page, '#lineClear')), 'a drag draws a line: the badge says 1, Undo and Clear come on');
     t.check((await overlayHas(page, 'cv-value', 0.5, 0.3, COLORS.lcRed)) && (await overlayHas(page, 'cv-block', 0.5, 0.3, COLORS.lcRed)), 'the line appears on every image');
