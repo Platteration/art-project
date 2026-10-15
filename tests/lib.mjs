@@ -192,6 +192,7 @@ export async function pasteFile(page, file) {
 // a pointer stroke across an element: points are fractions of its box, default a diagonal
 export async function stroke(page, selector, points = [[0.3, 0.3], [0.5, 0.5], [0.7, 0.65]], { steps = 8, frame = null, button = 'left' } = {}) {
   const loc = (frame || app(page)).locator(selector).first();
+  await loc.scrollIntoViewIfNeeded().catch(() => null); // a phone's page is taller than its window
   const b = await loc.boundingBox();
   if (!b) throw new Error('no box for ' + selector);
   const at = (p) => [b.x + b.width * p[0], b.y + b.height * p[1]];
