@@ -24,12 +24,14 @@
   // The Studio listens for the event and stops its autosave, so the painting cannot come back.
   function forget(reload) {
     try { window.dispatchEvent(new Event('studio:forget')); } catch (e) { /* nothing listening */ }
+    // the site's other open tabs hear a marker (a storage event) and start over too, so a painting one of
+    // them is still saving cannot come back; the marker itself is gone at once. A full storage refuses the
+    // marker: the keys still go, and the marker is written once the sweep has made room.
+    var told = false;
+    try { localStorage.setItem(PREFIX + 'forget', String(Date.now())); told = true; } catch (e) { /* full, or unavailable */ }
     try {
-      // the site's other open tabs hear this (a storage event) and start over too, so a painting one of
-      // them is still saving cannot come back; the marker itself is gone at once
-      localStorage.setItem(PREFIX + 'forget', String(Date.now()));
-      localStorage.removeItem(PREFIX + 'forget');
       Object.keys(localStorage).filter(function (k) { return k.indexOf(PREFIX) === 0 || k.indexOf('pose-and-light.') === 0; }).forEach(function (k) { localStorage.removeItem(k); });
+      if (!told) { localStorage.setItem(PREFIX + 'forget', String(Date.now())); localStorage.removeItem(PREFIX + 'forget'); }
     } catch (e) { /* storage unavailable: nothing kept */ }
     var done = false;
     function finish() { if (done) return; done = true; if (reload) location.reload(); }
@@ -81,6 +83,7 @@
     // the class hides the module's controls (all of them, or its tab); the "part did not start" note it
     // also shows stays hidden while the standing load note is up (styles.css), so one note says it
     root.classList.add(tab === 'all' ? 'all-failed' : 'part-failed');
+    syncNotes();
     if (tab && tab !== 'all') {
       var item = document.querySelector('[data-tab="' + tab + '"]');
       var panel = document.getElementById('tab-' + tab);
@@ -106,6 +109,18 @@
       }
     }
   }
+
+  // The three standing notes show by the classes on <html> (styles.css). Without the stylesheet they would
+  // all show at once, so each also carries the hidden attribute, kept in step with the classes here.
+  function syncNotes() {
+    var c = document.documentElement.classList;
+    var down = c.contains('no-js') || c.contains('load-failed') || c.contains('all-failed');
+    var set = function (cls, on) { var n = document.querySelector('.' + cls); if (n) n.hidden = !on; };
+    set('nojs-note', down);
+    set('oldbrowser-note', c.contains('old-browser'));
+    set('partfail-note', c.contains('part-failed') && !down);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', syncNotes); else syncNotes();
 
   window.StudioGuard = { report: report, forget: forget, failed: failed };
 
@@ -136,9 +151,11 @@
         // the scripts before it: the app has not started, and the standing note says so over the guide
         if (src && TAB_OF.hasOwnProperty(src[1]) && TAB_OF[src[1]] !== 'all') { failed(src[1] + '.js did not load', TAB_OF[src[1]]); return; }
         document.documentElement.classList.add('load-failed');
+        syncNotes();
         if (src && TAB_OF[src[1]] === 'all') failed('app.js did not load', 'all');
       } else if (tag === 'link' && el.rel === 'stylesheet' && /styles\.css$/.test(el.href || '')) {
         document.documentElement.classList.add('load-failed'); // (fonts.css failing only costs the typefaces)
+        syncNotes();
       }
       return; // images have their own handling in the app
     }

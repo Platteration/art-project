@@ -2,9 +2,6 @@
 (function () {
   'use strict';
 
-  // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to load
-  document.documentElement.classList.remove('no-js');
-
   // the modules this one needs; without them the page shows the standing note instead of half an app
   if (!window.Study || !window.Mixing || !window.Paints) {
     if (window.StudioGuard) StudioGuard.failed('app.js: processing.js, mixing.js or paints.js did not load', 'all');
@@ -2235,6 +2232,9 @@
   $('tabFigureBtn').addEventListener('click', () => switchTab('figure'));
   document.querySelectorAll('.tab[aria-haspopup]').forEach((btn) => {
     const menu = $(btn.getAttribute('aria-controls'));
+    // Tab (or anything) taking the focus out of the group closes its menu, as Esc and a tap elsewhere do
+    const group = btn.closest('.tab-group');
+    if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
     btn.addEventListener('click', () => {
       const open = menu.hidden;
       closeMenus();
@@ -2745,14 +2745,17 @@
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true, true);
-    if (location.hash === '#check') { switchTab('study'); els.drawers.check.open = true; }
-    if (location.hash === '#game') switchTab('game');
-    if (location.hash === '#paint') switchTab('paint');
-    if (location.hash === '#help') switchTab('help');
-    if (location.hash === '#loomis') switchTab('loomis');
-    if (location.hash === '#pose') switchTab('pose');
-    if (location.hash === '#figure') switchTab('figure');
-    if (location.hash === '#battle') switchTab('battle');
+    routeHash();
+  }
+  // the address's #part opens that part: at load, and whenever it changes later (Back and Forward between two
+  // of them, a link followed, one typed); an address with none, met by going Back, is the Study tab
+  const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
+  function routeHash(e) {
+    const h = location.hash;
+    const to = Object.prototype.hasOwnProperty.call(ROUTES, h) ? ROUTES[h] : e && (h === '' || h === '#') ? 'study' : null;
+    if (!to) return;
+    switchTab(to);
+    if (h === '#check') els.drawers.check.open = true;
   }
 
   // Help tab: forget everything this site keeps in the browser. Two taps, so a stray tap does nothing.
@@ -2785,4 +2788,8 @@
   }
 
   start();
+  window.addEventListener('hashchange', routeHash);
+  // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to
+  // load, taken once the app has started, so a page whose other scripts failed too keeps its standing note
+  document.documentElement.classList.remove('no-js');
 })();
