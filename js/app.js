@@ -464,13 +464,16 @@
   // The last file chosen wins: a read still under way when another file is chosen for the same
   // place (two files in the same instant) shows nothing and says nothing when it finishes.
   const readJobs = { photo: 0, art: 0 };
-  function readImage(file, done, slot = 'photo') {
+  // extra: a sentence about how the file arrived (the others dropped with it), said before any refusal
+  // and with the photo's own note on success
+  function readImage(file, done, slot = 'photo', extra = '') {
     if (!file) return;
+    const refuse = (msg, ms) => toast([extra, msg].filter(Boolean).join(' '), ms);
     // the type is the browser's guess from the name: a file with none, or with the catch-all
     // application/octet-stream, is tried by its content
     const typed = file.type && file.type !== 'application/octet-stream';
     if (typed && !file.type.startsWith('image/')) {
-      toast('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
+      refuse('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
       return;
     }
     const job = ++readJobs[slot];
@@ -487,7 +490,7 @@
       // viewBox, where the browser gives it none: Chromium gives such an SVG 300 x 150, and it loads as
       // that), and one under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
-        toast(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
+        refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
         return;
       }
       const r = shrinkIfHuge(img, w, h);
@@ -498,7 +501,7 @@
       settled = true;
       URL.revokeObjectURL(url);
       if (job !== readJobs[slot]) return;
-      toast('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
+      refuse('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
     };
     img.onload = loaded;
     img.onerror = failed;
@@ -532,9 +535,8 @@
     return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
-  // extra: a sentence about how the file arrived (the others dropped with it), said with the photo's own
   function loadFile(file, extra) {
-    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', [extra, note].filter(Boolean).join(' ')));
+    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', [extra, note].filter(Boolean).join(' ')), 'photo', extra);
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
@@ -566,7 +568,7 @@
       runSoon(0);
       const said = [extra, note].filter(Boolean).join(' ');
       if (said) toast(said, 5000);
-    }, 'art');
+    }, 'art', extra);
   }
 
   // Loads whichever image the open tab is about
@@ -618,9 +620,11 @@
       else if (types.includes('text/plain')) toast('That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one.', 5000);
       return;
     }
-    // one photo at a time: the first of several is taken, and the drop says so
-    const files = e.dataTransfer.files;
-    loadForTab(files[0], files.length > 1 ? `${files.length} files were dropped: only the first, ${files[0].name}, was loaded.` : '');
+    // one photo at a time: of several files the first that looks like a picture is taken (a text file
+    // dropped beside a photo does not win), and the drop says so, whether or not that one loads
+    const files = Array.from(e.dataTransfer.files);
+    const pick = files.find((f) => !f.type || f.type === 'application/octet-stream' || f.type.startsWith('image/')) || files[0];
+    loadForTab(pick, files.length > 1 ? `Of the ${files.length} files dropped, only ${pick.name || 'the first'} was taken.` : '');
   });
   window.addEventListener('paste', (e) => {
     const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith('image/'));

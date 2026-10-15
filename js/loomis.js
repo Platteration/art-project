@@ -203,11 +203,17 @@
     // kept inside the picture (a head whose crown is cut off would put the nod and tilt arrows above it)
     const H = W * state.aspect, m = 18 * (W / 400);
     const inside = (h) => Object.assign(h, { x: Math.max(m, Math.min(W - m, h.x)), y: Math.max(m, Math.min(H - m, h.y)) });
-    return [
+    const all = [
       { key: 'yaw', d: -1, x: cx - R - pad, y: cy, glyph: 'left' }, { key: 'yaw', d: 1, x: cx + R + pad, y: cy, glyph: 'right' },
       { key: 'pitch', d: -1, x: cx - pad * 0.9, y: cy - R - pad, glyph: 'up' }, { key: 'pitch', d: 1, x: cx + pad * 0.9, y: cy - R - pad, glyph: 'down' },
       { key: 'roll', d: -1, x: cx - R * 0.78 - pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'ccw' }, { key: 'roll', d: 1, x: cx + R * 0.78 + pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'cw' },
     ].map(inside);
+    // a row of arrows pushed down into the picture (a small head near its top) would land the tilt arrows
+    // on the nod arrows: the tilt arrows then move outward, clear of them
+    const [, , up, down, ccw, cw] = all, r = 15 * (W / 400) * 2.3;
+    if (Math.hypot(ccw.x - up.x, ccw.y - up.y) < r) ccw.x = Math.max(m, up.x - r);
+    if (Math.hypot(cw.x - down.x, cw.y - down.y) < r) cw.x = Math.min(W - m, down.x + r);
+    return all;
   }
   function nudge(key, d) {
     if (!state.fit) return;

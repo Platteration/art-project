@@ -486,7 +486,7 @@ export default async function studio(t, site) {
     t.check(r.undo, 'nothing to undo right after a restore'); }
   // a stroke, then a tab switch within the save delay: kept and saved
   { const since3 = Date.now(); await stroke(page, '#ps-paper', [[0.6, 0.2], [0.7, 0.4]]); const inkS = await alphaInk(page, '#ps-paper'); await tab(page, 'study'); const rec3 = await waitSaved(page, since3); await tab(page, 'paint'); t.check(!!rec3 && (await alphaInk(page, '#ps-paper')) === inkS && inkS > saved.paper, 'a stroke followed at once by a tab switch is kept and saved', { rec3: !!rec3, inkS }); }
-  // a stroke, then a reload at once (inside the 1.5 s save delay)
+  // a stroke, then a reload at once (inside the save delay, 800 ms)
   { const last = await waitSaved(page, 0); await stroke(page, '#ps-paper', [[0.7, 0.2], [0.8, 0.8]]); const inkBefore = await alphaInk(page, '#ps-paper'); await page.reload({ waitUntil: 'load' }); await sleep(500); await tab(page, 'paint'); await studioReady(page); const inkAfter = await alphaInk(page, '#ps-paper'); const lastSaved = await alphaInk(page, '#ps-paper');
     t.note(inkAfter === inkBefore ? 'a stroke followed at once by a reload is kept (the save on pagehide made it)' : `a stroke followed at once by a reload, inside the 1.5 s autosave delay, is lost (${inkBefore} → ${inkAfter}); everything saved before it is kept`);
     t.check(inkAfter === inkBefore || (last && lastSaved > 0 && inkAfter < inkBefore), 'a reload right after a stroke keeps the painting as last saved, or with the stroke', { inkBefore, inkAfter }); }

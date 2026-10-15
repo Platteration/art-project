@@ -365,7 +365,7 @@
     $('sketchFromStudy').addEventListener('click', () => {
       const prep = Studio.prep(), segs = Studio.marks();
       if (!prep) return;
-      if (!segs.length) { Studio.toast(withNotice('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'), 5000); return; }
+      if (!segs.length) { const none = withNotice('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); Studio.toast(none, none.length > 120 ? 8000 : 5000); return; }
       const k = Math.min(paper.width / prep.w, paper.height / prep.h);
       const w = prep.w * k, h = prep.h * k, ox = (paper.width - w) / 2, oy = (paper.height - h) / 2;
       useLayer(sketch); snapshot();
@@ -447,7 +447,7 @@
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
     const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
-    let restored = false, dbOk = false, restoreFailed = false, badRecord = false; // dbOk: the database answered, so saving works here
+    let restored = false, dbOk = false, restoreFailed = false, badRecord = false, sketchLost = false; // dbOk: the database answered, so saving works here
     async function restore() {
       if (!hasDb) return;
       let saved;
@@ -462,7 +462,8 @@
       const usable = typeof saved === 'object' && size(saved.w) && size(saved.h) && saved.w <= saved.h * 8 && saved.h <= saved.w * 8 && saved.paper instanceof Blob;
       const hasSketch = usable && saved.sketch instanceof Blob;
       const [pImg, sImg] = usable ? await Promise.all([loadBlob(saved.paper), hasSketch ? loadBlob(saved.sketch) : null]) : [null, null];
-      if (!pImg || (hasSketch && !sImg)) { badRecord = true; return; }
+      if (!pImg) { badRecord = true; return; }
+      if (hasSketch && !sImg) sketchLost = true; // the paint is back; the underdrawing alone is not, and that is said
       [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
       paper.getContext('2d').drawImage(pImg, 0, 0);
       if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
@@ -569,7 +570,15 @@
     // as on a phone (a hidden stage has no size: the width stays until the next layout)
     function sizeReference() {
       const st = $('stage'), side = Math.min(st.clientWidth, st.clientHeight);
-      if (side > 0) $('refFig').style.width = `${Math.round(ref.size * side)}px`;
+      if (side <= 0) return;
+      // the picture has to fit the stage's height too, with its switch under it: a tall picture on a wide,
+      // short stage stops the slider short of 70%, so the readout never names a size that is not shown
+      const aspect = ref.prep ? ref.prep.w / ref.prep.h : 1;
+      const fitW = Math.max(0.2 * side, Math.min(st.clientWidth - 24, (st.clientHeight - 48) * aspect));
+      const top = Math.max(20, Math.min(70, Math.floor((fitW / side) * 100)));
+      $('refSize').max = top;
+      if (ref.size > top / 100) { ref.size = top / 100; $('refSize').value = top; }
+      $('refFig').style.width = `${Math.round(ref.size * side)}px`;
     }
     function dealReference() {
       if (!window.Subjects) { Studio.toast('The generated portraits are not available: a script did not load. Reload the page.'); return; }
@@ -843,7 +852,7 @@
       ready.then(() => {
         layout();
         if (!welcomed && !restoreFailed) { // a failed restore has the guard's reset offer on screen: leave it there
-          if (restored && o.welcome) Studio.toast(o.welcome);
+          if (restored && o.welcome) Studio.toast(sketchLost ? `${o.welcome}, without its underdrawing, which could not be read.` : o.welcome, sketchLost ? 6000 : 1800);
           else if (badRecord && o.welcome) Studio.toast('The painting saved last time could not be read, so this is a fresh paper.', 6000);
           // the one-time note is only true where the database works, and only once the flag could be kept
           else if (o.notice && dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) { noticeAt = performance.now(); Studio.toast(o.notice, 7000); }

@@ -392,7 +392,7 @@ export default async function studyPhotos(t, site) {
       { title: 'dropped broken image', files: [brokenImage()], reject: NOT_OPENED },
       { title: 'dropped 15 × 15 PNG', files: [await makeImage(page, { width: 15, height: 15 })], reject: TOO_SMALL },
       { title: 'dropped sizeless SVG', files: [svgImage()], name: 'drawing.svg', dims: [300, 150] },
-      { title: 'two files dropped at once (the first is taken, and the drop says so)', files: [await makeImage(page, { width: 400, height: 500, name: 'first.png' }), await makeImage(page, { width: 300, height: 300, name: 'second.png' })], name: 'first.png', dims: [400, 500], said: /^2 files were dropped: only the first, first\.png, was loaded\.$/ },
+      { title: 'two files dropped at once (the first is taken, and the drop says so)', files: [await makeImage(page, { width: 400, height: 500, name: 'first.png' }), await makeImage(page, { width: 300, height: 300, name: 'second.png' })], name: 'first.png', dims: [400, 500], said: /^Of the 2 files dropped, only first\.png was taken\.$/ },
     ];
     for (const d of drops) {
       await resetToast(page);
