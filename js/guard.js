@@ -81,7 +81,12 @@
       var item = document.querySelector('[data-tab="' + tab + '"]');
       var panel = document.getElementById('tab-' + tab);
       if (item) item.hidden = true;
-      if (panel) panel.hidden = true;
+      if (panel) {
+        var showing = !panel.hidden;
+        panel.hidden = true;
+        // the page may have opened on this very tab (index.html#game) before its script was found missing
+        if (showing && window.Studio && Studio.go) { try { Studio.go('study'); } catch (e) { /* the Study tab is already there */ } }
+      }
     }
   }
 
@@ -91,7 +96,7 @@
   // that module did not start, and its tab is taken off the menu (a module cannot do that for itself).
   var booting = true;
   window.addEventListener('load', function () { booting = false; });
-  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure' };
+  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure', subjects: 'game', palette: '' };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
   // stylesheet failing to load shows the standing note at the top of the page, not a passing toast,
@@ -100,10 +105,15 @@
     var el = e.target;
     if (el && el !== window && el.tagName) {
       var tag = el.tagName.toLowerCase();
-      if (tag === 'script' || (tag === 'link' && el.rel === 'stylesheet')) {
-        document.documentElement.classList.add('load-failed');
+      if (tag === 'script') {
         var src = /\/js\/([a-z-]+)\.js$/.exec(el.src || '');
-        if (src && TAB_OF.hasOwnProperty(src[1])) failed(src[1] + '.js did not load', TAB_OF[src[1]]);
+        // one module's script: its part leaves the page with the "part did not start" note; app.js or one of
+        // the scripts before it: the app has not started, and the standing note says so over the guide
+        if (src && TAB_OF.hasOwnProperty(src[1]) && TAB_OF[src[1]] !== 'all') { failed(src[1] + '.js did not load', TAB_OF[src[1]]); return; }
+        document.documentElement.classList.add('load-failed');
+        if (src && TAB_OF[src[1]] === 'all') failed('app.js did not load', 'all');
+      } else if (tag === 'link' && el.rel === 'stylesheet' && /styles\.css$/.test(el.href || '')) {
+        document.documentElement.classList.add('load-failed'); // (fonts.css failing only costs the typefaces)
       }
       return; // images have their own handling in the app
     }

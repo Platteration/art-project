@@ -73,8 +73,10 @@
     $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library, which may not have loaded. Try another browser, or reload the page and come back to this tab.';
     showSetup();
   }
-  // the frames' messages go to this page's own origin; opened from disk (file:), where every document is its own opaque origin and location.origin names none, they go to any, as the receivers check the sender window either way
-  const FRAME_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
+  // the frames' messages go to this page's own origin; where the page has none (opened from disk, or inside
+  // another site's sandboxed frame, where the origin reads 'null') they go to any, as the receivers check the
+  // sender window either way
+  const FRAME_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
   const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, FRAME_ORIGIN); };
   const isPicture = (u) => typeof u === 'string' && /^data:image\/(jpeg|png);base64,/.test(u);
   // The page CSP allows blob: images, not data:, so frame pictures are re-wrapped as Blob URLs on
@@ -94,6 +96,8 @@
     } else if (d.type === 'pose-and-light:thumb' && typeof d.id === 'string' && isPicture(d.url)) {
       const thumbUrl = asBlobUrl(d.url);
       if (!thumbUrl) return;
+      const old = thumbs.get(d.id);
+      if (old && old !== thumbUrl) URL.revokeObjectURL(old); // the list comes again after every class: the picture before goes
       thumbs.set(d.id, thumbUrl);
       panel.querySelectorAll(`[data-pose-id="${CSS.escape(d.id)}"] img`).forEach((img) => { img.src = thumbUrl; img.closest('button').classList.add('has-img'); });
     } else if (d.type === 'pose-and-light:shot' && pending.has(d.req)) {
@@ -129,7 +133,8 @@
   let last = null;           // the class before, for the review
   const out = new Set(Array.isArray(kept.out) ? kept.out.filter((x) => typeof x === 'string').slice(0, 200) : []);
   if (kept.mode === 'timed') $('timed').checked = true;
-  if (TIMES[kept.secs]) $('t' + kept.secs).checked = true;
+  // (an own time only: a saved 'constructor' would pass a plain lookup and name no radio)
+  if (Object.prototype.hasOwnProperty.call(TIMES, kept.secs) && $('t' + kept.secs)) $('t' + kept.secs).checked = true;
   const modeNow = () => ($('timed').checked ? 'timed' : 'relaxed');
   const secsNow = () => { const v = +((panel.querySelector('input[name="figTime"]:checked') || {}).value); return TIMES[v] ? v : 30; };
   // what the page shows after loading; the settings are written back only once they differ from it, so a

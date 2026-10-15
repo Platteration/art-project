@@ -157,6 +157,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
 .embed .stage { height: var(--stage-h, 600px); }
 /* Simple shows only what a beginner needs; Advanced shows every control */
 .simple .adv-only, html:not(.simple) .simple-only { display: none !important; }
+/* the 3D view could not start (js/pose.js fail()): only the stage with its note stays */
+.failed .rail, .failed .mode-switch, .failed .stage-bar, .failed .lamp, .failed .rig, .failed .arrows { display: none !important; }
 .top-side { display: flex; align-items: center; gap: 10px; }
 .mode-switch { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); }
 .mode-switch button { appearance: none; border: 0; border-radius: 99px; background: transparent; color: var(--muted); font: 600 0.8rem/1 var(--body); padding: 7px 12px; cursor: pointer; }

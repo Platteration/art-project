@@ -15,10 +15,11 @@
   };
   // pose.html?render=1 in a hidden frame: the page draws pictures for Portrait Value Studio's Figure study
   const RENDER = /[?&]render=1(&|$)/.test(location.search) && window.parent !== window;
-  // the app is told at this page's own origin; opened from disk (file:), where every document is its own
-  // opaque origin and location.origin names none, at any (the app checks the sender window either way)
-  const APP_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
-  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, APP_ORIGIN); };
+  // the app is told at this page's own origin; where the page has none (opened from disk, or inside another
+  // site's sandboxed frame, where the origin reads 'null') at any: the app checks the sender window either way
+  const APP_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
+  // the 3D view could not start: the panel says so, and the controls that would do nothing leave the page
+  const fail = () => { document.documentElement.classList.add('failed'); $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, APP_ORIGIN); };
   if (!window.THREE) { fail(); return; }
   window.__poseStarted = true; // pose-embed.js shows the failure panel if this never runs
   const T = window.THREE;

@@ -32,9 +32,9 @@
     host.addEventListener('resize', size);
     new MutationObserver(theme).observe(host.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   }
-  // the app is told at its own origin; opened from disk (file:), where every document is its own opaque
-  // origin and location.origin names none, at any (the app checks the sender window either way)
-  const APP_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
+  // the app is told at this page's own origin; where the page has none (opened from disk, or inside another
+  // site's sandboxed frame, where the origin reads 'null') at any: the app checks the sender window either way
+  const APP_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
   let told = 0;
   const tell = () => {
     const app = document.querySelector('.app');

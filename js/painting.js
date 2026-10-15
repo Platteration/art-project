@@ -231,6 +231,7 @@
       $('washOpts').hidden = canvasState.ground !== 'wash';
       $('groundHint').textContent = { raw: 'Raw canvas: pale and warm. The painting stays as it is when the ground changes.', wash: 'A thin wash of one of your paints over the canvas, as painters tone a ground before starting.', gray: 'A neutral mid-value gray, so both lights and darks read against it.' }[canvasState.ground];
       $('washOut').textContent = `${Math.round(canvasState.washStr * 100)}%`;
+      $('washStr').value = Math.round(canvasState.washStr * 100); // (a restored painting sets the slider too)
       $('washName').textContent = canvasState.washCode ? paintName(canvasState.washCode) : '';
     }
     // the wash can be any paint in the palette; an earth is the usual choice, so one starts chosen
@@ -423,7 +424,7 @@
       return v;
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
-    let saveTimer = 0, saving = false, saveAgain = false, forgetting = false;
+    let saveTimer = 0, saving = false, saveAgain = false, forgetting = false, saveFailed = false;
     function saveSoon() { if (!hasDb || forgetting) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
     async function saveNow() {
       if (!hasDb || forgetting) return;
@@ -432,7 +433,10 @@
       try {
         const [paperBlob, sketchBlob] = await Promise.all([toBlob(paper), toBlob(sketch)]);
         await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: Date.now() });
-      } catch (e) { /* storage unavailable: the painting lives in this visit only */ }
+      } catch (e) {
+        // said once a visit, since the first visit was told the painting is kept: it is not, this time
+        if (!saveFailed) { saveFailed = true; Studio.toast(e && e.name === 'QuotaExceededError' ? 'The painting could not be saved: browser storage is full. It stays for this visit only.' : 'The painting could not be saved in this browser. It stays for this visit only.', 7000); }
+      }
       saving = false;
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
@@ -450,8 +454,13 @@
       [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
       if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
       if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
-      if (saved.canvas && typeof saved.canvas === 'object') {
-        Object.keys(canvasState).forEach((k) => { if (k in saved.canvas && typeof saved.canvas[k] === typeof canvasState[k]) canvasState[k] = saved.canvas[k]; });
+      if (saved.canvas && typeof saved.canvas === 'object') { // field by field, each to what the sheet offers
+        const c = saved.canvas;
+        if (['raw', 'wash', 'gray'].includes(c.ground)) canvasState.ground = c.ground;
+        if (Object.prototype.hasOwnProperty.call(WEAVE_ALPHA, c.weave)) canvasState.weave = c.weave;
+        if (typeof c.washCode === 'string' && c.washCode.length <= 8) canvasState.washCode = c.washCode;
+        const sl = $('washStr');
+        if (Number.isFinite(c.washStr) && c.washStr >= +sl.min / 100 && c.washStr <= +sl.max / 100) canvasState.washStr = c.washStr;
       }
       renderWash(); applyCanvas();
       showSketch(saved.sketchShown !== false);
@@ -513,7 +522,7 @@
     function refreshReference() {
       if (ref.kind === 'image') {
         $('refName').textContent = ref.label;
-      } else if (ref.kind === 'painting' && ref.id) {
+      } else if (ref.kind === 'painting' && ref.id && window.Subjects) {
         if (!ref.prep) Object.assign(ref, studyPortrait(ref.id));
         const e = Subjects.entry(ref.id);
         $('refName').textContent = `${e.title}, after ${Subjects.painterOf(ref.id)}: a generated portrait, as the game deals them.`;
@@ -540,8 +549,13 @@
       $('refSizeOut').textContent = `${Math.round(ref.size * 100)}%`;
       q('[data-ref-show]').forEach((b) => b.setAttribute('aria-pressed', String(!!+b.dataset.refShow === ref.shown)));
     }
-    function dealReference() { ref.kind = 'painting'; ref.id = Subjects.random(ref.id); ref.prep = ref.res = null; ref.shown = true; refreshReference(); }
+    function dealReference() {
+      if (!window.Subjects) { Studio.toast('The generated portraits are not available: a script did not load. Reload the page.'); return; }
+      ref.kind = 'painting'; ref.id = Subjects.random(ref.id); ref.prep = ref.res = null; ref.shown = true; refreshReference();
+    }
     $('refAnother').addEventListener('click', dealReference);
+    // without subjects.js (the generated portraits) the reference offers the Study photo only
+    if (!window.Subjects) q('[data-ref-kind="painting"]').forEach((b) => { b.hidden = true; });
     if (o.followStudy !== false) {
       q('[data-ref-kind]').forEach((b) => b.addEventListener('click', () => {
         if (b.dataset.refKind === 'painting') { if (ref.kind !== 'painting') dealReference(); }

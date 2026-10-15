@@ -2144,6 +2144,8 @@
   }
   function switchTab(name, focus) {
     if (!els.tabPanels[name]) return;
+    const item = document.querySelector(`.tab-item[data-tab="${name}"], .tab[data-tab="${name}"]`);
+    if (item && item.hidden) { if (name !== 'study') switchTab('study', focus); return; } // a module the guard took off the menu stays off: its panel would be dead
     state.tab = name;
     if (name !== 'study') setPicking(false); // picking a neutral spot only works on Your painting
     Object.entries(els.tabPanels).forEach(([key, panel]) => { panel.hidden = key !== name; });
@@ -2170,8 +2172,10 @@
   // Pose and light is its own page (pose.html), shown in a frame that loads the first time the tab
   // opens. The page says how tall it is, and the frame grows to fit, so it scrolls with the app.
   const poseFrame = $('poseFrame');
-  // the frames' messages go to this page's own origin; opened from disk (file:), where every document is its own opaque origin and location.origin names none, they go to any, as the receivers check the sender window either way
-  const FRAME_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
+  // the frames' messages go to this page's own origin; where the page has none (opened from disk, or inside
+  // another site's sandboxed frame, where the origin reads 'null') they go to any, as the receivers check the
+  // sender window either way
+  const FRAME_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
   function openPose() {
     if (!poseFrame.getAttribute('src')) poseFrame.setAttribute('src', poseFrame.dataset.src);
   }

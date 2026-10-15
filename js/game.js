@@ -15,8 +15,8 @@
   'use strict';
 
   // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
-  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
-    if (window.StudioGuard) StudioGuard.failed('game.js: app.js did not finish loading', 'game');
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio || !window.Subjects) {
+    if (window.StudioGuard) StudioGuard.failed('game.js: app.js or subjects.js did not finish loading', 'game');
     return;
   }
 
@@ -334,7 +334,7 @@
   // ---- What to paint: the player's photo or a generated painting, dealt at random ----
 
   // a brand-new portrait, drawn from a random painter and seed (never the one just played)
-  const deal = () => Subjects.random(subject && subject.id || load(LAST_PAINTING_KEY, null));
+  const deal = () => Subjects.random(subject && subject.id || load(LAST_PAINTING_KEY, ''));
   let subject = null;
   subject = load(SUBJECT_KEY, { kind: 'photo' }).kind === 'painting' ? { kind: 'painting', id: deal() } : { kind: 'photo' };
   if (subject.id) save(LAST_PAINTING_KEY, subject.id);
@@ -1626,7 +1626,7 @@
   // ---- Wiring ---------------------------------------------------------------
 
   const savedMode = load(MODE_KEY, 'classic');
-  els.mode.value = MODES[savedMode] ? savedMode : 'classic';
+  els.mode.value = Object.prototype.hasOwnProperty.call(MODES, savedMode) ? savedMode : 'classic'; // an own mode only: 'constructor' would pass a plain lookup
   showMode();
   els.mode.addEventListener('change', () => {
     save(MODE_KEY, mode());
