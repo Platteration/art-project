@@ -170,13 +170,15 @@ python3 -m http.server 8000 --bind 127.0.0.1   # then visit http://localhost:800
 
 That development server lists folders and serves the `.git` directory, so never use it to publish the site. See [Publishing](#publishing).
 
+Opened from disk, the page works too, Pose and light and Figure study included: their frames talk to the page at any origin there, because a file has none, and at the page's own origin once served. Before a push, run `node scripts/check-policy.mjs`: it fails if any copy of the Content Security Policy differs from the others, or if a page or script holds something the policy refuses (an inline style or script, a string turned into markup).
+
 To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
 
 ## Publishing
 
 The site is static: there is nothing to run on the server, and nothing a visitor should ever see except the page itself. The repository carries the hosting settings so that the usual launch mistakes are already handled. The full audit behind them, with what was fixed and what is left to decide, is in [docs/security-audit.md](docs/security-audit.md).
 
-**Publish only the runtime files**: `index.html`, `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `styles.css`, `LICENSE`, `manifest.json`, `.well-known/security.txt`, `js/`, `img/` and `fonts/`, plus the config file for your host. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify; `docs/` is treated the same way.
+**Publish only the runtime files**: `index.html`, `pose.html`, `404.html`, `styles.css`, `pose.css`, `fonts.css`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `LICENSE`, `manifest.json`, `.well-known/security.txt`, `js/` (with `js/vendor/`), `img/` and `fonts/`, plus the config file for your host; `git archive HEAD` (below) yields exactly that set. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify; `docs/` is treated the same way.
 
 **Publishing an export.** The repository's `.gitattributes` marks the notes and tooling `export-ignore`, so one command produces exactly the runtime files plus the host configs (`_headers`, `_redirects`, `.htaccess`; each host ignores the others' files):
 
@@ -249,7 +251,8 @@ What the site keeps in the browser, and clears with **Forget my work on this dev
 
 | Where | What |
 | --- | --- |
-| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo; only the fifty most recently played are kept), and whether the Studio's one-time saving note was shown |
+| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo; only the fifty most recently played are kept), the Figure study class (Relaxed or Timed, the time a pose gets, the poses taken out) and the mixes locked in there, and whether the Studio's one-time saving note was shown |
+| `localStorage`, keys starting `pose-and-light.` | Pose and light: the pose and light where you left off (`pose-and-light.v2`), up to twelve saved poses as joint angles and a viewpoint, no pictures (`pose-and-light.mine.v1`), and the Simple or Advanced choice of the page opened on its own (`pose-and-light.mode`) |
 | IndexedDB database `portrait-value-studio` | The Studio painting: the paper, the underdrawing and the canvas settings, saved a moment after each change |
 
 Saved PNGs are drawn from the canvas and carry no camera metadata. The game's Share button hands the scorecard to the phone's share sheet only when pressed. A web server hosting the site sees only ordinary access logs.
@@ -300,6 +303,7 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `manifest.json`, `img/icon-*.png`, `img/og.jpg`, `robots.txt`: the page for a wrong address, the icons and share image, the web app manifest, and the crawler note
 - `LICENSE`, `SECURITY.md`, `.well-known/security.txt`: the MIT license, and where to report a security problem
 - `_headers`, `.htaccess`, `deploy/nginx.conf`: the same response headers and server rules for Netlify or Cloudflare Pages, Apache and nginx (see [Publishing](#publishing))
+- `scripts/check-policy.mjs` and `docs/security-audit.md`: the check before a push, and the audit behind the hosting settings with what is left to decide. Tooling and notes, not part of the site: `git archive` leaves them out, and the server configs refuse them
 
 ## Licenses and notices
 
