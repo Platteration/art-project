@@ -365,7 +365,7 @@
     $('sketchFromStudy').addEventListener('click', () => {
       const prep = Studio.prep(), segs = Studio.marks();
       if (!prep) return;
-      if (!segs.length) { Studio.toast('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); return; }
+      if (!segs.length) { Studio.toast(withNotice('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'), 5000); return; }
       const k = Math.min(paper.width / prep.w, paper.height / prep.h);
       const w = prep.w * k, h = prep.h * k, ox = (paper.width - w) / 2, oy = (paper.height - h) / 2;
       useLayer(sketch); snapshot();
@@ -377,8 +377,12 @@
       state.lastLayer = 'sketch';
       closeSheets();
       saveSoon();
-      Studio.toast('The Study lines are on the underdrawing, in pencil');
+      Studio.toast(withNotice('The Study lines are on the underdrawing, in pencil'), noticeAt ? 8000 : 1800);
     });
+    // the one-time note, shown as the Studio opens, is not lost to a message that follows at once
+    // (Draw it in the Studio copies the head a moment after opening it): that message carries it
+    let noticeAt = 0;
+    function withNotice(msg) { return noticeAt && performance.now() - noticeAt < 7000 ? `${msg}. ${o.notice}` : msg; }
     function showSketch(on) {
       wrap.classList.toggle('ps-no-sketch', !on);
       q('[data-sketch-show]').forEach((x) => x.setAttribute('aria-pressed', String(!!+x.dataset.sketchShow === on)));
@@ -841,7 +845,7 @@
           if (restored && o.welcome) Studio.toast(o.welcome);
           else if (badRecord && o.welcome) Studio.toast('The painting saved last time could not be read, so this is a fresh paper.', 6000);
           // the one-time note is only true where the database works, and only once the flag could be kept
-          else if (o.notice && dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) Studio.toast(o.notice, 7000);
+          else if (o.notice && dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) { noticeAt = performance.now(); Studio.toast(o.notice, 7000); }
         }
         welcomed = true;
       });

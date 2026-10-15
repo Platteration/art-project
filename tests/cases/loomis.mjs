@@ -207,7 +207,7 @@ export default async function loomis(t, site) {
     await tab(page, 'study');
     t.check((await studyInk(page, 'cv-orig')).red === 0, 'with the head hidden the Study tab shows no head');
     await tab(page, 'loomis');
-    t.check(!c.studio && s.segs === 0, 'with the head hidden Draw it in the Studio is still offered, and there are no lines to draw', { studioDisabled: c.studio, segs: s.segs });
+    t.check(!c.studio && s.segs > 0, 'with the head hidden Draw it in the Studio is still offered, and the head is still what it draws', { studioDisabled: c.studio, segs: s.segs });
     const noticeBefore = await storageGet(page, 'portrait-value-studio.studioNotice');
     armToast(page); await click(page, '#lh-studio');
     const hiddenToast = await toastMatch(page, /Nothing to copy|head|hidden/i, 2500);
@@ -316,8 +316,9 @@ export default async function loomis(t, site) {
     // every mark on the same point
     for (let k = 0; k < 8; k++) await mark(page, 0.5, 0.5);
     s = await lstate(page); c = await card(page); let i = await ink(page);
-    const sameOk = s.has && s.fit.s > 0.01 && i.red > 50;
-    t.check(sameOk, 'eight marks on one point still give a head that is drawn (or the page says the marks cannot make one)', { fit: s.fit, ink: i, toast: await text(page, '#toast'), card: c.step });
+    const sameSaid = `${await text(page, '#toast')} ${await text(page, '#lh-sub')}`;
+    const sameOk = (s.has && s.fit.s > 0.01 && i.red > 50) || (!s.has && /different points/.test(sameSaid) && i.red === 0);
+    t.check(sameOk, 'eight marks on one point still give a head that is drawn (or the page says the marks cannot make one)', { fit: s.fit, ink: i, said: sameSaid, card: c.step });
     if (!sameOk) t.finding({ title: 'With the eyes on one point the fit collapses to a head of radius 0: "The head is over the face", but nothing is drawn and the arrows sit around a point', severity: 'medium', steps: '1. On the Loomis head (sample or any photo), tap the same spot for every feature and press Lock in each time (eight times; or lock both eyes on one spot and the rest anywhere).', expected: 'A head of some size (the other marks give one), or the card says the two eyes must be two different points and asks again.', actual: `The toast says "The head is over the face" and the card "Head fitted / Drag a dot or a line to adjust it", but the fit is ${JSON.stringify(s.fit)}: radius 0, so no ball, no lines (${i.red} red pixels) and nothing to drag; six arrow buttons are drawn around the point and turn an invisible head. Cause: js/loomis.js line 86, s0 = eyeDist / 0.8 is 0 when the eyes coincide; the Nelder–Mead simplex steps for s are s0 × 0.2 and s0 × 0.05 (lines 100, 104), so s never leaves 0, where the cost is 1e9 (line 94); lock() at line 159 announces the head regardless.` });
     await click(page, '#lh-reset');
     // marks at the picture's corners, with the brows and forehead skipped

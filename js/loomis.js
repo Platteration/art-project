@@ -83,7 +83,11 @@
     const roll = Math.atan2(ey, ex), eyeDist = Math.hypot(ex, ey);
     const mid = [(L.x + R.x) / 2, ((L.y + R.y) / 2) * state.aspect];
     const nx = (N.x - mid[0]) * Math.cos(-roll) - (N.y * state.aspect - mid[1]) * Math.sin(-roll);
-    const s0 = eyeDist / 0.8;
+    // the size to start from: the eyes' distance, or, with the eyes on one point, the chin's distance
+    // from them; marks all on one point give no size, and no head
+    const C = state.points.chin, chinDist = Math.hypot(C.x - mid[0], C.y * state.aspect - mid[1]);
+    const s0 = Math.max(eyeDist / 0.8, chinDist / 1.5);
+    if (s0 < 1e-4) return null;
     const yaw0 = Math.max(-1.2, Math.min(1.2, Math.asin(Math.max(-0.95, Math.min(0.95, nx / (s0 * 0.95))))));
     const cost = (v) => {
       const f = { s: v[0], tx: v[1], ty: v[2], yaw: v[3], pitch: v[4], roll: v[5], len: v[6] };
@@ -156,7 +160,7 @@
     state.pending = null;
     state.step++;
     refit();
-    if (done()) Studio.toast('The head is over the face');
+    announceFit();
   }
   function skip() {
     if (done() || !current().optional) return;
@@ -164,6 +168,12 @@
     state.pending = null;
     state.step++;
     refit();
+    announceFit();
+  }
+  const NO_FIT = 'No head fits these marks: the eyes, nose, mouth and chin must be different points.';
+  function announceFit() {
+    if (!done()) return;
+    Studio.toast(state.fit ? 'The head is over the face' : `${NO_FIT} Press Back and move them.`, state.fit ? 1800 : 5000);
   }
   function back() {
     if (state.pending) { state.pending = null; render(); return; }
@@ -190,11 +200,14 @@
     const f = state.fit;
     if (!f) return [];
     const cx = f.tx * W, cy = f.ty * W, R = f.s * W, pad = 26 * (W / 700 + 0.6);
+    // kept inside the picture (a head whose crown is cut off would put the nod and tilt arrows above it)
+    const H = W * state.aspect, m = 18 * (W / 400);
+    const inside = (h) => Object.assign(h, { x: Math.max(m, Math.min(W - m, h.x)), y: Math.max(m, Math.min(H - m, h.y)) });
     return [
       { key: 'yaw', d: -1, x: cx - R - pad, y: cy, glyph: 'left' }, { key: 'yaw', d: 1, x: cx + R + pad, y: cy, glyph: 'right' },
       { key: 'pitch', d: -1, x: cx - pad * 0.9, y: cy - R - pad, glyph: 'up' }, { key: 'pitch', d: 1, x: cx + pad * 0.9, y: cy - R - pad, glyph: 'down' },
       { key: 'roll', d: -1, x: cx - R * 0.78 - pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'ccw' }, { key: 'roll', d: 1, x: cx + R * 0.78 + pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'cw' },
-    ];
+    ].map(inside);
   }
   function nudge(key, d) {
     if (!state.fit) return;
@@ -246,15 +259,16 @@
 
   // ---- The card and the strip -----------------------------------------------------------------
   function render() {
-    const d = done();
-    $('stepLabel').textContent = d ? 'Head fitted' : `${state.step + 1} of ${STEPS.length}`;
-    $('ask').textContent = d ? 'Drag a dot or a line to adjust it' : current().name;
-    $('sub').textContent = d ? 'The arrows turn, nod and tilt the head. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.' : `${current().ask}${state.pending ? ' Drag to fine-tune, then lock it in.' : ''}`;
+    const d = done(), fitted = d && !!state.fit;
+    $('stepLabel').textContent = fitted ? 'Head fitted' : d ? 'No head' : `${state.step + 1} of ${STEPS.length}`;
+    $('ask').textContent = fitted ? 'Drag a dot or a line to adjust it' : d ? 'These marks make no head' : current().name;
+    $('sub').textContent = fitted ? 'The arrows turn, nod and tilt the head. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.'
+      : d ? `${NO_FIT} Press Back and move them.` : `${current().ask}${state.pending ? ' Drag to fine-tune, then lock it in.' : ''}`;
     $('lock').hidden = d; $('lock').disabled = !state.pending;
     $('skip').hidden = d || !current().optional;
-    $('back').hidden = d; $('back').disabled = !state.step && !state.pending;
-    $('cardStudio').hidden = !d;
-    $('refit').hidden = !d;
+    $('back').hidden = fitted; $('back').disabled = !state.step && !state.pending;
+    $('cardStudio').hidden = !fitted;
+    $('refit').hidden = !fitted;
     $('undo').disabled = !state.step && !state.pending;
     $('reset').disabled = !state.step && !state.pending;
     ['show', 'studio', 'save'].forEach((id) => { $(id).disabled = !state.fit; });
@@ -465,7 +479,7 @@
   }
   // the near-side lines as straight segments in picture fractions, for the Studio's underdrawing
   function segments() {
-    if (!state.fit || !state.shown) return [];
+    if (!state.fit) return []; // hidden here or not: Draw it in the Studio asks for the head
     const W = 1000, H = Math.round(W * state.aspect), f = state.fit, out = [], n = 48;
     for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2, b = ((i + 1) / n) * Math.PI * 2; out.push([f.tx + f.s * Math.cos(a), (f.ty + f.s * Math.sin(a)) / state.aspect, f.tx + f.s * Math.cos(b), (f.ty + f.s * Math.sin(b)) / state.aspect]); }
     projected(W).forEach((piece) => { for (let i = 1; i < piece.pts.length; i++) { const a = piece.pts[i - 1], b = piece.pts[i]; if (a[2] && b[2]) out.push([a[0] / W, a[1] / H, b[0] / W, b[1] / H]); } });

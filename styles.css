@@ -1352,7 +1352,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 /* with the Studio's (or a Figure class's) tool strip along the bottom of a phone, the note sits above it */
 @media (max-width: 759px) {
-  body.tab-paint .toast, body.figure-focus .toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+  body.tab-paint .toast, body.tab-loomis .toast, body.figure-focus .toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
 }
 
 /* ---- Save dialog (where downloads are blocked) ---- */
@@ -1631,7 +1631,6 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .lh-acts .btn-ghost { padding: 6px 8px; }
 .lh-done .lh-card { gap: 4px; padding: 10px 14px; }
 .lh-done .lh-ask { font-size: 1.05rem; }
-.lh-done .lh-sub { display: none; }
 .lh-loupe { position: absolute; z-index: 6; width: 120px; height: 120px; border-radius: 50%; overflow: hidden; border: 3px solid var(--surface); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); pointer-events: none; background: #222; }
 .lh-loupe canvas { display: block; width: 100%; height: 100%; }
 .lh .ps-ic[aria-pressed="true"] { background: none; color: var(--ink); border-color: var(--line); }
