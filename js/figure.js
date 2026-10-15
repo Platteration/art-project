@@ -70,7 +70,7 @@
     if (failed || poses) return;
     failed = true;
     frame.removeAttribute('src');
-    $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library from the internet. Check the connection, then come back to this tab or reload the page.';
+    $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library, which may not have loaded. Try another browser, or reload the page and come back to this tab.';
     showSetup();
   }
   const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, location.origin); };
@@ -130,6 +130,9 @@
   if (TIMES[kept.secs]) $('t' + kept.secs).checked = true;
   const modeNow = () => ($('timed').checked ? 'timed' : 'relaxed');
   const secsNow = () => { const v = +((panel.querySelector('input[name="figTime"]:checked') || {}).value); return TIMES[v] ? v : 30; };
+  // what the page shows after loading; the settings are written back only once they differ from it, so a
+  // visit that changes nothing (or a page reloaded after Forget my work on this device) stores nothing
+  let lastSaved = JSON.stringify({ mode: modeNow(), secs: secsNow(), out: [...out] });
   const GROUPS = [['standing', 'Standing'], ['moving', 'Moving and sport'], ['low', 'Low to the floor'], ['dance', 'Dance'], ['mine', 'Your poses']];
   const groupList = () => (groups.length ? groups : GROUPS).filter(([g]) => poses.some((q) => q.group === g));
   const pool = () => (poses ? poses.filter((q) => !out.has(q.id)).map((q) => q.id) : []);
@@ -191,7 +194,8 @@
     $('all').textContent = n ? 'Take them all out' : 'Put them all back';
     $('start').disabled = !n || failed;
     $('back').hidden = !(last && last.results.some((r) => r.analysis.marked));
-    save({ mode: timed ? 'timed' : 'relaxed', secs, out: [...out] });
+    const now = JSON.stringify({ mode: timed ? 'timed' : 'relaxed', secs, out: [...out] });
+    if (now !== lastSaved) { save(JSON.parse(now)); lastSaved = now; }
   }
   panel.querySelectorAll('input[name="figClass"], input[name="figTime"]').forEach((r) => r.addEventListener('change', showSetup));
   $('all').addEventListener('click', () => {
@@ -325,11 +329,12 @@
     if (timedOut && window.GameSound && GameSound.on()) GameSound.chime();
     showResult(keep(), timedOut);
   }
-  // the drawing of this pose, with its gesture and score, kept for the end of the class (as a JPEG: the
-  // full picture is only held until the card has shown it, and an empty sheet keeps no picture at all)
+  // the drawing of this pose, with its gesture and score, kept for the end of the class (as a JPEG behind a
+  // Blob URL, which the policy allows where a data: picture is refused: the full picture is only held until
+  // the card has shown it, and an empty sheet keeps no picture at all)
   function keep() {
     const pic = studio.composite(), a = analyze(cls.shot, studio.ink());
-    const r = { n: cls.n, id: cls.id, name: (byId(cls.id) || { name: 'Pose' }).name, shot: cls.shot, pic, image: a.marked ? pic.toDataURL('image/jpeg', 0.88) : null, w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) };
+    const r = { n: cls.n, id: cls.id, name: (byId(cls.id) || { name: 'Pose' }).name, shot: cls.shot, pic, image: a.marked ? asBlobUrl(pic.toDataURL('image/jpeg', 0.88)) : null, w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) };
     cls.results.push(r);
     return r;
   }
@@ -355,6 +360,7 @@
     if (poses) tellFrame({ type: 'pose-and-light:list' });
     // a class with nothing drawn in it goes straight back to the setup (the drawings before stay)
     if (!c.results.some((r) => r.analysis.marked)) { show('setup'); showSetup(); $('start').focus(); return; }
+    if (last) last.results.forEach((r) => { if (r.image) URL.revokeObjectURL(r.image); r.image = null; r.img = null; }); // the class before goes, pictures and all
     last = c;
     showReview(c);
     show('review');

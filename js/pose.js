@@ -1,9 +1,18 @@
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  // Trusted Types forbids HTML-string assignment; build the same nodes through DOMParser instead.
-  const setRich = (el, html) => { const doc = new DOMParser().parseFromString(html, 'text/html'); el.replaceChildren(...[...doc.body.childNodes].map((n) => document.importNode(n, true))); };
-  const setSvg = (el, svgInner) => { const doc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${svgInner}</svg>`, 'image/svg+xml'); el.replaceChildren(...[...doc.documentElement.childNodes].map((n) => document.importNode(n, true))); };
+  // Trusted Types forbids turning a string into markup (an HTML string assigned to an element, or handed to
+  // a parser), so the few rich texts and icons are built as nodes: a lesson is plain text with <b>…</b> runs,
+  // an icon a list of shapes.
+  const setRich = (el, text) => el.replaceChildren(...text.split(/(<b>.*?<\/b>)/).filter(Boolean).map((s) => { const m = /^<b>(.*)<\/b>$/.exec(s); if (!m) return document.createTextNode(s); const b = document.createElement('b'); b.textContent = m[1]; return b; }));
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const setSvg = (el, shapes) => {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    shapes.forEach(([tag, attrs]) => { const n = document.createElementNS(SVG_NS, tag); Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, String(v))); svg.appendChild(n); });
+    el.replaceChildren(svg);
+  };
   // pose.html?render=1 in a hidden frame: the page draws pictures for Portrait Value Studio's Figure study
   const RENDER = /[?&]render=1(&|$)/.test(location.search) && window.parent !== window;
   const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, location.origin); };
@@ -794,10 +803,11 @@
     return { x: (p.x + 1) / 2 * canvas.clientWidth, y: (1 - p.y) / 2 * canvas.clientHeight, z: p.z };
   }
   const STEP = 6;               // degrees a tap moves; holding keeps going
-  const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5"/></svg>';
-  const TURN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M18 2.8v4h-4"/></svg>';
-  const TOWARD = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.8" fill="currentColor"/></svg>';
-  const AWAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8"/></svg>';
+  // the arrow icons, as the shapes setSvg draws (a 24 × 24 view box)
+  const ARROW = [['path', { d: 'M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5' }]];
+  const TURN = [['path', { d: 'M20 12a8 8 0 1 1-2.6-5.9' }], ['path', { d: 'M18 2.8v4h-4' }]];
+  const TOWARD = [['circle', { cx: 12, cy: 12, r: 8 }], ['circle', { cx: 12, cy: 12, r: 2.8, fill: 'currentColor' }]];
+  const AWAY = [['circle', { cx: 12, cy: 12, r: 8 }], ['path', { d: 'M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8' }]];
   let arrows = [];
   function arrowAt(label, run) {
     const b = document.createElement('button');
@@ -1156,9 +1166,15 @@
       [bulb.visible, beam.visible, stand.visible, outlineMat.visible] = vis;
     }
   }
-  function drawThumb(entry) {
+  function drawThumb(entry) {            // a JPEG data string: what Figure study's frame is sent (it re-wraps it)
     const shot = shoot(entry, THUMB.w, THUMB.h, false);
     return shot ? shot.canvas.toDataURL('image/jpeg', 0.86) : null;
+  }
+  // This page shows its pictures as Blob URLs, kept for the visit: the policy allows blob: pictures, not data:.
+  function drawThumbUrl(entry, done) {
+    const shot = shoot(entry, THUMB.w, THUMB.h, false);
+    if (!shot) { done(null); return; }
+    shot.canvas.toBlob((blob) => done(blob ? URL.createObjectURL(blob) : null), 'image/jpeg', 0.86);
   }
   // pictures are drawn one at a time after the page is up, so it opens quickly
   const thumbQueue = [];
@@ -1172,8 +1188,11 @@
       const job = thumbQueue.shift();
       if (!job) { thumbBusy = false; requestRender(); return; }
       if (job[1].isConnected) {
-        const url = drawThumb(job[0]);
-        if (url) { job[1].querySelector('img').src = url; job[1].classList.add('has-img'); if (job[0].id) thumbs.set(job[0].id, url); }
+        drawThumbUrl(job[0], (url) => {
+          if (!url || !job[1].isConnected) return;
+          job[1].querySelector('img').src = url; job[1].classList.add('has-img');
+          if (job[0].id) thumbs.set(job[0].id, url);
+        });
       }
       setTimeout(next, 16);
     };
@@ -1198,7 +1217,7 @@
     else thumbLater(entry, b, first);
     return item;
   }
-  const thumbs = new Map();                  // pictures already drawn, by pose id
+  const thumbs = new Map();                  // pictures already drawn, by pose id (Blob URLs on this page; data strings in the hidden frame that draws for Figure study)
   // the library's pose now on the figure: its button stays pressed until the pose changes
   let chosen = null;
   function choose(id, name) {
@@ -1287,15 +1306,16 @@
   let savedSay = 0;
   $('savePose').addEventListener('click', () => {
     clearTimeout(savedSay);
-    $('savePose').textContent = 'Saved in the pose library';
-    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, 2200);
     removed = null;
     const id = 'mine-' + Date.now().toString(36);
     mine.push({ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } });
     if (mine.length > MINE_MAX) mine.shift();
-    keepMine();
+    const kept = keepMine();
     showMine();
     choose(id, `Your pose ${mine.length}`);
+    // the button says what happened: a pose that could not be stored is still in the library for this visit
+    $('savePose').textContent = kept ? 'Saved in the pose library' : 'In the library for this visit only: storage is full';
+    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, kept ? 2200 : 6000);
   });
   showMine();
 

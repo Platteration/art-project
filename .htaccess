@@ -41,7 +41,7 @@ ErrorDocument 403 /404.html
   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" env=HTTPS
   # frame-ancestors is left out on purpose: the app is meant to be embeddable. Do not add X-Frame-Options.
   <FilesMatch "\.html$">
-    Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
+    Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; frame-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'"
     Header always set Cache-Control "no-cache"
   </FilesMatch>
   <FilesMatch "\.(css|js|txt)$">

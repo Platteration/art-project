@@ -192,7 +192,7 @@ Point the host at that folder (or set it as the publish directory), never at the
 
 | Header | Value | Why |
 | --- | --- | --- |
-| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'` | Only this site's own scripts, styles and fonts run; photos and the save preview (`blob:`) stay allowed, and Trusted Types stop any future string-to-HTML injection. The same policy is in a `<meta>` tag in `index.html`, so hosts without header control (GitHub Pages) get it too. |
+| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; frame-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'` | Only this site's own scripts, styles and fonts run; photos, the pose pictures and the save preview (`blob:`) stay allowed, the page may show its own Pose and light page in a frame (`frame-src 'self'`), and Trusted Types stop any future string-to-HTML injection. The same policy is in a `<meta>` tag in `index.html`, so hosts without header control (GitHub Pages) get it too. |
 | `X-Content-Type-Options` | `nosniff` | Files are what their type says. |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | No page paths leak to other sites. |
 | `Permissions-Policy` | camera, microphone, geolocation, payment, USB, sensors and the Topics API off; autoplay and clipboard-write for this site | The app only needs the clipboard and its own chime. |
@@ -239,7 +239,7 @@ curl -s  https://SITE/js/ | grep -c 'Page not found'   # 1: the 404 page, not a 
 curl -sI https://SITE/nonexistent | head -1   # 404
 ```
 
-Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it, including a sandboxed one (`sandbox="allow-scripts allow-modals"`), where the fonts and the save dialog must still work. Security problems are reported through GitHub issues, as `SECURITY.md` and `/.well-known/security.txt` say; the `Expires` date in that file is 1 October 2027 and needs renewing before then. On GitHub Pages, Jekyll skips dot-folders, so add `include: [.well-known]` to a `_config.yml` for the file to be served.
+Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it, including a sandboxed one (`sandbox="allow-scripts allow-modals"`), where the fonts and the save dialog must still work. Security problems are reported privately through GitHub's vulnerability reporting (Security, then Report a vulnerability), as `SECURITY.md` and `/.well-known/security.txt` say; the `Expires` date in that file is 14 October 2027 and needs renewing before then. On GitHub Pages, Jekyll skips dot-folders, so add `include: [.well-known]` to a `_config.yml` for the file to be served.
 
 ## Privacy
 
