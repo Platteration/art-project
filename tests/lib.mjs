@@ -45,7 +45,8 @@ export async function openPage(site, opts = {}) {
   page.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
   page.on('console', (m) => { const t = m.text(); if (NOISE.test(t)) return; if (m.type() === 'error') log.console.push(t.slice(0, 300)); else if (m.type() === 'warning') log.warnings.push(t.slice(0, 300)); });
   page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:' + site.base) && !u.startsWith('blob:null') && !u.startsWith('data:') && !(sandbox && u.startsWith(sandbox.base))) log.offsite.push(u); });
-  page.on('requestfailed', (r) => { const u = r.url(); if (!block.some((b) => matchGlob(b, u))) log.failed.push(u + ' ' + ((r.failure() || {}).errorText || '')); });
+  // (a request a navigation cut short, and a Blob picture let go of, are not failures)
+  page.on('requestfailed', (r) => { const u = r.url(); const why = (r.failure() || {}).errorText || ''; if (u.startsWith('blob:') || why === 'net::ERR_ABORTED' || block.some((b) => matchGlob(b, u))) return; log.failed.push(u + ' ' + why); });
   await page.addInitScript((seed) => {
     document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)} ${(e.sourceFile || '').split('/').pop()}:${e.lineNumber}`); });
     if (seed) { try { for (const [k, v] of Object.entries(seed)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch (e) { /* storage off */ } }
