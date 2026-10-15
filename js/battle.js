@@ -110,7 +110,8 @@
   function measure(kind, c) { return kind === 'value' ? c.L : c.warmth; }
   // a pair of colors for the question at the level, or a "same" pair when the dice say so
   function makePair(pool, lv, q) {
-    const usable = q.kind === 'temp' ? pool.filter((c) => c.chroma >= 10) : pool;
+    const colorful = pool.filter((c) => c.chroma >= 10);
+    const usable = q.kind === 'temp' && colorful.length >= 2 ? colorful : pool;
     const wantSame = Math.random() < lv.same;
     const [lo, hi] = lv[q.kind];
     let best = null;
@@ -120,7 +121,8 @@
       const d = Math.abs(measure(q.kind, a) - measure(q.kind, b));
       // a "same" pair must still look different, so it is a real question
       const differs = q.kind === 'value' ? Math.abs(a.warmth - b.warmth) > 0.4 || Math.abs(a.chroma - b.chroma) > 12 : Math.abs(a.L - b.L) > 8;
-      if (wantSame ? d < SAME[q.kind] && differs : d >= lo && d <= hi) best = [a, b];
+      const reads = q.kind !== 'value' || vLabel(a) === vLabel(b); // a value tie shows the same V on the scale
+      if (wantSame ? d < SAME[q.kind] && differs && reads : d >= lo && d <= hi) best = [a, b];
     }
     if (!best) {
       // the palette can't make the pair asked for at this level: take the nearest it can
@@ -130,7 +132,8 @@
     }
     const colors = Math.random() < 0.5 ? best : [best[1], best[0]];
     const d = measure(q.kind, colors[1]) - measure(q.kind, colors[0]);
-    const answer = Math.abs(d) < SAME[q.kind] ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
+    const tie = Math.abs(d) < SAME[q.kind] && (q.kind !== 'value' || vLabel(colors[0]) === vLabel(colors[1]));
+    const answer = tie ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
     return { q, n: 2, colors, answer };
   }
   // three or four colors for a swatch question: values at least a level's gap apart where the
@@ -178,13 +181,15 @@
     els.palette.replaceChildren();
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const ct = load(COUNT_KEY, 'mix'), md = load(MODE_KEY, 'streak');
+    const has = (name, v) => [...root.querySelectorAll(`input[name="${name}"]`)].some((r) => r.value === v);
+    const ct = has('vbCount', load(COUNT_KEY, 'mix')) ? load(COUNT_KEY, 'mix') : 'mix', md = has('vbMode', load(MODE_KEY, 'streak')) ? load(MODE_KEY, 'streak') : 'streak';
     root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
     root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
     showBest();
   }
+  const bestOf = (bests, key) => (typeof bests[key] === 'number' && Number.isFinite(bests[key]) && bests[key] >= 0 ? bests[key] : null);
   function showBest() {
-    const best = load(BEST_KEY, {})[bestKey()];
+    const best = bestOf(load(BEST_KEY, {}), bestKey());
     els.best.textContent = best == null ? (mode() === 'streak' ? 'No streak yet for these settings.' : 'No score yet for these settings.') : mode() === 'streak' ? `Your best streak here: ${best} in a row.` : `Your best here: ${best} right in ${mode() / 60} minute${mode() === '60' ? '' : 's'}.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
@@ -194,8 +199,10 @@
   function start() {
     const pal = paletteNow();
     const pool = mixPool(pal.codes, 220);
+    // whites alone mix no colors to compare; grays alone (a white and a black) have no temperature to ask about
+    if (pool.length < 2) { Studio.toast(`${pal.name} makes no colors to compare: it needs a paint that is not a white.`, 5000); return; }
     const seconds = mode() === 'streak' ? 0 : +mode();
-    game = { pool, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
+    game = { pool, hasTemp: pool.filter((c) => c.chroma >= 10).length >= 2, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
     els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true; els.miss.hidden = true;
     els.time.hidden = !seconds;
     setFocus(true);
@@ -235,7 +242,8 @@
     if (!game.bag.length) { game.bag = game.count === 'mix' ? [2, 3, 4].sort(() => Math.random() - 0.5) : [+game.count]; }
     const n = game.bag.shift();
     const qs = n === 2 ? PAIR_Q : MANY_Q, key = n === 2 ? 'pair' : 'many';
-    const q = qs[game.dealt[key]++ % qs.length];
+    let q = qs[game.dealt[key]++ % qs.length];
+    while (q.kind === 'temp' && !game.hasTemp) q = qs[game.dealt[key]++ % qs.length]; // a gray pool gets the value questions only
     game.rounds[game.i] = makeRound(game.pool, levelAt(game.i), q, n);
     showRound();
   }
@@ -384,7 +392,7 @@
   });
   document.addEventListener('keydown', (e) => {
     if (!game || game.over || Studio.tab() !== 'battle') return;
-    if (!els.miss.hidden) { if (e.key === 'Enter') els.missNext.click(); return; }
+    if (!els.miss.hidden) { if (e.key === 'Enter' && document.activeElement !== els.missNext) els.missNext.click(); return; }
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') {
       if (e.key === 'ArrowLeft') tapSwatch(0);
@@ -408,7 +416,7 @@
     const score = onClock ? game.right : game.streak;
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
-    const isBest = score > 0 && (bests[key] == null || score > bests[key]);
+    const isBest = score > 0 && (bestOf(bests, key) == null || score > bestOf(bests, key));
     if (isBest) { delete bests[key]; bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
@@ -429,9 +437,9 @@
     els.again.focus({ preventScroll: true });
   }
   els.again.addEventListener('click', start);
-  els.settings.addEventListener('click', () => { clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null; els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); showBest(); });
+  els.settings.addEventListener('click', () => { clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null; els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); renderSetup(); });
   // the tabs are hidden while playing on a phone, so the bar has a way out: tap ✕ twice
-  let quitArmed = 0;
+  let quitArmed = -1e9;
   els.quit.addEventListener('click', () => {
     if (!game || game.over) { els.settings.click(); return; }
     if (performance.now() - quitArmed > 3000) { quitArmed = performance.now(); Studio.toast('Tap ✕ again to quit this battle'); return; }

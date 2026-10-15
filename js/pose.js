@@ -1028,7 +1028,8 @@
     const asked = light.el;
     reachable();
     if (fromSlider && light.el !== asked) fromSlider = false;          // show the height the lamp can really reach
-    LF.forEach(([id, k, f]) => { if (!fromSlider) $(id).value = light[k]; $(id + 'Out').textContent = f(light[k]); });
+    // a slider whose own value was wrapped or clamped (180° around reads as -180°) is moved to what it reads
+    LF.forEach(([id, k, f]) => { if (!fromSlider || +$(id).value !== light[k]) $(id).value = light[k]; $(id + 'Out').textContent = f(light[k]); });
     const match = LIGHTS.find((l) => Math.abs(wrapAz(l.az - light.az)) < 6 && Math.abs(l.el - light.el) < 6);
     $('lightName').textContent = match ? match.name : 'Your own';
     setRich($('lightLesson'), match ? match.lesson : 'Move the light and watch the <b>shadow side</b> and the <b>cast shadow</b> on the backdrop change shape.');
@@ -1253,7 +1254,7 @@
   function markLibrary() {
     const on = chosen && chosen.pose === JSON.stringify(pose) ? chosen.id : null;
     document.querySelectorAll('#poses .pose-btn, #mine .pose-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === on)));
-    if (!sheetStart) $('libNote').textContent = on ? `On the figure now: ${chosen.name}` : 'Tap a pose to start from it';
+    if (!sheetStart) $('libNote').textContent = notStored || (on ? `On the figure now: ${chosen.name}` : 'Tap a pose to start from it');
   }
   // the library in groups, so 30 pictures are easy to look through
   const GROUPS = [['standing', 'Standing'], ['moving', 'Moving and sport'], ['low', 'Low to the floor'], ['dance', 'Dance']];
@@ -1289,7 +1290,10 @@
     const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
     if (Array.isArray(m)) mine = m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX);
   } catch (err) { /* none kept */ }
-  const keepMine = () => { if (forgotten) return true; try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); return true; } catch (err) { const n = document.getElementById('libNote'); if (n) n.textContent = 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.'; return false; } };
+  // a change to your poses that could not be stored (storage full) is said in the library's note, and the
+  // note keeps saying it (over what the figure wears) until a write succeeds
+  let notStored = '';
+  const keepMine = () => { if (forgotten) return true; try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); notStored = ''; return true; } catch (err) { notStored = 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.'; const n = document.getElementById('libNote'); if (n) n.textContent = notStored; return false; } };
   let removed = null;                        // the last pose taken away, until it is put back or another changes
   function showMine() {
     $('mine').textContent = '';

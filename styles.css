@@ -1654,7 +1654,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .battle-focus { overflow: hidden; }
 .vb-board { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; min-height: min(72vh, 600px); padding: 10px 14px 18px; background: #8c8a86; border-radius: var(--r); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
 .vb-stage { display: grid; gap: 18px; justify-items: center; align-content: center; min-width: 0; }
-.vb-bar { justify-self: stretch; display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 10px; border-bottom: 1px solid rgba(243, 238, 226, 0.25); color: #f3eee2; }
+.vb-bar { justify-self: stretch; display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 10px; border-bottom: 1px solid rgba(28, 26, 23, 0.25); color: #1c1a17; } /* dark on the primer gray: 4.9:1 */
 .vb-round { font: 700 1.15rem/1 var(--mono); font-variant-numeric: tabular-nums; }
 .vb-round.is-pulse { animation: vb-pulse-btn 0.3s ease-out; display: inline-block; }
 .vb-round.is-milestone { animation: vb-milestone 0.9s ease-out; display: inline-block; color: #e8c47a; }
