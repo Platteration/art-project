@@ -2782,7 +2782,8 @@
   // of them, a link followed, one typed); an address with none, met by going Back, is the Study tab
   const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
   function routeHash(e) {
-    const h = location.hash;
+    // a shortcut typed by hand matches however it is written: #Help, #help/ and #loomis?x name their tabs
+    const h = location.hash.toLowerCase().replace(/[/?&].*$/, '');
     const to = Object.prototype.hasOwnProperty.call(ROUTES, h) ? ROUTES[h] : e && (h === '' || h === '#') ? 'study' : null;
     if (!to) return;
     switchTab(to);

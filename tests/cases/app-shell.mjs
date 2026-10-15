@@ -449,8 +449,8 @@ export default async function appShell(t, site) {
     }
     const variants = [];
     for (const [i, h] of ['#Help', '#help/', '#loomis?x', '#nonsense'].entries()) { await page.goto(`${site.base}?v=${i}${h}`, { waitUntil: 'load' }); await sleep(300); variants.push(`${h} → ${(await shell(page)).shown.join()}`); }
-    t.check(variants.every((v) => / → tab-study$/.test(v)), 'hash: an address the app does not know (#Help, #help/, #loomis?x, #nonsense) opens the Study tab', variants);
-    t.note(`hash: the shortcuts match exactly: ${variants.join('; ')} (no case folding or trailing slash).`);
+    // a shortcut typed by hand matches however it is written; an address the app does not know opens Study
+    t.check(variants.join('; ') === '#Help → tab-help; #help/ → tab-help; #loomis?x → tab-loomis; #nonsense → tab-study', 'hash: #Help, #help/ and #loomis?x open their tabs; #nonsense opens the Study tab', variants);
     // the 404 page's root-absolute files exist
     const assets = [];
     for (const f of ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'fonts.css', 'styles.css']) { const r = await page.request.get(site.base + f); assets.push(`${f} ${r.status()}`); }
