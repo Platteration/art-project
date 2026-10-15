@@ -8,6 +8,11 @@ on:
     branches: [main, launch]
 permissions:
   contents: read
+# a newer push to the same branch (or pull request) supersedes a run still going: only its latest head is
+# tested, and the runners are not held by heads nobody will look at again
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 jobs:
   policy:
     name: policy, export and nginx config
