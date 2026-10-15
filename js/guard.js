@@ -80,7 +80,18 @@
     if (tab && tab !== 'all') {
       var item = document.querySelector('[data-tab="' + tab + '"]');
       var panel = document.getElementById('tab-' + tab);
-      if (item) item.hidden = true;
+      if (item) {
+        item.hidden = true;
+        // the group's button names one of its items: not this one any more; a group with none left goes too
+        var group = item.closest ? item.closest('.tab-group') : null;
+        if (group) {
+          var left = group.querySelectorAll('.tab-item:not([hidden])');
+          var sub = group.querySelector('.tab-sub');
+          var name = item.querySelector('span');
+          if (!left.length) group.hidden = true;
+          else if (sub && name && sub.textContent === name.textContent && left[0].querySelector('span')) sub.textContent = left[0].querySelector('span').textContent;
+        }
+      }
       if (panel) {
         var showing = !panel.hidden;
         panel.hidden = true;

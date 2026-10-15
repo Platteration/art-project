@@ -212,6 +212,8 @@ Every key is prefixed `portrait-value-studio.` and the DB is `portrait-value-stu
 
 ## 7. Launch checklist
 
+*Superseded (2026-10-15): the runtime set is the one README's Publishing section names (`git archive HEAD` yields it), the tabs now include Pose and light and Figure study, and Forget also clears the `pose-and-light.` keys; the checklist is rewritten for every host in `docs/deploy.md` (Phase 4 of the launch plan). Kept as the record of the hardening pass.*
+
 Tick after deploy, with `SITE` the https host:
 
 - [ ] `bc71eaa` (or its descendant) is merged to the branch the host builds, tagged, and the publish directory is an export of runtime files only (`index.html 404.html favicon.ico favicon.svg apple-touch-icon.png robots.txt styles.css js/ img/ fonts/` + the host's config). `git status` clean before deploying.
