@@ -14,6 +14,12 @@
 (function () {
   'use strict';
 
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('game.js: app.js did not finish loading', 'game');
+    return;
+  }
+
   const $ = (id) => document.getElementById(id);
   const els = {
     setup: $('gameSetup'), play: $('gamePlay'), result: $('gameResult'),
@@ -87,11 +93,21 @@
   const MODE_KEY = 'portrait-value-studio.gameMode';
 
   function load(key, fallback) {
-    try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (err) { return fallback; }
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      if (v == null) return fallback;
+      // a saved value of another shape than the default (a bad write, an older version) is ignored
+      if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback;
+      return v;
+    } catch (err) {
+      return fallback;
+    }
   }
   function save(key, value) {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* storage unavailable: kept for this visit */ }
   }
+  // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
+  function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
 
   const toHex = (c) => Studio.toHex({ r: c[0], g: c[1], b: c[2] });
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -310,7 +326,7 @@
   let game = null;       // the game in progress or just scored
   let setupFor = null;   // { from, level } the setup board was built for
 
-  const level = () => document.querySelector('input[name="gameLevel"]:checked').value;
+  const level = () => (document.querySelector('input[name="gameLevel"]:checked') || {}).value || 'medium';
   const mode = () => els.mode.value;
   // bests are kept per mode; Classic's keys stay as they were
   const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
@@ -371,7 +387,7 @@
     const keep = els.palette.value || load(PALETTE_KEY, 'zorn');
     const choices = paletteChoices();
     const sug = board ? suggestedPalette(board).id : null;
-    els.palette.innerHTML = '';
+    els.palette.replaceChildren();
     choices.forEach((p) => els.palette.append(new Option(p.id === sug ? `${p.name} (suggested)` : p.name, p.id)));
     const fresh = board && paletteFor !== board;
     paletteFor = board;
@@ -395,8 +411,16 @@
     let k = 0, task = null;
     const done = (v) => { delete b.mixing[p.id]; return v; };
     return (b.mixing[p.id] = new Promise((resolve) => {
-      (function next() {
+      next();
+      function next() {
         if (board !== b || chosenPalette().id !== p.id) { resolve(null); return; }
+        try { step(); } catch (err) { // a mixing error ends this palette's targets as "none", never a Start button stuck off
+          delete b.mixing[p.id];
+          if (window.StudioGuard) StudioGuard.report(err);
+          resolve(null);
+        }
+      }
+      function step() {
         const end = performance.now() + 24;
         while (k < b.groups.length && performance.now() < end) {
           const g = b.groups[k];
@@ -416,7 +440,7 @@
         }
         b.targets[p.id] = out;
         resolve(out);
-      })();
+      }
     }).then(done));
   }
 
@@ -468,7 +492,7 @@
 
   function showPalette() {
     const p = chosenPalette();
-    els.paletteDots.innerHTML = '';
+    els.paletteDots.replaceChildren();
     p.codes.forEach((c) => {
       const d = document.createElement('span');
       d.className = 'paint-dot';
@@ -684,7 +708,7 @@
   }
 
   function renderPaints() {
-    els.paints.innerHTML = '';
+    els.paints.replaceChildren();
     game.paints.forEach((paint, i) => {
       const li = document.createElement('li');
       const b = document.createElement('button');
@@ -771,7 +795,7 @@
   });
 
   function renderNumbers() {
-    els.numbers.innerHTML = '';
+    els.numbers.replaceChildren();
     game.board.groups.forEach((g, k) => {
       const li = document.createElement('li');
       const b = document.createElement('button');
@@ -1269,7 +1293,7 @@
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
     const isBest = !bests[game.bestKey] || points > bests[game.bestKey];
-    if (isBest) { bests[game.bestKey] = points; save(BEST_KEY, bests); }
+    if (isBest) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
 
     els.play.hidden = true;
     els.result.hidden = false;
@@ -1283,7 +1307,7 @@
     game.result = { pct: Math.round(accuracy), stars: starsFor(accuracy), points, grade: GRADES[starsFor(accuracy)] };
     showScore(accuracy, isBest, timedOut);
     els.points.textContent = points;
-    els.breakdown.innerHTML = '';
+    els.breakdown.replaceChildren();
     [
       ['Mode', MODES[game.mode].name, ''],
       ...(valueMode ? [['Value study', `${valueAcc.toFixed(0)}%`, `+${valuePts}`]] : []),
@@ -1517,7 +1541,7 @@
   }
 
   function renderZones(rows) {
-    els.zones.innerHTML = '';
+    els.zones.replaceChildren();
     const sorted = rows.slice().sort((a, b) => a.match - b.match);
     sorted.forEach((r) => {
       const li = document.createElement('li');
@@ -1611,7 +1635,7 @@
     if (board) renderPalettes();
   });
   els.deal.addEventListener('click', () => { dealMystery(); renderPalettes(); });
-  const savedLevel = load(LEVEL_KEY, 'medium');
+  const savedLevel = LEVELS[load(LEVEL_KEY, 'medium')] ? load(LEVEL_KEY, 'medium') : 'medium';
   document.querySelectorAll('input[name="gameLevel"]').forEach((r) => {
     r.checked = r.value === savedLevel;
     r.addEventListener('change', () => { if (Studio.tab() === 'game') refreshSetup(); });

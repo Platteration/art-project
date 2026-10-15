@@ -162,13 +162,97 @@ The Studio keeps your work: the paper, the underdrawing, the ground and texture 
 
 ## Running it
 
-No build step or install. Open `index.html` in a browser, or serve the folder:
+No build step or install. Open `index.html` in a browser, or, for a quick local look only, serve the folder to this computer:
 
 ```sh
-python3 -m http.server 8000   # then visit http://localhost:8000
+python3 -m http.server 8000 --bind 127.0.0.1   # then visit http://localhost:8000
 ```
 
+That development server lists folders and serves the `.git` directory, so never use it to publish the site. See [Publishing](#publishing).
+
 To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
+
+## Publishing
+
+The site is static: there is nothing to run on the server, and nothing a visitor should ever see except the page itself. The repository carries the hosting settings so that the usual launch mistakes are already handled. The full audit behind them, with what was fixed and what is left to decide, is in [docs/security-audit.md](docs/security-audit.md).
+
+**Publish only the runtime files**: `index.html`, `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `robots.txt`, `styles.css`, `LICENSE`, `manifest.json`, `.well-known/security.txt`, `js/`, `img/` and `fonts/`, plus the config file for your host. Never point a web server at a git checkout: `.git/` holds the whole history. If the whole folder is deployed anyway, the Apache and nginx configs refuse dotfiles, `README.md` and `deploy/`, and `_redirects` does the same on Netlify; `docs/` is treated the same way.
+
+**Publishing an export.** The repository's `.gitattributes` marks the notes and tooling `export-ignore`, so one command produces exactly the runtime files plus the host configs (`_headers`, `_redirects`, `.htaccess`; each host ignores the others' files):
+
+```sh
+git archive --format=tar HEAD | tar -x -C /path/to/publish-folder
+```
+
+Point the host at that folder (or set it as the publish directory), never at the checkout. For nginx, copy `deploy/nginx.conf` into the server's config by hand.
+
+**Serve over HTTPS only**, with plain `http://` redirected (the Apache and nginx configs do this; Netlify, Cloudflare Pages and GitHub Pages have a "force HTTPS" switch). Clipboard, `<dialog>` downloads and the saved painting all need a secure context.
+
+**Response headers.** The same set is in `_headers` (Netlify, Cloudflare Pages), `.htaccess` (Apache) and `deploy/nginx.conf` (nginx):
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'` | Only this site's own scripts, styles and fonts run; photos and the save preview (`blob:`) stay allowed, and Trusted Types stop any future string-to-HTML injection. The same policy is in a `<meta>` tag in `index.html`, so hosts without header control (GitHub Pages) get it too. |
+| `X-Content-Type-Options` | `nosniff` | Files are what their type says. |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | No page paths leak to other sites. |
+| `Permissions-Policy` | camera, microphone, geolocation, payment, USB, sensors and the Topics API off; autoplay and clipboard-write for this site | The app only needs the clipboard and its own chime. |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Keeps other windows from reaching this one. |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Browsers remember to use HTTPS. |
+| `Cache-Control` | `no-cache` for HTML, CSS, JS; a week for images; a year for fonts | File names carry no version, so the page, styles and scripts are revalidated on every load and a deploy can never mix old scripts with new HTML. |
+
+`frame-ancestors` and `X-Frame-Options` are left out **on purpose**: the app is built to be embedded in other sites (it even works around sandboxed frames that block downloads). To restrict embedding, append `; frame-ancestors 'self' https://your-site.example` to the policy in your host's config.
+
+For a site that embeds the app: give the `<iframe>` `allow="clipboard-write"` so Copy works, and know that a browser keeps the embedded copy's settings and saved painting apart from the ones on this site.
+
+**Not-found pages.** `404.html` is the page a visitor sees for a wrong address or a folder with no index; Netlify, Cloudflare Pages and GitHub Pages pick a root `404.html` up by themselves, and the Apache and nginx configs wire it up (and turn folder listings off). Its links and asset paths are root-absolute (`/`, `/styles.css`, the icons and the hash shortcuts), so if the site lives under a sub-path rather than a domain root, edit them.
+
+**Nothing leaves the visitor's device.** There is no backend, no analytics and no third-party request: the fonts are served from `fonts/` rather than a font CDN. Keep it that way when adding features; the `connect-src 'none'` line in the policy makes any new network request from a script fail loudly in the browser console.
+
+**When the public address is known.** Four things wait for it; with `https://SITE/` as the address, add to `<head>` in `index.html`, after the `twitter:card` line:
+
+```html
+<link rel="canonical" href="https://SITE/">
+<meta property="og:url" content="https://SITE/">
+<meta property="og:image" content="https://SITE/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Portrait Value Studio: a portrait beside its dark, middle and light study and its big color shapes">
+```
+
+and change `twitter:card` from `summary` to `summary_large_image`. Then create `sitemap.xml` at the root with the one page:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://SITE/</loc></url></urlset>
+```
+
+and add `Sitemap: https://SITE/sitemap.xml` to `robots.txt` and `Canonical: https://SITE/.well-known/security.txt` to `.well-known/security.txt`. Nothing in the policy needs to change for these.
+
+**Launch checklist**, with `SITE` your https address. Deploy from a clean, committed tree: `fonts/` and `js/guard.js` are runtime files the page needs, so a partial copy breaks it.
+
+```sh
+curl -sI http://SITE/ | head -1              # a 301 to https
+curl -sI https://SITE/ | grep -i -E 'content-security|strict-transport|nosniff|referrer|permissions|cache-control'
+curl -sI https://SITE/.git/HEAD | head -1     # 404
+curl -sI https://SITE/README.md | head -1     # 404
+curl -s  https://SITE/js/ | grep -c 'Page not found'   # 1: the 404 page, not a file list
+curl -sI https://SITE/nonexistent | head -1   # 404
+```
+
+Then open the site, try every tab, load a photo, save a PNG, and check that the browser console shows no `Content Security Policy` lines. Try it once inside an iframe on another site if you embed it, including a sandboxed one (`sandbox="allow-scripts allow-modals"`), where the fonts and the save dialog must still work. Security problems are reported through GitHub issues, as `SECURITY.md` and `/.well-known/security.txt` say; the `Expires` date in that file is 1 October 2027 and needs renewing before then. On GitHub Pages, Jekyll skips dot-folders, so add `include: [.well-known]` to a `_config.yml` for the file to be served.
+
+## Privacy
+
+Nothing leaves the visitor's device. The page makes no network request after loading its own files: no analytics, no font CDN, no backend. Photos, paintings and scores are processed and kept in the browser only.
+
+What the site keeps in the browser, and clears with **Forget my work on this device** (How to use tab, under Good to know):
+
+| Where | What |
+| --- | --- |
+| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo; only the fifty most recently played are kept), and whether the Studio's one-time saving note was shown |
+| IndexedDB database `portrait-value-studio` | The Studio painting: the paper, the underdrawing and the canvas settings, saved a moment after each change |
+
+Saved PNGs are drawn from the canvas and carry no camera metadata. The game's Share button hands the scorecard to the phone's share sheet only when pressed. A web server hosting the site sees only ordinary access logs.
 
 ## Settings
 
@@ -209,6 +293,21 @@ All the math uses CIE L\*a\*b\*, so "value" means perceived lightness (L\*). Mun
 - `js/loomis.js`: the Loomis head tab
 - `pose.html`: Pose and light, a page of its own (shown in a frame on its tab, and hidden in another to draw Figure study's pictures)
 - `js/battle.js`: the Value battle game
-- `img/help/`: the phone screenshots the How to use tab shows
+- `js/guard.js`: loaded first; shows a note when a script fails or something throws, and clears everything the site keeps in the browser
+- `img/help/`: the phone screenshots the How to use tab shows (400 px wide, twice their display width)
+- `fonts/`: the three typefaces, served from here rather than a font CDN, with their licenses
+- `404.html`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `manifest.json`, `img/icon-*.png`, `img/og.jpg`, `robots.txt`: the page for a wrong address, the icons and share image, the web app manifest, and the crawler note
+- `LICENSE`, `SECURITY.md`, `.well-known/security.txt`: the MIT license, and where to report a security problem
+- `_headers`, `.htaccess`, `deploy/nginx.conf`: the same response headers and server rules for Netlify or Cloudflare Pages, Apache and nginx (see [Publishing](#publishing))
 
-Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html). The spectral data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) (MIT license).
+## Licenses and notices
+
+Portrait Value Studio is released under the [MIT License](LICENSE), copyright (c) 2026 Platteration. The license file is served with the site, so a copy travels with every deployment.
+
+Third-party material in this repository:
+
+- The spectral mixing data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) by Ronald van Wijnen, MIT license (the full notice is in that file).
+- The typefaces in `fonts/` (Bricolage Grotesque by the Bricolage Grotesque Project Authors; IBM Plex Sans and IBM Plex Mono by IBM) are under the SIL Open Font License 1.1; their license texts are next to the files.
+
+
+Palette sources: [Zorn](https://www.naturalpigments.com/artist-materials/zorn-palette-four-colors), [Frank Reilly](https://methods.art/painters/frank-reilly), [Richard Schmid](https://www.wetcanvas.com/forums/topic/the-color-palette-of-richard-schmid-in-his-own-words/), [Rembrandt](https://www.naturalpigments.com/artist-materials/rembrandt-van-rijn-color-palette), [Sorolla](https://www.naturalpigments.com/artist-materials/joaquin-sorolla-palette), [Monet](https://www.liveabout.com/impressionist-masters-palettes-techniques-claude-monet-2578614), [split primary](https://www.handprint.com/HP/WCL/palette4r.html).

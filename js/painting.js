@@ -15,6 +15,11 @@
  */
 (function () {
   'use strict';
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('painting.js: app.js did not finish loading', 'paint');
+    return;
+  }
   const psRoot = document.getElementById('ps-root');
   if (!psRoot) return;
   // a clean copy of the markup, taken before this studio fills it in, for any other studio to use
@@ -74,7 +79,7 @@
     const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
     const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const lab = (c) => Study.rgbToLab(c[0], c[1], c[2]);
-    function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
+    function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
     function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
 
     // ---- Paints and the mixing model (the same as the Study tab and the game use) ----------------

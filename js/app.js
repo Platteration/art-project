@@ -2,6 +2,15 @@
 (function () {
   'use strict';
 
+  // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to load
+  document.documentElement.classList.remove('no-js');
+
+  // the modules this one needs; without them the page shows the standing note instead of half an app
+  if (!window.Study || !window.Mixing || !window.Paints) {
+    if (window.StudioGuard) StudioGuard.failed('app.js: processing.js, mixing.js or paints.js did not load', 'all');
+    return;
+  }
+
   const $ = (id) => document.getElementById(id);
   const els = {
     file: $('file'),
@@ -148,11 +157,12 @@
   const toHex = (c) => ('#' + hex2(c.r) + hex2(c.g) + hex2(c.b)).toUpperCase();
 
   let toastTimer = 0;
-  function toast(msg) {
+  // ms: how long it stays; a problem the visitor has to read gets longer than a passing confirmation
+  function toast(msg, ms = 1800) {
     els.toast.textContent = msg;
     els.toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => els.toast.classList.remove('show'), 1800);
+    toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
   }
 
   function cssVar(name) {
@@ -184,17 +194,29 @@
     } catch (err) { return true; }
   })();
 
+  let saveImgUrl = '';
   function savePng(canvas, name) {
-    canvas.toBlob((blob) => blob && downloadBlob(blob, name), 'image/png');
-    if (!downloadsMayBeBlocked) return;
-    els.saveImg.src = canvas.toDataURL('image/png');
-    els.saveImg.alt = name;
-    els.saveName.textContent = name;
-    els.saveDialog.showModal();
+    canvas.toBlob((blob) => {
+      if (!blob) { toast('The PNG could not be made. Try a smaller Working size.', 5000); return; }
+      downloadBlob(blob, name);
+      if (!downloadsMayBeBlocked) return;
+      // the same blob is the preview to save by hand, so the page needs no data: URLs
+      if (saveImgUrl) URL.revokeObjectURL(saveImgUrl);
+      saveImgUrl = URL.createObjectURL(blob);
+      els.saveImg.src = saveImgUrl;
+      els.saveImg.alt = name;
+      els.saveName.textContent = name;
+      openDialog(els.saveDialog);
+    }, 'image/png');
+  }
+
+  // showModal() where the browser has it; otherwise the dialog opens in place
+  function openDialog(dlg) {
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
   }
 
   els.saveClose.addEventListener('click', () => els.saveDialog.close());
-  els.saveDialog.addEventListener('close', () => els.saveImg.removeAttribute('src'));
+  els.saveDialog.addEventListener('close', () => { els.saveImg.removeAttribute('src'); if (saveImgUrl) { URL.revokeObjectURL(saveImgUrl); saveImgUrl = ''; } });
 
   // ---- Settings -----------------------------------------------------------
 
@@ -356,18 +378,31 @@
     syncOverlay(canvas);
   }
 
-  function prepareAndRun(resetSplit) {
-    state.prep = Study.prepare(state.source, +els.detail.value);
-    const { w, h, rgba } = state.prep;
-    paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
-    state.pixels.orig = rgba;
-    if (resetSplit) autoSplit();
-    runSoon(0);
+  // Preparing a photo (decode, Lab conversion, auto split) blocks for up to a second or more on a
+  // phone, so for a photo the visitor just loaded the "Updating…" indicator is painted first and the
+  // work runs two frames later; a newer photo arriving in between wins. Start-up prepares at once,
+  // so the sample study and the hash routes find the data ready.
+  let prepareJob = 0;
+  function prepareAndRun(resetSplit, immediate) {
+    const job = ++prepareJob;
+    const work = () => {
+      if (job !== prepareJob) return;
+      state.prep = Study.prepare(state.source, +els.detail.value);
+      const { w, h, rgba } = state.prep;
+      paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
+      state.pixels.orig = rgba;
+      if (resetSplit) autoSplit();
+      runSoon(0);
+    };
+    if (immediate) { work(); return; }
+    els.busy.hidden = false;
+    clearTimeout(runTimer);
+    requestAnimationFrame(() => requestAnimationFrame(work));
   }
 
   function renderZones() {
     const r = state.result;
-    els.zones.innerHTML = '';
+    els.zones.replaceChildren();
     r.zoneGray.forEach((g, i) => {
       const li = document.createElement('li');
       const tone = document.createElement('span');
@@ -425,28 +460,70 @@
   function readImage(file, done) {
     if (!file) return;
     if (file.type && !file.type.startsWith('image/')) {
-      toast('That file is not an image. Choose a JPG, PNG or WebP photo.');
+      toast('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
       return;
     }
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => {
+    let settled = false;
+    const loaded = () => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
-      done(img);
+      const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+      // an image with no size (an SVG without width and height) would become a blank 1 x 1 study
+      if (w < 16 || h < 16) {
+        toast('That image has no usable size. Use a JPG, PNG or WebP photo.', 5000);
+        return;
+      }
+      const r = shrinkIfHuge(img, w, h);
+      done(r.source, r.note);
     };
-    img.onerror = () => {
+    const failed = () => {
+      if (settled) return;
+      settled = true;
       URL.revokeObjectURL(url);
-      toast('This image could not be opened. Try saving it as JPG or PNG first.');
+      toast('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
     };
+    img.onload = loaded;
+    img.onerror = failed;
     img.src = url;
+    // decode() keeps the decoding of a big photo off the click handler, so the page stays responsive
+    if (typeof img.decode === 'function') img.decode().then(loaded, () => { /* some browsers refuse decode() for a huge image that still loads: onload or onerror decides */ });
+  }
+
+  // A huge photo (a 50-megapixel camera file) costs hundreds of megabytes once decoded and can
+  // close the tab on a phone. Above this many pixels the photo is drawn once onto a canvas no larger
+  // than twice the biggest working size, which is more than the studies ever use, and the big
+  // decoded image is let go.
+  const HUGE_PIXELS = 24e6;
+  const SHRINK_SIDE = 2800;
+  // Returns { source, note }: the image or its reduced copy, and the sentence to tell the visitor (or '').
+  function shrinkIfHuge(img, w, h) {
+    if (w * h <= HUGE_PIXELS) return { source: img, note: '' };
+    const scale = SHRINK_SIDE / Math.max(w, h);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * scale));
+    c.height = Math.max(1, Math.round(h * scale));
+    // a browser out of canvas memory gives no context (null) or refuses the draw: keep the photo as it is
+    const g = c.getContext('2d');
+    if (!g) return { source: img, note: '' };
+    try {
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, c.width, c.height);
+    } catch (err) {
+      return { source: img, note: '' };
+    }
+    return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
   function loadFile(file) {
-    readImage(file, (img) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait'));
+    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', note));
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
-  function useSource(img, name, baseName) {
+  // note: a sentence about the photo itself (it was reduced), said together with the marks line below
+  function useSource(img, name, baseName, note) {
     state.source = img;
     state.baseName = baseName || 'portrait';
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
@@ -454,18 +531,22 @@
       state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
     ].filter(Boolean);
     clearMarks();
+    const said = [];
+    if (note) said.push(note);
     if (marks.length) {
       const list = marks.length > 1 ? marks.slice(0, -1).join(', ') + ' and ' + marks[marks.length - 1] : marks[0];
-      toast(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo`);
+      said.push(`${list.charAt(0).toUpperCase() + list.slice(1)} cleared for the new photo.`);
     }
+    if (said.length) toast(said.join(' '), note ? 6000 : 1800);
     if (state.art.isExample) setArt(null);
     prepareAndRun(true);
   }
 
   function loadArtFile(file) {
-    readImage(file, (img) => {
+    readImage(file, (img, note) => {
       setArt(img, file.name || 'Pasted painting', false);
       runSoon(0);
+      if (note) toast(note, 5000);
     });
   }
 
@@ -501,16 +582,22 @@
       checking() ? 'Drop your painting to check it' : 'Drop the portrait to load it';
     els.dropHint.hidden = false;
   });
-  window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  // Every drag over the page is claimed, so dropping text, a link or a picture from another tab can
+  // never navigate the browser away from the app and lose the work in it.
+  window.addEventListener('dragover', (e) => { e.preventDefault(); });
   window.addEventListener('dragleave', () => {
     dragDepth = Math.max(0, dragDepth - 1);
     if (!dragDepth) els.dropHint.hidden = true;
   });
   window.addEventListener('drop', (e) => {
-    if (!hasFiles(e)) return;
     e.preventDefault();
     dragDepth = 0;
     els.dropHint.hidden = true;
+    if (!hasFiles(e)) {
+      const types = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
+      if (types.includes('text/uri-list') || types.includes('text/html')) toast('Save the picture to your device first, then drop the file here.', 5000);
+      return;
+    }
     loadForTab(e.dataTransfer.files[0]);
   });
   window.addEventListener('paste', (e) => {
@@ -898,7 +985,8 @@
     try {
       const raw = localStorage.getItem(PALETTE_KEY);
       const list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list.filter((c) => c && Number.isInteger(c.r)) : [];
+      const ok = (n) => Number.isInteger(n) && n >= 0 && n <= 255;
+      return Array.isArray(list) ? list.filter((c) => c && typeof c === 'object' && ok(c.r) && ok(c.g) && ok(c.b)) : [];
     } catch (err) {
       return null;
     }
@@ -948,7 +1036,7 @@
 
   function renderPalette() {
     const list = state.palette;
-    els.swatches.innerHTML = '';
+    els.swatches.replaceChildren();
     list.forEach((c, index) => {
       const hex = toHex(c);
       const li = document.createElement('li');
@@ -2320,7 +2408,7 @@
     ].filter(Boolean).join(' · ');
     els.meterShapes.style.width = cmp.shapeMatch + '%';
 
-    els.fixList.innerHTML = '';
+    els.fixList.replaceChildren();
     if (!cmp.top.length) {
       const li = document.createElement('li');
       li.className = 'fix-none';
@@ -2555,6 +2643,7 @@
     source: () => state.source,
     prep: () => state.prep,
     savePng,
+    openDialog,
     sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
     settings,
     tab: () => state.tab,
@@ -2564,22 +2653,28 @@
     valueLabel,
   };
 
+  // Each step that reads saved settings runs on its own: a bad saved value (an older version, a
+  // stray write) must not stop the rest of the app from starting. The failure is still reported.
+  function safely(step) {
+    try { step(); } catch (err) { if (window.StudioGuard) StudioGuard.report(err, { saved: true }); else console.error(err); }
+  }
+
   function start() {
-    restoreDrawers();
+    safely(restoreDrawers);
     let mode = 'simple';
-    try { mode = localStorage.getItem(MODE_KEY) || 'simple'; } catch (err) { /* simple */ }
+    try { mode = localStorage.getItem(MODE_KEY) === 'advanced' ? 'advanced' : 'simple'; } catch (err) { /* simple */ }
     setMode(mode, false);
     els.checkSection.hidden = !els.drawers.check.open;
     updateToolbar();
-    restoreSmoothing();
+    safely(restoreSmoothing);
     updateOutputs();
-    renderPalette();
-    loadCanvasSize();
+    safely(renderPalette);
+    safely(loadCanvasSize);
     updateToolButtons();
     state.source = paintSample();
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
-    prepareAndRun(true);
+    prepareAndRun(true, true);
     if (location.hash === '#check') { switchTab('study'); els.drawers.check.open = true; }
     if (location.hash === '#game') switchTab('game');
     if (location.hash === '#paint') switchTab('paint');
@@ -2588,6 +2683,24 @@
     if (location.hash === '#pose') switchTab('pose');
     if (location.hash === '#figure') switchTab('figure');
     if (location.hash === '#battle') switchTab('battle');
+  }
+
+  // Help tab: forget everything this site keeps in the browser. Two taps, so a stray tap does nothing.
+  const forgetBtn = $('forgetBtn');
+  if (forgetBtn) {
+    const idle = forgetBtn.textContent;
+    let armed = 0;
+    forgetBtn.addEventListener('click', () => {
+      if (!armed) {
+        forgetBtn.textContent = 'Tap again to clear everything and reload';
+        armed = setTimeout(() => { armed = 0; forgetBtn.textContent = idle; }, 5000);
+        return;
+      }
+      clearTimeout(armed);
+      forgetBtn.disabled = true;
+      forgetBtn.textContent = 'Clearing…';
+      if (window.StudioGuard) StudioGuard.forget(true); else location.reload();
+    });
   }
 
   const redrawHist = () => drawHistogram();

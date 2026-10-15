@@ -1,0 +1,23 @@
+* text=auto eol=lf
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.ico binary
+*.woff2 binary
+*.webp binary
+*.gif binary
+*.ttf binary
+*.otf binary
+*.svg text
+fonts/* linguist-vendored
+
+# `git archive HEAD` yields the runtime files and the host configs only (see README, Publishing):
+# the repository's own notes and tooling stay out of the export.
+README.md         export-ignore
+SECURITY.md       export-ignore
+docs/             export-ignore
+deploy/           export-ignore
+fonts/README.md   export-ignore
+.gitignore        export-ignore
+.gitattributes    export-ignore
+.editorconfig     export-ignore

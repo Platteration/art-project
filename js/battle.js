@@ -17,6 +17,12 @@
  */
 (function () {
   'use strict';
+
+  // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
+  if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
+    if (window.StudioGuard) StudioGuard.failed('battle.js: app.js did not finish loading', 'battle');
+    return;
+  }
   const $ = (id) => document.getElementById('vb-' + id);
   const root = document.getElementById('tab-battle');
   if (!root) return;
@@ -25,8 +31,10 @@
   const MODE_KEY = 'portrait-value-studio.battleMode';
   const BEST_KEY = 'portrait-value-studio.battleBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
-  function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
+  function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
+  function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
 
   // ---- Colors from the palette ------------------------------------------------------------------
   const made = new Map();
@@ -167,7 +175,7 @@
   const bestKey = () => `${paletteNow().id}:${count()}:${mode()}`;
   function renderSetup() {
     const list = palettes(), was = els.palette.value || load(PALETTE_KEY, 'zorn');
-    els.palette.innerHTML = '';
+    els.palette.replaceChildren();
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
     const ct = load(COUNT_KEY, 'mix'), md = load(MODE_KEY, 'streak');
@@ -240,14 +248,16 @@
     els.round.textContent = timed() ? `${game.right} right` : `Streak ${game.streak}`;
     els.score.textContent = `Round ${game.i + 1}`;
     els.question.textContent = r.q.ask;
-    els.swatches.innerHTML = '';
+    els.swatches.replaceChildren();
     els.swatches.dataset.count = r.n;
     r.colors.forEach((c, i) => {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'vb-swatch'; b.dataset.index = i;
       b.style.background = css(c.rgb);
       b.setAttribute('aria-label', `Color ${LETTERS[i]}`);
-      b.innerHTML = `<span class="vb-letter">${LETTERS[i]}</span><span class="vb-badge" hidden></span>`;
+      const letter = document.createElement('span'); letter.className = 'vb-letter'; letter.textContent = LETTERS[i];
+      const badge = document.createElement('span'); badge.className = 'vb-badge'; badge.hidden = true;
+      b.append(letter, badge);
       b.addEventListener('click', () => tapSwatch(i));
       els.swatches.append(b);
     });
@@ -342,12 +352,15 @@
   function showMiss(r) {
     pauseClock();
     els.missWhy.textContent = explain(r);
-    els.missChips.innerHTML = '';
+    els.missChips.replaceChildren();
     const order = r.q.kind === 'value' ? r.colors.map((c, i) => i).sort((a, b) => r.colors[a].L - r.colors[b].L) : r.colors.map((c, i) => i);
     order.forEach((i) => {
       const c = r.colors[i], chip = document.createElement('span');
       chip.className = 'vb-chip';
-      chip.innerHTML = `<span class="vb-chip-color" style="background:${css(c.rgb)}"></span><span class="vb-chip-text">${r.n > 2 ? LETTERS[i] : i === 0 ? 'Left' : 'Right'}<br>${r.q.kind === 'value' ? vLabel(c) : tLabel(c)}</span>`;
+      const color = document.createElement('span'); color.className = 'vb-chip-color'; color.style.background = css(c.rgb);
+      const text = document.createElement('span'); text.className = 'vb-chip-text';
+      text.append(r.n > 2 ? LETTERS[i] : i === 0 ? 'Left' : 'Right', document.createElement('br'), r.q.kind === 'value' ? vLabel(c) : tLabel(c));
+      chip.append(color, text);
       els.missChips.append(chip);
     });
     els.missNext.textContent = timed() ? 'Next ▸' : 'See the score';
@@ -396,7 +409,7 @@
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
     const isBest = score > 0 && (bests[key] == null || score > bests[key]);
-    if (isBest) { bests[key] = score; save(BEST_KEY, bests); }
+    if (isBest) { delete bests[key]; bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];

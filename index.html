@@ -1,15 +1,29 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
 <title>Portrait Value Studio</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Load a portrait photo and see its dark, middle and light shapes and its big colors, pick paints and mixes, paint it in the Studio, then check how close you got. Everything runs in your browser and photos never leave your device.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="theme-color" content="#efe7d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#152019" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Portrait Value Studio">
+<meta property="og:description" content="See a portrait's dark, middle and light shapes and its big colors, pick paints, paint it, then check how close you got. Runs entirely in your browser.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<script src="js/guard.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<div class="oldbrowser-note" role="alert"><strong>This browser is too old for Portrait Value Studio.</strong> Use a current Safari, Chrome, Edge or Firefox (2022 or later). The guide below still reads.</div>
+<div class="partfail-note" role="alert"><strong>Part of Portrait Value Studio did not start.</strong> Reload the page. If it happens again, a script was blocked or failed, and only the parts that started are shown.</div>
+<div class="nojs-note" role="alert"><strong>Portrait Value Studio has not started.</strong> Everything runs in your browser and nothing is uploaded, but the studies, the Studio and the games are drawn with JavaScript. If JavaScript is off, turn it on for this site; otherwise check your connection. Then reload the page. The guide below still reads without it.</div>
 <div class="app">
   <header class="topbar">
     <div class="brand">
@@ -985,7 +999,7 @@
               <li>The four big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Figure study</strong> is a drawing class with the wooden figure as the model. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
             </ol>
           </div>
-          <div class="help-shots"><figure class="phone"><img src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo, the four big buttons and the Learning tools menu open under the first" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
+          <div class="help-shots"><figure class="phone"><img width="400" height="774" src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo, the four big buttons and the Learning tools menu open under the first" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
         </section>
 
         <section class="help-part" id="help-study">
@@ -1000,8 +1014,8 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/studies.jpg" alt="The photo, the dark-middle-light picture and the big color shapes on a phone" loading="lazy"><figcaption>The three pictures</figcaption></figure>
-            <figure class="phone"><img src="img/help/values.jpg" alt="The Dark, middle, light drawer with the Detail switch and the three grays" loading="lazy"><figcaption>Detail and the three grays</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/studies.jpg" alt="The photo, the dark-middle-light picture and the big color shapes on a phone" loading="lazy"><figcaption>The three pictures</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/values.jpg" alt="The Dark, middle, light drawer with the Detail switch and the three grays" loading="lazy"><figcaption>Detail and the three grays</figcaption></figure>
           </div>
         </section>
 
@@ -1017,7 +1031,7 @@
               <li><strong>Grid</strong> lays a 3 × 3 or 4 × 4 grid over the picture, for drawing it square by square.</li>
             </ol>
           </div>
-          <div class="help-shots"><figure class="phone"><img src="img/help/lines.jpg" alt="Two red lines drawn on the photo with the Lines tool: one through the eyes, one down the middle of the face" loading="lazy"><figcaption>Lines through the eyes and the middle</figcaption></figure></div>
+          <div class="help-shots"><figure class="phone"><img width="400" height="774" src="img/help/lines.jpg" alt="Two red lines drawn on the photo with the Lines tool: one through the eyes, one down the middle of the face" loading="lazy"><figcaption>Lines through the eyes and the middle</figcaption></figure></div>
         </section>
 
         <section class="help-part" id="help-loomis">
@@ -1032,9 +1046,9 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/loomis-mark.jpg" alt="Placing a mark on the Loomis head tab: the loupe shows the eye magnified under the finger" loading="lazy"><figcaption>Placing a mark with the loupe</figcaption></figure>
-            <figure class="phone"><img src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face, with arrow buttons around the ball to turn, nod and tilt it" loading="lazy"><figcaption>The head and its arrows</figcaption></figure>
-            <figure class="phone"><img src="img/help/loomis-adjust.jpg" alt="The head turned to the side after dragging its centre line" loading="lazy"><figcaption>Turned by dragging the centre line</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/loomis-mark.jpg" alt="Placing a mark on the Loomis head tab: the loupe shows the eye magnified under the finger" loading="lazy"><figcaption>Placing a mark with the loupe</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face, with arrow buttons around the ball to turn, nod and tilt it" loading="lazy"><figcaption>The head and its arrows</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/loomis-adjust.jpg" alt="The head turned to the side after dragging its centre line" loading="lazy"><figcaption>Turned by dragging the centre line</figcaption></figure>
           </div>
         </section>
         <section class="help-part" id="help-pose">
@@ -1050,9 +1064,9 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/pose-rig.jpg" alt="The wooden figure in a throwing pose in Simple mode: circles at the hands, ovals under the feet, the ring around the hips, and a diamond at the right elbow after the right hand was moved" loading="lazy"><figcaption>Posing with the rig controls</figcaption></figure>
-            <figure class="phone"><img src="img/help/pose-library.jpg" alt="The pose library over the stage: small pictures of the figure in each pose, in groups" loading="lazy"><figcaption>Choosing a pose</figcaption></figure>
-            <figure class="phone"><img src="img/help/pose-values.jpg" alt="The same pose seen as dark, middle and light values, with the lamp high to one side" loading="lazy"><figcaption>Dark, middle and light</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/pose-rig.jpg" alt="The wooden figure in a throwing pose in Simple mode: circles at the hands, ovals under the feet, the ring around the hips, and a diamond at the right elbow after the right hand was moved" loading="lazy"><figcaption>Posing with the rig controls</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/pose-library.jpg" alt="The pose library over the stage: small pictures of the figure in each pose, in groups" loading="lazy"><figcaption>Choosing a pose</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/pose-values.jpg" alt="The same pose seen as dark, middle and light values, with the lamp high to one side" loading="lazy"><figcaption>Dark, middle and light</figcaption></figure>
           </div>
         </section>
 
@@ -1067,8 +1081,8 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/colors.jpg" alt="The Colors and paints drawer with the palettes to choose from" loading="lazy"><figcaption>Choosing a palette</figcaption></figure>
-            <figure class="phone"><img src="img/help/mixes.jpg" alt="The recipes for every color in the study, mixed from the chosen palette" loading="lazy"><figcaption>A recipe for every color</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/colors.jpg" alt="The Colors and paints drawer with the palettes to choose from" loading="lazy"><figcaption>Choosing a palette</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/mixes.jpg" alt="The recipes for every color in the study, mixed from the chosen palette" loading="lazy"><figcaption>A recipe for every color</figcaption></figure>
           </div>
         </section>
 
@@ -1085,11 +1099,11 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/studio.jpg" alt="The Studio on a phone: the paper with strokes on it, the reference floating in the corner and the row of tool icons at the bottom" loading="lazy"><figcaption>The paper and the tools</figcaption></figure>
-            <figure class="phone"><img src="img/help/brushes.jpg" alt="The Brushes sheet with the five brushes and the round brush's size slider" loading="lazy"><figcaption>Brushes</figcaption></figure>
-            <figure class="phone"><img src="img/help/paints.jpg" alt="The Paints sheet: the palette's paints, the mixing well with a mix in it and the kept mixes" loading="lazy"><figcaption>Paints and the mixing well</figcaption></figure>
-            <figure class="phone"><img src="img/help/reference.jpg" alt="The Reference sheet: the Study photo or a portrait, shown as the original, values or blocks" loading="lazy"><figcaption>Reference</figcaption></figure>
-            <figure class="phone"><img src="img/help/canvas.jpg" alt="The Canvas sheet: ground, texture and Save as PNG" loading="lazy"><figcaption>Canvas</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/studio.jpg" alt="The Studio on a phone: the paper with strokes on it, the reference floating in the corner and the row of tool icons at the bottom" loading="lazy"><figcaption>The paper and the tools</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/brushes.jpg" alt="The Brushes sheet with the five brushes and the round brush's size slider" loading="lazy"><figcaption>Brushes</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/paints.jpg" alt="The Paints sheet: the palette's paints, the mixing well with a mix in it and the kept mixes" loading="lazy"><figcaption>Paints and the mixing well</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/reference.jpg" alt="The Reference sheet: the Study photo or a portrait, shown as the original, values or blocks" loading="lazy"><figcaption>Reference</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/canvas.jpg" alt="The Canvas sheet: ground, texture and Save as PNG" loading="lazy"><figcaption>Canvas</figcaption></figure>
           </div>
         </section>
 
@@ -1107,10 +1121,10 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/figure-setup.jpg" alt="The Figure study setup on a phone: Timed, with 1 minute a pose, 27 of the 30 poses in the class, and the pose library with a tick on each pose in it" loading="lazy"><figcaption>Setting up a class</figcaption></figure>
-            <figure class="phone"><img src="img/help/figure-draw.jpg" alt="Drawing a pose: the bar with the pose, the clock and Done on top, the reference in the corner and a quick charcoal gesture drawing on the paper" loading="lazy"><figcaption>Drawing a pose</figcaption></figure>
-            <figure class="phone"><img src="img/help/figure-card.jpg" alt="The card after a pose: the gesture match, five stars and Gesture master!, the drawing with the blue stick figure, orange line of action and green tilt lines over it beside the pose, the notes, and Next pose and Stop class" loading="lazy"><figcaption>The card after each pose</figcaption></figure>
-            <figure class="phone"><img src="img/help/figure-review.jpg" alt="The review after the class: each drawing beside its pose, with its stars, the gesture over it and its notes" loading="lazy"><figcaption>The review</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-setup.jpg" alt="The Figure study setup on a phone: Timed, with 1 minute a pose, 27 of the 30 poses in the class, and the pose library with a tick on each pose in it" loading="lazy"><figcaption>Setting up a class</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-draw.jpg" alt="Drawing a pose: the bar with the pose, the clock and Done on top, the reference in the corner and a quick charcoal gesture drawing on the paper" loading="lazy"><figcaption>Drawing a pose</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-card.jpg" alt="The card after a pose: the gesture match, five stars and Gesture master!, the drawing with the blue stick figure, orange line of action and green tilt lines over it beside the pose, the notes, and Next pose and Stop class" loading="lazy"><figcaption>The card after each pose</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-review.jpg" alt="The review after the class: each drawing beside its pose, with its stars, the gesture over it and its notes" loading="lazy"><figcaption>The review</figcaption></figure>
           </div>
         </section>
 
@@ -1127,9 +1141,9 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/check.jpg" alt="The How close did I get drawer with its buttons" loading="lazy"><figcaption>Loading a painting</figcaption></figure>
-            <figure class="phone"><img src="img/help/score.jpg" alt="The scores and the list of what to fix first" loading="lazy"><figcaption>The scores</figcaption></figure>
-            <figure class="phone"><img src="img/help/shapes.jpg" alt="Every shape labelled with how close the painting matches it" loading="lazy"><figcaption>Shape by shape</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/check.jpg" alt="The How close did I get drawer with its buttons" loading="lazy"><figcaption>Loading a painting</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/score.jpg" alt="The scores and the list of what to fix first" loading="lazy"><figcaption>The scores</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/shapes.jpg" alt="Every shape labelled with how close the painting matches it" loading="lazy"><figcaption>Shape by shape</figcaption></figure>
           </div>
         </section>
 
@@ -1144,9 +1158,9 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/game-setup.jpg" alt="The game setup: the portrait to paint, the palette, the level and the mode" loading="lazy"><figcaption>Setting up a game</figcaption></figure>
-            <figure class="phone"><img src="img/help/game-play.jpg" alt="A game in play: the numbered board, the paints, the mix for number 1 and the number buttons" loading="lazy"><figcaption>Mixing number 1</figcaption></figure>
-            <figure class="phone"><img src="img/help/game-score.jpg" alt="The score popup after locking in a portrait" loading="lazy"><figcaption>The score</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/game-setup.jpg" alt="The game setup: the portrait to paint, the palette, the level and the mode" loading="lazy"><figcaption>Setting up a game</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/game-play.jpg" alt="A game in play: the numbered board, the paints, the mix for number 1 and the number buttons" loading="lazy"><figcaption>Mixing number 1</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/game-score.jpg" alt="The score popup after locking in a portrait" loading="lazy"><figcaption>The score</figcaption></figure>
           </div>
         </section>
 
@@ -1162,9 +1176,9 @@
             </ol>
           </div>
           <div class="help-shots">
-            <figure class="phone"><img src="img/help/battle-play.jpg" alt="Value battle: two color squares on a gray board, the question, and the three answer buttons" loading="lazy"><figcaption>A round</figcaption></figure>
-            <figure class="phone"><img src="img/help/battle-answer.jpg" alt="After answering: the right swatch is ringed in gold and a line explains the values" loading="lazy"><figcaption>The answer explained</figcaption></figure>
-            <figure class="phone"><img src="img/help/battle-four.jpg" alt="Four lettered swatches and the prompt to tap them in order from darkest to lightest" loading="lazy"><figcaption>Four colors in order</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/battle-play.jpg" alt="Value battle: two color squares on a gray board, the question, and the three answer buttons" loading="lazy"><figcaption>A round</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/battle-answer.jpg" alt="After answering: the right swatch is ringed in gold and a line explains the values" loading="lazy"><figcaption>The answer explained</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/battle-four.jpg" alt="Four lettered swatches and the prompt to tap them in order from darkest to lightest" loading="lazy"><figcaption>Four colors in order</figcaption></figure>
           </div>
         </section>
 
