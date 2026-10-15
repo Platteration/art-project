@@ -447,9 +447,12 @@ export default async function pose(t, site) {
       await tab(page, 'study', { wait: false });
       await page.mouse.move(100, 100, { steps: 3 }); await page.mouse.up();
       await tab(page, 'pose');
+      // the frame redraws at the tab's size a frame or two after the switch: wait for that, not for time
+      await fr.waitForFunction(() => document.getElementById('view').width > 800, null, { timeout: 8000 }).catch(() => null);
       const s = await scan(fr);
       t.check(sane(s) && before !== await poseJson(fr) && await fr.evaluate(() => document.getElementById('view').width > 800 && !document.getElementById('undo').disabled), 'a hand dragged in the embed, the tab switched mid-drag and back: the pose moved and stays sane, the stage redrawn, Undo on', s);
     }
+    await fr.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); // the stage settled at its size
     await fr.evaluate(() => document.getElementById('snap').click());
     await fr.waitForFunction(() => document.getElementById('snapImg').naturalWidth > 0, null, { timeout: 8000 }).catch(() => null);
     t.check(await fr.evaluate(() => document.getElementById('snapDialog').open && document.getElementById('snapImg').naturalWidth === document.getElementById('view').width), 'Snapshot in the embed shows the picture');
