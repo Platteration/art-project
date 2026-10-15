@@ -73,7 +73,9 @@
     $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library, which may not have loaded. Try another browser, or reload the page and come back to this tab.';
     showSetup();
   }
-  const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, location.origin); };
+  // the frames' messages go to this page's own origin; opened from disk (file:), where every document is its own opaque origin and location.origin names none, they go to any, as the receivers check the sender window either way
+  const FRAME_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
+  const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, FRAME_ORIGIN); };
   const isPicture = (u) => typeof u === 'string' && /^data:image\/(jpeg|png);base64,/.test(u);
   // The page CSP allows blob: images, not data:, so frame pictures are re-wrapped as Blob URLs on
   // arrival (kept for the visit; the data strings themselves are dropped).

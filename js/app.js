@@ -2170,13 +2170,15 @@
   // Pose and light is its own page (pose.html), shown in a frame that loads the first time the tab
   // opens. The page says how tall it is, and the frame grows to fit, so it scrolls with the app.
   const poseFrame = $('poseFrame');
+  // the frames' messages go to this page's own origin; opened from disk (file:), where every document is its own opaque origin and location.origin names none, they go to any, as the receivers check the sender window either way
+  const FRAME_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
   function openPose() {
     if (!poseFrame.getAttribute('src')) poseFrame.setAttribute('src', poseFrame.dataset.src);
   }
   // it follows the app's Simple or Advanced switch: told when it loads and whenever the switch changes
   function tellPoseMode() {
     if (!poseFrame.getAttribute('src') || !poseFrame.contentWindow) return;
-    poseFrame.contentWindow.postMessage({ type: 'pose-and-light:mode', mode: document.body.classList.contains('mode-simple') ? 'simple' : 'advanced' }, location.origin);
+    poseFrame.contentWindow.postMessage({ type: 'pose-and-light:mode', mode: document.body.classList.contains('mode-simple') ? 'simple' : 'advanced' }, FRAME_ORIGIN);
   }
   poseFrame.addEventListener('load', tellPoseMode);
   window.addEventListener('studio:mode', tellPoseMode);

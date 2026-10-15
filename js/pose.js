@@ -15,7 +15,10 @@
   };
   // pose.html?render=1 in a hidden frame: the page draws pictures for Portrait Value Studio's Figure study
   const RENDER = /[?&]render=1(&|$)/.test(location.search) && window.parent !== window;
-  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, location.origin); };
+  // the app is told at this page's own origin; opened from disk (file:), where every document is its own
+  // opaque origin and location.origin names none, at any (the app checks the sender window either way)
+  const APP_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
+  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, APP_ORIGIN); };
   if (!window.THREE) { fail(); return; }
   window.__poseStarted = true; // pose-embed.js shows the failure panel if this never runs
   const T = window.THREE;
@@ -2090,7 +2093,7 @@
       });
       return list;
     };
-    const tell = (msg) => window.parent.postMessage(msg, location.origin);
+    const tell = (msg) => window.parent.postMessage(msg, APP_ORIGIN);
     let pictures = 0;                         // a newer list stops the pictures of the one before
     window.addEventListener('message', (e) => {
       const d = e.data;

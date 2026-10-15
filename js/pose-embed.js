@@ -32,12 +32,15 @@
     host.addEventListener('resize', size);
     new MutationObserver(theme).observe(host.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   }
+  // the app is told at its own origin; opened from disk (file:), where every document is its own opaque
+  // origin and location.origin names none, at any (the app checks the sender window either way)
+  const APP_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : '*';
   let told = 0;
   const tell = () => {
     const app = document.querySelector('.app');
     if (!app) return;
     const h = Math.ceil(app.getBoundingClientRect().bottom + window.scrollY);
-    if (h !== told) { told = h; window.parent.postMessage({ type: 'pose-and-light:height', height: h }, location.origin); }
+    if (h !== told) { told = h; window.parent.postMessage({ type: 'pose-and-light:height', height: h }, APP_ORIGIN); }
   };
   document.addEventListener('DOMContentLoaded', () => { tell(); if (window.ResizeObserver) new ResizeObserver(tell).observe(document.querySelector('.app')); });
   window.addEventListener('load', tell);
