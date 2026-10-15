@@ -37,6 +37,13 @@ const ranked = (page) => page.waitForFunction(() => document.querySelectorAll('#
 const mixed = (page) => page.waitForFunction(() => { const rows = document.querySelectorAll('#mixList .mix-row'); return rows.length > 0 && [...rows].every((r) => r.querySelector('.mix-badge') && !r.querySelector('.mix-pending')); }, null, { timeout: 30000 }).catch(() => null);
 // a suggestion has finished
 const suggestedDone = (page) => page.waitForFunction(() => { const b = document.getElementById('suggestBtn'); return !b.disabled && b.textContent === 'Suggest again'; }, null, { timeout: 30000 }).catch(() => null);
+// an action that starts a suggestion later (the library's close event is queued): the rows and chips on the page
+// are stamped first, and the wait holds until new ones have replaced them and every row is worked out
+async function afterSuggest(page, action) {
+  await page.evaluate(() => document.querySelectorAll('#mixList .mix-row, #resultPaints .paint-chip').forEach((e) => { e.dataset.old = '1'; }));
+  await action();
+  await page.waitForFunction(() => { const b = document.getElementById('suggestBtn'); const rows = document.querySelectorAll('#mixList .mix-row'); return !b.disabled && b.textContent === 'Suggest again' && !document.querySelector('#mixList [data-old], #resultPaints [data-old]') && rows.length > 0 && [...rows].every((r) => r.querySelector('.mix-badge') && !r.querySelector('.mix-pending')); }, null, { timeout: 30000 }).catch(() => null);
+}
 const rows = (page) => page.evaluate(() => [...document.querySelectorAll('#mixList .mix-row')].map((r) => {
   const badge = r.querySelector('.mix-badge');
   return { zone: r.querySelector('.mix-zone').textContent, recipe: r.querySelector('.mix-recipe').textContent, title: r.querySelector('.mix-recipe').title, badge: badge ? badge.textContent : '', status: badge ? badge.dataset.status : '', add: r.querySelector('.mix-add').getAttribute('aria-label'), mixTitle: r.querySelector('.mix-chip:nth-child(2)').title };
@@ -296,7 +303,7 @@ export default async function paints(t, site) {
     // one paint, the white alone
     await setMine(page, ['TW']);
     t.check((await text(page, '#paintDialogCount')) === '1 ticked', 'one tick: the dialog counts it', await text(page, '#paintDialogCount'));
-    await click(page, '#paintDialogDone'); await suggestedDone(page); await mixed(page);
+    await afterSuggest(page, () => click(page, '#paintDialogDone'));
     const s1 = { count: await text(page, '#mineCount'), chips: await chips(page), about: await text(page, '#resultAbout'), match: await text(page, '#resultMatch'), rs: await rows(page) };
     t.check(s1.count === '1 paint ticked' && JSON.stringify(s1.chips) === '["TW"]' && s1.about.startsWith('Chosen from your paints'), 'Done with one paint: a new suggestion from that paint alone', s1);
     t.check(s1.rs.length === n && s1.rs.every((r) => r.recipe === 'TW'), 'with white alone every mix is white', s1.rs.map((r) => r.recipe));
@@ -305,7 +312,7 @@ export default async function paints(t, site) {
     // two paints
     await click(page, '#mineEdit'); await sleep(100);
     await setMine(page, ['TW', 'IB']);
-    await click(page, '#paintDialogDone'); await suggestedDone(page); await mixed(page);
+    await afterSuggest(page, () => click(page, '#paintDialogDone'));
     const s2 = { count: await text(page, '#mineCount'), chips: await chips(page), rs: await rows(page) };
     t.check(s2.count === '2 paints ticked' && JSON.stringify(s2.chips) === '["TW","IB"]' && s2.rs.length === n && s2.rs.every((r) => RECIPE.test(r.recipe)), 'two paints: both go on the palette, every color gets a gray', s2);
     const studioErr = page.log.pageerrors.filter((e) => /painting\.js/.test(e));
@@ -337,7 +344,7 @@ export default async function paints(t, site) {
     t.check(r3.ticked.length === union.size && [...union].every((c) => r3.ticked.includes(c)) && r3.count === `${union.size} ticked`, `a second palette on top: the union (${union.size}), nothing unticked`, r3);
     const r4 = await tickPreset('');
     t.check(r4.ticked.length === union.size && r4.toast === '', 'the menu\'s heading row ticks nothing', r4);
-    await click(page, '#paintDialogDone'); await suggestedDone(page);
+    await afterSuggest(page, () => click(page, '#paintDialogDone'));
     t.check((await text(page, '#mineCount')) === `${union.size} paints ticked`, `the pane counts ${union.size} paints`, await text(page, '#mineCount'));
     await clean(t, page, 'tick a known palette');
 
@@ -374,9 +381,8 @@ export default async function paints(t, site) {
     t.check((await ticked(page)).length === 0 && (await text(page, '#paintDialogCount')) === '', 'Untick all empties the ticks (those hidden by the search too) and blanks the count', [(await ticked(page)).length, await text(page, '#paintDialogCount')]);
     await click(page, '#paintNone'); await sleep(50);
     t.check((await ticked(page)).length === 0, 'Untick all with nothing ticked is harmless');
-    await click(page, '#paintDialogDone'); await sleep(200);
+    await afterSuggest(page, async () => { await click(page, '#paintDialogDone'); await sleep(200); });
     t.check((await page.evaluate(() => document.getElementById('paintSearch').value)) === '' && !(await dialogOpen(page)), 'Done closes the dialog and clears the search for next time');
-    await suggestedDone(page);
     t.check((await text(page, '#mineCount')) === 'No paints ticked yet: suggestions come from the whole library.' && (await text(page, '#resultAbout')).startsWith('Chosen from the whole library'), 'after Untick all the pane and the new suggestion say the whole library', [await text(page, '#mineCount'), await text(page, '#resultAbout')]);
     await clean(t, page, 'search and untick');
 
@@ -384,7 +390,7 @@ export default async function paints(t, site) {
     const everyCode = await page.evaluate(() => Paints.LIBRARY.map((p) => p.code));
     await setMine(page, everyCode);
     t.check((await text(page, '#paintDialogCount')) === '77 ticked', 'all 77 ticked: the dialog counts them', await text(page, '#paintDialogCount'));
-    await click(page, '#paintDialogDone'); await suggestedDone(page); await mixed(page);
+    await afterSuggest(page, () => click(page, '#paintDialogDone'));
     const s77 = { count: await text(page, '#mineCount'), chips: await chips(page), about: await text(page, '#resultAbout') };
     t.check(s77.count === '77 paints ticked' && s77.chips.length >= 3 && s77.chips.length <= 11 && s77.chips[0] === 'TW' && s77.about.startsWith('Chosen from your paints'), 'all 77 ticked: a suggestion of at most 10 + white from "your paints"', s77);
     t.note(`All 77 ticked at size 10 suggests ${s77.chips.join(', ')}; the whole library at size 6 suggested ${s0.chips.join(', ')}.`);
@@ -406,9 +412,8 @@ export default async function paints(t, site) {
     await page.keyboard.press('Space'); await sleep(50);
     const nowTicked = await ticked(page);
     t.check(onBox && nowTicked.length === 76 && !nowTicked.includes(boxCode), `Tab reaches a paint and Space unticks it (${boxCode})`, [onBox, nowTicked.length]);
-    await page.keyboard.press('Escape'); await sleep(200);
+    await afterSuggest(page, async () => { await page.keyboard.press('Escape'); await sleep(200); });
     t.check(!(await dialogOpen(page)), 'Escape closes the library');
-    await suggestedDone(page);
     t.check((await text(page, '#mineCount')) === '76 paints ticked' && (await text(page, '#suggestBtn')) === 'Suggest again', 'Escape after a change counts the paints again and suggests again', [await text(page, '#mineCount'), await text(page, '#suggestBtn')]);
     await page.focus('#srcPreset'); await page.keyboard.press('Space'); await sleep(100);
     await ranked(page);
@@ -609,7 +614,7 @@ export default async function paints(t, site) {
     const item = await page.locator('#paintCats li label').first().boundingBox();
     t.check(item && item.height >= 36, 'phone: a paint row is tall enough to tap', item);
     await setMine(page, ['TW', 'YO', 'CRL', 'IB', 'UB']);
-    await click(page, '#paintDialogDone'); await suggestedDone(page); await mixed(page);
+    await afterSuggest(page, () => click(page, '#paintDialogDone'));
     t.check((await chips(page)).length >= 3 && (await chips(page)).length <= 6 && (await hscroll(page)) <= 0, 'phone: a suggestion from five paints shows without horizontal scroll', await chips(page));
     await click(page, '#blockViewPalette');
     await page.waitForFunction(() => !document.getElementById('blockViewPalette').classList.contains('is-busy'), null, { timeout: 20000 }).catch(() => null);
