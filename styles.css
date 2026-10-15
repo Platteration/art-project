@@ -1348,6 +1348,10 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* with the Studio's (or a Figure class's) tool strip along the bottom of a phone, the note sits above it */
+@media (max-width: 759px) {
+  body.tab-paint .toast, body.figure-focus .toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+}
 
 /* ---- Save dialog (where downloads are blocked) ---- */
 .save-dialog {
