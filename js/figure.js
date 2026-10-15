@@ -72,7 +72,7 @@
     $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library from the internet. Check the connection, then come back to this tab or reload the page.';
     showSetup();
   }
-  const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, '*'); };
+  const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, location.origin); };
   const isPicture = (u) => typeof u === 'string' && /^data:image\/(jpeg|png);base64,/.test(u);
   window.addEventListener('message', (e) => {
     if (e.source !== frame.contentWindow) return;

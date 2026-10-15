@@ -236,7 +236,7 @@
     function renderWash() {
       const codes = codesNow();
       if (!codes.includes(canvasState.washCode)) canvasState.washCode = codes.find((c) => ['YO', 'RS', 'BS', 'RU', 'BU', 'LR', 'NY', 'CO', 'TR', 'YOP', 'TOR'].includes(c)) || codes[1] || codes[0];
-      $('washRow').innerHTML = '';
+      $('washRow').replaceChildren();
       codes.forEach((code) => {
         const b = document.createElement('button'); b.type = 'button'; b.style.setProperty('--c', paintHex(code)); b.title = paintName(code); b.setAttribute('aria-label', `Wash of ${paintName(code)}`);
         b.setAttribute('aria-pressed', String(code === canvasState.washCode));
@@ -604,7 +604,7 @@
       $('eraserSub').textContent = state.eraser;
       // the Brushes icon shows the brush in hand (or the last one used)
       const b = BRUSHES.includes(state.tool) ? state.tool : state.lastBrush;
-      $('brushIcon').innerHTML = root.querySelector(`[data-brush="${b}"] svg`).innerHTML;
+      const brushSvg = root.querySelector(`[data-brush="${b}"] svg`); $('brushIcon').replaceChildren(...[...brushSvg.childNodes].map((n) => n.cloneNode(true)));
       $('brushSub').textContent = subs[b];
       $('brushBtn').setAttribute('aria-pressed', String(BRUSHES.includes(state.tool)));
       q('[data-ps-tool]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.psTool === state.tool)));
@@ -644,11 +644,14 @@
     // ---- Paints and the well -----------------------------------------------------------------------
     function setColor(c, name) { state.color = c; state.name = name; $('colorDot').style.setProperty('--c', css(c)); $('colorBtn').title = `Paints and mixing · ${name}`; }
     function renderPaints() {
-      $('paints').innerHTML = '';
+      $('paints').replaceChildren();
       codesNow().forEach((code) => {
         const li = document.createElement('li');
         const b = document.createElement('button'); b.type = 'button'; b.className = 'ps-paint'; b.title = paintName(code); b.dataset.code = code;
-        b.innerHTML = `<span class="ps-dot" style="--c:${paintHex(code)}"></span><span class="ps-code">${code}</span><span class="ps-n"></span>`;
+        const dot = document.createElement('span'); dot.className = 'ps-dot'; dot.style.setProperty('--c', paintHex(code));
+        const codeEl = document.createElement('span'); codeEl.className = 'ps-code'; codeEl.textContent = code;
+        const nEl = document.createElement('span'); nEl.className = 'ps-n';
+        b.append(dot, codeEl, nEl);
         b.addEventListener('click', () => { state.well.push({ code, amount: AMOUNTS[+$('amount').value] }); showWell(); });
         li.append(b); $('paints').append(li);
       });
@@ -693,7 +696,7 @@
     }
     $('dropMix').addEventListener('click', () => { if (picked < 0) return; state.mixes.splice(picked, 1); picked = -1; $('picked').hidden = true; renderMixes(); saveMixes(); });
     function renderMixes() {
-      $('mixes').innerHTML = '';
+      $('mixes').replaceChildren();
       if (!state.mixes.length) { const s = document.createElement('span'); s.className = 'ps-none'; s.textContent = 'Lock in a mix to keep it here.'; $('mixes').append(s); return; }
       state.mixes.forEach((m, i) => {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'ps-mix'; b.style.setProperty('--c', css(m.c)); b.title = `${m.name || 'Mix ' + (i + 1)}: ${recipeOf(m.parts)}`; b.setAttribute('aria-label', b.title);
@@ -754,7 +757,7 @@
     function renderPalettes() {
       paletteList = palettes();
       const sel = $('palette'), was = sel.value;
-      sel.innerHTML = '';
+      sel.replaceChildren();
       paletteList.forEach((p) => sel.append(new Option(p.name, p.id)));
       // until you choose one here, the palette follows the Study tab's
       const cur = window.StudioPalette && StudioPalette.current();
