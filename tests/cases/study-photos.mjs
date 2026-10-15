@@ -105,7 +105,7 @@ export default async function studyPhotos(t, site) {
       { title: 'SVG without a size (Chromium gives it 300 × 150)', make: async () => svgImage(), dims: [300, 150], corner: [127, 127, 127], at: [200, 100] },
       { title: 'a text file', make: async () => textFile(), reject: NOT_IMAGE },
       { title: 'a broken JPEG', make: async () => brokenImage(), reject: NOT_OPENED },
-      { title: 'a PNG handed over as application/octet-stream', make: async () => ({ ...(await makeImage(page, { width: 300, height: 200, name: 'untyped' })), mimeType: 'application/octet-stream' }), reject: NOT_IMAGE },
+      { title: 'a PNG handed over as application/octet-stream (its content decides)', make: async () => ({ ...(await makeImage(page, { width: 300, height: 200, name: 'octet' })), mimeType: 'application/octet-stream' }), dims: [300, 200] },
       { title: '5000 × 5000 JPEG (25 megapixels)', make: () => makeImage(page, { width: 5000, height: 5000, type: 'image/jpeg' }), dims: [2800, 2800], note: /^A very large photo \(5000 × 5000\) was reduced to 2800 × 2800 for speed\.$/ },
       { title: '6000 × 4000 JPEG (exactly 24 megapixels: not reduced)', make: () => makeImage(page, { width: 6000, height: 4000, type: 'image/jpeg' }), dims: [6000, 4000] },
     ];
@@ -148,7 +148,7 @@ export default async function studyPhotos(t, site) {
     });
     const untyped = await waitLabel(page, 'untyped');
     t.check(untyped && (await study(page)).label === 'untyped · 300 × 200 px' && same((await study(page)).value, [300, 200]) && (await toast(page)) === '', 'a PNG whose file has no type loads by its content, nothing said', { label: (await study(page)).label, toast: await toast(page) });
-    t.note('a PNG handed over as application/octet-stream is refused as "not an image" before its content is tried (readImage checks file.type first); one with an empty type loads by its content.');
+    t.note('a PNG handed over as application/octet-stream loads by its content, like one with an empty type: readImage lets a file of unknown type through to the decoder (checked among the kinds above).');
     await clean(t, page, 'untyped file');
 
     // ---- the same file twice, an empty change, a second photo while the first is still being read ----
@@ -179,7 +179,8 @@ export default async function studyPhotos(t, site) {
       const m = /^(\S+) · (\d+) × (\d+) px$/.exec(r.label);
       const expect = m && studySize(+m[2], +m[3]);
       t.check(m && same(r.value, expect) && same(r.orig, expect) && r.busy, `two photos dropped at once (run ${i}): the study drawn is the photo the label names`, { label: r.label, value: r.value });
-      t.note(`two photos dropped at once, heavy.jpg (5000 × 5000) then light.png (run ${i}): the page shows ${m ? m[1] : r.label}; toast "${said}". Which one wins follows which file finishes reading, not which was chosen last (readImage has no job counter; only prepareAndRun has one)${m && m[1] === 'light.png' && /very large/.test(said) ? ', and the six-second reduction note describes the photo that is not shown' : ''}. The window is the heavy file's read time (tens of ms): not reachable by hand, so a note.`);
+      // the last file chosen wins, whichever finishes reading first, and the other's reduction note is not said
+      t.check(m && m[1] === 'light.png' && !/very large/.test(said), `two photos dropped at once, heavy.jpg (5000 × 5000) then light.png (run ${i}): the one chosen last is shown and nothing is said of the other`, { label: r.label, toast: said });
     }
     await clean(t, page, 'two photos at once');
 
@@ -391,7 +392,7 @@ export default async function studyPhotos(t, site) {
       { title: 'dropped broken image', files: [brokenImage()], reject: NOT_OPENED },
       { title: 'dropped 15 × 15 PNG', files: [await makeImage(page, { width: 15, height: 15 })], reject: TOO_SMALL },
       { title: 'dropped sizeless SVG', files: [svgImage()], name: 'drawing.svg', dims: [300, 150] },
-      { title: 'two files dropped at once (the first is taken)', files: [await makeImage(page, { width: 400, height: 500, name: 'first.png' }), await makeImage(page, { width: 300, height: 300, name: 'second.png' })], name: 'first.png', dims: [400, 500] },
+      { title: 'two files dropped at once (the first is taken, and the drop says so)', files: [await makeImage(page, { width: 400, height: 500, name: 'first.png' }), await makeImage(page, { width: 300, height: 300, name: 'second.png' })], name: 'first.png', dims: [400, 500], said: /^2 files were dropped: only the first, first\.png, was loaded\.$/ },
     ];
     for (const d of drops) {
       await resetToast(page);
@@ -403,14 +404,14 @@ export default async function studyPhotos(t, site) {
         t.check((await study(page)).label === before.label && (await study(page)).busy && !(await visible(page, '#dropHint')), `${d.title}: the study stays, the hint is gone`, (await study(page)).label);
       } else {
         t.check(await waitLabel(page, d.name) && (await study(page)).label === `${d.name} · ${d.dims.join(' × ')} px` && same((await study(page)).value, studySize(...d.dims)), `${d.title}: loaded with its label`, (await study(page)).label);
+        if (d.said) t.check(await waitToast(page, d.said), `${d.title}: the page says which was loaded`, await toast(page));
       }
       await clean(t, page, d.title);
     }
-    t.note('two files dropped at once: the first is loaded and nothing is said about the second (app.js drop handler takes files[0]).');
     await resetToast(page);
     await dropText(page, 'body', 'just some words');
     await sleep(400);
-    t.check((await toast(page)) === '' && (await study(page)).label.startsWith('first.png'), 'dropped plain text: nothing happens and nothing is said', await toast(page));
+    t.check((await toast(page)) === 'That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one.' && (await study(page)).label.startsWith('first.png'), 'dropped plain text: nothing loads, and the page says it was text', await toast(page));
     await resetToast(page);
     await dropText(page, 'body', '<img src="https://example.com/a.jpg">', 'https://example.com/a.jpg');
     await sleep(400);

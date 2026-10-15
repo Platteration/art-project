@@ -64,11 +64,14 @@
   }
 
   const known = new Set(Paints.LIBRARY.map((p) => p.code));
-  const choice = Object.assign({ source: 'preset', preset: '', max: 6 }, load(CHOICE_KEY, {}));
-  // only values the drawer knows: anything else (an older version, a stray write) falls back to the default
-  if (choice.source !== 'mine') choice.source = 'preset';
-  if (typeof choice.preset !== 'string' || (choice.preset && !Paints.PRESETS.some((pr) => pr.id === choice.preset))) choice.preset = '';
-  if (!Number.isInteger(choice.max) || choice.max < 3 || choice.max > 10) choice.max = 6; // the range of #paintMax
+  // the saved choice, read field by field: only values the drawer knows, anything else (an older
+  // version, a stray write) falls back to the default, and a key it does not read is not kept
+  const saved = load(CHOICE_KEY, {}) || {};
+  const choice = {
+    source: saved.source === 'mine' ? 'mine' : 'preset',
+    preset: typeof saved.preset === 'string' && Paints.PRESETS.some((pr) => pr.id === saved.preset) ? saved.preset : '',
+    max: Number.isInteger(saved.max) && saved.max >= 3 && saved.max <= 10 ? saved.max : 6, // the range of #paintMax
+  };
   const mine = new Set(load(MINE_KEY, []).filter((c) => known.has(c)));
 
   // Paints ready to mix, made once each
@@ -159,8 +162,12 @@
     primary: 'A yellow, a red and a blue. Mix every color yourself.',
     rembrandt: 'Earth colors, for the old-master look.',
   };
+  const isSimple = () => document.body.classList.contains('mode-simple');
   function renderPresets(n) {
     els.presetList.replaceChildren();
+    // Simple mode shows three of the ten: its badge goes to the best of those (shown by the stylesheet
+    // in Simple mode only), unless the best overall is one of them
+    const simpleBest = ranking.find((x) => SIMPLE_WHY[x.preset.id]);
     ranking.forEach(({ preset, cov }, rank) => {
       const li = el('li');
       li.dataset.preset = preset.id;
@@ -171,6 +178,7 @@
       const head = el('span', 'preset-head');
       head.append(el('span', 'preset-name', preset.name));
       if (rank === 0) head.append(el('span', 'preset-best', 'Best match'));
+      else if (simpleBest && simpleBest.preset === preset) head.append(el('span', 'preset-best-simple', 'Best match'));
       const dots = el('span', 'paint-dots');
       preset.paints.forEach((c) => dots.append(dot(c)));
       const meter = el('span', 'preset-meter');
@@ -375,10 +383,11 @@
     refresh();
   });
 
-  // C: Simple offers its three palettes and hides My paints (README, Simple and Advanced): coming back to
-  // Simple from My paints, or from a palette Simple does not list, moves to the best of the three, and says so
-  window.addEventListener('studio:mode', (e) => {
-    if (e.detail !== 'simple') return;
+  // Simple offers its three palettes and hides My paints (README, Simple and Advanced): Simple reached
+  // from My paints, or from a palette Simple does not list, moves to the best of the three (the first of
+  // them before the study has been ranked) and says so, at the switch and at load alike
+  function fitSimple() {
+    if (!isSimple()) return;
     const simpleIds = Object.keys(SIMPLE_WHY);
     if (choice.source === 'preset' && simpleIds.includes(choice.preset)) return;
     const best = (ranking || []).map((x) => x.preset.id).find((id) => simpleIds.includes(id)) || simpleIds[0];
@@ -390,7 +399,8 @@
     refresh();
     announce();
     if (was) Studio.toast(`Simple mode uses ${presetName(best)} instead of ${was}`, 4000);
-  });
+  }
+  window.addEventListener('studio:mode', fitSimple);
 
   // ---- The paint library dialog ---------------------------------------------
 
@@ -485,9 +495,10 @@
   /*
    * The palette chosen here: the known palette picked, or the suggested one from My paints. With
    * none chosen yet, the known palette that mixes this study's colors best (most within reach,
-   * then closest), as the list ranks them. { name, short, codes, chosen } or null.
+   * then closest), as the list ranks them; in Simple mode, the best of the three it shows.
+   * { name, short, codes, chosen } or null.
    */
-  let bestFor = null, best = null;
+  let bestFor = null, bestSimple = null, best = null;
   function current() {
     if (choice.source === 'preset' && choice.preset) {
       const pr = Paints.PRESETS.find((p) => p.id === choice.preset);
@@ -496,10 +507,10 @@
     if (choice.source === 'mine' && suggested) return { name: 'Suggested palette', codes: suggested.codes, chosen: true };
     const r = Studio.result();
     if (!r) return null;
-    if (bestFor !== r) {
+    if (bestFor !== r || bestSimple !== isSimple()) {
       const colors = studyColors();
-      bestFor = r;
-      best = Paints.PRESETS.map((pr) => ({ pr, cov: Mixing.coverage(pr.paints.map(paintFor), colors) }))
+      bestFor = r; bestSimple = isSimple();
+      best = Paints.PRESETS.filter((pr) => !bestSimple || SIMPLE_WHY[pr.id]).map((pr) => ({ pr, cov: Mixing.coverage(pr.paints.map(paintFor), colors) }))
         .sort((a, b) => b.cov.reached - a.cov.reached || a.cov.score - b.cov.score)[0].pr;
     }
     return { name: best.name, codes: best.paints, chosen: false };
@@ -510,5 +521,6 @@
 
   renderMine();
   refresh();
+  fitSimple();
   announce();
 })();

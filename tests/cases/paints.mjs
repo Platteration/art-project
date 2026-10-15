@@ -51,7 +51,7 @@ const rows = (page) => page.evaluate(() => [...document.querySelectorAll('#mixLi
 const chips = (page) => page.evaluate(() => [...document.querySelectorAll('#resultPaints .paint-code')].map((e) => e.textContent));
 const presetList = (page) => page.evaluate(() => [...document.querySelectorAll('#presetList li')].map((li) => {
   const b = li.querySelector('.preset');
-  return { id: li.dataset.preset, simple: 'simple' in li.dataset, pressed: b.getAttribute('aria-pressed') === 'true', label: b.getAttribute('aria-label'), best: !!li.querySelector('.preset-best'), reach: li.querySelector('.preset-reach').textContent, dots: li.querySelectorAll('.paint-dot').length, why: (li.querySelector('.preset-why') || {}).textContent || '', shown: getComputedStyle(li).display !== 'none' };
+  return { id: li.dataset.preset, simple: 'simple' in li.dataset, pressed: b.getAttribute('aria-pressed') === 'true', label: b.getAttribute('aria-label'), best: [...li.querySelectorAll('.preset-best, .preset-best-simple')].some((e) => getComputedStyle(e).display !== 'none'), reach: li.querySelector('.preset-reach').textContent, dots: li.querySelectorAll('.paint-dot').length, why: (li.querySelector('.preset-why') || {}).textContent || '', shown: getComputedStyle(li).display !== 'none' };
 }));
 const presets = (page) => page.evaluate(() => Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, paints: p.paints, about: p.about })));
 const nColors = (page) => page.evaluate(() => Studio.result().blockColors.filter((c) => c.share > 0).length);
@@ -485,8 +485,7 @@ export default async function paints(t, site) {
     const why = { zorn: 'Four colors. The easiest way to mix skin.', primary: 'A yellow, a red and a blue. Mix every color yourself.', rembrandt: 'Earth colors, for the old-master look.' };
     t.check(shown.length === 3 && shown.every((l) => why[l.id] === l.why), 'Simple mode offers Zorn, Three primaries and Rembrandt, each with its reason', shown.map((l) => [l.id, l.why]));
     t.check(!(await visible(page, '#srcMine')) && !(await visible(page, '#minePane')) && !(await visible(page, '#lean')), 'Simple mode hides My paints and the lighter-tones lean');
-    const bestShown = shown.some((l) => l.best);
-    t.note(`Simple mode on the sample: the "Best match" badge is ${bestShown ? 'on a shown palette' : `on ${list.find((l) => l.best).id}, which Simple hides, so no shown palette carries it though the hint says "Best match first"`}.`);
+    t.check(shown.filter((l) => l.best).length === 1 && shown.find((l) => l.best) === shown[0], 'in Simple mode exactly one of the three shown palettes is marked Best match, the first shown, so "Best match first" holds there too', shown.map((l) => [l.id, l.best]));
     await pickPreset(page, 'primary');
     t.check((await text(page, '#resultName')) === 'Three primaries' && (await rows(page)).length === (await nColors(page)), 'picking a Simple palette shows its mixes', [await text(page, '#resultName'), (await rows(page)).length]);
     // Advanced, My paints, then Simple: nothing to choose from
@@ -507,7 +506,9 @@ export default async function paints(t, site) {
     const p3 = await openPage(site, { storage: { [K.drawers]: '["colors"]', [K.choice]: '{"source":"preset","preset":"schmid","max":6}' } });
     await settled(p3); await ranked(p3); await mixed(p3);
     const l3 = await presetList(p3);
-    t.note(`Simple mode with Richard Schmid saved from Advanced: the result shows "${await text(p3, '#resultName')}" and the header "${await text(p3, '#colorsState')}", while ${l3.filter((l) => l.shown && l.pressed).length} of the three shown palettes is pressed (the chosen one is hidden). The choice is kept, as the README says, but Simple cannot show which it is.`);
+    const pressed3 = l3.filter((l) => l.shown && l.pressed);
+    t.check(pressed3.length === 1 && pressed3[0].id === 'zorn' && (await text(p3, '#resultName')) === 'Zorn' && (await storageGetRaw(p3, K.choice)) === '{"source":"preset","preset":"zorn","max":6}', 'Simple mode at load with Richard Schmid saved from Advanced moves to Zorn (the first of the three before the study is ranked), shows its mixes and saves it', [pressed3.map((l) => l.id), await text(p3, '#resultName'), await storageGetRaw(p3, K.choice)]);
+    t.note(`Simple mode with Richard Schmid saved from Advanced: the header reads "${await text(p3, '#colorsState')}".`);
     await clean(t, p3, 'simple with a hidden choice');
     await p3.context().close();
   }

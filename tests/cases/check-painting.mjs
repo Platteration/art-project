@@ -17,14 +17,14 @@
 // depends on; and the phone width.
 import fs from 'node:fs';
 import path from 'node:path';
-import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, sleep, PHONE, PROTO_NAMES } from '../lib.mjs';
+import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
 
 const EXAMPLE_LABEL = 'Example painting · a made-up attempt at the sample: lifted shadows, warmer skin, and photographed slightly tilted. Line it up below to see the score change. Load your own to replace it.';
 const NO_ART_LABEL = 'Load a photo of your finished painting to score it against the reference.';
 const SAMPLE = /^Sample study · a painted stand-in\./;
 const NOT_IMAGE = /^That file is not an image\. Choose a JPG, PNG or WebP photo\.$/;
 const NOT_OPENED = /^This image could not be opened\. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first\.$/;
-const TOO_SMALL = /^That picture is too small to study \(\d+ × \d+ px\): it needs at least 16 px on each side\.$/;
+const TOO_SMALL = /^That picture is too small to check \(\d+ × \d+ px\): it needs at least 16 px on each side\.$/; // the painting's own wording, not the Study tab's
 const NOTE = /^(Too (light|dark) by \d+\.\d value|Too (warm|cool)|Too (saturated|gray)|Hue is off)(, (too (warm|cool)|too (saturated|gray)))*$/;
 const META = /^\d{1,3}% match · (Shadow|Middle|Light) shape · \d+\.\d% of picture · ΔE \d+\.\d · #[0-9A-F]{6} → #[0-9A-F]{6}$/;
 const NONE_OFF = 'Every large shape is within ΔE 5 of the reference.';
@@ -139,13 +139,16 @@ export default async function checkPainting(t, site) {
     // README names against the page's words (the spec is the expectation)
     const words = await page.evaluate(() => ({ color: document.querySelector('#checkBody .score-label').textContent.trim(), subs: [...document.querySelectorAll('#checkBody .score-sub dt')].map((e) => e.textContent.trim()), list: document.querySelector('#checkBody .fixes h3').textContent.trim(), map: document.querySelector('#checkPanels figure:last-child figcaption span').textContent.trim() }));
     t.check(/Accuracy by shape/.test(words.map), 'the map panel is called Accuracy by shape, as the README does', words.map);
-    // the README's "You get" list, read from the README as it stands, names what the page shows
-    const readme = fs.readFileSync(path.join(site.root, 'README.md'), 'utf8');
+    // the README's "You get" list, read from the checkout's README as it stands (an export carries no README),
+    // names what the page shows
+    const readmePath = path.join(ROOT, 'README.md');
+    const readme = fs.existsSync(readmePath) ? fs.readFileSync(readmePath, 'utf8') : '';
     const section = readme.slice(readme.indexOf('### How close did I get?'), readme.indexOf('\n## How to use'));
     const promised = [...section.matchAll(/^ {3}- \*\*([^*]+)\*\*/gm)].map((m) => m[1]);
     const shown = [words.color, ...words.subs, words.list, words.map];
     const namedAsReadme = section.length > 0 && shown.every((w) => section.includes(`**${w}**`));
-    if (!t.check(namedAsReadme, 'the scores, the list and the map carry the names the README promises', { page: shown, readme: promised })) {
+    if (!readme) t.note('no README.md beside the tests: the page\'s names were not checked against the spec');
+    else if (!t.check(namedAsReadme, 'the scores, the list and the map carry the names the README promises', { page: shown, readme: promised })) {
       t.finding({ title: 'The README names the results differently from the page', severity: 'low', steps: 'Open index.html#check. Read the scorecard\'s labels, the list\'s heading and the map\'s caption, then the "You get" list of README.md\'s "How close did I get?" section.', expected: 'One vocabulary for the visitor who reads both: the page uses the names the README promises, or the README uses the page\'s.', actual: `The page says ${shown.map((w) => `"${w}"`).join(', ')}; the README promises ${promised.map((w) => `"${w}"`).join(', ')}. Cause: index.html lines 348-385 (the scorecard, the fixes heading and the map caption) against the README section's list.` });
     }
     // Simple mode: plain-words hints, the formulas behind Show the details
@@ -289,7 +292,7 @@ export default async function checkPainting(t, site) {
       const b = await box(page, '#cv-art');
       await page.mouse.move(b.x + b.width * 0.1, b.y + b.height * 0.1); await page.mouse.down(); await page.mouse.move(b.x + b.width * 0.3, b.y + b.height * 0.3, { steps: 5 }); await page.mouse.up(); await sleep(300);
       s = await state(page);
-      t.note(`a drag (not a click) across Your painting while picking ${s.toast ? 'says: ' + s.toast : 'does nothing and says nothing'}; picking ${s.picking ? 'stays on' : 'ends'} (the README asks for a click, so this is recorded, not failed)`);
+      t.check(s.toast === 'Click one white or gray spot, without dragging' && s.picking, 'a drag (not a click) across Your painting while picking says to click one spot, and picking stays on', { toast: s.toast, picking: s.picking });
       if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
     }
     await click(page, '#wbPick'); await sleep(50);
@@ -457,7 +460,6 @@ export default async function checkPainting(t, site) {
         await sleep(300);
         const s = await state(page);
         t.check(said && s.label === lastLabel && s.body && s.badge === example.badge, `${k.title}: refused with the right words, the painting before it stays scored`, { toast: s.toast, label: s.label.slice(0, 40), badge: s.badge });
-        if (k.reject === TOO_SMALL && k.title === 'a 1 × 1 PNG') t.note(`a too-small painting photo gets the Study tab's wording ("${s.toast}"): "too small to study" rather than too small to check`);
       } else {
         const loaded = await loadArt(page, k.file);
         const s = await state(page);
@@ -574,8 +576,7 @@ export default async function checkPainting(t, site) {
     await countResults(page);
     await busyHidden(page);
     let s = await state(page);
-    t.check(!s.open && !s.section && s.badge === '' && s.label === EXAMPLE_LABEL, 'a plain load: the drawer closed with an empty badge (nothing scored until it is opened), the example ready', { open: s.open, section: s.section, badge: s.badge });
-    t.note('with the drawer closed the badge is empty until the drawer is first opened (the other drawers\' badges say their state from the start); the README promises only that the badge keeps a score.');
+    t.check(!s.open && !s.section && s.badge === 'Not scored yet' && s.label === EXAMPLE_LABEL, 'a plain load: the drawer closed, its badge says the example is not scored until it is opened, the example ready', { open: s.open, section: s.section, badge: s.badge });
     await tab(page, 'help');
     const went = await page.evaluate(() => { const b = document.querySelector('[data-go="check"]'); if (!b) return false; b.click(); return true; });
     await sleep(400);
@@ -608,7 +609,7 @@ export default async function checkPainting(t, site) {
       await countResults(p);
       await busyHidden(p); await sleep(300);
       const s = await state(p);
-      t.check(s.open === open && s.section === open && (open ? s.body && s.badge === `Color ${s.color} · Value ${s.value}` : s.badge === '') && s.label === EXAMPLE_LABEL, `${title}: the drawer ${open ? 'opens with the example scored' : 'stays closed, nothing scored yet'}`, { open: s.open, section: s.section, badge: s.badge, simple: s.simple });
+      t.check(s.open === open && s.section === open && (open ? s.body && s.badge === `Color ${s.color} · Value ${s.value}` : s.badge === 'Not scored yet') && s.label === EXAMPLE_LABEL, `${title}: the drawer ${open ? 'opens with the example scored' : 'stays closed, nothing scored yet'}`, { open: s.open, section: s.section, badge: s.badge, simple: s.simple });
       await clean(t, p, title);
       await p.context().close();
     }

@@ -664,7 +664,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .preset-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .preset-name { font-weight: 600; }
-.preset-best {
+.preset-best, .preset-best-simple {
   flex: none;
   padding: 1px 7px;
   border-radius: 999px;
@@ -672,6 +672,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   color: var(--surface);
   font: 600 0.66rem/1.5 var(--mono);
 }
+.preset-best-simple { display: none; } /* the best of Simple mode's three: shown there only */
+.mode-simple .preset-best-simple { display: inline; }
 .paint-dots { display: flex; flex-wrap: wrap; gap: 3px; }
 .paint-dot {
   width: 14px; height: 14px; flex: none;

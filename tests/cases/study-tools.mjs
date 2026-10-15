@@ -195,8 +195,7 @@ export default async function studyTools(t, site) {
     await resetToast(page);
     await tapAt(page, 0.5, 0.5);
     await dragPx(page, 0.5, 0.5, 1, 0, { mid: false });
-    t.check((await count(page, 'line')) === 0, 'a tap and a 1 px slip draw no line');
-    t.note('Lines: a tap or a slip draws nothing and says nothing (app.js 938–940: a line under 4 px is dropped without a word; a measure of that length gets a hint). The README promises no message, so this is noted, not failed.');
+    t.check((await count(page, 'line')) === 0 && (await toastShown(page)) === 'Drag from one point to another to draw a line', 'a tap and a 1 px slip draw no line, and say to drag', await toastShown(page));
     await dragFrac(page, [0.2, 0.3], [0.8, 0.3]);
     t.check((await count(page, 'line')) === 1 && !(await disabled(page, '#lineUndo')) && !(await disabled(page, '#lineClear')), 'a drag draws a line: the badge says 1, Undo and Clear come on');
     t.check((await overlayHas(page, 'cv-value', 0.5, 0.3, COLORS.lcRed)) && (await overlayHas(page, 'cv-block', 0.5, 0.3, COLORS.lcRed)), 'the line appears on every image');
@@ -322,8 +321,14 @@ export default async function studyTools(t, site) {
       if (!/·/.test(want)) t.check((await toastShown(page)) === '' && (await text(page, '#toolHint')) === hint, `unit on my canvas "${value}": the page says nothing about a length it cannot use`);
       fy += 0.06;
     }
-    t.note('Unit on my canvas: 0, a negative number, 10000 or more, letters and 1e400 are silently ignored: the labels drop the length and nothing says why (app.js 1496–1499 canvasSize: v > 0 && v < 10000). The input lets a negative or huge number stand.');
-    t.note('Unit on my canvas: "1e400" typed into the field is emptied by the browser (a number field keeps only finite numbers), so the labels drop the length without a word.');
+    // a length the labels cannot use is said when the field is left; letters and 1e400 are emptied by the
+    // browser itself (a number field keeps only finite numbers), which counts as not set
+    const UNUSABLE = 'Unit on my canvas needs a length over 0 and under 10 000: the labels leave it out until then.';
+    for (const [value, said] of [['0', UNUSABLE], ['-5', UNUSABLE], ['10000', UNUSABLE], ['abc', ''], ['1e400', ''], ['', '']]) {
+      await resetToast(page);
+      await setSize(page, value);
+      t.check((await toastShown(page)) === said, `unit on my canvas "${value}" left in the field: ${said ? 'said to be unusable' : 'nothing said (not set)'}`, await toastShown(page));
+    }
     await setSize(page, '10'); await page.selectOption('#canvasSys', 'cm');
     const kept = JSON.parse(await storageGet(page, CANVAS_KEY));
     t.check(kept && kept.value === '10' && kept.sys === 'cm', 'the canvas length is kept in the browser as typed', kept);

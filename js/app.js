@@ -382,16 +382,20 @@
   // phone, so for a photo the visitor just loaded the "Updating…" indicator is painted first and the
   // work runs two frames later; a newer photo arriving in between wins. Start-up prepares at once,
   // so the sample study and the hash routes find the data ready.
-  let prepareJob = 0;
+  let prepareJob = 0, prepareReset = false;
   function prepareAndRun(resetSplit, immediate) {
     const job = ++prepareJob;
+    // a photo's auto split is owed until a job runs: a setting changed in the window takes it over
+    prepareReset = prepareReset || !!resetSplit;
     const work = () => {
       if (job !== prepareJob) return;
+      const reset = prepareReset;
+      prepareReset = false;
       state.prep = Study.prepare(state.source, +els.detail.value);
       const { w, h, rgba } = state.prep;
       paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
       state.pixels.orig = rgba;
-      if (resetSplit) autoSplit();
+      if (reset) autoSplit();
       runSoon(0);
     };
     if (immediate) { work(); return; }
@@ -457,12 +461,19 @@
 
   // ---- Loading photos -----------------------------------------------------
 
-  function readImage(file, done) {
+  // The last file chosen wins: a read still under way when another file is chosen for the same
+  // place (two files in the same instant) shows nothing and says nothing when it finishes.
+  const readJobs = { photo: 0, art: 0 };
+  function readImage(file, done, slot = 'photo') {
     if (!file) return;
-    if (file.type && !file.type.startsWith('image/')) {
+    // the type is the browser's guess from the name: a file with none, or with the catch-all
+    // application/octet-stream, is tried by its content
+    const typed = file.type && file.type !== 'application/octet-stream';
+    if (typed && !file.type.startsWith('image/')) {
       toast('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
       return;
     }
+    const job = ++readJobs[slot];
     const url = URL.createObjectURL(file);
     const img = new Image();
     let settled = false;
@@ -470,11 +481,13 @@
       if (settled) return;
       settled = true;
       URL.revokeObjectURL(url);
+      if (job !== readJobs[slot]) return; // another file was chosen while this one was read
       const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-      // an image with no size (an SVG without width and height) would become a blank 1 x 1 study, and one
-      // under 16 px a side has nothing to study: each is told what is wrong with it
+      // an image with no size at all would become a blank 1 x 1 study (an SVG without width, height or
+      // viewBox, where the browser gives it none: Chromium gives such an SVG 300 x 150, and it loads as
+      // that), and one under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
-        toast(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to study (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
+        toast(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
         return;
       }
       const r = shrinkIfHuge(img, w, h);
@@ -484,6 +497,7 @@
       if (settled) return;
       settled = true;
       URL.revokeObjectURL(url);
+      if (job !== readJobs[slot]) return;
       toast('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
     };
     img.onload = loaded;
@@ -518,8 +532,9 @@
     return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
-  function loadFile(file) {
-    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', note));
+  // extra: a sentence about how the file arrived (the others dropped with it), said with the photo's own
+  function loadFile(file, extra) {
+    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', [extra, note].filter(Boolean).join(' ')));
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
@@ -544,16 +559,17 @@
     prepareAndRun(true);
   }
 
-  function loadArtFile(file) {
+  function loadArtFile(file, extra) {
     readImage(file, (img, note) => {
       setArt(img, file.name || 'Pasted painting', false);
       runSoon(0);
-      if (note) toast(note, 5000);
-    });
+      const said = [extra, note].filter(Boolean).join(' ');
+      if (said) toast(said, 5000);
+    }, 'art');
   }
 
   // Loads whichever image the open tab is about
-  const loadForTab = (file) => (checking() ? loadArtFile(file) : loadFile(file));
+  const loadForTab = (file, extra) => (checking() ? loadArtFile(file, extra) : loadFile(file, extra));
 
   function setSourceLabel(name, w, h, isSample) {
     state.isSample = isSample;
@@ -598,9 +614,12 @@
     if (!hasFiles(e)) {
       const types = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
       if (types.includes('text/uri-list') || types.includes('text/html')) toast('Save the picture to your device first, then drop the file here.', 5000);
+      else if (types.includes('text/plain')) toast('That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one.', 5000);
       return;
     }
-    loadForTab(e.dataTransfer.files[0]);
+    // one photo at a time: the first of several is taken, and the drop says so
+    const files = e.dataTransfer.files;
+    loadForTab(files[0], files.length > 1 ? `${files.length} files were dropped: only the first, ${files[0].name}, was loaded.` : '');
   });
   window.addEventListener('paste', (e) => {
     const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith('image/'));
@@ -939,6 +958,8 @@
         } else if (len >= 4) {
           state.lines.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, color: d.color });
           record({ kind: 'line', op: 'add' });
+        } else {
+          toast('Drag from one point to another to draw a line');
         }
         drawAllOverlays();
         // the drag is over, and with it the loupe's length and tilt
@@ -970,7 +991,8 @@
       }
       if (state.picking) {
         if (canvas === els.canvases.art && s && moved < 10) pickNeutral(s);
-        else if (moved < 10) toast('Click a white or gray spot on Your painting');
+        else if (canvas === els.canvases.art) toast('Click one white or gray spot, without dragging');
+        else toast('Click a white or gray spot on Your painting');
         return;
       }
       // the accuracy map's tints are not colors worth keeping; a drag cancelled with Esc ends here too
@@ -2110,6 +2132,11 @@
   const canvasSizeChanged = () => { saveCanvasSize(); updateToolHint(); drawAllOverlays(); };
   els.canvasSize.addEventListener('input', canvasSizeChanged);
   els.canvasSys.addEventListener('change', canvasSizeChanged);
+  // a length the labels cannot use (0, below 0, 10 000 or more) is said when the field is left; the
+  // browser itself empties letters and a number beyond what it holds, and empty means not set
+  els.canvasSize.addEventListener('change', () => {
+    if (els.canvasSize.value !== '' && !canvasSize()) toast('Unit on my canvas needs a length over 0 and under 10 000: the labels leave it out until then.', 5000);
+  });
 
   window.addEventListener('keydown', (e) => {
     // the save dialog is modal: Esc only closes it, and nothing behind it should change
@@ -2223,6 +2250,8 @@
     setPicking(false);
     updateColorFix();
     els.artSource.textContent = '';
+    // the badge says what the drawer holds before it is opened (scoring waits for that); a score replaces it
+    els.drawerState.check.textContent = img ? 'Not scored yet' : 'No painting yet';
     if (!img) {
       els.artSource.textContent = 'Load a photo of your finished painting to score it against the reference.';
       return;
@@ -2332,7 +2361,7 @@
     els.checkBody.hidden = !ready;
     els.checkPanels.hidden = !ready;
     els.alignPanel.hidden = !ready;
-    if (!ready) { els.drawerState.check.textContent = state.art.source ? '' : 'No painting yet'; return; }
+    if (!ready) { els.drawerState.check.textContent = state.art.source ? 'Not scored yet' : 'No painting yet'; return; }
 
     const a = align();
     const key = [state.prep.w, state.prep.h, els.artFit.value, a.x, a.y, a.scale, a.rot, state.art.gains.join(',')].join(':');
