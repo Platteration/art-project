@@ -483,9 +483,11 @@
     });
     if (board) notePreview();
   }
+  // a best is a number of points: a saved value of another kind (a stray write) is no best
+  const bestOfKey = (bests, key) => (typeof bests[key] === 'number' && Number.isFinite(bests[key]) && bests[key] >= 0 ? bests[key] : null);
   function notePreview() {
     const m = mode(), lv = LEVELS[level()];
-    els.previewNote.textContent = `${board.groups.length} numbers to mix, `
+    els.previewNote.textContent = `${board.groups.length} number${board.groups.length === 1 ? '' : 's'} to mix, `
       + (m === 'relaxed' ? 'no time limit.' : `${fmtTime(lv.seconds)} on the clock${m === 'memory' ? `, after a ${LOOK_SECONDS}-second look.` : '.'}`)
       + (m === 'value' ? ' Values first, then color.' : '');
   }
@@ -519,7 +521,7 @@
         });
       }
     }
-    const best = load(BEST_KEY, {})[bestKey()];
+    const best = bestOfKey(load(BEST_KEY, {}), bestKey());
     els.best.textContent = best ? `Your best on this portrait at this level in ${MODES[mode()].name} mode: ${best} points` : '';
   }
 
@@ -540,8 +542,9 @@
 
   let timer = 0;
 
-  async function startGame() {
-    refreshSetup();
+  // keep: play the board just played again, even if the Study tab's photo has changed meanwhile
+  async function startGame(keep) {
+    if (!keep || !board) refreshSetup();
     const p = chosenPalette();
     const targets = await targetsFor(board, p);
     if (!targets) return; // the board or palette changed while it was being mixed
@@ -1216,7 +1219,8 @@
     const a = perTap();
     els.amountOut.textContent = `${fmtParts(a)} part${a > 1 ? 's' : ''} per tap`;
   }
-  els.amount.value = Math.max(0, AMOUNTS.indexOf(load(AMOUNT_KEY, 1)));
+  const savedAmountAt = AMOUNTS.indexOf(load(AMOUNT_KEY, 1)); // a saved amount off the list falls back to one part
+  els.amount.value = savedAmountAt < 0 ? AMOUNTS.indexOf(1) : savedAmountAt;
   els.amount.addEventListener('input', () => { save(AMOUNT_KEY, perTap()); showAmount(); });
   showAmount();
 
@@ -1292,7 +1296,8 @@
     const valuePts = valueMode ? Math.round(valueAcc) : 0;
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
-    const isBest = !bests[game.bestKey] || points > bests[game.bestKey];
+    const was = bestOfKey(bests, game.bestKey);
+    const isBest = !was || points > was;
     if (isBest) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
 
     els.play.hidden = true;
@@ -1605,11 +1610,12 @@
     const painting = subject.kind === 'painting';
     again.same.textContent = painting ? 'Same portrait' : 'Same photo';
     again.next.textContent = painting ? 'New portrait' : 'New photo';
-    again.hint.textContent = painting ? 'Try the same portrait again, or take on a new one?' : 'Try the same photo again, or load a new one?';
+    const changed = !painting && setupFor && setupFor.from !== subjectStamp(); // a photo loaded on the Study tab mid-game
+    again.hint.textContent = painting ? 'Try the same portrait again, or take on a new one?' : changed ? 'The photo on the Study tab has changed since this game began. Same photo plays the one just played; New photo loads another.' : 'Try the same photo again, or load a new one?';
     if (again.dialog.showModal) again.dialog.showModal(); else startGame();
     again.same.focus();
   }));
-  again.same.addEventListener('click', () => { again.dialog.close(); startGame(); });
+  again.same.addEventListener('click', () => { again.dialog.close(); startGame(true); });
   again.next.addEventListener('click', () => {
     again.dialog.close();
     if (subject.kind === 'painting') {
@@ -1635,7 +1641,7 @@
     if (board) renderPalettes();
   });
   els.deal.addEventListener('click', () => { dealMystery(); renderPalettes(); });
-  const savedLevel = LEVELS[load(LEVEL_KEY, 'medium')] ? load(LEVEL_KEY, 'medium') : 'medium';
+  const savedLevel = Object.prototype.hasOwnProperty.call(LEVELS, load(LEVEL_KEY, 'medium')) ? load(LEVEL_KEY, 'medium') : 'medium'; // an own level only
   document.querySelectorAll('input[name="gameLevel"]').forEach((r) => {
     r.checked = r.value === savedLevel;
     r.addEventListener('change', () => { if (Studio.tab() === 'game') refreshSetup(); });
