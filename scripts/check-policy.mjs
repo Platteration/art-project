@@ -24,6 +24,7 @@ const copies = {
   '_headers': headerLine('_headers', /Content-Security-Policy:\s*(.+)/),
   '.htaccess': headerLine('.htaccess', /Content-Security-Policy "([^"]+)"/),
   'deploy/nginx.conf': headerLine('deploy/nginx.conf', /Content-Security-Policy "([^"]+)"/),
+  'README.md': headerLine('README.md', /\| `Content-Security-Policy` \| `([^`]+)` \|/),
 };
 
 let failed = false;
@@ -53,6 +54,10 @@ for (const file of ['index.html', 'pose.html', '404.html', 'styles.css', 'pose.c
     console.error(`FAIL: third-party origin referenced in ${file}`);
     failed = true;
   }
+}
+
+for (const file of ['styles.css', 'pose.css', 'fonts.css']) {
+  if (/url\(\s*["']?data:/i.test(read(file))) { console.error(`FAIL: data: URL in ${file} (img-src refuses data: pictures)`); failed = true; }
 }
 
 // What the policy refuses must not be in the pages or scripts: an inline style attribute or script

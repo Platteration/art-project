@@ -312,6 +312,7 @@ Portrait Value Studio is released under the [MIT License](LICENSE), copyright (c
 Third-party material in this repository:
 
 - The spectral mixing data in `js/mixing.js` is from [spectral.js](https://github.com/rvanwijnen/spectral.js) by Ronald van Wijnen, MIT license (the full notice is in that file).
+- `js/vendor/three.min.js` is [three.js](https://threejs.org) r128 by the three.js authors, MIT license; the notice is `js/vendor/LICENSE-three.txt` beside it.
 - The typefaces in `fonts/` (Bricolage Grotesque by the Bricolage Grotesque Project Authors; IBM Plex Sans and IBM Plex Mono by IBM) are under the SIL Open Font License 1.1; their license texts are next to the files.
 
 
