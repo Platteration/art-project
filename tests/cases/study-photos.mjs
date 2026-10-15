@@ -695,7 +695,7 @@ export default async function studyPhotos(t, site) {
       twoTone[sim] = r;
       t.check(Math.abs(r.share[0] - 0.5) < 0.01 && r.share[1] < 0.01 && Math.abs(r.share[2] - 0.5) < 0.01, `Auto split on two flat tones, L* ${LD.toFixed(1)} and ${LL.toFixed(1)} (Simplify ${sim}): the dark half is the shadow, the light half the light`, { t1: r.t1, t2: r.t2, share: r.share });
     }
-    if (twoTone[0].share[1] > 0.4) t.finding({ title: 'Auto split with Simplify off on a picture of two flat tones leaves Shadow empty and paints the dark tone as the middle gray', severity: 'medium', steps: 'Advanced → Dark, middle, light: Simplify to Off. Load a PNG whose left half is rgb(50,50,50) and right half rgb(196,196,196) (L* 20.8 and 79.2), or press Auto split with it loaded.', expected: 'The dark half in Shadow (V 2 gray) and the light half in Light (V 8.5), the middle the empty value, as Auto split gives at Simplify 3 (splits 31/51).', actual: `Splits at V ${(twoTone[0].t1 / 10).toFixed(1)} and ${(twoTone[0].t2 / 10).toFixed(1)}: Shadow ${Math.round(twoTone[0].share[0] * 100)}%, Middle ${Math.round(twoTone[0].share[1] * 100)}%, Light ${Math.round(twoTone[0].share[2] * 100)}%; the dark half is painted V 5 middle gray. The same happens on loading such a picture at Simplify off, since a new photo gets an auto split.`, cause: 'js/processing.js:273-290 (autoThresholds): with two tones every split that puts them in different classes scores the same between-class variance, and the loop keeps the first it finds (a = 1, line 278 takes only a strictly better one), whose shadow class [0, a) is empty; split(1) then puts t1 at 11, below the dark tone. A loaded photo gets the same split (js/app.js:398).' });
+    if (twoTone[0].share[1] > 0.4) t.finding({ title: 'Auto split with Simplify off on a picture of two flat tones leaves Shadow empty and paints the dark tone as the middle gray', severity: 'medium', steps: 'Advanced → Dark, middle, light: Simplify to Off. Load a PNG whose left half is rgb(50,50,50) and right half rgb(196,196,196) (L* 20.8 and 79.2), or press Auto split with it loaded.', expected: `The dark half in Shadow (V 2 gray) and the light half in Light (V 8.5), the middle the empty value, as Auto split gives at Simplify 3 (splits ${twoTone[3].t1}/${twoTone[3].t2}).`, actual: `Splits at V ${(twoTone[0].t1 / 10).toFixed(1)} and ${(twoTone[0].t2 / 10).toFixed(1)}: Shadow ${Math.round(twoTone[0].share[0] * 100)}%, Middle ${Math.round(twoTone[0].share[1] * 100)}%, Light ${Math.round(twoTone[0].share[2] * 100)}%; the dark half is painted V 5 middle gray. The same happens on loading such a picture at Simplify off, since a new photo gets an auto split.`, cause: 'js/processing.js:273-290 (autoThresholds): with two tones every split that puts them in different classes scores the same between-class variance, and the loop keeps the first it finds (a = 1, line 278 takes only a strictly better one), whose shadow class [0, a) is empty; split(1) then puts t1 at 11, below the dark tone. A loaded photo gets the same split (js/app.js:398, prepareAndRun; lines as of aac638b).' });
     await clean(t, page, 'auto split on known tones');
 
     // Merge small shapes: a speck smaller than the size threshold folds into the shape it shares the most edge with
@@ -937,6 +937,7 @@ export default async function studyPhotos(t, site) {
     await page.reload({ waitUntil: 'load' }); await sleep(600); await busyHidden(page);
     const simple = await page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), header: document.getElementById('valuesState').textContent, smoothing: Studio.settings().smoothing, lean: Studio.settings().lighter, smoothingShown: getComputedStyle(document.getElementById('smoothSoft').closest('fieldset')).display !== 'none', leanShown: getComputedStyle(document.getElementById('lean').closest('.field')).display !== 'none' }));
     t.note(`Simple after Advanced chose Soft smoothing and lean Off, then a reload: the header says "${simple.header}" while smoothing "${simple.smoothing}" and lean ${simple.lean} stay in force (Smoothing shown: ${simple.smoothingShown}, lean shown: ${simple.leanShown}). The README says Simple hides those controls; it does not say whether their saved values still act, so this is noted, not found.`);
+    await clean(t, page, 'simple after advanced, reloaded');
     await page.context().close();
   }
 
@@ -1016,7 +1017,7 @@ export default async function studyPhotos(t, site) {
     const afterLoad = await subjectNow();
     t.check(before === 'painting' && afterLoad === 'photo', 'Paint by numbers with a dealt painting: Load photo switches the setup to My photo', { before, afterLoad });
     t.check(dropped && afterDrop === 'photo', 'Paint by numbers with a dealt painting: a dropped photo switches the setup to My photo too, as Load photo does', { dropped, afterDrop });
-    if (dropped && afterDrop !== 'photo' && afterLoad === 'photo') t.finding({ title: 'A photo dropped (or pasted) on Paint by numbers\' setup loads on the Study tab, but the setup keeps the dealt painting and nothing is said', severity: 'medium', steps: 'Games → Paint by numbers. Choose A painting. Drag a portrait photo from the desktop onto the page (or paste one). Then, for comparison, choose A painting again and use Load photo in the header.', expected: 'The dropped photo becomes what to paint from (My photo), as Load photo makes it; or the page says the photo went to the Study tab.', actual: `After the drop the setup still has "${afterDrop}" chosen and shows the painting; nothing is said, so the drop looks ignored (the photo is on the Study tab). Load photo switches the setup to "${afterLoad}".`, cause: 'js/game.js:1669 switches the subject to the photo only on the file input\'s change event; the drop and paste handlers (js/app.js:613-632) call loadForTab without telling the game.' });
+    if (dropped && afterDrop !== 'photo' && afterLoad === 'photo') t.finding({ title: 'A photo dropped on Paint by numbers\' setup loads on the Study tab, but the setup keeps the dealt painting and nothing is said', severity: 'medium', steps: 'Games → Paint by numbers. Choose A painting. Drag a portrait photo from the desktop onto the page (or paste one). Then, for comparison, choose A painting again and use Load photo in the header.', expected: 'The dropped photo becomes what to paint from (My photo), as Load photo makes it; or the page says the photo went to the Study tab.', actual: `After the drop the setup still has "${afterDrop}" chosen and shows the painting; nothing is said, so the drop looks ignored (the photo is on the Study tab). Load photo switches the setup to "${afterLoad}".`, cause: 'js/game.js:1672 switches the subject to the photo only on the file input\'s change event; the window\'s drop and paste handlers (js/app.js:616-635 as of aac638b) call loadForTab, which loads the Study photo without telling the game (a paste takes the same path).' });
     await clean(t, page, 'drop on paint by numbers');
     await tab(page, 'loomis');
     await resetToast(page);
@@ -1150,13 +1151,16 @@ export default async function studyPhotos(t, site) {
     await enter('text');
     t.check(!(await visible(page, '#dropHint')), 'dragging text over the page shows no drop hint');
     await leave(); await leave();
+    await enter('files'); await page.evaluate(() => window.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
+    t.note(`a dragenter followed by a dragend with no dragleave leaves the drop hint ${(await visible(page, '#dropHint')) ? 'up (app.js has no dragend handler)' : 'hidden'}; a browser cancelling a drag (Esc) fires dragleave at the current target first (HTML drag and drop), so this is noted, not found`);
+    await leave(); await leave();
     await resetToast(page);
     await dropFiles(page, 'body', [{ name: 'Pictures', mimeType: '', buffer: Buffer.alloc(0) }]);
     await page.waitForFunction(() => document.getElementById('toast').textContent !== '', null, { timeout: 5000 }).catch(() => null);
     const empty = await toast(page);
     t.check(empty !== '' && (await study(page)).label === SAMPLE_LABEL, 'an empty file with no type dropped (as a dropped folder arrives): refused, the study stays', empty);
     t.check(empty !== '' && !NOT_OPENED.test(empty), 'an empty file with no type dropped: the words name the problem (an empty file or a folder), not HEIC photos', empty);
-    if (NOT_OPENED.test(empty)) t.finding({ title: 'A folder (or an empty file) dropped on the page is told about HEIC photos', severity: 'low', steps: 'Drag a folder from the desktop onto the Study tab (Chromium hands the page a File of size 0 and no type; the same for any empty file).', expected: 'A sentence that names the problem: that was a folder or an empty file, drop a JPG, PNG or WebP photo.', actual: `The toast says "${empty}": a phone-photo format the visitor did not drop.`, cause: 'js/app.js:470-506 (readImage): a file with no type is tried by its content, so a folder or a 0-byte file goes to the decoder and fails into the HEIC sentence (line 504); neither its size nor DataTransferItem.webkitGetAsEntry().isDirectory is looked at.' });
+    if (NOT_OPENED.test(empty)) t.finding({ title: 'A folder (or an empty file) dropped on the page is told about HEIC photos', severity: 'low', steps: 'Drag a folder from the desktop onto the Study tab (Chromium hands the page a File of size 0 and no type; the same for any empty file).', expected: 'A sentence that names the problem: that was a folder or an empty file, drop a JPG, PNG or WebP photo.', actual: `The toast says "${empty}": a phone-photo format the visitor did not drop.`, cause: 'js/app.js:469-511 as of aac638b (readImage): a file with no type is tried by its content, so a folder or a 0-byte file goes to the decoder and fails into the HEIC sentence (line 504); neither its size nor DataTransferItem.webkitGetAsEntry().isDirectory is looked at.' });
     // a clipboard with text and a picture, and one with two pictures
     const pasteMany = (items) => page.evaluate(async (items) => {
       const dt = new DataTransfer();
@@ -1177,7 +1181,7 @@ export default async function studyPhotos(t, site) {
     await sleep(300); await busyHidden(page);
     const afterField = { label: (await study(page)).label, measures: await page.evaluate(() => +(document.querySelector('[data-tool="measure"]').dataset.count || 0)), toast: await toast(page) };
     t.check(measures >= 1 && afterField.label === beforeField && afterField.measures === measures, 'a paste into the Unit on my canvas field goes to the field: the photo and the measures stay', { measuresBefore: measures, labelBefore: beforeField, after: afterField });
-    if (measures >= 1 && afterField.label !== beforeField) t.finding({ title: 'Pasting into "Unit on my canvas" while the clipboard also holds a picture replaces the photo and clears the measures', severity: 'medium', steps: '1. Load a photo, press Measure and draw a measure. 2. Copy something that puts text and a picture on the clipboard together (a cell copied from a spreadsheet does; any screenshot also does if you meant to paste a number but the clipboard still holds it). 3. Click into Unit on my canvas and press Ctrl+V.', expected: 'A paste into a text field goes to that field; the photo and the measures stay.', actual: `The photo is replaced by the clipboard picture (label "${afterField.label}") and the measures are cleared (${measures} → ${afterField.measures}; toast "${afterField.toast}").`, cause: 'js/app.js:629-632: the window-level paste handler takes the first image item whatever the paste\'s target is, so a paste aimed at an input or textarea loads a photo.' });
+    if (measures >= 1 && afterField.label !== beforeField) t.finding({ title: 'Pasting into "Unit on my canvas" while the clipboard also holds a picture replaces the photo and clears the measures', severity: 'medium', steps: '1. Load a photo, press Measure and draw a measure. 2. Copy something that puts text and a picture on the clipboard together (a cell copied from a spreadsheet does; any screenshot also does if you meant to paste a number but the clipboard still holds it). 3. Click into Unit on my canvas and press Ctrl+V.', expected: 'A paste into a text field goes to that field; the photo and the measures stay.', actual: `The photo is replaced by the clipboard picture (label "${afterField.label}") and the measures are cleared (${measures} → ${afterField.measures}; toast "${afterField.toast}").`, cause: 'js/app.js:632-635 (as of aac638b): the window-level paste handler takes the first image item whatever the paste\'s target is, so a paste aimed at an input or textarea loads a photo.' });
     await click(page, '[data-tool="measure"]');
     await clean(t, page, 'odd drops and pastes');
     // a BMP loads like any photo; a TIFF and a HEIC the browser cannot open are told so
@@ -1207,18 +1211,22 @@ export default async function studyPhotos(t, site) {
   {
     const page = await openPage(site);
     await clickWait(page, '[data-mode="advanced"]');
-    const huge = await makeImage(page, { width: 6000, height: 4000, type: 'image/jpeg', name: 'decoding.jpg' });
-    await page.setInputFiles('#file', huge);
-    const early = await page.evaluate(() => { const e = document.getElementById('simplify'); e.value = '9'; e.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-mode="simple"]').click(); return !document.getElementById('source').textContent.includes('decoding.jpg'); });
+    // the photo is chosen and the settings changed in one task, so they surely land before the photo is decoded
+    const choose = (then) => page.evaluate(async (then) => {
+      const c = document.createElement('canvas'); c.width = 6000; c.height = 4000; const g = c.getContext('2d'); g.fillStyle = '#8a9aa6'; g.fillRect(0, 0, 6000, 4000); g.fillStyle = '#c98f6a'; g.beginPath(); g.ellipse(3000, 1700, 1200, 1500, 0, 0, 7); g.fill(); g.fillStyle = '#2e2420'; g.fillRect(1000, 3000, 4000, 1000);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+      const input = document.getElementById('file'); const dt = new DataTransfer(); dt.items.add(new File([blob], 'decoding.jpg', { type: 'image/jpeg' })); input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+      if (then === 'settings') { const e = document.getElementById('simplify'); e.value = '9'; e.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-mode="simple"]').click(); }
+      else { document.querySelector('[data-tab="help"]').click(); const f = document.getElementById('forgetBtn'); f.click(); f.click(); }
+      return !document.getElementById('source').textContent.includes('decoding.jpg');
+    }, then);
+    const early = await choose('settings');
     const arrived = await waitLabel(page, 'decoding.jpg', 60000);
     const s = await study(page);
     const own = await page.evaluate(() => { const st = Studio.settings(); const [a, b] = Study.autoThresholds(Studio.prep(), st.blurRadius, st.smoothing); const t1 = Math.max(1, Math.min(a, 97)); return [t1, Math.max(t1 + 2, Math.min(b, 99))]; });
     t.check(early && arrived && s.simple && s.header === 'Normal detail' && s.simplify === 3 && s.merge === 4 && same([s.t1, s.t2], own) && same(s.value, [900, 600]) && s.busy, 'Simplify 9 then Simple chosen while a 6000 × 4000 photo is still being read: it arrives at the preset shown (Normal, 3 / 4) with its own auto split', { early, arrived, header: s.header, simplify: s.simplify, merge: s.merge, splits: [s.t1, s.t2], own, value: s.value });
     await clean(t, page, 'settings changed while a photo is read');
-    await page.setInputFiles('#file', huge);
-    await tab(page, 'help');
-    await click(page, '#forgetBtn');
-    await Promise.all([page.waitForNavigation({ timeout: 20000 }).catch(() => null), click(page, '#forgetBtn')]);
+    await Promise.all([page.waitForNavigation({ timeout: 20000 }).catch(() => null), choose('forget').catch(() => null)]); // the reload may cut the evaluate short
     await sleep(600); await busyHidden(page); await sleep(200);
     const after = { label: (await study(page)).label, keys: await storageKeys(page) };
     t.check(after.label === SAMPLE_LABEL && after.keys.length === 0, 'Forget my work pressed while a photo is being read: the page comes back with the sample and keeps nothing', after);
@@ -1237,4 +1245,5 @@ export default async function studyPhotos(t, site) {
     await clean(t, page, 'no canvas for the reduction');
     await page.context().close();
   }
+  t.note('Left out of the coverage list, each for a reason: a GIF (it needs a hand-made LZW stream; a BMP stands in for "a picture the browser opens that is not JPG, PNG or WebP"); a drop that announces Files but carries none (a DataTransfer cannot be made so in a page); a toast replaced by a text drop right after a photo cleared the marks (a race of two messages, said in the toast\'s own words either way); a reload in the middle of Study.process at 1400 px (the first block reloads mid-load already) and Forget pressed in a second tab while this one reads a photo (multitab covers Forget across tabs).');
 }
