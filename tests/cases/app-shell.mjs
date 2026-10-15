@@ -49,6 +49,9 @@ const focusLastBefore = (page, id) => page.evaluate((id) => {
   const last = all[all.length - 1]; if (!last) return null; last.focus(); return last.id || last.textContent.trim().slice(0, 30);
 }, id);
 const activeIs = (page) => page.evaluate(() => { const e = document.activeElement; return { cls: e.className, text: e.textContent.trim().slice(0, 40), id: e.id }; });
+// "js/app.js:2243": the line where a pattern first appears in a file of the site, so a finding's cause
+// follows the source while the maintainer edits it
+const lineOf = (root, file, re) => { const lines = fs.readFileSync(path.join(root, file), 'utf8').split('\n'); const i = lines.findIndex((l) => re.test(l)); return i < 0 ? file : `${file}:${i + 1}`; };
 // what a fallback page shows: the notes, the controls that should have stepped aside, the guide
 const fallback = (page) => page.evaluate(() => {
   const d = (sel) => { const e = document.querySelector(sel); return e ? getComputedStyle(e).display : null; };
@@ -56,7 +59,7 @@ const fallback = (page) => page.evaluate(() => {
     cls: document.documentElement.className.trim(), nojs: d('.nojs-note'), old: d('.oldbrowser-note'), part: d('.partfail-note'),
     tabs: d('.tabs'), actions: d('.topbar-actions'), rail: d('.rail'), study: d('#tab-study'), help: d('#tab-help'), steps: d('.help-steps .btn'),
     toolstrip: d('.toolstrip'), tools: [...document.querySelectorAll('.toolstrip button')].filter((b) => b.getClientRects().length).map((b) => b.id || b.textContent.trim()),
-    forget: d('#forgetBtn'),
+    forget: (() => { const b = document.getElementById('forgetBtn'); return b && b.getClientRects().length ? 'shown' : 'none'; })(), // (a hidden parent hides it too)
   };
 });
 // a page of our own (for JavaScript off), recorded the way openPage records one
@@ -73,6 +76,16 @@ async function barePage(site, { viewport = DESKTOP, javaScriptEnabled = true } =
 }
 
 export default async function appShell(t, site) {
+  const A = (re) => lineOf(site.root, 'js/app.js', re), G = (re) => lineOf(site.root, 'js/guard.js', re), P = (re) => lineOf(site.root, 'js/painting.js', re), S = (re) => lineOf(site.root, 'styles.css', re);
+  const SRC = {
+    arrowDown: A(/btn\.addEventListener\('keydown'/), toggle: A(/const open = menu\.hidden;/), menuOpenOn: A(/const on = menu\.querySelector/), menuKeys: A(/menu\.addEventListener\('keydown'/),
+    pointerdown: A(/document\.addEventListener\('pointerdown'/), dataGo: A(/switchTab\(go === 'check'/), hiddenFallback: A(/if \(item && item\.hidden\)/), routePose: A(/'#pose'/),
+    fileChange: A(/els\.file\.addEventListener\('change'/), loadFile: A(/function loadFile/), useSource: A(/function useSource/), forgetBtn: A(/const forgetBtn = /), safely: A(/function safely/),
+    appToast: A(/function toast\(msg/), appToastTimer: A(/toastTimer = setTimeout/),
+    guardTimer: G(/timer = setTimeout\(function \(\) \{ toast\.classList\.remove/), guardArmed: G(/armed = true; btn\.textContent/), guardCap: G(/if \(shown >= 3\)/), guardFromStudio: G(/artFromStudio/),
+    pos: P(/const pos = \(e\) =>/), segment: P(/n = Math\.max\(1, Math\.ceil\(d \/ spacing/), hasDb: P(/const hasDb = /), saveSoon: P(/function saveSoon/), restore: P(/async function restore/), saveFailed: P(/stays for this visit only/), notice: P(/o\.notice && dbOk/), restoreCatch: P(/restore\(\)\.catch/), freshPaper: P(/fresh paper/),
+    toastAction: S(/^\.toast \.toast-action \{/), tabsGrid: S(/^\.tabs \{ display: grid/), fallbackRule: S(/^\.no-js \.topbar-actions/), toolstrip: lineOf(site.root, 'index.html', /class="toolstrip"/), poseRO: lineOf(site.root, 'js/pose.js', /new ResizeObserver/),
+  };
   // ---- the tab menus by keyboard, and the mouse edges of the same menus ----------------------------
   for (const round of [1, 2]) {
     const page = await openPage(site);
@@ -107,7 +120,7 @@ export default async function appShell(t, site) {
     await page.keyboard.press('ArrowDown'); const s2 = await shell(page);
     const stays = s2.gamesOpen && s2.gamesExpanded === 'true' && (s2.active === 'tabGameBtn' || s2.active === 'tabBattleBtn');
     t.check(stays, `menus ${round}: ArrowDown on the button of an open menu moves into it rather than closing it`, s2);
-    if (backOnButton && !stays && round === 2) t.finding({ title: 'ArrowDown on the button of an already open tab menu closes the menu instead of moving into it', severity: 'low', steps: 'Focus Games and press ArrowDown (the menu opens on an item). Press ArrowUp to reach Paint by numbers, then Shift+Tab: the focus is back on the Games button and the menu is still open. Press ArrowDown.', expected: 'The focus moves into the open menu, as the first ArrowDown did (ARIA menu button: Down Arrow opens the menu and moves the focus to an item).', actual: `The menu closes and the focus stays on the button: js/app.js:2243 answers ArrowDown with btn.click(), and the click handler (2238-2242) toggles, so on an open menu it shuts it. State after: ${JSON.stringify({ gamesOpen: s2.gamesOpen, expanded: s2.gamesExpanded, active: s2.active })}`, cause: 'js/app.js:2243 (ArrowDown = btn.click()) with the toggle at 2238-2242' });
+    if (backOnButton && !stays && round === 2) t.finding({ title: 'ArrowDown on the button of an already open tab menu closes the menu instead of moving into it', severity: 'low', steps: 'Open Value battle from the Games menu. Focus Games and press ArrowDown (the menu opens on Value battle). Press ArrowUp (Paint by numbers), then Shift+Tab: the focus is back on the Games button and the menu is still open. Press ArrowDown.', expected: 'The focus moves into the open menu, as the first ArrowDown did (ARIA menu button: Down Arrow opens the menu and moves the focus to an item).', actual: `The menu closes and the focus stays on the button: ${SRC.arrowDown} answers ArrowDown with btn.click(), and the click handler (${SRC.toggle}) toggles, so on an open menu it shuts it. State after: ${JSON.stringify({ gamesOpen: s2.gamesOpen, expanded: s2.gamesExpanded, active: s2.active })}`, cause: `${SRC.arrowDown} (ArrowDown = btn.click()) with the toggle at ${SRC.toggle}` });
     // edge: Tab out of the open menu: the menu should not stay open behind the focus
     await page.evaluate(() => document.querySelectorAll('.tab-menu').forEach((m) => { m.hidden = true; }));
     await page.focus('#tabLearnBtn'); await page.keyboard.press('ArrowDown');
@@ -115,7 +128,7 @@ export default async function appShell(t, site) {
     s = await shell(page);
     const left = s.active !== 'tabStudyBtn' && s.active !== 'tabLoomisBtn' && s.active !== 'tabPoseBtn' && s.active !== 'tabHelpBtn';
     t.check(left && !s.learnOpen, `menus ${round}: Tab out of the Learning menu closes it`, s);
-    if (left && s.learnOpen && round === 2) t.finding({ title: 'Tab out of an open tab menu leaves the menu open behind the focus', severity: 'low', steps: 'Focus Learning tools, press ArrowDown (the menu opens), press Tab four times: the focus leaves the menu for the Studio button.', expected: 'The menu closes when the focus leaves it (a keyboard visitor otherwise has an open menu covering the page with nothing to close it but Escape).', actual: `The menu stays open with aria-expanded="true"; nothing closes it on focusout (js/app.js:2236-2249 handle only ArrowDown, ArrowUp and Escape; the pointerdown at 2250 is for the mouse). Focus on ${s.active}`, cause: 'js/app.js:2236-2250: no focusout handler on the menu' });
+    if (left && s.learnOpen && round === 2) t.finding({ title: 'Tab out of an open tab menu leaves the menu open behind the focus', severity: 'low', steps: 'Focus Learning tools, press ArrowDown (the menu opens), press Tab four times: the focus leaves the menu for the Studio button.', expected: 'The menu closes when the focus leaves it (a keyboard visitor otherwise has an open menu covering the page with nothing to close it but Escape).', actual: `The menu stays open with aria-expanded="true"; nothing closes it on focusout (${SRC.menuKeys} handles only ArrowDown, ArrowUp and Escape; the pointerdown at ${SRC.pointerdown} is for the mouse). Focus on ${s.active}`, cause: `${SRC.menuKeys}-${SRC.pointerdown}: no focusout handler on the menu` });
     await page.keyboard.press('Escape');
     // mouse: a double click toggles open then closed; a click outside closes
     await page.click('#tabLearnBtn'); await page.click('#tabLearnBtn'); s = await shell(page);
@@ -207,7 +220,7 @@ export default async function appShell(t, site) {
     const after = await page.evaluate(() => { const e = document.activeElement; return { id: e.id || e.tagName.toLowerCase(), hiddenPanel: !!e.closest('.tabpanel[hidden]') }; });
     const focusKept = after.id !== 'body' && !after.hiddenPanel;
     t.check(focusKept, 'help: after a jump button by keyboard the focus is on something visible', after);
-    if (!focusKept) t.finding({ title: 'After a Help jump button is pressed by keyboard, the focus falls to the page body (the button pressed is now hidden)', severity: 'low', steps: 'Open How to use, Tab to "Go to Studio", press Enter.', expected: 'The focus moves to the Studio section button (as the menu items do, switchTab(name, true)) or into the Studio.', actual: `document.activeElement is ${after.id}${after.hiddenPanel ? ' inside the hidden help panel' : ''}: js/app.js:2638-2642 call switchTab(go) without focus, so the focus is on a button that is now display:none, the browser drops it to the body, and the next Tab starts from the top of the page.`, cause: 'js/app.js:2640: switchTab(go) without its focus argument' });
+    if (!focusKept) t.finding({ title: 'After a Help jump button is pressed by keyboard, the focus falls to the page body (the button pressed is now hidden)', severity: 'low', steps: 'Open How to use, Tab to "Go to Studio", press Enter.', expected: 'The focus moves to the Studio section button (as the menu items do, switchTab(name, true)) or into the Studio.', actual: `document.activeElement is ${after.id}${after.hiddenPanel ? ' inside the hidden help panel' : ''}: ${SRC.dataGo} calls switchTab(go) without focus, so the focus is on a button that is now display:none, the browser drops it to the body, and the next Tab starts from the top of the page.`, cause: `${SRC.dataGo}: switchTab(go) without its focus argument` });
     await clean(t, page, 'help');
     await page.context().close();
   }
@@ -254,7 +267,7 @@ export default async function appShell(t, site) {
     await page.mouse.click(box.x + box.width / 2, box.y + Math.min(box.height - 20, 500)); await sleep(150);
     s = await shell(page);
     t.check(!s.learnOpen && s.learnExpanded === 'false', 'pose: a click inside the Pose frame closes an open tab menu', s);
-    if (s.learnOpen) t.finding({ title: 'A tab menu stays open when the visitor clicks into the Pose and light picture', severity: 'low', steps: 'Open Learning tools > Pose and light. Open the Learning tools menu again. Click on the figure or the light controls inside the Pose page.', expected: 'The menu closes, as it does for a click anywhere else on the page.', actual: `The menu stays open over the page with aria-expanded="true" (focus moved into the frame: ${s.active}): the close-on-click listener is a pointerdown on the app's document (js/app.js:2250), and a pointerdown inside the frame's own document never reaches it.`, cause: 'js/app.js:2250: pointerdown on document only; nothing closes the menus on blur or when the frame takes the focus' });
+    if (s.learnOpen) t.finding({ title: 'A tab menu stays open when the visitor clicks into the Pose and light picture', severity: 'low', steps: 'Open Learning tools > Pose and light. Open the Learning tools menu again. Click on the figure or the light controls inside the Pose page.', expected: 'The menu closes, as it does for a click anywhere else on the page.', actual: `The menu stays open over the page with aria-expanded="true" (focus moved into the frame: ${s.active}): the close-on-click listener is a pointerdown on the app's document (${SRC.pointerdown}), and a pointerdown inside the frame's own document never reaches it.`, cause: `${SRC.pointerdown}: pointerdown on document only; nothing closes the menus on blur or when the frame takes the focus` });
     await page.keyboard.press('Escape'); await page.evaluate(() => document.querySelectorAll('.tab-menu').forEach((m) => { m.hidden = true; }));
     // the frame's height message: capped, sanity-checked, and only taken from the frame itself
     const fh = () => page.evaluate(() => document.getElementById('poseFrame').style.height);
@@ -410,7 +423,7 @@ export default async function appShell(t, site) {
       await page.context().close();
     }
     if (results.every((r) => r.changed.shown.join() !== 'tab-game' || r.fwd.shown.join() !== 'tab-game')) {
-      t.finding({ title: 'A hash shortcut only works at page load: editing the address to #game (or Back/Forward between hashes) while the app is open changes nothing', severity: 'medium', steps: 'Open /#paint. Edit the address bar to /#game and press Enter (a same-document navigation), or press Back and Forward after that.', expected: 'The tab named by the hash opens, as it does when the address is first opened (the 404 page and the README offer these shortcuts as addresses).', actual: `The Studio stays open; the address says #game. js/app.js:2748-2755 read location.hash once in start(); there is no hashchange or popstate listener, and switchTab never writes the hash. Seen: ${JSON.stringify(results[0].changed)}`, cause: 'js/app.js:2748-2755: the hash is read once, in start(); no hashchange/popstate listener' });
+      t.finding({ title: 'A hash shortcut only works at page load: editing the address to #game (or Back/Forward between hashes) while the app is open changes nothing', severity: 'medium', steps: 'Open /#paint. Edit the address bar to /#game and press Enter (a same-document navigation), or press Back and Forward after that.', expected: 'The tab named by the hash opens, as it does when the address is first opened (the 404 page and the README offer these shortcuts as addresses).', actual: `The Studio stays open; the address says #game. ${SRC.routePose} and the lines around it read location.hash once in start(); there is no hashchange or popstate listener, and switchTab never writes the hash. Seen: ${JSON.stringify(results[0].changed)}`, cause: `${SRC.routePose}: the hash is read once, in start(); no hashchange/popstate listener` });
     }
     // the hash does not follow the tab either: a reload returns to the hash's tab, not the one in use
     const page = await openPage(site, { url: '#help' });
@@ -449,6 +462,8 @@ export default async function appShell(t, site) {
     t.check(s.cls.includes('old-browser') && s.old === 'block' && /too old/.test(s.noteText) && s.nojs === 'none', `old browser ${label}: the standing note says the browser is too old`, s);
     t.check(s.tabs === 'none' && s.actions === 'none' && s.rail === 'none' && s.study === 'none' && s.help === 'block' && s.steps === 'none' && s.forget !== 'none', `old browser ${label}: no controls, the guide reads, Forget still there`, s);
     t.check(s.toolstrip === 'none', `old browser ${label}: the tool bar goes with the other controls`, s.tools);
+    // what a press on one of its icons does there (the Study pictures it works on are hidden)
+    if (s.toolstrip !== 'none') s.linesPressed = await page.evaluate(() => { const b = [...document.querySelectorAll('.toolstrip button')].find((x) => /Lines/.test(x.textContent)); if (!b) return null; b.click(); return b.getAttribute('aria-pressed'); });
     oldStrips.push(s);
     t.check((await hscroll(page)) <= 0, `old browser ${label}: no horizontal scroll`, await hscroll(page));
     if (label === 'phone') await screenshot(page, 'app-shell-old-browser-phone');
@@ -470,7 +485,7 @@ export default async function appShell(t, site) {
     t.note(`old browser #pose: the hidden Pose frame ${s.frame ? JSON.stringify(s.frame) : 'did not load'}.`);
     const errs = page.log.pageerrors.slice();
     const ok = await clean(t, page, 'old browser #pose');
-    if (!ok) t.finding({ title: 'In an old browser (no ResizeObserver) opened at #pose, the hidden Pose frame still loads and its script throws', severity: 'low', steps: 'In an init script delete window.ResizeObserver (every frame); open index.html#pose.', expected: 'With the old-browser note up and the tabs hidden, the Pose page is not loaded (or fails quietly like a missing three.js).', actual: `html class "${s.cls}", poseFrame src ${s.src}: start() still calls switchTab("pose") (js/app.js:2753), which sets the frame's src, and js/pose.js:1536 constructs a ResizeObserver without a guard, so the frame throws: ${errs.map((e) => e.split('\n')[0]).join(' | ').slice(0, 200)}`, cause: 'js/app.js:2753 opens the frame in old-browser mode; js/pose.js:1536 new ResizeObserver unguarded' });
+    if (!ok) t.finding({ title: 'In an old browser (no ResizeObserver) opened at #pose, the hidden Pose frame still loads and its script throws', severity: 'low', steps: 'In an init script delete window.ResizeObserver (every frame); open index.html#pose.', expected: 'With the old-browser note up and the tabs hidden, the Pose page is not loaded (or fails quietly like a missing three.js).', actual: `html class "${s.cls}", poseFrame src ${s.src}: start() still opens the Pose tab for the address (${SRC.routePose}), which sets the frame's src, and ${SRC.poseRO} constructs a ResizeObserver without a guard, so the frame throws: ${errs.map((e) => e.split('\n')[0]).join(' | ').slice(0, 200)}`, cause: `${SRC.routePose} opens the frame in old-browser mode; ${SRC.poseRO} new ResizeObserver unguarded` });
     await page.context().close();
   }
 
@@ -537,8 +552,8 @@ export default async function appShell(t, site) {
     // one finding for the controls the fallbacks leave behind
     const deadNojs = nojsStrips.filter((s) => s.toolstrip !== 'none' || s.forget !== 'none');
     const deadAll = allFailed.strip && (allFailed.strip.toolstrip !== 'none' || (allFailed.strip.forget !== 'none' && allFailed.forget.after === allFailed.forget.idle));
-    const deadOld = oldStrips.some((s) => s.toolstrip !== 'none');
-    if (deadNojs.length || deadAll || deadOld) t.finding({ title: 'The "guide instead of dead controls" fallbacks leave the tool bar (Magnifier, Lines, Measure, Plumb, Grid) on the page, and with JavaScript off or app.js failed, the Forget button too, none of which can work', severity: 'medium', steps: 'Open the site (1) with JavaScript off, (2) with js/app.js answering a script that throws, or (3) in a browser without ResizeObserver (old-browser note). Look above the guide, and press "Forget my work on this device" under Good to know.', expected: 'Only the note and the guide (index.html\'s own comment: "shows the guide instead of dead controls"; guard.js: "a standing note instead of controls that die one by one").', actual: `The five tool icons stay above the guide in every fallback (${[deadNojs.length ? 'JavaScript off: ' + JSON.stringify(deadNojs[0].tools) : '', deadAll ? 'app.js throws: ' + JSON.stringify(allFailed.strip.tools) : '', deadOld ? 'old browser: shown, and pressing Lines turns a tool on for the hidden Study pictures' : ''].filter(Boolean).join('; ')}); with JavaScript off or app.js failed nothing answers them, and Forget (display ${nojsStrips[0] && nojsStrips[0].forget}) does nothing when pressed (after one tap with app.js failed it still reads "${allFailed.forget && allFailed.forget.after}": its listener is in app.js:2759-2773).`, cause: 'styles.css:1730-1732 hide .topbar-actions, .tabs, .rail and the panels but not .toolstrip (index.html:269, outside the rail) or #forgetBtn' });
+    const deadOld = oldStrips.find((s) => s.toolstrip !== 'none');
+    if (deadNojs.length || deadAll || deadOld) t.finding({ title: 'The "guide instead of dead controls" fallbacks leave the tool bar (Magnifier, Lines, Measure, Plumb, Grid) on the page, and with JavaScript off or app.js failed, the Forget button too, none of which can work', severity: 'medium', steps: 'Open the site (1) with JavaScript off, (2) with js/app.js answering a script that throws, or (3) in a browser without ResizeObserver (old-browser note). Look above the guide, and press "Forget my work on this device" under Good to know.', expected: `Only the note and the guide (${G(/dead controls/)}: "which shows the guide instead of dead controls"; ${G(/die one by one/)}: "a standing note instead of controls that die one by one").`, actual: `The five tool icons stay above the guide in every fallback (${[deadNojs.length ? 'JavaScript off: ' + JSON.stringify(deadNojs[0].tools) : '', deadAll ? 'app.js throws: ' + JSON.stringify(allFailed.strip.tools) : '', deadOld ? `old browser: shown, and pressing Lines sets its aria-pressed to ${deadOld.linesPressed}, a tool for Study pictures that are hidden` : ''].filter(Boolean).join('; ')}); with JavaScript off or app.js failed nothing answers them, and Forget (${nojsStrips[0] && nojsStrips[0].forget} with JavaScript off) does nothing when pressed (after one tap with app.js failed it still reads "${allFailed.forget && allFailed.forget.after}": its listener is in ${SRC.forgetBtn}).`, cause: `${SRC.fallbackRule} hides .topbar-actions, .tabs, .rail and the panels but not .toolstrip (${SRC.toolstrip}, outside the rail) or #forgetBtn` });
   }
 
   // ---- storage blocked outright: setItem throws and no IndexedDB; then localStorage itself throws ----
@@ -565,7 +580,7 @@ export default async function appShell(t, site) {
     // the guide says the Studio saves as you go: with no database to save to, the visitor must be told it does not
     const toldNotKept = /visit only|not (be )?saved|could not be saved/.test(note1.text + ' ' + after.toast.text + ' ' + (await page.evaluate(() => document.getElementById('ps-status') ? document.getElementById('ps-status').textContent : '')));
     t.check(toldNotKept, 'storage blocked: the Studio says the painting stays for this visit only', { onOpen: note1.text, afterStroke: after.toast.text });
-    if (!toldNotKept) t.finding({ title: 'With IndexedDB absent (window.indexedDB undefined, as Firefox with dom.indexedDB.enabled=false has it) the Studio silently keeps nothing, while the guide says it saves as you go', severity: 'low', steps: 'In an init script set window.indexedDB to undefined (or turn IndexedDB off in Firefox). Open the Studio, paint a stroke, wait.', expected: 'A note that the painting stays for this visit only (the note the Studio gives when a save fails, painting.js:447, and gives inside a sandboxed embed).', actual: `Nothing is said on opening ("${note1.text}") or after a stroke ("${after.toast.text}"): painting.js:412 sets hasDb false, saveSoon (434) and restore (455) return at once, and the one-time note at 861 needs dbOk, so neither the "saved as you go" note nor the "could not be saved" one appears, and the painting is gone on the next visit.`, cause: 'js/painting.js:412/434/455: hasDb false returns silently; nothing says so' });
+    if (!toldNotKept) t.finding({ title: 'With IndexedDB absent (window.indexedDB undefined, as Firefox with dom.indexedDB.enabled=false has it) the Studio silently keeps nothing, while the guide says it saves as you go', severity: 'low', steps: 'In an init script set window.indexedDB to undefined (or turn IndexedDB off in Firefox). Open the Studio, paint a stroke, wait.', expected: `A note that the painting stays for this visit only (the note the Studio gives when a save fails, ${SRC.saveFailed}, and gives inside a sandboxed embed).`, actual: `Nothing is said on opening ("${note1.text}") or after a stroke ("${after.toast.text}"): ${SRC.hasDb} sets hasDb false, saveSoon (${SRC.saveSoon}) and restore (${SRC.restore}) return at once, and the one-time note at ${SRC.notice} needs dbOk, so neither the "saved as you go" note nor the "could not be saved" one appears, and the painting is gone on the next visit.`, cause: `${SRC.hasDb}, ${SRC.saveSoon}, ${SRC.restore}: hasDb false returns silently; nothing says so` });
     t.check(page.log.pageerrors.length === err0, 'storage blocked: no page error', page.log.pageerrors);
     // Forget still reloads the page
     await tab(page, 'help');
@@ -641,7 +656,7 @@ export default async function appShell(t, site) {
     await clean(t, page, `hostile ${label}`);
     await page.context().close();
   }
-  t.note('Which saved keys trigger the guard\'s "could not be read" note: none of the localStorage keys. Every reader (app.js restoreDrawers/restoreSmoothing/readPalette/loadCanvasSize, game.js/palette.js/battle.js/painting.js load(), figure.js load(), pose.js restore()) parses inside try/catch and falls back to its default, so the note with its reset offer is reached only through StudioGuard.report(err, { saved: true }) from a Studio restore() that rejects (painting.js:842) or a start() step that throws (app.js:2729), which a junk IndexedDB record does not do either: it says "could not be read, so this is a fresh paper" (painting.js:859). The steps below drive the offer through StudioGuard.report itself.');
+  t.note(`Which saved keys trigger the guard's "could not be read" note: none of the localStorage keys. Every reader (app.js restoreDrawers/restoreSmoothing/readPalette/loadCanvasSize, game.js/palette.js/battle.js/painting.js load(), figure.js load(), pose.js restore()) parses inside try/catch and falls back to its default, so the note with its reset offer is reached only through StudioGuard.report(err, { saved: true }) from a Studio restore() that rejects (${SRC.restoreCatch}) or a start() step that throws (${SRC.safely}), which a junk IndexedDB record does not do either: it says "could not be read, so this is a fresh paper" (${SRC.freshPaper}). The steps below drive the offer through StudioGuard.report itself.`);
 
   // ---- the guard's reset offer: a junk saved painting, then the two-tap reset and what it clears -----
   {
@@ -674,7 +689,7 @@ export default async function appShell(t, site) {
     t.check(offer.show && offer.button === 'Tap again to reset' && !offer.disabled, 'reset: the first tap arms it and says so', offer);
     await sleep(6500); offer = await toastState(page);
     t.check(offer.show && offer.button === 'Tap again to reset', 'reset: the armed offer is still there after 6.5 s', offer);
-    t.note('reset: once armed, the offer never times out (guard.js:66 clears the hide timer); it stays until the second tap or another note replaces it.');
+    t.note(`reset: once armed, the offer never times out (${SRC.guardArmed} clears the hide timer); it stays until the second tap or another note replaces it.`);
     await navigate(page, () => page.click('#toast .toast-action')); await sleep(1500);
     const gone = { keys: await siteKeys(page), record: await dbRecord(page), ...(await page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), lean: document.getElementById('lean').value }))) };
     t.check(gone.keys.length === 0 && gone.record !== 'record' && gone.simple, 'reset: after the second tap and the reload no key, no record, Simple again', gone);
@@ -687,7 +702,8 @@ export default async function appShell(t, site) {
   // ---- the reset offer's button once the note has gone (20 s), side by side with the 404 page and the old-browser legs ----
   const resetOfferGone = async () => {
     const page = await openPage(site);
-    await page.evaluate(() => { localStorage.setItem('portrait-value-studio.mode', 'advanced'); localStorage.setItem('portrait-value-studio.lean', '80'); });
+    // (the Studio's one-time saving note is marked as shown: a note would replace the offer when the Studio opens below)
+    await page.evaluate(() => { localStorage.setItem('portrait-value-studio.mode', 'advanced'); localStorage.setItem('portrait-value-studio.lean', '80'); localStorage.setItem('portrait-value-studio.studioNotice', 'true'); });
     await page.evaluate(() => window.StudioGuard.report(new Error('test: offer that goes'), { saved: true })); dropOwn(page, /test: offer that goes/);
     // while it shows, the keyboard reaches it: Tab from the last control before it
     const from = await focusLastBefore(page, 'toast'); await page.keyboard.press('Tab');
@@ -703,22 +719,22 @@ export default async function appShell(t, site) {
     const goneReach = { ...(await activeIs(page)), toastOpacity: await page.evaluate(() => getComputedStyle(document.getElementById('toast')).opacity) };
     const tabHits = /toast-action/.test(goneReach.cls);
     t.check(!tabHits, 'reset offer gone: Tab from the last control does not land on its invisible button', goneReach);
-    // nor may it catch clicks: the toast lets the pointer through, its button does not
-    const spot = await page.evaluate(() => { const b = document.querySelector('#toast .toast-action'); if (!b) return null; const r = b.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hit: hit ? hit.className : null, under: (() => { b.style.visibility = 'hidden'; const u = document.elementFromPoint(x, y); b.style.visibility = ''; return u ? (u.id || u.className || u.tagName).toString().slice(0, 40) : null; })() }; });
-    const clickHits = !!spot && spot.hit === 'toast-action';
-    t.check(!clickHits, 'reset offer gone: its invisible button does not catch clicks at the bottom of the window', spot);
+    // nor may it catch clicks: the toast lets the pointer through, its button does not. Seen on the Study tab, then
+    // on the Studio, where a desktop's paper and strip reach the bottom of the window
+    const spotAt = () => page.evaluate(() => { const b = document.querySelector('#toast .toast-action'); if (!b) return null; const r = b.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y); b.style.visibility = 'hidden'; const u = document.elementFromPoint(x, y); b.style.visibility = ''; return { x, y, hit: hit ? hit.className : null, under: u ? (u.id || u.getAttribute('aria-label') || u.className || u.tagName).toString().slice(0, 40) : null }; });
+    const spot = await spotAt();
+    await page.evaluate(() => window.Studio.go('paint')); await sleep(600);
+    const spotStudio = await spotAt();
+    const clickHits = !!spot && spot.hit === 'toast-action', studioHits = !!spotStudio && spotStudio.hit === 'toast-action';
+    t.check(!clickHits && !studioHits, 'reset offer gone: its invisible button does not catch clicks at the bottom of the window', { study: spot, studio: spotStudio });
     let wiped = null;
-    if (clickHits) {
-      // what two ordinary clicks on that spot do
-      await page.keyboard.press('Escape');
-      await page.evaluate(() => { const b = document.querySelector('#toast .toast-action'); if (b.textContent !== 'Reset settings and saved painting') { b.remove(); } });
-      if (await page.evaluate(() => !!document.querySelector('#toast .toast-action'))) {
-        await navigate(page, async () => { await page.mouse.click(spot.x, spot.y); await sleep(200); await page.mouse.click(spot.x, spot.y); });
-        await sleep(800);
-        wiped = { keys: await siteKeys(page), simple: await page.evaluate(() => document.body.classList.contains('mode-simple')) };
-      }
+    if (studioHits) {
+      // what two ordinary clicks on that spot of the Studio do
+      await navigate(page, async () => { await page.mouse.click(spotStudio.x, spotStudio.y); await sleep(200); await page.mouse.click(spotStudio.x, spotStudio.y); });
+      await sleep(800);
+      wiped = { keys: await siteKeys(page), simple: await page.evaluate(() => document.body.classList.contains('mode-simple')) };
     }
-    if (tabHits || clickHits) t.finding({ title: 'Once the reset offer\'s note has faded, its "Reset settings and saved painting" button stays on the page, invisible, focusable and clickable: two clicks at the bottom centre of the window wipe every setting and the saved painting', severity: 'medium', steps: 'Have the guard\'s saved-state note come up (StudioGuard.report(err, { saved: true }), what a Studio restore() that rejects or a start() step that throws calls). Leave it: after 20 s it fades. Then (a) Tab from the last control of the page, or (b) click twice at the bottom centre of the window, where the note was.', expected: 'The button leaves with its note (removed, or hidden from the pointer and the keyboard); nothing invisible can clear the visitor\'s work.', actual: `${tabHits ? `Tab lands on the invisible button (toast opacity ${goneReach.toastOpacity}); Enter twice clears everything. ` : ''}${clickHits ? `The spot (${Math.round(spot.x)}, ${Math.round(spot.y)}) is taken by the invisible button, not the page underneath (${spot.under}); ` : ''}${wiped ? `two clicks there reloaded the page with ${wiped.keys.length} saved keys left (Advanced and the lean were set) and the mode back to ${wiped.simple ? 'Simple' : 'Advanced'}.` : ''} guard.js:72-73 only removes the class "show" when the 20 s are up; the button stays in the toast, and styles.css:1735 gives .toast-action pointer-events: auto inside a toast whose opacity is 0.`, cause: 'js/guard.js:72-73 (the hide timer leaves the button); styles.css:1735 (.toast .toast-action { pointer-events: auto } even when the toast is hidden)' });
+    if (tabHits || clickHits || studioHits) t.finding({ title: 'Once the reset offer\'s note has faded, its "Reset settings and saved painting" button stays on the page, invisible, focusable and clickable: two clicks at the bottom centre of the window wipe every setting and the saved painting', severity: 'medium', steps: 'Have the guard\'s saved-state note come up (StudioGuard.report(err, { saved: true }), what a Studio restore() that rejects or a start() step that throws calls). Leave it: after 20 s it fades. Then (a) Tab from the last control of the page, or (b) open the Studio and click (or start a stroke) twice at the bottom centre of the window, where the note was.', expected: 'The button leaves with its note (removed, or hidden from the pointer and the keyboard); nothing invisible can clear the visitor\'s work.', actual: `${tabHits ? `Tab lands on the invisible button (toast opacity ${goneReach.toastOpacity}); Enter twice clears everything. ` : ''}${clickHits || studioHits ? `The spot (${Math.round((spotStudio || spot).x)}, ${Math.round((spotStudio || spot).y)}) is taken by the invisible button, over what is underneath (Study tab: ${spot.under}; Studio: ${spotStudio && spotStudio.under}); ` : ''}${wiped ? `two clicks there on the Studio reloaded the page with ${wiped.keys.length} saved keys left (Advanced and the lean were set) and the mode back to ${wiped.simple ? 'Simple' : 'Advanced'}.` : ''} ${SRC.guardTimer} only removes the class "show" when the 20 s are up; the button stays in the toast, and ${SRC.toastAction} gives .toast-action pointer-events: auto inside a toast whose opacity is 0.`, cause: `${SRC.guardTimer} (the hide timer leaves the button); ${SRC.toastAction} (.toast .toast-action { pointer-events: auto } even when the toast is hidden)` });
     await clean(t, page, 'reset offer gone');
     await page.context().close();
   };
@@ -808,7 +824,7 @@ export default async function appShell(t, site) {
     t.check(!g.show && g.text === '', 'toast: a fourth error note in a visit is not shown (three at most)', g);
     await page.evaluate(() => window.StudioGuard.report(new Error('test: later saved-state error'), { saved: true })); dropOwn(page, /test: later/);
     g = await toastState(page);
-    t.note(`toast: after three error notes a saved-state error gets ${g.show ? 'a note' : 'no note and no reset offer'} (guard.js:56 counts every note against the same cap of three).`);
+    t.note(`toast: after three error notes a saved-state error gets ${g.show ? 'a note' : 'no note and no reset offer'} (${SRC.guardCap} counts every note against the same cap of three).`);
     await clean(t, page, 'toast cap');
     await page.context().close();
   }
@@ -827,7 +843,7 @@ export default async function appShell(t, site) {
     await page.context().close();
   }
   {
-    // the two timers: an app note's own timer (app.js:159-166) is not cleared by the guard's note (guard.js:71-73)
+    // the two timers: an app note's own timer is not cleared by the guard's note, nor the reverse
     const seen = [];
     for (const round of [1, 2]) {
       const page = await openPage(site);
@@ -841,7 +857,7 @@ export default async function appShell(t, site) {
       await clean(t, page, `toast timers ${round}`);
       await page.context().close();
     }
-    if (seen.every((x) => x.vanished)) t.finding({ title: 'The guard\'s reset offer is hidden early by an app note\'s timer that was still running', severity: 'low', steps: 'With the app loaded: Studio.toast("Copied #000000") (any app note, 1.8 s), then within that time StudioGuard.report(err, { saved: true }) (a saved-state failure). Wait 2 s.', expected: 'The note "Your saved settings or painting could not be read." with its reset button stays 20 s (guard.js:73).', actual: `The toast is hidden after about 1.8 s: app.js:165 keeps its own toastTimer and guard.js:71-73 clears only the guard's, so the earlier timer removes the class "show". The reverse happens too (a guard note's 6 s timer cuts a later app note). Seen: ${JSON.stringify(seen[0])}`, cause: 'js/app.js:159-166 and js/guard.js:71-73: two hide timers on one toast, each clearing only its own' });
+    if (seen.every((x) => x.vanished)) t.finding({ title: 'The guard\'s reset offer is hidden early by an app note\'s timer that was still running', severity: 'low', steps: 'With the app loaded: Studio.toast("Copied #000000") (any app note, 1.8 s), then within that time StudioGuard.report(err, { saved: true }) (a saved-state failure). Wait 2 s.', expected: `The note "Your saved settings or painting could not be read." with its reset button stays 20 s (${SRC.guardTimer}).`, actual: `The toast is hidden after about 1.8 s: ${SRC.appToastTimer} keeps its own toastTimer and ${SRC.guardTimer} clears only the guard's, so the earlier timer removes the class "show". The reverse happens too (a guard note's 6 s timer cuts a later app note). Seen: ${JSON.stringify(seen[0])}`, cause: `${SRC.appToast} and ${SRC.guardTimer}: two hide timers on one toast, each clearing only its own` });
   }
   {
     const page = await openPage(site, { viewport: PHONE });
@@ -953,10 +969,11 @@ export default async function appShell(t, site) {
     await fr.focus('[data-save="block"]'); await page.keyboard.press('Enter');
     await fr.waitForFunction(() => { const d = document.getElementById('saveDialog'); const i = document.getElementById('saveImg'); return d.open && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => null);
     const dlg = await fr.evaluate(() => { const i = document.getElementById('saveImg'); return { open: document.getElementById('saveDialog').open, src: i.src.slice(0, 10), w: i.naturalWidth, name: document.getElementById('saveName').textContent, alt: i.alt, fonts: document.fonts.status }; });
-    t.check(dlg.open && dlg.src === 'blob:null' && dlg.w > 0 && /-color-blocks\.png$/.test(dlg.name) && dlg.fonts === 'loaded', 'sandboxed embed: Save PNG opens the save-by-hand dialog with the picture and its name', dlg);
+    t.check(dlg.open && dlg.src.startsWith('blob:') && dlg.w > 0 && /-color-blocks\.png$/.test(dlg.name) && dlg.fonts === 'loaded', 'sandboxed embed: Save PNG opens the save-by-hand dialog with the picture and its name', dlg);
     await screenshot(page, 'app-shell-sandbox-save');
     await page.keyboard.press('Enter'); // the dialog's first control is Close
-    await fr.waitForFunction(() => !document.getElementById('saveDialog').open, null, { timeout: 2000 }).catch(() => null);
+    // (the dialog's close event, which lets the picture go, comes a moment after it shuts)
+    await fr.waitForFunction(() => !document.getElementById('saveDialog').open && !document.getElementById('saveImg').getAttribute('src'), null, { timeout: 3000 }).catch(() => null);
     const closed = await fr.evaluate(() => ({ open: document.getElementById('saveDialog').open, focus: document.activeElement && document.activeElement.dataset.save, src: document.getElementById('saveImg').getAttribute('src') }));
     t.check(!closed.open && closed.focus === 'block' && closed.src === null, 'sandboxed embed: Close shuts it, lets the picture go and puts the focus back on Save PNG', closed);
     await clean(t, page, 'sandboxed embed save');
@@ -1001,14 +1018,14 @@ export default async function appShell(t, site) {
     const learnOk = l1.learnOpen && l1.active === 'tabPoseBtn';
     t.check(learnOk, 'missing modules: ArrowDown from Study the photo steps over the hidden Loomis head to Pose and light', l1);
     await page.keyboard.press('Escape');
-    if (!gamesOk || !learnOk) t.finding({ title: 'When the guard has taken a page off a tab menu, the arrow keys get stuck on the hidden item: the keyboard cannot open Games on its last game, or step past a missing Loomis head', severity: 'low', steps: 'Serve the site with js/game.js failing (Paint by numbers leaves the menu) and js/painting.js failing (Studio, Figure study and Loomis head leave). Focus Games and press ArrowDown, then ArrowDown again. Focus Learning tools, press ArrowDown, then ArrowDown.', expected: 'The menu opens on Value battle; in Learning tools ArrowDown goes from Study the photo to Pose and light (ARIA menus skip hidden items).', actual: `Games: the menu opens but the focus stays on the button (${g1.active}) and the next ArrowDown closes it (open: ${g2.gamesOpen}). Learning tools: ArrowDown from Study the photo stays on ${l1.active}, so Pose and light and How to use cannot be reached by arrows. js/app.js:2241 focuses menu.querySelector('.tab-item'), the hidden first item, and 2245-2246 walk every .tab-item, hidden ones included; focus() on a hidden button does nothing.`, cause: 'js/app.js:2241 and 2245-2246: the menu items are not filtered by hidden' });
+    if (!gamesOk || !learnOk) t.finding({ title: 'When the guard has taken a page off a tab menu, the arrow keys get stuck on the hidden item: the keyboard cannot open Games on its last game, or step past a missing Loomis head', severity: 'low', steps: 'Serve the site with js/game.js failing (Paint by numbers leaves the menu) and js/painting.js failing (Studio, Figure study and Loomis head leave). Focus Games and press ArrowDown, then ArrowDown again. Focus Learning tools, press ArrowDown, then ArrowDown.', expected: 'The menu opens on Value battle; in Learning tools ArrowDown goes from Study the photo to Pose and light (ARIA menus skip hidden items).', actual: `Games: the menu opens but the focus stays on the button (${g1.active}) and the next ArrowDown closes it (open: ${g2.gamesOpen}). Learning tools: ArrowDown from Study the photo stays on ${l1.active}, so Pose and light and How to use cannot be reached by arrows. ${SRC.menuOpenOn} focuses menu.querySelector('.tab-item'), the hidden first item, and ${SRC.menuKeys} walks every .tab-item, hidden ones included; focus() on a hidden button does nothing.`, cause: `${SRC.menuOpenOn} and ${SRC.menuKeys}: the menu items are not filtered by hidden` });
     // the guide's "Go to Studio" with no Studio
     await tab(page, 'help');
     const goStudio = await page.evaluate(() => { const b = document.querySelector('[data-go="paint"]'); return { shown: b.getClientRects().length > 0, text: b.textContent }; });
     await click(page, '[data-go="paint"]'); await settle(page);
     const landed = { ...(await shell(page)), toast: (await toastState(page)).text, partNote: await visible(page, '.partfail-note') };
     t.check(!goStudio.shown || /Studio/.test(landed.toast), 'missing modules: the guide does not offer "Go to Studio" when the Studio did not start (or says why it lands elsewhere)', { goStudio, landed });
-    if (goStudio.shown && !/Studio/.test(landed.toast)) t.finding({ title: 'With the Studio off the menu (painting.js failed), the guide still offers "Go to Studio", which opens Study the photo without a word', severity: 'low', steps: 'Serve the site with js/painting.js failing. Open How to use and press "Go to Studio" in the four-step path.', expected: 'The button leaves with the Studio, as the guard does for "Use my Studio painting" (guard.js:88), or the page says the Studio did not start.', actual: `"${goStudio.text}" is shown; pressing it opens ${landed.shown.join()} (switchTab's hidden-item fallback, js/app.js:2187) with no note beyond the standing "Part of Portrait Value Studio did not start" at the top.`, cause: 'js/guard.js:88 hides #artFromStudio only; js/app.js:2638-2642 route [data-go="paint"] to the fallback' });
+    if (goStudio.shown && !/Studio/.test(landed.toast)) t.finding({ title: 'With the Studio off the menu (painting.js failed), the guide still offers "Go to Studio", which opens Study the photo without a word', severity: 'low', steps: 'Serve the site with js/painting.js failing. Open How to use and press "Go to Studio" in the four-step path.', expected: `The button leaves with the Studio, as the guard does for "Use my Studio painting" (${SRC.guardFromStudio}), or the page says the Studio did not start.`, actual: `"${goStudio.text}" is shown; pressing it opens ${landed.shown.join()} (switchTab's hidden-item fallback, ${SRC.hiddenFallback}) with no note beyond the standing "Part of Portrait Value Studio did not start" at the top.`, cause: `${SRC.guardFromStudio} hides #artFromStudio only; ${SRC.dataGo} routes [data-go="paint"] to the fallback` });
     await clean(t, page, 'missing modules');
     await page.context().close();
   }
@@ -1019,7 +1036,7 @@ export default async function appShell(t, site) {
     const bar = await page.evaluate(() => { const nav = document.querySelector('.tabs').getBoundingClientRect(); const shown = [...document.querySelectorAll('.tabs > *')].filter((e) => !e.hidden && e.getBoundingClientRect().width > 0).map((e) => e.getBoundingClientRect()); const last = shown[shown.length - 1]; return { groups: shown.length, gamesHidden: document.querySelector('[data-group="games"]').hidden, emptyRight: Math.round(nav.right - last.right), cols: getComputedStyle(document.querySelector('.tabs')).gridTemplateColumns }; });
     t.check(bar.gamesHidden && bar.groups === 3, 'missing games: the Games group leaves the bar', bar);
     t.check(bar.emptyRight <= 2 && (await hscroll(page)) <= 0, 'missing games: the three sections left fill the bar (no empty column)', bar);
-    if (bar.gamesHidden && bar.emptyRight > 2) t.finding({ title: 'With both games failed, the Games group leaves the tab bar but its column stays empty', severity: 'low', steps: 'Serve the site with js/game.js and js/battle.js failing (the guard hides the Games group). Look at the tab bar at 390 px (and 1400 px).', expected: 'Learning tools, Studio and Figure study share the bar.', actual: `The three sections keep a quarter of the bar each and a blank ${bar.emptyRight} px column is left on the right (grid-template-columns: ${bar.cols}).`, cause: 'styles.css:348 .tabs { grid-template-columns: repeat(4, minmax(0, 1fr)) } whatever the guard hides' });
+    if (bar.gamesHidden && bar.emptyRight > 2) t.finding({ title: 'With both games failed, the Games group leaves the tab bar but its column stays empty', severity: 'low', steps: 'Serve the site with js/game.js and js/battle.js failing (the guard hides the Games group). Look at the tab bar at 390 px (and 1400 px).', expected: 'Learning tools, Studio and Figure study share the bar.', actual: `The three sections keep a quarter of the bar each and a blank ${bar.emptyRight} px column is left on the right (grid-template-columns: ${bar.cols}).`, cause: `${SRC.tabsGrid} .tabs { grid-template-columns: repeat(4, minmax(0, 1fr)) } whatever the guard hides` });
     await screenshot(page, 'app-shell-phone-no-games');
     // pose.html answered 404 (a partial deploy): what the Pose tab shows
     await page.route(site.base + 'pose.html*', (r) => r.fulfill({ status: 404, contentType: 'text/html; charset=utf-8', body: fs.readFileSync(path.join(site.root, '404.html'), 'utf8') }));
@@ -1044,7 +1061,7 @@ export default async function appShell(t, site) {
     }
     const told = outcomes.every((o) => o.shown.join() === 'tab-study' || /photo|loaded|Study/i.test(o.toast));
     t.check(told, 'help: Load photo while on the guide shows the study or says where the photo went', outcomes.map((o) => ({ shown: o.shown, toast: o.toast, source: o.source.slice(0, 40) })));
-    if (!told) t.finding({ title: 'Load photo pressed on the How to use tab (or any tab without the pictures) gives no visible result', severity: 'medium', steps: 'Open How to use (desktop: the top bar with Load photo stays in view). Press Load photo and choose a portrait.', expected: 'The Study tab opens with the new photo, or a note says the photo is in Study the photo.', actual: `The guide stays open and no note appears; the studies change behind it (js/app.js:594-597, the input's change → loadFile 538 → useSource 544-561, never switches the tab or says where the photo went; the source line reads "${outcomes[0].source.slice(0, 60)}").`, cause: 'js/app.js:544-561: useSource toasts only about marks or a reduced size, and never opens the Study tab' });
+    if (!told) t.finding({ title: 'Load photo pressed on the How to use tab (or any tab without the pictures) gives no visible result', severity: 'medium', steps: 'Open How to use (desktop: the top bar with Load photo stays in view). Press Load photo and choose a portrait.', expected: 'The Study tab opens with the new photo, or a note says the photo is in Study the photo.', actual: `The guide stays open and no note appears; the studies change behind it (the input's change at ${SRC.fileChange} → loadFile ${SRC.loadFile} → useSource ${SRC.useSource} never switches the tab or says where the photo went; the source line reads "${outcomes[0].source.slice(0, 60)}").`, cause: `${SRC.useSource}: useSource toasts only about marks or a reduced size, and never opens the Study tab` });
     t.note(`help: before the load the source line read "${before.slice(0, 50)}".`);
     // tabs, and Simple/Advanced, switched while the study is busy with a big photo
     await tab(page, 'study');
@@ -1081,7 +1098,7 @@ export default async function appShell(t, site) {
     const moved = await within(page.mouse.move(b.x + b.width * 0.6, b.y + b.height * 0.5, { steps: 3 }), 6000);
     const alive = moved && await within(page.evaluate(() => 1), 4000);
     t.check(opened === 'figure' && alive, 'mid-stroke: leaving the Studio by keyboard with the mouse still down leaves the page responsive', { from, opened, moved, alive });
-    if (opened === 'figure' && !alive) t.finding({ title: 'Leaving the Studio while a stroke is held freezes the page: the next pointer move runs an endless loop', severity: 'high', steps: 'Desktop. Press the Studio section button (the focus stays on it), press the mouse on the paper and, holding it, press Tab and Enter (Figure study opens). Move the mouse.', expected: 'The stroke ends when the paper is hidden (or the move is ignored); the page keeps answering.', actual: 'The page stops answering at once (no script, no input; Chromium offers to kill the page). The paper keeps the pointer capture while hidden, so the move still reaches its pointermove handler; pos() divides by the hidden paper\'s width and height of 0 and gives Infinity, and segment() then stamps Math.ceil(Infinity / spacing) = Infinity dabs in a for loop that never ends.', cause: 'js/painting.js:336 (pos: (clientX - r.left) / r.width with r.width 0) and js/painting.js:329-331 (n = Math.ceil(d / spacing()) unbounded); nothing ends the stroke on studio:tab or releases the capture' });
+    if (opened === 'figure' && !alive) t.finding({ title: 'Leaving the Studio while a stroke is held freezes the page: the next pointer move runs an endless loop', severity: 'high', steps: 'Desktop. Press the Studio section button (the focus stays on it), press the mouse on the paper and, holding it, press Tab and Enter (Figure study opens). Move the mouse.', expected: 'The stroke ends when the paper is hidden (or the move is ignored); the page keeps answering.', actual: 'The page stops answering at once (no script, no input; Chromium offers to kill the page). The paper keeps the pointer capture while hidden, so the move still reaches its pointermove handler; pos() divides by the hidden paper\'s width and height of 0 and gives Infinity, and segment() then stamps Math.ceil(Infinity / spacing) = Infinity dabs in a for loop that never ends.', cause: `${SRC.pos} (pos: (clientX - r.left) / r.width with r.width 0) and ${SRC.segment} (n = Math.ceil(d / spacing()) unbounded); nothing ends the stroke on studio:tab or releases the capture` });
     if (alive) { await page.mouse.up(); await clean(t, page, 'mid-stroke'); }
     await within(page.context().close(), 10000);
   }
