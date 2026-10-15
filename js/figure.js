@@ -15,7 +15,8 @@
 (function () {
   'use strict';
   const panel = document.getElementById('tab-figure');
-  if (!panel || !window.PaintStudio || !PaintStudio.create) return;
+  if (!panel) return;
+  if (!window.PaintStudio || !PaintStudio.create) { if (window.StudioGuard) StudioGuard.failed('figure.js: painting.js did not finish loading', 'figure'); return; }
   const $ = (id) => document.getElementById('fig-' + id);
   const KEY = 'portrait-value-studio.figureStudy';
   function load() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }

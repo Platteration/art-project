@@ -25,7 +25,7 @@
   function forget(reload) {
     try { window.dispatchEvent(new Event('studio:forget')); } catch (e) { /* nothing listening */ }
     try {
-      Object.keys(localStorage).filter(function (k) { return k.indexOf(PREFIX) === 0; }).forEach(function (k) { localStorage.removeItem(k); });
+      Object.keys(localStorage).filter(function (k) { return k.indexOf(PREFIX) === 0 || k.indexOf('pose-and-light.') === 0; }).forEach(function (k) { localStorage.removeItem(k); });
     } catch (e) { /* storage unavailable: nothing kept */ }
     var done = false;
     function finish() { if (done) return; done = true; if (reload) location.reload(); }
@@ -91,7 +91,7 @@
   // that module did not start, and its tab is taken off the menu (a module cannot do that for itself).
   var booting = true;
   window.addEventListener('load', function () { booting = false; });
-  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis' };
+  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure' };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
   // stylesheet failing to load shows the standing note at the top of the page, not a passing toast.
