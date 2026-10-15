@@ -1099,7 +1099,18 @@ export default async function appShell(t, site) {
     const alive = moved && await within(page.evaluate(() => 1), 4000);
     t.check(opened === 'figure' && alive, 'mid-stroke: leaving the Studio by keyboard with the mouse still down leaves the page responsive', { from, opened, moved, alive });
     if (opened === 'figure' && !alive) t.finding({ title: 'Leaving the Studio while a stroke is held freezes the page: the next pointer move runs an endless loop', severity: 'high', steps: 'Desktop. Press the Studio section button (the focus stays on it), press the mouse on the paper and, holding it, press Tab and Enter (Figure study opens). Move the mouse.', expected: 'The stroke ends when the paper is hidden (or the move is ignored); the page keeps answering.', actual: 'The page stops answering at once (no script, no input; Chromium offers to kill the page). The paper keeps the pointer capture while hidden, so the move still reaches its pointermove handler; pos() divides by the hidden paper\'s width and height of 0 and gives Infinity, and segment() then stamps Math.ceil(Infinity / spacing) = Infinity dabs in a for loop that never ends.', cause: `${SRC.pos} (pos: (clientX - r.left) / r.width with r.width 0) and ${SRC.segment} (n = Math.ceil(d / spacing()) unbounded); nothing ends the stroke on studio:tab or releases the capture` });
-    if (alive) { await page.mouse.up(); await clean(t, page, 'mid-stroke'); }
+    if (alive) {
+      await page.mouse.up();
+      // back in the Studio the held stroke is over: a move with no button paints nothing, a new stroke paints
+      await tab(page, 'paint'); await sleep(300);
+      const ink1 = await inked(page, '#ps-paper');
+      await page.mouse.move(b.x + b.width * 0.7, b.y + b.height * 0.75, { steps: 4 });
+      const ink2 = await inked(page, '#ps-paper');
+      await stroke(page, '#ps-paper', [[0.2, 0.6], [0.45, 0.65], [0.6, 0.7]]);
+      const ink3 = await inked(page, '#ps-paper');
+      t.check(ink2 === ink1 && ink3 > ink2, 'mid-stroke: back in the Studio the held stroke has ended (a move without the button paints nothing) and a new stroke paints', { ink1, ink2, ink3 });
+      await clean(t, page, 'mid-stroke');
+    }
     await within(page.context().close(), 10000);
   }
   t.note('Not driven: Forget while another tab keeps the database open without reloading. The Studio opens the database only for each read or write and closes it again (painting.js dbPut/dbGet), so another tab holds no connection between saves; the multitab case covers Forget across two tabs.');

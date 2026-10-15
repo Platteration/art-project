@@ -6,8 +6,14 @@
 // the head, Save PNG, Draw it in the Studio (and the Studio's underdrawing), the head over the Study
 // tab's pictures and in their saved PNGs, a new photo (and a rejected file, and a 24-megapixel one)
 // while marking, a press that outlives the photo, hostile saved state, keyboard, and both widths.
+// At the end: the coverage critic's gaps (every high and medium one, then the low ones the time allowed): a turned,
+// nodded, tilted or long head; a hidden head through Start over and a new photo; the loupe's content and place; marks
+// while a new photo is prepared; the head on the Study pictures and in their PNGs by position; the no-head card; touch;
+// dots close together; a profile; the far side dashed; a resize; Draw it in the Studio pressed again; Save PNG while
+// hidden and mid-sequence; the drag extremes; the narrow widths; a pixel ratio of 2; a sandboxed save; the words and
+// labels; keyboard focus; dark theme; the model's numbers; drags cut short; a dropped or pasted photo; small and wide photos.
 import fs from 'node:fs';
-import { openPage, clean, tab, DESKTOP, PHONE, makeImage, loadPhoto, textFile, brokenImage, svgImage, click, text, visible, hscroll, screenshot, sleep, storageGet, PROTO_NAMES } from '../lib.mjs';
+import { openPage, clean, tab, DESKTOP, PHONE, makeImage, loadPhoto, textFile, brokenImage, svgImage, click, text, visible, hscroll, screenshot, sleep, storageGet, PROTO_NAMES, dropFiles, pasteFile, axe, app } from '../lib.mjs';
 
 const DEG = Math.PI / 180;
 const ORDER = ['leftEye', 'rightEye', 'leftBrow', 'rightBrow', 'nose', 'mouth', 'chin', 'forehead'];
@@ -63,6 +69,57 @@ async function pngOf(page, dl) {
 }
 const download = async (page, sel) => { const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 8000 }).catch(() => null), click(page, sel)]); return dl; };
 const layoutOf = (page) => page.evaluate(() => { const r = (s) => { const e = document.querySelector(s); const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom, shown: !e.hidden && getComputedStyle(e).display !== 'none' }; }; return { card: r('#lh-card'), stage: r('#lh-stage'), wrap: r('#lh-wrap'), strip: r('#lh-root .ps-strip'), exit: r('#lh-exit'), tabs: r('.tabs'), vw: innerWidth, vh: innerHeight }; });
+
+// ---- helpers for the checks at the end of this case (the coverage critic's gaps) ----
+const guard = async (t, label, fn) => { try { await fn(); } catch (e) { t.check(false, `${label}: the step ran to its end`, String((e && e.message) || e).slice(0, 300)); } };
+// the marks a head makes at a pose, by the model's own projection (a pose's fields left out are level)
+const posedMarks = (page, pose) => page.evaluate((pose) => { const a = Studio.prep(); const aspect = a.h / a.w; const f = { s: 0.2, tx: 0.5, ty: 0.45, yaw: 0, pitch: 0, roll: 0, len: 1, ...pose }; const out = {}; Loomis.STEPS.forEach((st) => { const p = Loomis.project(st.model, f, st.face); out[st.key] = [p[0], p[1] / aspect]; }); return out; }, pose);
+// how far each locked mark is from the landmark the fitted head puts there (picture widths)
+const residualsOf = (page) => page.evaluate(() => { const f = Loomis.state.fit, a = Loomis.state.aspect; return Loomis.STEPS.filter((st) => Loomis.state.points[st.key]).map((st) => { const p = Loomis.state.points[st.key]; const q = Loomis.project(st.model, f, st.face); return +Math.hypot(q[0] - p.x, q[1] - p.y * a).toFixed(4); }); });
+// what a canvas (or a decoded PNG kept as window.__png) holds of the head: the share of the ball's rim (radius s x W, 3 px either way)
+// that is red, the share of the centre line's run that is cyan, and the colour counts. Self-contained: it is sent to the page as text.
+const HEAD_STATS = (c, fit) => {
+  const W = c.width, H = c.height, d = c.getContext('2d').getImageData(0, 0, W, H).data;
+  const isRed = (r, g, b) => r > 200 && g < 90 && b < 90;
+  const isCyan = (r, g, b) => r < 80 && g > 170 && b > 200;
+  const isYellow = (r, g, b) => r > 200 && g > 180 && b < 80;
+  const at = (x, y, pred) => { const xi = Math.round(x), yi = Math.round(y); if (xi < 0 || yi < 0 || xi >= W || yi >= H) return false; const i = (yi * W + xi) * 4; return d[i + 3] > 200 && pred(d[i], d[i + 1], d[i + 2]); };
+  let rim = 0, rimN = 0, run = 0, runN = 0;
+  if (fit) {
+    const cx = fit.tx * W, cy = fit.ty * W, R = fit.s * W;
+    for (let a = 0; a < 360; a += 10) { const th = (a * Math.PI) / 180; let hit = false; for (let r = R - 3; r <= R + 3 && !hit; r++) hit = at(cx + r * Math.cos(th), cy + r * Math.sin(th), isRed); rim += hit ? 1 : 0; rimN++; }
+    for (let y = cy - 0.8 * R; y <= cy + 0.8 * R; y += 2) { runN++; if (at(cx - 1, y, isCyan) || at(cx, y, isCyan) || at(cx + 1, y, isCyan)) run++; }
+  }
+  let red = 0, cyan = 0, yellow = 0, white = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] <= 200) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (isRed(r, g, b)) red++; else if (isCyan(r, g, b)) cyan++; else if (isYellow(r, g, b)) yellow++; else if (r > 245 && g > 245 && b > 245) white++;
+  }
+  return { W, H, rim: rimN ? +(rim / rimN).toFixed(2) : null, run: runN ? +(run / runN).toFixed(2) : null, red, cyan, yellow, white };
+};
+const headStats = (page, expr, fit) => page.evaluate(`(${HEAD_STATS.toString()})(${expr}, ${JSON.stringify(fit)})`);
+// a saved PNG decoded in the page (kept as window.__png, for headStats)
+async function decodePng(page, dl) {
+  if (!dl) return null;
+  const b64 = fs.readFileSync(await dl.path()).toString('base64');
+  return page.evaluate(async (b64) => { const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' })); const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; c.getContext('2d').drawImage(bmp, 0, 0); window.__png = c; return { w: c.width, h: c.height }; }, b64);
+}
+const sketchInk = (page) => page.evaluate(() => { const c = document.getElementById('ps-sketch'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 16) if (d[i] > 8) n++; return n; });
+// the loupe for a press at each edge of the picture: shown, inside the stage, and not over the finger
+const edgeProbe = async (pg) => {
+  const out = [];
+  for (const [fx, fy] of [[0.02, 0.5], [0.98, 0.5], [0.5, 0.02], [0.5, 0.98]]) {
+    await press(pg, fx, fy);
+    const b = await ovBox(pg);
+    const px = b.x + Math.min(fx * b.w, b.w - 0.5), py = b.y + Math.min(fy * b.h, b.h - 0.5);
+    const r = await pg.evaluate(() => { const l = document.getElementById('lh-loupe').getBoundingClientRect(), s = document.getElementById('lh-stage').getBoundingClientRect(); return { shown: !document.getElementById('lh-loupe').hidden, l: [l.left, l.top, l.right, l.bottom], s: [s.left, s.top, s.right, s.bottom] }; });
+    await pg.mouse.up();
+    const [L, T, R, B] = r.l, [SL, ST, SR, SB] = r.s;
+    out.push({ at: [fx, fy], shown: r.shown, inStage: L >= SL - 0.5 && T >= ST - 0.5 && R <= SR + 0.5 && B <= SB + 0.5, under: px >= L && px <= R && py >= T && py <= B });
+  }
+  return out;
+};
 
 export default async function loomis(t, site) {
   // ================= desktop: the sample, the full sequence, the loupe, the fitted head and all its handles =================
@@ -471,6 +528,591 @@ export default async function loomis(t, site) {
     await page.context().close();
   }
 
+  // ================= the coverage critic's gaps: high and medium first =================
+  // gap (high): a turned, nodded, tilted or long head is fitted from its marks, not only a level one
+  await guard(t, 'turned, nodded, tilted and long heads', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const POSES = [{ yaw: 0.5 }, { yaw: -0.5 }, { yaw: 0.9 }, { yaw: -0.9, bare: true }, { pitch: 0.35 }, { pitch: -0.35, bare: true }, { roll: 0.3 }, { roll: -0.3 }, { len: 0.85 }, { len: 1.2, bare: true }, { yaw: -0.6, pitch: 0.25, roll: -0.2, len: 1.1 }];
+    const rows = [];
+    for (const pose of POSES) {
+      await click(page, '#lh-reset');
+      await sequence(page, await posedMarks(page, pose), pose.bare ? ['leftBrow', 'rightBrow', 'forehead'] : []);
+      const f = (await lstate(page)).fit, want = { yaw: 0, pitch: 0, roll: 0, len: 1, ...pose };
+      const ok = !!f && near(f.yaw, want.yaw, 0.06) && near(f.pitch, want.pitch, 0.06) && near(f.roll, want.roll, 0.06) && near(f.len, want.len, 0.05) && near(f.s, 0.2, 0.02) && near(f.tx, 0.5, 0.02) && near(f.ty, 0.45, 0.02);
+      const res = await residualsOf(page), red = (await ink(page)).red;
+      rows.push({ pose: JSON.stringify(pose), fit: f && [f.yaw, f.pitch, f.roll, f.len, f.s].map((v) => +v.toFixed(3)), maxResidual: Math.max(...res), red, ok: ok && Math.max(...res) <= 0.01 && red > 50 });
+    }
+    const bad = rows.filter((r) => !r.ok);
+    t.check(bad.length === 0, 'a turned (either way), nodded, tilted or long head is fitted to the pose that made its marks, yaw sign included, every landmark within 1% of its mark, and drawn', bad.length ? bad : `${rows.length} poses`);
+    if (bad.length) t.finding({ title: 'A turned, nodded, tilted or long head is not fitted to the pose its marks were made from', severity: 'high', steps: '1. On the Loomis head (the sample), tap and lock the eight marks of a head turned to one side, nodded, tilted or lengthened (a three-quarter view is the usual case). 2. Read the fitted yaw, pitch, roll and length, and look at where the lines lie.', expected: 'The fit recovers the pose (the yaw with its sign, the nod, the tilt and the face length), every mark lands on its landmark, and the head is drawn over the face.', actual: JSON.stringify(bad).slice(0, 500) });
+    await clean(t, page, 'gap: turned and posed heads');
+    await page.context().close();
+  });
+
+  // gap (high): a head hidden with the eye button stays hidden through Start over, a new photo and Back one mark
+  await guard(t, 'a hidden head after Start over, a new photo and Back one mark', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const FIVE = ['leftBrow', 'rightBrow', 'forehead'];
+    await sequence(page, await marksFor(page), FIVE);
+    await click(page, '#lh-show');
+    await click(page, '#lh-reset'); await click(page, '#lh-reset');
+    armToast(page);
+    await sequence(page, await marksFor(page), FIVE);
+    const bad = [];
+    let c = await card(page), i = await ink(page);
+    if (!(c.done && i.red > 50)) bad.push({ after: 'Start over', fitted: c.done, red: i.red, pressed: c.pressed, toast: await toastMatch(page, /over the face/i, 300) });
+    await loadPhoto(page, await makeImage(page, { width: 800, height: 600, name: 'other.png' }), { settle: 800 });
+    armToast(page);
+    await sequence(page, await marksFor(page), FIVE);
+    c = await card(page); i = await ink(page);
+    if (!(c.done && i.red > 50)) bad.push({ after: 'a new photo', fitted: c.done, red: i.red, pressed: c.pressed, toast: await toastMatch(page, /over the face/i, 300) });
+    // still hidden: Back one mark, then the forehead tapped and locked again
+    await click(page, '#lh-undo');
+    const fh = (await marksFor(page)).forehead;
+    await tap(page, fh[0], fh[1]); await click(page, '#lh-lock');
+    c = await card(page); i = await ink(page);
+    if (!(c.done && i.red > 50)) bad.push({ after: 'Back one mark and Lock in', fitted: c.done, red: i.red, pressed: c.pressed, toast: await toastMatch(page, /over the face/i, 300) });
+    t.check(bad.length === 0, 'a head hidden with the eye button is drawn again after Start over, a new photo and Back one mark and Lock in, so the fit that follows shows it', bad.length ? bad : 'drawn after all three');
+    if (bad.length) t.finding({ title: 'A head hidden with the eye button stays hidden after Start over, a new photo or Back one mark, while "The head is over the face" is said', severity: 'high', steps: '1. On the Loomis head, lock in the marks and press the eye button (Show or hide the head). 2. Press Start over twice (or load another photo, or press Back one mark and then Lock in) and mark the features again.', expected: 'The head is drawn over the photo after the last mark, as the README says ("After the last the head is drawn over the photo"), or the page says the head is hidden and how to show it.', actual: `${JSON.stringify(bad).slice(0, 420)} Cause: js/loomis.js line 186, reset() clears points, step, fit and auto but not state.shown, which the eye button sets (line 305); clearMarks (js/app.js line 2095) calls reset for a new photo; back() (line 178) leaves shown alone.` });
+    await clean(t, page, 'gap: hidden head');
+    await page.context().close();
+  });
+
+  // gap (medium): the loupe shows the spot under the finger, and is never over the finger
+  await guard(t, 'the loupe content and its place', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await loadPhoto(page, await makeImage(page, { width: 600, height: 800, name: 'face.png' }), { settle: 800 });
+    const rows = [];
+    for (const [fx, fy, name] of [[0.5, 0.25, 'hair'], [0.5, 0.42, 'face'], [0.5, 0.85, 'shirt'], [0.1, 0.1, 'background']]) {
+      await press(page, fx, fy);
+      const r = await page.evaluate(([fx, fy]) => {
+        const lc = document.getElementById('lh-loupeCanvas'), ph = document.getElementById('lh-photo');
+        const mean = (ctx, x0, y0) => { const d = ctx.getImageData(x0, y0, 4, 4).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } return [r / n, g / n, b / n].map(Math.round); };
+        const o = Math.round(lc.width / 2 + 16); // 16 loupe pixels from the centre: clear of the crosshair and its ring
+        return { loupe: mean(lc.getContext('2d'), o, o), photo: mean(ph.getContext('2d'), Math.round(fx * ph.width) - 2, Math.round(fy * ph.height) - 2) };
+      }, [fx, fy]);
+      await page.mouse.up();
+      rows.push({ name, ...r, same: r.loupe.every((v, k) => Math.abs(v - r.photo[k]) <= 24) });
+    }
+    const distinct = rows.every((r, a) => rows.every((o, b) => a === b || Math.abs(r.photo[0] - o.photo[0]) + Math.abs(r.photo[1] - o.photo[1]) + Math.abs(r.photo[2] - o.photo[2]) > 40));
+    t.check(rows.every((r) => r.same) && distinct, 'the loupe shows the photo under the finger: its middle is the colour of the spot pressed (hair, face, shirt, background)', rows);
+    const edgesDesk = await edgeProbe(page);
+    const phone = await openPage(site, { viewport: PHONE });
+    await tab(phone, 'loomis');
+    const edgesPhone = await edgeProbe(phone);
+    t.check([...edgesDesk, ...edgesPhone].every((e) => e.shown && e.inStage && !e.under), 'the loupe for a press at each edge is shown inside the stage and not under the finger, on both widths', { desktop: edgesDesk, phone: edgesPhone });
+    await clean(t, page, 'gap: loupe');
+    await clean(t, phone, 'gap: loupe on a phone');
+    await phone.context().close();
+    await page.context().close();
+  });
+
+  // gap (medium): marks placed while a new photo is still being prepared must not land on the new picture
+  await guard(t, 'marks while a new photo is prepared', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await mark(page, 0.3, 0.3); await mark(page, 0.6, 0.3);
+    // at the moment the "Updating" note comes up (the old picture still shown), two marks are placed and locked in one task
+    await page.evaluate(() => {
+      window.__mid = null;
+      const busy = document.getElementById('busy');
+      new MutationObserver((_, mo) => {
+        if (busy.hidden) return;
+        mo.disconnect();
+        const before = Loomis.state.step;
+        Loomis.place(0.4, 0.45); document.getElementById('lh-lock').click();
+        Loomis.place(0.7, 0.5); document.getElementById('lh-lock').click();
+        window.__mid = { before, after: Loomis.state.step };
+      }).observe(busy, { attributes: true, attributeFilter: ['hidden'] });
+    });
+    await page.setInputFiles('#file', await makeImage(page, { width: 6000, height: 4000, type: 'image/jpeg', quality: 0.6, name: 'big.jpg' }));
+    await page.waitForFunction(() => window.__mid && document.getElementById('busy').hidden, null, { timeout: 60000 }).catch(() => null);
+    await sleep(800);
+    const mid = await page.evaluate(() => window.__mid);
+    const s = await lstate(page), c = await card(page);
+    const kept = s.step !== 0 || Object.keys(s.points).length > 0;
+    if (!mid) t.note('the "Updating" note never came up while the 24-megapixel photo was prepared, so no mark was placed in that window');
+    else {
+      t.check(!kept, 'marks placed while a new photo is being prepared are dropped, not kept for the new photo', { mid, step: s.step, points: Object.keys(s.points), card: c.step });
+      if (kept) t.finding({ title: 'Marks placed while a new photo is still being prepared survive onto the new photo', severity: 'medium', steps: '1. On the Loomis head, lock two marks. 2. Load a large photo (a 24-megapixel JPEG) with Load photo. 3. While the "Updating…" note shows, tap and lock marks on the picture.', expected: 'The new photo starts with no marks (the README: loading a new photo clears all three), so marks placed on the old picture are dropped or refused.', actual: `After the new photo arrives the card reads "${c.step} ${c.ask}" with ${Object.keys(s.points).length} mark(s) kept (step ${s.step}); the two locked during the note were placed on the old picture and now sit on the new one. Cause: js/loomis.js clears its marks only in reset(), called from clearMarks when the file is read (js/app.js lines 552 and 2095-2097); the picture itself changes only at studio:result (js/loomis.js line 357), and nothing in between clears marks placed meanwhile.` });
+    }
+    await clean(t, page, 'gap: marks while preparing');
+    await page.context().close();
+  });
+
+  // gap (medium): the head sits where the fit puts it on the Study pictures and in their saved PNGs (by position, not colour counts)
+  await guard(t, 'the head on the Study pictures and their PNGs', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await loadPhoto(page, await makeImage(page, { width: 600, height: 800, name: 'face.png' }), { settle: 800 });
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const fit = (await lstate(page)).fit;
+    await tab(page, 'study');
+    const rows = {};
+    for (const id of ['cv-orig', 'cv-value', 'cv-block']) rows[id] = await headStats(page, `document.getElementById('${id}').nextElementSibling`, fit);
+    for (const kind of ['orig', 'value', 'block']) {
+      const dl = await download(page, `[data-save="${kind}"]`);
+      rows[`png-${kind}`] = dl && (await decodePng(page, dl)) ? await headStats(page, 'window.__png', fit) : null;
+    }
+    const placed = Object.values(rows).every((r) => r && r.rim !== null && r.rim >= 0.9 && r.run !== null && r.run >= 0.8);
+    t.check(placed, 'the head is where the fit puts it on the Study pictures and in their saved PNGs: the ball\'s rim and the centre line are in place', rows);
+    if (!placed) t.finding({ title: 'The head on the Study pictures or in their saved PNGs is not where the fit puts it', severity: 'medium', steps: '1. Load a portrait and lock in the Loomis marks (the head is fitted). 2. Open the Study tab and look at the head over the photo, the three-value study and the color blocks, and at their Save PNG files.', expected: 'The ball and the centre line lie where the fitted head puts them, in each picture and each saved PNG.', actual: JSON.stringify(rows).slice(0, 500) });
+    t.note('the underdrawing (Draw it in the Studio) is fitted to the paper, not the picture, so its place is not measured here');
+    await clean(t, page, 'gap: study head position');
+    await page.context().close();
+  });
+
+  // gap (medium): the no-head card, and the way back from it
+  await guard(t, 'the no-head state and the way back', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    // both eyes, nose, mouth and chin on one point: the five needed marks cannot make a head
+    await mark(page, 0.5, 0.5); await mark(page, 0.5, 0.5);
+    await click(page, '#lh-skip'); await click(page, '#lh-skip');
+    await mark(page, 0.5, 0.5); await mark(page, 0.5, 0.5); await mark(page, 0.5, 0.5);
+    await click(page, '#lh-skip');
+    const c = await card(page), s = await lstate(page), i = await ink(page), hs = await handlesOf(page);
+    const toast = (await text(page, '#toast')) || '';
+    const noHead = c.step === 'No head' && c.ask === 'These marks make no head' && /different points/.test(c.sub) && c.backShown && !c.lockShown && !c.skip && c.show && c.save && c.studio && hs.length === 0 && i.red === 0 && !s.has && /different points/.test(toast);
+    t.check(noHead, 'when the marks make no head the card says No head and why, offers Back, turns Show, Save and Draw it in the Studio off, and draws no arrows or head', { step: c.step, ask: c.ask, sub: c.sub.slice(0, 80), backShown: c.backShown, lockShown: c.lockShown, skip: c.skip, show: c.show, save: c.save, studio: c.studio, arrows: hs.length, red: i.red, toast });
+    // Back twice: the forehead, then the chin's ring; the chin moved off the others and locked, a head again
+    await click(page, '#lh-back'); await click(page, '#lh-back');
+    const c2 = await card(page), s2 = await lstate(page);
+    t.check(c2.step === '7 of 8' && c2.ask === 'Chin' && !!s2.pending && !s2.points.chin, 'Back twice gives the chin back as a pending ring, so it can be moved', { step: c2.step, ask: c2.ask, pending: s2.pending });
+    await tap(page, 0.5, 0.9); await click(page, '#lh-lock'); await click(page, '#lh-skip');
+    const s3 = await lstate(page), c3 = await card(page);
+    t.check(s3.has && c3.done, 'moving the chin off the others and locking it fits a head again', { has: s3.has, step: c3.step, fit: s3.fit && +s3.fit.s.toFixed(3) });
+    await clean(t, page, 'gap: no head');
+    await page.context().close();
+  });
+
+  // gap (medium): touch on a phone: a finger places and drags a mark, drags a dot, a second finger and a cancel leave nothing stuck, a held arrow keeps turning
+  await guard(t, 'touch on a phone', async () => {
+    const page = await openPage(site, { viewport: PHONE });
+    await tab(page, 'loomis');
+    const cdp = await page.context().newCDPSession(page);
+    const send = (type, pts = []) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y]) => ({ x, y })) });
+    const at = async (fx, fy) => { const b = await ovBox(page); return [b.x + fx * b.w, b.y + fy * b.h]; };
+    const [x0, y0] = await at(0.3, 0.3), [x1, y1] = await at(0.36, 0.4);
+    await send('touchStart', [[x0, y0]]); await sleep(60);
+    const during = { loupe: (await loupe(page)).shown, pending: (await lstate(page)).pending };
+    for (let k = 1; k <= 6; k++) await send('touchMove', [[x0 + ((x1 - x0) * k) / 6, y0 + ((y1 - y0) * k) / 6]]);
+    const moved = (await lstate(page)).pending;
+    await send('touchEnd'); await sleep(80);
+    const after = { pending: (await lstate(page)).pending, loupe: (await loupe(page)).shown, scrollY: await page.evaluate(() => window.scrollY) };
+    const placed = !!moved && near(moved.x, 0.36, 0.02) && near(moved.y, 0.4, 0.02) && !!after.pending && !after.loupe;
+    t.check(during.loupe && !!during.pending && placed && after.scrollY === 0, 'a finger places a mark and drags it: the loupe is up, the mark follows the finger and stays when the finger lifts, and the page does not scroll', { during, moved, after });
+    // a dot dragged by a finger once the head is fitted
+    await click(page, '#lh-reset');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const pe = (await lstate(page)).points.chin;
+    const [cx, cy] = await at(pe.x, pe.y), [dx, dy] = await at(pe.x - 0.03, pe.y + 0.02);
+    await send('touchStart', [[cx, cy]]); await sleep(40);
+    for (let k = 1; k <= 6; k++) await send('touchMove', [[cx + ((dx - cx) * k) / 6, cy + ((dy - cy) * k) / 6]]);
+    const dragged = (await lstate(page)).points.chin;
+    await send('touchEnd'); await sleep(80);
+    t.check(near(dragged.x, pe.x - 0.03, 0.01) && near(dragged.y, pe.y + 0.02, 0.01) && (await lstate(page)).moving === null, 'a finger drags a dot: the mark follows it and nothing is left moving when it lifts', { from: pe, to: dragged });
+    // a second finger lands mid-drag and both lift: no drag left going, no loupe up
+    await send('touchStart', [[dx, dy]]); await sleep(30);
+    await send('touchMove', [[dx + 4, dy + 2]]);
+    const [sx, sy] = await at(0.8, 0.8);
+    await send('touchMove', [[dx + 8, dy + 4], [sx, sy]]);
+    await send('touchMove', [[dx + 12, dy + 6], [sx, sy + 4]]);
+    await send('touchEnd'); await sleep(80);
+    const two = { moving: (await lstate(page)).moving, loupe: (await loupe(page)).shown };
+    t.check(two.moving === null && !two.loupe, 'a second finger landing mid-drag and both lifting leaves no drag going and no loupe up', two);
+    // a touch the browser cancels
+    await send('touchStart', [[dx, dy]]); await sleep(30);
+    await send('touchMove', [[dx + 3, dy]]);
+    await send('touchCancel'); await sleep(80);
+    const cancelled = { moving: (await lstate(page)).moving, loupe: (await loupe(page)).shown };
+    t.check(cancelled.moving === null && !cancelled.loupe, 'a touch the browser cancels leaves no drag going and no loupe up', cancelled);
+    // an arrow held by a finger keeps turning
+    const before = (await lstate(page)).fit;
+    const h = await handleAt(page, 'right');
+    await send('touchStart', [[h.x, h.y]]); await sleep(1000); await send('touchEnd'); await sleep(80);
+    const held = Math.round(((await lstate(page)).fit.yaw - before.yaw) / (3 * DEG));
+    t.check(held >= 4 && held <= 14, 'an arrow held by a finger keeps turning, about three degrees a step', { held });
+    await clean(t, page, 'gap: touch');
+    await page.context().close();
+  });
+
+  // gap (medium): dots close together: a press on a dot picks up that dot, the nearer one, on a small head at phone scale
+  await guard(t, 'dots close together', async () => {
+    const page = await openPage(site, { viewport: PHONE });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page, { s: 0.05 }), ['leftBrow', 'rightBrow', 'forehead']);
+    const pts = await page.evaluate(() => ({ nose: Loomis.state.points.nose, mouth: Loomis.state.points.mouth }));
+    const b = await ovBox(page), k = b.w / b.W;
+    const apart = Math.hypot((pts.nose.x - pts.mouth.x) * b.W, (pts.nose.y - pts.mouth.y) * b.H);
+    const res = [];
+    for (const name of ['mouth', 'nose']) {
+      const before = (await lstate(page)).points;
+      const x = before[name].x * b.W, y = before[name].y * b.H;
+      const hit = await hitAt(page, x, y);
+      await page.mouse.move(b.x + x * k, b.y + y * k); await page.mouse.down();
+      await page.mouse.move(b.x + (x + 2) * k, b.y + (y + 1) * k, { steps: 3 }); await page.mouse.up();
+      const after = (await lstate(page)).points;
+      const moved = Object.keys(after).filter((n) => Math.hypot(after[n].x - before[n].x, after[n].y - before[n].y) > 1e-4);
+      res.push({ name, hit, moved });
+    }
+    t.check(res.every((r) => r.hit === 'mark:' + r.name && r.moved.length === 1 && r.moved[0] === r.name), 'a press on a dot picks up that dot, even when two dots are a few pixels apart (the nearer one wins)', { apartPx: +apart.toFixed(1), res });
+    t.note('the arrows are tested before the dots (js/loomis.js hitTest): a dot under an arrow was not searched for here, since no level head puts one there');
+    await clean(t, page, 'gap: dots close');
+    await page.context().close();
+  });
+
+  // gap (medium): a profile, and two eyes on one point in a profile
+  await guard(t, 'a profile and two eyes on one point', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const rows = [];
+    for (const yaw of [1.1, -1.1, 1.4]) {
+      await click(page, '#lh-reset');
+      await sequence(page, await posedMarks(page, { yaw }), []);
+      const f = (await lstate(page)).fit, res = await residualsOf(page), red = (await ink(page)).red;
+      rows.push({ yaw, fit: f && +f.yaw.toFixed(3), maxResidual: Math.max(...res), red, ok: !!f && Math.sign(f.yaw) === Math.sign(yaw) && Math.abs(f.yaw - yaw) < 0.08 && Math.max(...res) <= 0.01 && red > 50 });
+    }
+    t.check(rows.every((r) => r.ok), 'a profile (a turn of 1.1 either way, and 1.4) is fitted with its turn and every mark on its feature', rows);
+    // the far eye sits on the silhouette: both eyes on the visible eye's spot, the rest where the profile puts them
+    await click(page, '#lh-reset');
+    const m = await posedMarks(page, { yaw: 1.1 });
+    m.rightEye = m.leftEye;
+    await sequence(page, m, []);
+    const s = await lstate(page), c = await card(page), red = (await ink(page)).red;
+    const coherent = (s.has && red > 50) || c.step === 'No head';
+    t.check(coherent, 'two eyes on one point in a profile: the head is drawn, or the card says it makes no head (never a fit with nothing drawn)', { step: c.step, has: s.has, red, fit: s.fit && +s.fit.yaw.toFixed(3) });
+    if (!coherent) t.finding({ title: 'Two eyes on one point in a profile: "The head is over the face" is said, but no head is drawn', severity: 'medium', steps: '1. On the Loomis head, tap the visible eye of a profile, press Lock in, then tap the same spot for the other eye and lock it. 2. Mark the nose, mouth and chin where the profile puts them, skip the brows and the forehead.', expected: 'A head is drawn, or the card says the marks make no head.', actual: `The card reads "${c.step}", the fit is ${JSON.stringify(s.fit)} and ${red} red pixels are drawn.` });
+    t.note(`both eyes on the visible eye: the fit reads yaw ${s.fit ? s.fit.yaw.toFixed(3) : 'none'} for a profile of 1.1; ${red > 50 ? 'a head is drawn' : 'nothing is drawn'}`);
+    await clean(t, page, 'gap: profile');
+    await page.context().close();
+  });
+
+  // gap (medium): the far side of the head is faint and dashed
+  await guard(t, 'the far side of the head is faint and dashed', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), []);
+    for (let k = 0; k < 17; k++) await tapHandle(page, 'right'); // about 0.9 rad: the centre line's far half clear of its near half
+    const r = await page.evaluate(() => {
+      const c = document.getElementById('lh-overlay'), W = c.width, f = Loomis.state.fit, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const path = [];
+      for (let k = 0; k <= 720; k++) { const th = (k / 720) * Math.PI * 2; const p = Loomis.project([0, -Math.cos(th), Math.sin(th)], f, false); if (p[2] < -0.05) path.push([p[0] * W, p[1] * W]); }
+      let on = 0;
+      for (const [x, y] of path) { const xi = Math.round(x), yi = Math.round(y); if (xi >= 0 && yi >= 0 && xi < c.width && yi < c.height && d[(yi * c.width + xi) * 4 + 3] > 25) on++; }
+      let faint = 0;
+      for (let i = 0; i < d.length; i += 4) { const a = d[i + 3]; if (a >= 60 && a <= 140 && Math.max(d[i], d[i + 1], d[i + 2]) > 100) faint++; }
+      return { yaw: +f.yaw.toFixed(3), far: path.length, on, share: path.length ? +(on / path.length).toFixed(2) : null, faint };
+    });
+    const dashed = r.far > 100 && r.share !== null && r.share > 0.1 && r.share < 0.85 && r.faint > 0;
+    t.check(dashed, 'the far half of the centre line is drawn faint and dashed: part of it inked, with gaps, and faint pixels in the overlay', r);
+    if (!dashed) t.finding({ title: 'The far side of a turned head is drawn solid, or not at all, instead of faint and dashed', severity: 'medium', steps: '1. On the Loomis head, lock in the marks. 2. Press the right arrow about 17 times (a turn of about 50 degrees). 3. Look at the far half of the centre line, the faint line behind the ball.', expected: 'The far side is faint (about 40% alpha) and dashed, as the README says ("Lines on the far side of the head are faint and dashed").', actual: JSON.stringify(r) });
+    await clean(t, page, 'gap: far side');
+    await page.context().close();
+  });
+
+  // gap (medium): a resize or a turn of the phone keeps the head, the arrows and the pending ring on the picture
+  await guard(t, 'resize and orientation', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const fitted = [];
+    for (const vp of [{ width: 844, height: 390 }, { width: 390, height: 844 }, { width: 1400, height: 900 }]) {
+      await page.setViewportSize(vp);
+      await page.waitForFunction(() => { const o = document.getElementById('lh-overlay'), w = document.getElementById('lh-wrap'); return w.clientWidth > 0 && o.width === Math.round(w.clientWidth * (window.devicePixelRatio || 1)); }, null, { timeout: 5000 }).catch(() => null);
+      const lay = await layoutOf(page), i = await ink(page), hs = await handlesOf(page), box = await ovBox(page);
+      fitted.push({ vp: `${vp.width}x${vp.height}`, overlay: [box.W, box.H], wrapInStage: inside(lay.wrap, lay.stage), cardOver: overlaps(lay.card, lay.wrap), red: i.red, arrowsInside: hs.every((h) => h.x >= 0 && h.y >= 0 && h.x <= box.W && h.y <= box.H) });
+    }
+    t.check(fitted.every((r) => r.wrapInStage && !r.cardOver && r.red > 50 && r.arrowsInside), 'after a resize or a turn the fitted head is redrawn at the new size, the photo stays in the stage, the card does not cover it, and the arrows are on the picture', fitted);
+    // a pending ring: one mark locked, a second pending, then the resizes
+    await click(page, '#lh-reset');
+    await mark(page, 0.3, 0.3);
+    await tap(page, 0.6, 0.5);
+    const pending = [];
+    for (const vp of [{ width: 844, height: 390 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(vp);
+      await page.waitForFunction(() => { const o = document.getElementById('lh-overlay'), w = document.getElementById('lh-wrap'); return w.clientWidth > 0 && o.width === Math.round(w.clientWidth * (window.devicePixelRatio || 1)); }, null, { timeout: 5000 }).catch(() => null);
+      const lay = await layoutOf(page), i = await ink(page);
+      await press(page, 0.95, 0.9); const lp = await loupe(page); await page.mouse.up();
+      pending.push({ vp: `${vp.width}x${vp.height}`, pendingKept: !!(await lstate(page)).pending, yellow: i.yellow, loupeInStage: lp.shown && lp.inStage, wrapInStage: inside(lay.wrap, lay.stage) });
+    }
+    t.check(pending.every((r) => r.pendingKept && r.yellow > 0 && r.loupeInStage && r.wrapInStage), 'after a resize with a mark pending, the ring is redrawn on the picture and the loupe stays on the stage', pending);
+    if (!fitted.every((r) => r.wrapInStage && !r.cardOver && r.red > 50 && r.arrowsInside) || !pending.every((r) => r.pendingKept && r.yellow > 0 && r.loupeInStage && r.wrapInStage)) t.finding({ title: 'After a resize or a turn the head, the arrows or the pending ring is not kept on the picture', severity: 'medium', steps: '1. On the Loomis head, lock in the marks. 2. Resize the window to 844 × 390, then 390 × 844 (a phone turned), then back. 3. Look at the head and the arrows. 4. Repeat with one mark pending.', expected: 'The overlay is redrawn at the new size, the arrows stay on the picture, the loupe stays inside the stage, and a pending ring survives.', actual: JSON.stringify({ fitted, pending }).slice(0, 500) });
+    await clean(t, page, 'gap: resize');
+    await page.context().close();
+  });
+
+  // gap (medium, a note): Draw it in the Studio pressed again after turning the head: what the underdrawing holds (the decision is the maintainer's)
+  await guard(t, 'Draw it in the Studio pressed again', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    armToast(page); await click(page, '#lh-studio');
+    const first = { toast: await toastMatch(page, /underdrawing/, 4000), ink: await sketchInk(page) };
+    await tab(page, 'loomis');
+    for (let k = 0; k < 10; k++) await tapHandle(page, 'right');
+    armToast(page); await click(page, '#lh-studio');
+    const second = { toast: await toastMatch(page, /underdrawing/, 4000), ink: await sketchInk(page) };
+    t.note(`Draw it in the Studio pressed again after turning the head (ten right-arrow taps): the underdrawing holds ${second.ink} inked samples against ${first.ink} after the first press (${(second.ink / Math.max(1, first.ink)).toFixed(2)} times), and the toasts read "${first.toast}" then "${second.toast}". The copy adds to the underdrawing and clears nothing (js/painting.js lines 386-400), so the second head is drawn over the first; the README does not say whether it should replace it.`);
+    t.check(second.ink > first.ink && !!second.toast, 'pressing Draw it in the Studio again adds the turned head to the underdrawing with its copy message', { first, second });
+    await clean(t, page, 'gap: studio again');
+    await page.context().close();
+  });
+
+  // gap (medium, a note): Save PNG and Draw it in the Studio mid-sequence, after the chin, with the forehead still pending
+  await guard(t, 'Save PNG mid-sequence', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const marks = await marksFor(page);
+    await mark(page, ...marks.leftEye); await mark(page, ...marks.rightEye);
+    await click(page, '#lh-skip'); await click(page, '#lh-skip');
+    await mark(page, ...marks.nose); await mark(page, ...marks.mouth); await mark(page, ...marks.chin);
+    const enabled = { save: !(await card(page)).save, studio: !(await card(page)).studio };
+    const a = await decodePng(page, await download(page, '#lh-save'));
+    const yellowA = a ? (await headStats(page, 'window.__png', null)).yellow : null;
+    await tap(page, ...marks.forehead);
+    const dlB = await download(page, '#lh-save');
+    const b = await decodePng(page, dlB);
+    const yellowB = b ? (await headStats(page, 'window.__png', null)).yellow : null;
+    t.note(`mid-sequence (the chin locked, the forehead pending): Save PNG and Draw it in the Studio are ${enabled.save && enabled.studio ? 'enabled' : 'not both enabled'}; the saved PNG has ${yellowB} yellow pixels with the pending forehead ring against ${yellowA} before it (the ring is #ffd21f, the lines' colour too). The head copied at this point is the earlier head: a copy is made when it is pressed, and nothing later updates it.`);
+    await clean(t, page, 'gap: mid-sequence save');
+    await page.context().close();
+  });
+
+  // gap (medium): Save PNG with the head hidden saves what the screen shows: the photo and the marks, no head
+  await guard(t, 'Save PNG with the head hidden', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    await click(page, '#lh-show');
+    const dl = await download(page, '#lh-save');
+    const dims = await decodePng(page, dl);
+    const st = dims ? await headStats(page, 'window.__png', null) : null;
+    const photo = await headStats(page, "document.getElementById('lh-photo')", null);
+    const prep = await page.evaluate(() => { const p = Studio.prep(); return [p.w, p.h]; });
+    const ok = !!dl && dl.suggestedFilename() === 'loomis-head.png' && !!st && st.red <= photo.red + 5 && st.cyan <= photo.cyan + 5 && st.white > 0 && dims.w === prep[0] && dims.h === prep[1];
+    t.check(ok, 'Save PNG with the head hidden saves the photo at its size with the marks and no head, as the screen shows', { name: dl && dl.suggestedFilename(), png: st, photoColours: { red: photo.red, cyan: photo.cyan }, dims, prep });
+    t.note('Save PNG stays enabled while the head is hidden (it is off only without a fit), so a hidden head is saved without the head; the README does not say which the visitor should get');
+    await click(page, '#lh-show');
+    await clean(t, page, 'gap: hidden save');
+    await page.context().close();
+  });
+
+  // gap (medium): the extremes of the drags: the ball at its least size, the head pushed into a corner, a line past its limit
+  await guard(t, 'the extremes of the drags', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const reachable = async (hs) => { const out = []; for (const h of hs) out.push((await hitAt(page, h.x, h.y)) === 'handle:' + h.glyph); return out.every(Boolean); };
+    const OWN = { left: 'yaw', right: 'yaw', up: 'pitch', down: 'pitch', ccw: 'roll', cw: 'roll' };
+    const tapsOwn = async () => { const out = []; for (const glyph of Object.keys(OWN)) { const b0 = (await lstate(page)).fit; await tapHandle(page, glyph); const b1 = (await lstate(page)).fit; out.push(changed(b0, b1).join() === OWN[glyph]); } return out; };
+    const apartOf = (hs, W) => hs.every((h, a) => hs.every((o, b) => a === b || Math.hypot(h.x - o.x, h.y - o.y) >= (30 * W) / 400));
+    // (a) the ball dragged in to its least size
+    const sp = await spots(page), W = sp.W, f0 = (await lstate(page)).fit, bx = await ovBox(page), kk = bx.w / bx.W;
+    if (sp.pick.ball) { const p = sp.pick.ball; await page.mouse.move(bx.x + p[0] * kk, bx.y + p[1] * kk); await page.mouse.down(); await page.mouse.move(bx.x + f0.tx * W * kk, bx.y + f0.ty * W * kk, { steps: 12 }); await page.mouse.up(); }
+    const smin = (await lstate(page)).fit;
+    const hsA = await handlesOf(page), reachA = await reachable(hsA), tapA = await tapsOwn(), apartA = apartOf(hsA, W);
+    const partA = { s: smin && +smin.s.toFixed(4), apartA, reachA, tapA };
+    t.check(!!smin && near(smin.s, 0.03, 1e-6) && apartA && reachA && tapA.every(Boolean), 'the ball at its least size (0.03): the six arrows stay apart, each is reachable, and each turns its own value', partA);
+    await click(page, '#lh-refit');
+    // (b) the head pushed into the top-left corner
+    const sp2 = await spots(page), q = sp2.pick.move;
+    if (q) await dragPiece(page, 'move', -q[0] + 4, -q[1] + 4);
+    const fB = (await lstate(page)).fit, box = await ovBox(page);
+    const hsB = await handlesOf(page), inB = hsB.every((h) => h.x >= 0 && h.y >= 0 && h.x <= box.W && h.y <= box.H), reachB = await reachable(hsB), tapB = await tapsOwn(), apartB = apartOf(hsB, box.W);
+    const partB = { centre: fB && [+fB.tx.toFixed(3), +fB.ty.toFixed(3)], inB, apartB, reachB, tapB };
+    t.check(!!q && inB && apartB && reachB && tapB.every(Boolean), 'the head pushed into the top-left corner: the arrows stay on the picture, apart, reachable, and each turns its own value', partB);
+    await click(page, '#lh-refit');
+    // (c) a centre line dragged past the edge of the picture
+    const rC = await dragPiece(page, 'centre', 400, 0);
+    const yawC = (await lstate(page)).fit.yaw, redC = (await ink(page)).red;
+    t.check(!!rC && Math.abs(yawC) <= 1.5 + 1e-9 && redC > 50, 'a centre line dragged past the edge stops at the yaw limit (1.5 rad) and the head is still drawn', { yaw: yawC, red: redC, changed: rC && rC.changed });
+    if (!(!!smin && near(smin.s, 0.03, 1e-6) && apartA && reachA && tapA.every(Boolean)) || !(!!q && inB && apartB && reachB && tapB.every(Boolean))) t.finding({ title: 'At the extremes of a drag the arrows overlap, or cannot each turn their own value', severity: 'medium', steps: '1. On the Loomis head, drag the ball edge toward the centre (the least size). 2. Look at the six arrows, and tap each. 3. Then drag the head to the top-left corner and do the same.', expected: 'The six arrows are kept on the picture, apart, and each one turns its own value.', actual: JSON.stringify({ partA, partB }).slice(0, 500) });
+    await clean(t, page, 'gap: extremes');
+    await page.context().close();
+  });
+
+  // gap (medium): the desktop stage at its narrowest (760 px, the card beside the photo) and a landscape phone (844 x 390)
+  await guard(t, 'the narrow desktop and a landscape phone', async () => {
+    for (const vp of [{ width: 760, height: 700 }, { width: 844, height: 390 }]) {
+      const page = await openPage(site, { viewport: vp });
+      await tab(page, 'loomis');
+      const corners = [];
+      for (const [fx, fy] of [[0.03, 0.03], [0.97, 0.97]]) { await press(page, fx, fy); const lp = await loupe(page); await page.mouse.up(); corners.push(lp.shown && lp.inStage); }
+      await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+      const lay = await layoutOf(page), hs = await handlesOf(page), hscr = await hscroll(page);
+      const hits = [];
+      for (const h of hs) hits.push((await hitAt(page, h.x, h.y)) === 'handle:' + h.glyph);
+      const ok = lay.wrap.h > 120 && inside(lay.wrap, lay.stage) && !overlaps(lay.card, lay.wrap) && hscr <= 0 && corners.every(Boolean) && hits.every(Boolean);
+      t.check(ok, `${vp.width} × ${vp.height}: the photo is over 120 px high inside the stage, the card does not cover it, no horizontal scroll, the loupe is on the stage at the corners, and all six arrows can be tapped`, { wrap: [lay.wrap.w, lay.wrap.h], card: [lay.card.x, lay.card.y, lay.card.w, lay.card.h], hscroll: hscr, corners, hits });
+      await clean(t, page, `gap: ${vp.width} wide`);
+      await page.context().close();
+    }
+  });
+
+  // ================= the low gaps the time allowed =================
+  // gap (low): a device pixel ratio of 2 (every phone): the overlay is twice the CSS size, the head is drawn, a drag still turns it
+  await guard(t, 'device pixel ratio 2', async () => {
+    const page = await openPage(site, { viewport: PHONE });
+    await page.evaluate(() => Object.defineProperty(window, 'devicePixelRatio', { get: () => 2, configurable: true }));
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const box = await ovBox(page), cssW = await page.evaluate(() => document.getElementById('lh-wrap').clientWidth), i = await ink(page);
+    const r = await dragPiece(page, 'centre', 14, 0);
+    t.check(box.W === Math.round(cssW * 2) && i.red > 50 && !!r && r.changed.join() === 'yaw', 'with a device pixel ratio of 2 the overlay is twice the CSS size, the head is drawn, and a line drag still turns it', { overlay: box.W, css: cssW, red: i.red, changed: r && r.changed });
+    await clean(t, page, 'gap: pixel ratio 2');
+    await page.context().close();
+  });
+
+  // gap (low): Save PNG for the head inside another site's sandboxed frame: the save dialog opens with loomis-head.png
+  await guard(t, 'the sandboxed Save PNG', async () => {
+    const page = await openPage(site, { sandbox: {} });
+    await tab(page, 'loomis');
+    // the marks of a level head, computed in the frame (the app's own module lives there)
+    const m = await app(page).evaluate(() => { const p = Studio.prep(); const a = p.h / p.w; const out = {}; Loomis.STEPS.forEach((st) => { out[st.key] = [0.5 + 0.2 * st.model[0], (0.45 + 0.2 * st.model[1]) / a]; }); return out; });
+    await sequence(page, m, ['leftBrow', 'rightBrow', 'forehead']);
+    await click(page, '#lh-save');
+    const shown = await app(page).waitForFunction(() => { const d = document.getElementById('saveDialog'), i = document.getElementById('saveImg'); return d.open && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).then(() => true).catch(() => false);
+    const got = await app(page).evaluate(() => ({ open: document.getElementById('saveDialog').open, name: document.getElementById('saveName').textContent, src: (document.getElementById('saveImg').getAttribute('src') || '').slice(0, 5) }));
+    t.check(shown && got.open && got.name === 'loomis-head.png' && got.src === 'blob:', 'inside another site\'s sandboxed frame, Save PNG on the Loomis head opens the save dialog with loomis-head.png', got);
+    await app(page).evaluate(() => { const d = document.getElementById('saveDialog'); if (d.open) d.close(); }).catch(() => null);
+    await clean(t, page, 'gap: sandboxed save');
+    await page.context().close();
+  });
+
+  // gap (low): the words a visitor reads (the arrows' sentence, the strip's names, the Load photo label, the photo's accept)
+  await guard(t, 'the card words and the strip labels', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const got = await app(page).evaluate(() => {
+      const names = ['lh-undo', 'lh-reset', 'lh-show', 'lh-studio', 'lh-save', 'lh-exit'];
+      const btn = Object.fromEntries(names.map((id) => { const e = document.getElementById(id); return [id, { title: e.title, aria: e.getAttribute('aria-label') }]; }));
+      return { btn, sub: document.getElementById('lh-sub').textContent, loadLabel: (document.querySelector('label[for="file"]') || {}).textContent || null, accept: document.getElementById('file').accept };
+    });
+    const ok = Object.values(got.btn).every((b) => b.title && b.aria) && got.sub.startsWith('The arrows turn, nod and tilt the head.') && got.loadLabel === 'Load photo' && /image/.test(got.accept);
+    t.check(ok, 'the arrows\' sentence is on the card once fitted, every strip button has its name (title and aria-label), and the photo control reads Load photo', got);
+    await clean(t, page, 'gap: words');
+    await page.context().close();
+  });
+
+  // gap (low): keyboard focus after Lock in stays on a live control of the card, so the next Enter does something
+  await guard(t, 'keyboard focus after Lock in', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await tap(page, 0.3, 0.3);
+    await page.focus('#lh-lock'); await page.keyboard.press('Enter');
+    const focus = await app(page).evaluate(() => { const a = document.activeElement; return { id: a ? a.id : null, tag: a ? a.tagName : null, disabled: a ? !!a.disabled : null }; });
+    const live = focus.tag === 'BUTTON' && !focus.disabled && /^lh-/.test(focus.id || '');
+    t.check(live, 'after Lock in the keyboard focus is on a live control of the card (not lost to the page)', focus);
+    if (!live) t.finding({ title: 'Keyboard focus is lost to the page when Lock in is pressed from the keyboard', severity: 'low', steps: '1. On the Loomis head, Tab to a mark, tap it so Lock in is enabled. 2. Focus Lock in with Tab and press Enter. 3. Press Enter or Tab again.', expected: 'Focus stays on a control of the card (Back, Start over or the next step), so the keyboard user carries on.', actual: `After Lock in the focus is on ${JSON.stringify(focus)}: the button became disabled, so the focus fell to the page.` });
+    await clean(t, page, 'gap: keyboard focus');
+    await page.context().close();
+  });
+
+  // gap (low): the Loomis tab in dark theme, fitted: axe finds no serious or critical violation
+  await guard(t, 'the dark theme', async () => {
+    const page = await openPage(site, { viewport: DESKTOP, dark: true, bypassCSP: true });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const v = await axe(page);
+    const serious = v.filter((x) => x.impact === 'serious' || x.impact === 'critical');
+    t.check(serious.length === 0, 'the Loomis tab in dark theme, fitted: no serious or critical axe violation', serious.length ? serious : v.map((x) => x.id));
+    await clean(t, page, 'gap: dark');
+    await page.context().close();
+  });
+
+  // gap (low): the model's numbers against the README's, and the ball still a circle when turned, nodded and tilted
+  await guard(t, 'the model numbers and the circle', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const M = await page.evaluate(() => Object.fromEntries(Loomis.STEPS.map((st) => [st.key, st.model])));
+    const numbers = near(M.leftEye[1], 1 / 3, 0.02) && near(M.rightEye[1], 1 / 3, 0.02) && near(M.leftEye[0], -0.4, 1e-9) && near(M.rightEye[0], 0.4, 1e-9) && near(M.nose[1], 1, 1e-9) && near(M.mouth[1], 4 / 3, 0.01) && near(M.chin[1], 2, 1e-9) && near(M.forehead[1], -0.72, 0.005) && near(M.forehead[2], Math.sqrt(1 - 0.72 * 0.72), 0.005);
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    for (let k = 0; k < 8; k++) await tapHandle(page, 'right');
+    await tapHandle(page, 'up'); await tapHandle(page, 'cw');
+    const st = await headStats(page, "document.getElementById('lh-overlay')", (await lstate(page)).fit);
+    t.check(numbers && st.rim >= 0.9, 'the model numbers are the README\'s (eyes a third of a radius below the brow line, nose 1, mouth a third of the way to the chin, chin 2, forehead at 0.72), and the ball stays a circle when turned, nodded and tilted', { eyes: M.leftEye, nose: M.nose, mouth: M.mouth, chin: M.chin, forehead: M.forehead, rim: st.rim });
+    await clean(t, page, 'gap: numbers');
+    await page.context().close();
+  });
+
+  // gap (low): a dot drag cut short by a new photo; a line drag cut short by a tab switch, with no button down after
+  await guard(t, 'drags cut short', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const b = await ovBox(page), pl = (await lstate(page)).points.leftEye;
+    await page.mouse.move(b.x + pl.x * b.w, b.y + pl.y * b.h); await page.mouse.down();
+    await page.mouse.move(b.x + (pl.x + 0.02) * b.w, b.y + (pl.y + 0.01) * b.h, { steps: 3 });
+    await page.setInputFiles('#file', await makeImage(page, { width: 800, height: 600, name: 'wide.png' }));
+    await page.waitForFunction(() => Math.abs(Loomis.state.aspect - 0.75) < 0.01, null, { timeout: 15000 }).catch(() => null);
+    await page.mouse.move(b.x + (pl.x + 0.03) * b.w, b.y + (pl.y + 0.02) * b.h, { steps: 3 });
+    await page.mouse.up();
+    await sleep(300);
+    const s1 = await lstate(page), lp1 = await loupe(page);
+    t.check(s1.step === 0 && s1.moving === null && !lp1.shown, 'a dot dragged when a new photo loads: the marks start again, no drag is left going, and the loupe is gone', { step: s1.step, moving: s1.moving, loupe: lp1.shown, aspect: s1.aspect });
+    await sequence(page, await marksFor(page), ['leftBrow', 'rightBrow', 'forehead']);
+    const sp = await spots(page), pc = sp.pick.centre, bb = await ovBox(page), kk = bb.w / bb.W;
+    await page.mouse.move(bb.x + pc[0] * kk, bb.y + pc[1] * kk); await page.mouse.down();
+    await page.mouse.move(bb.x + (pc[0] + 10) * kk, bb.y + pc[1] * kk, { steps: 3 });
+    await page.evaluate(() => Studio.go('study')); await sleep(150);
+    await page.mouse.move(bb.x + (pc[0] + 30) * kk, bb.y + pc[1] * kk, { steps: 3 });
+    await page.mouse.up();
+    await tab(page, 'loomis');
+    const f1 = (await lstate(page)).fit;
+    await page.mouse.move(bb.x + (pc[0] + 60) * kk, bb.y + pc[1] * kk, { steps: 4 });
+    const f2 = (await lstate(page)).fit;
+    t.check(!!f1 && Number.isFinite(f1.yaw) && changed(f1, f2).length === 0, 'a line drag cut short by a tab switch ends there: a move with no button down does not turn the head', { changed: changed(f1, f2), yaw: f1 && f1.yaw });
+    await clean(t, page, 'gap: drags cut short');
+    await page.context().close();
+  });
+
+  // gap (low): a photo dropped on the Loomis picture, and one pasted, are loaded like Load photo
+  await guard(t, 'a dropped and a pasted photo', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await mark(page, 0.3, 0.3);
+    const url = page.url();
+    await dropFiles(page, '#lh-overlay', [await makeImage(page, { width: 800, height: 500, name: 'dropped.png' })]);
+    await page.waitForFunction(() => Math.abs(Loomis.state.aspect - 0.625) < 0.01, null, { timeout: 15000 }).catch(() => null);
+    const d = await lstate(page);
+    await mark(page, 0.3, 0.3);
+    await pasteFile(page, await makeImage(page, { width: 600, height: 800, name: 'pasted.png' }));
+    await page.waitForFunction(() => Math.abs(Loomis.state.aspect - 1.333) < 0.01, null, { timeout: 15000 }).catch(() => null);
+    const p = await lstate(page);
+    t.check(d.step === 0 && Math.abs(d.aspect - 0.625) < 0.01 && p.step === 0 && Math.abs(p.aspect - 1.333) < 0.01 && page.url() === url, 'a photo dropped on the picture and one pasted each start the marks again on their own shape, with no navigation', { dropped: [d.step, d.aspect], pasted: [p.step, p.aspect], url: page.url() === url });
+    await clean(t, page, 'gap: drop and paste');
+    await page.context().close();
+  });
+
+  // gap (low): a very small photo (40 x 60) and a very wide one (4000 x 500): a head is drawn, the arrows stay on the picture, the loupe stays on the stage, Save PNG gives the photo's size
+  await guard(t, 'a very small and a very wide photo', async () => {
+    const rows = [];
+    for (const [w, h, s, cy, label] of [[40, 60, 0.2, 0.45, 'small'], [4000, 500, 0.02, 0.0625, 'wide']]) {
+      const page = await openPage(site, { viewport: DESKTOP });
+      await tab(page, 'loomis');
+      await loadPhoto(page, await makeImage(page, { width: w, height: h, name: `${label}.png` }), { settle: 800 });
+      await press(page, 0.5, 0.5); const lp = await loupe(page); await page.mouse.up();
+      await sequence(page, await marksFor(page, { s, cy }), ['leftBrow', 'rightBrow', 'forehead']);
+      const fit = (await lstate(page)).fit, red = (await ink(page)).red, hs = await handlesOf(page), box = await ovBox(page);
+      const arrows = hs.every((hh) => hh.x >= 0 && hh.y >= 0 && hh.x <= box.W && hh.y <= box.H);
+      const dl = await download(page, '#lh-save'), dims = await decodePng(page, dl);
+      const prep = await page.evaluate(() => { const p = Studio.prep(); return [p.w, p.h]; });
+      rows.push({ label, photo: [w, h], fit: !!fit, red, arrows, loupe: lp.shown && lp.inStage, png: !!dims && dims.w === prep[0] && dims.h === prep[1] });
+      await clean(t, page, `gap: ${label} photo`);
+      await page.context().close();
+    }
+    t.check(rows.every((r) => r.fit && r.red > 20 && r.arrows && r.loupe && r.png), 'a 40 × 60 and a 4000 × 500 photo: the head is fitted and drawn, the arrows are on the picture, the loupe is on the stage, and Save PNG gives the photo\'s size', rows);
+  });
+
+  // what was left out, and what the case does not measure
+  t.note('gaps left out for the time budget (low): the Studio restored while the head is copied (a race that needs a large saved painting to show); Forget my work on this device from another tab (the Loomis head keeps nothing, so only the reload is at issue); the Study\'s working size and Advanced mode with a head fitted; Copy the Study lines with a head and Study marks together; a held arrow when the window loses focus (the pointer is still down, so turning on is the hold working, not a stuck repeat).');
+  t.note('the manual adjustments (an arrow turn, a line drag) are discarded by a dot drag or Back one mark + Lock in: that refits the head by design (the README: "Dragging a dot moves that mark and refits the head"), so it is not checked as a finding.');
+  t.note('no check of the existing sample case was changed; every existing check passes on the current tree, and none is plainly the author\'s mistake.');
   t.note('keyboard: the card\'s Lock in, Skip, Back, Draw it in the Studio and Back to the fit are buttons and work from the keyboard; placing a mark, dragging a dot or a line and the arrow buttons are pointer-only (the overlay canvas is not focusable and has no key handler); the README promises no keys here');
   t.note('the overlay canvas keeps the label "The photo: tap the feature asked for" once the head is fitted, when a tap no longer places anything');
 }
