@@ -8,7 +8,16 @@
 // size 3..10 and from the whole library, search, keyboard-only), two races inside a running suggestion (a
 // source switch, a new result), Simple mode's three palettes and a saved source Simple cannot show, hostile
 // saved state for myPaints, paintChoice and the picked colors, and everything again on a 390 px phone.
-import { openPage, clean, tab, PHONE, makeImage, loadPhoto, click, text, visible, hscroll, sleep } from '../lib.mjs';
+// Then the second pass (GAP_BLOCKS at the end of the file, one block per promise the first pass left
+// unchecked): every badge against the ΔE it promises, a recipe of at most three paints plus white, the
+// meters against the coverage they come from, the pigment model and its tinting strengths, a finished
+// suggestion made again for a new photo or setting, the palette Simple mode uses before a choice, whites
+// and no white, the greedy choice size by size, flat and noisy photos, the drawer opened by its summary,
+// the source switched back and forth, Forget, the palette block view against the rows, axe over the open
+// drawer and the dialog, the toast, the Studio that stops following, races, two tabs, no storage, the
+// pending states, names and titles, search by family, + with the drawer closed, the phone's dialog, and
+// the keyboard's reach.
+import { openPage, newTab, clean, tab, PHONE, makeImage, loadPhoto, click, text, visible, hscroll, sleep, storageKeys, storageGet, axe } from '../lib.mjs';
 
 const K = {
   mine: 'portrait-value-studio.myPaints',
@@ -66,6 +75,54 @@ const dialogOpen = (page) => page.evaluate(() => document.getElementById('paintD
 const pickPreset = async (page, id) => { await click(page, `#presetList li[data-preset="${id}"] .preset`); await mixed(page); };
 const paletteOptions = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return { value: e.value, options: [...e.options].map((o) => [o.value, o.textContent]) }; }, sel);
 
+// ---- helpers of the second pass (GAP_BLOCKS) ---------------------------------------------------------------
+// small tools left in the page (installed again after a reload): a hex to Lab, ΔE00 between two hexes, a paint
+// made the way palette.js makes it, and the study's colors as palette.js reads them (share > 0, weight √share)
+const qInstall = (page) => page.evaluate(() => {
+  if (window.__q) return;
+  const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const labOf = (h) => Study.rgbToLab(...hexRgb(h));
+  window.__q = {
+    hexRgb,
+    labOf,
+    dE: (a, b) => Study.deltaE2000(...labOf(a), ...labOf(b)),
+    paint: (code) => Mixing.makePaint(Object.assign({ strength: 'normal' }, Paints.byCode(code))),
+    colors: () => Studio.result().blockColors.filter((c) => c.share > 0).map((c) => ({ rgb: { r: c.r, g: c.g, b: c.b }, weight: Math.sqrt(c.share) })),
+  };
+});
+// an image of flat bands, top to bottom: [[color, height in px], ...] on a 600 x 800 canvas
+async function bandsImage(page, bands, name = 'bands.png') {
+  const dataUrl = await page.evaluate((bands) => {
+    const c = document.createElement('canvas'); c.width = 600; c.height = 800; const g = c.getContext('2d'); let y = 0;
+    for (const [color, h] of bands) { g.fillStyle = color; g.fillRect(0, y, 600, h); y += h; }
+    return c.toDataURL('image/png');
+  }, bands);
+  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+  return { name, mimeType: m[1], buffer: Buffer.from(m[2], 'base64') };
+}
+// each row's badge and the ΔE00 between its target color and its predicted mix (both read off the page's own hexes)
+const rowDeltas = async (page) => {
+  await qInstall(page);
+  return page.evaluate(() => [...document.querySelectorAll('#mixList .mix-row')].map((row) => {
+    const b = row.querySelector('.mix-badge');
+    const tgt = /#[0-9A-F]{6}/.exec(row.querySelector('.mix-add').getAttribute('aria-label'));
+    const pred = /#[0-9A-F]{6}/.exec(row.querySelector('.mix-chip:nth-child(2)').title);
+    return { status: b ? b.dataset.status : '', badge: b ? b.textContent : '', dE: tgt && pred ? window.__q.dE(tgt[0], pred[0]) : NaN };
+  }));
+};
+// nothing has changed for `ms` ms: the study's result, the suggestion and the mixes all at rest
+const quiet = (page, ms = 500) => page.waitForFunction((ms) => {
+  const w = window.__quiet = window.__quiet || { r: null, t: 0 };
+  const r = window.Studio && Studio.result();
+  const rows = document.querySelectorAll('#mixList .mix-row');
+  const resting = document.getElementById('busy').hidden && !document.getElementById('suggestBtn').disabled && [...rows].every((x) => x.querySelector('.mix-badge') && !x.querySelector('.mix-pending'));
+  const now = performance.now();
+  if (w.r !== r || !resting) { w.r = r; w.t = now; return false; }
+  return now - w.t >= ms;
+}, ms, { timeout: 30000, polling: 100 }).catch(() => null);
+const optionValues = (page, sel) => page.evaluate((s) => [...document.querySelector(s).options].map((o) => o.value), sel);
+const tickDialog = async (page, codes) => { await click(page, '#mineEdit'); await sleep(100); await setMine(page, codes); };
+
 // a photo that goes further than paint does: pure white, skin, a saturated blue and pure black
 async function extremesImage(page) {
   const dataUrl = await page.evaluate(() => {
@@ -102,7 +159,49 @@ async function checkPalette(t, page, label, codes, n) {
   t.check(titleOk, `${label}: hovering a mix gives the paints' full names and parts`, rs.slice(0, 3).map((r) => r.title));
   t.check(rs.every((r) => /^Predicted mix #[0-9A-F]{6}$/.test(r.mixTitle)), `${label}: the mixed chip names its predicted color`, rs.map((r) => r.mixTitle));
   t.check(rs.every((r) => /^Add #[0-9A-F]{6} to picked colors$/.test(r.add)), `${label}: every + button says what it adds`, rs.map((r) => r.add));
+  await checkBadges(t, page, label);
+  checkRecipes(t, label, rs, await page.evaluate(() => Object.fromEntries(Paints.LIBRARY.map((p) => [p.code, Mixing.makePaint(Object.assign({ strength: 'normal' }, p)).white]))));
+  // the chips under the name carry each paint's full name (the only place a phone, with no hover, shows it)
+  const chipNames = await page.evaluate(() => [...document.querySelectorAll('#resultPaints .paint-chip')].map((li) => ({ code: li.querySelector('.paint-code').textContent, name: li.querySelector('.paint-name').textContent, shown: li.querySelector('.paint-name').getClientRects().length > 0, dot: li.querySelector('.paint-dot').title })));
+  t.check(chipNames.length === codes.length && chipNames.every((c, i) => c.code === codes[i] && c.name === byCode[c.code] && c.dot === byCode[c.code] && c.shown), `${label}: every chip shows its paint's full name, and its dot says it too`, chipNames);
   return rs;
+}
+
+// Close is a ΔE00 under 3, Near under 6, Out of reach more; a value limit is never a mix that is Close. The predicted
+// color on the page is rounded to an sRGB hex, so a band's edge is allowed a little (TOL)
+const WORD = { close: 'Close', near: 'Near', far: 'Out of reach' };
+async function checkBadges(t, page, label) {
+  const TOL = 0.35;
+  const ds = await rowDeltas(page);
+  const word = ds.every((d) => (d.status === 'limit' ? /^(Darkest|Lightest) you can mix$/.test(d.badge) : WORD[d.status] === d.badge));
+  const band = ds.every((d) => Number.isFinite(d.dE) && (d.status === 'close' ? d.dE < 3 + TOL : d.status === 'near' ? d.dE >= 3 - TOL && d.dE < 6 + TOL : d.status === 'far' ? d.dE >= 6 - TOL : d.dE >= 3 - TOL));
+  t.check(ds.length > 0 && word, `${label}: each badge's word is the one its status gives`, ds.map((d) => [d.status, d.badge]));
+  t.check(ds.length > 0 && band, `${label}: every badge agrees with the ΔE between the color and its predicted mix (Close under 3, Near under 6, Out of reach beyond, a limit never Close)`, ds.map((d) => [d.status, +d.dE.toFixed(2)]));
+  return ds;
+}
+// a recipe is up to three paints plus white (at most 24 whole parts), a paint once, and a lone main paint has no number
+function checkRecipes(t, label, rs, white) {
+  const parsed = rs.map((r) => r.recipe.split(' · ').map((p) => { const [code, amt] = p.split('\u00a0'); return { code, amt }; }));
+  t.check(parsed.every((ps) => ps.length <= 4 && ps.filter((p) => !white[p.code]).length <= 3), `${label}: no recipe holds more than three paints plus white`, rs.map((r) => r.recipe).filter((x, i) => parsed[i].length > 4 || parsed[i].filter((p) => !white[p.code]).length > 3));
+  t.check(parsed.every((ps) => new Set(ps.map((p) => p.code)).size === ps.length), `${label}: no recipe names a paint twice`, rs.map((r) => r.recipe));
+  t.check(parsed.every((ps) => ps.filter((p) => /^\d+$/.test(p.amt || '')).reduce((a, p) => a + +p.amt, 0) <= 24), `${label}: no recipe is more than 24 whole parts`, rs.map((r) => r.recipe));
+  const lone = parsed.every((ps) => { const main = ps.filter((p) => p.amt !== 'touch'); return main.length >= 1 && (main.length === 1 ? main[0].amt === undefined : main.every((p) => /^\d+$/.test(p.amt || ''))); });
+  t.check(lone, `${label}: a lone main paint carries no number, several carry whole parts, the rest are touches`, rs.map((r) => r.recipe));
+}
+// the meters are the count Mixing.coverage gives for this study, and palettes of the same reach run closest first
+async function checkRanking(t, page, label) {
+  await qInstall(page);
+  const r = await page.evaluate(() => {
+    const q = window.__q, colors = q.colors();
+    return [...document.querySelectorAll('#presetList li')].map((li) => {
+      const pr = Paints.PRESETS.find((p) => p.id === li.dataset.preset);
+      const cov = Mixing.coverage(pr.paints.map(q.paint), colors);
+      return { id: pr.id, shown: +li.querySelector('.preset-reach').textContent.split(' / ')[0], reached: cov.reached, score: cov.score };
+    });
+  });
+  t.check(r.length === 10 && r.every((x) => x.shown === x.reached), `${label}: every meter is the number of colors Mixing.coverage reaches for this study`, r.map((x) => [x.id, x.shown, x.reached]));
+  t.check(r.every((x, i) => i === 0 || x.reached < r[i - 1].reached || (x.reached === r[i - 1].reached && x.score >= r[i - 1].score - 1e-9)), `${label}: palettes that reach as many colors run the closer one first ("then by how closely")`, r.map((x) => [x.id, x.reached, +x.score.toFixed(2)]));
+  return r;
 }
 
 export default async function paints(t, site) {
@@ -124,6 +223,14 @@ export default async function paints(t, site) {
     t.check((await text(page, '#colorsState')) === '3 per value', 'the drawer header says "3 per value" before a palette is chosen', await text(page, '#colorsState'));
     t.check((await text(page, '#colorsOut')) === '3', 'Colors in each value reads 3', await text(page, '#colorsOut'));
     t.check(list.every((l) => !l.simple || ['zorn', 'primary', 'rembrandt'].includes(l.id)), 'the three Simple palettes are Zorn, Three primaries and Rembrandt', list.filter((l) => l.simple).map((l) => l.id));
+    await checkRanking(t, page, 'sample');
+    // the README's ten names, written out here rather than read from Paints.PRESETS, which would agree with any rename
+    const shownNames = await page.evaluate(() => [...document.querySelectorAll('#presetList .preset-name')].map((e) => e.textContent));
+    const READMENAMES = [/^Zorn$/, /^Zorn with a blue$/, /^Three primaries$/, /^Modern primaries \(CMY\)$/, /^Split primary$/, /^Frank Reilly$/, /^Richard Schmid$/, /^Rembrandt \(earths\)$/, /^Sorolla \(studio portraits\)$/, /^Monet \(impressionist\)$/];
+    t.check(shownNames.length === 10 && READMENAMES.every((re) => shownNames.filter((x) => re.test(x)).length === 1), 'the ten palettes are the README\'s: Zorn, Zorn with a blue, three primaries, modern primaries, split primary, Frank Reilly, Richard Schmid, Rembrandt, Sorolla and Monet', shownNames);
+    const dotTitles = await page.evaluate(() => [...document.querySelectorAll('#presetList li')].map((li) => ({ id: li.dataset.preset, titles: [...li.querySelectorAll('.paint-dot')].map((d) => d.title), names: Paints.PRESETS.find((p) => p.id === li.dataset.preset).paints.map((c) => Paints.byCode(c).name) })));
+    t.check(dotTitles.every((d) => JSON.stringify(d.titles) === JSON.stringify(d.names)), 'hovering a palette\'s dots names each paint in full, in order', dotTitles.filter((d) => JSON.stringify(d.titles) !== JSON.stringify(d.names)));
+    t.note(`The README says "a warm portrait on a gray ground suits Zorn". On the built-in sample the best match is ${list[0].id} (${list[0].reach}) and Zorn reaches ${list.find((l) => l.id === 'zorn').reach}: the sample is not the photo that sentence means, and the ranking is only checked here for what it computes, not for that example.`);
     await clean(t, page, 'known palettes');
 
     // picking each palette: its name, paints, note and a mix for every color; a second press changes nothing
@@ -191,6 +298,16 @@ export default async function paints(t, site) {
     t.check(exList.filter((l) => l.best).length === 1 && exList[0].best, 'the loaded photo has exactly one Best match, first', exList.map((l) => l.best));
     const ne = await nColors(page);
     t.check(exList.every((l) => l.reach.endsWith(` / ${ne}`)) && (await text(page, '#resultMatch')).endsWith(` of ${ne} colors`), 'the meters and the result count the new photo\'s colors', [ne, await text(page, '#resultMatch')]);
+    await checkRanking(t, page, 'extremes photo');
+    // every palette on the photo that goes past paint: its badges and recipes keep their promises there too
+    for (const p of all) {
+      await pickPreset(page, p.id);
+      await checkPalette(t, page, `extremes ${p.name}`, p.paints, ne);
+      const within = (await rowDeltas(page)).filter((d) => d.dE < 6.35).length;
+      const reached = reachOf(await text(page, '#resultMatch'))[0];
+      t.check(within >= reached, `extremes ${p.name}: the rows that come within ΔE 6 are at least the colors "Mixes N of ${ne}" promises (${reached})`, [within, reached]);
+    }
+    await pickPreset(page, 'zorn');
     await clean(t, page, 'extremes photo');
 
     // ---- a new photo, a tab switch and a reload in the middle of the mixes ---------------------------------
