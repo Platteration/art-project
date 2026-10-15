@@ -170,7 +170,7 @@ python3 -m http.server 8000 --bind 127.0.0.1   # then visit http://localhost:800
 
 That development server lists folders and serves the `.git` directory, so never use it to publish the site. See [Publishing](#publishing).
 
-Opened from disk, the page works too, Pose and light and Figure study included: their frames talk to the page at any origin there, because a file has none, and at the page's own origin once served. Before a push, run `node scripts/check-policy.mjs`: it fails if any copy of the Content Security Policy differs from the others, or if a page or script holds something the policy refuses (an inline style or script, a string turned into markup).
+Opened from disk, the page works too, Pose and light and Figure study included: their frames talk to the page at any origin there, because a file has none, and at the page's own origin once served. Before a push, run `npm run check` (after `npm install` once, and `npx playwright install chromium`): `scripts/check-policy.mjs` fails if any copy of the Content Security Policy differs from the others, or if a page or script holds something the policy refuses (an inline style or script, a string turned into markup); then the tests in `tests/` drive the real site in headless Chromium with the policy enforced (see `tests/README.md`). The GitHub Actions workflow runs the same on every pull request, the smoke case against a `git archive` export as well.
 
 To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
 

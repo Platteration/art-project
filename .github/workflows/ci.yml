@@ -1,0 +1,76 @@
+# Runs on every pull request and on pushes to main and launch: the policy check, the export check, an
+# nginx parse of deploy/nginx.conf on the nginx Ubuntu ships, and every test case in tests/cases/ (one
+# job each, so a long case does not hold the others), the smoke case also against a git archive export.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main, launch]
+permissions:
+  contents: read
+jobs:
+  policy:
+    name: policy, export and nginx config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: every copy of the policy is the same; no sink the policy refuses
+        run: node scripts/check-policy.mjs
+      - name: git archive yields the runtime files and the host configs only
+        run: |
+          mkdir -p /tmp/export && git archive HEAD | tar -x -C /tmp/export
+          cd /tmp/export
+          for f in index.html pose.html 404.html styles.css pose.css fonts.css js/guard.js js/vendor/three.min.js fonts/ibm-plex-sans-latin.woff2 _headers _redirects .htaccess .well-known/security.txt LICENSE manifest.json robots.txt; do test -e "$f" || { echo "missing from the export: $f"; exit 1; }; done
+          for f in README.md SECURITY.md docs deploy scripts tests package.json package-lock.json .github .gitignore .gitattributes .editorconfig fonts/README.md; do test ! -e "$f" || { echo "should not be in the export: $f"; exit 1; }; done
+          echo "export: $(find . -type f | wc -l) files"
+      - name: deploy/nginx.conf parses on the nginx Ubuntu ships
+        run: |
+          nginx -v
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/key.pem -out /tmp/cert.pem -days 1 -subj /CN=example.com 2>/dev/null
+          sed -e 's#/etc/letsencrypt/live/example.com/fullchain.pem#/tmp/cert.pem#' -e 's#/etc/letsencrypt/live/example.com/privkey.pem#/tmp/key.pem#' -e 's#/var/www/portrait-value-studio#/tmp/export#' deploy/nginx.conf > /tmp/pvs.conf
+          printf 'events {}\nhttp { include /etc/nginx/mime.types; include /tmp/pvs.conf; }\n' > /tmp/nginx-test.conf
+          sudo nginx -t -c /tmp/nginx-test.conf
+  cases:
+    name: list the test cases
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: echo "list=$(ls tests/cases | sed 's/\.mjs$//' | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+  test:
+    name: ${{ matrix.case }}
+    needs: cases
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        case: ${{ fromJSON(needs.cases.outputs.list) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: the case, against the checkout
+        run: node tests/run.mjs --only ${{ matrix.case }}
+      - name: the same case against the export, which is what a host publishes
+        if: matrix.case == 'smoke'
+        run: |
+          mkdir -p /tmp/export && git archive HEAD | tar -x -C /tmp/export
+          node tests/run.mjs --only smoke --root /tmp/export
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.case }}-screens-and-report
+          path: |
+            tests/screens
+            tests/report.json
+          if-no-files-found: ignore
+          retention-days: 7
