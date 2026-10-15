@@ -657,6 +657,8 @@
       const subs = { chisel: state.chisel.toUpperCase(), round: state.round, pencil: state.lead === 'charcoal' ? 'Ch' : HARD[state.hard].short, sketch: state.slead === 'charcoal' ? 'Ch' : HARD[state.shard].short, blend: state.blend };
       $('chiselSub').textContent = subs.chisel; $('roundSub').textContent = subs.round; $('pencilSub').textContent = subs.pencil; $('sketchSub').textContent = subs.sketch; $('blendSub').textContent = subs.blend;
       q('[data-hard]').forEach((b) => { b.textContent = state.lead === 'charcoal' ? CHAR[b.dataset.hard].label : HARD[b.dataset.hard].label; });
+      // the underdrawing is the same pencil: its hardness reads 2H / HB / 4B in graphite too
+      q('[data-shard]').forEach((b) => { b.textContent = state.slead === 'charcoal' ? CHAR[b.dataset.shard].label : HARD[b.dataset.shard].label; });
       $('pencilHint').textContent = state.lead === 'charcoal' ? 'A hard stick keeps a crisp line; a soft one spreads and goes black. Press harder with a pen for more.' : 'Light is pale and fine; Dark builds up fast. Press harder with a pen for more.';
       $('eraserSub').textContent = state.eraser;
       // the Brushes icon shows the brush in hand (or the last one used)
