@@ -35,7 +35,7 @@ const APP_FAILED = 'Something went wrong in the app. If a control stops respondi
 const shownPanels = (page) => page.evaluate(() => [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id));
 const notesOf = (page) => page.evaluate(() => {
   const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : 'missing'; };
-  return { cls: document.documentElement.className.trim(), nojs: d('.nojs-note'), part: d('.partfail-note'), old: d('.oldbrowser-note'), tabs: d('.tabs'), help: d('#tab-help'), actions: d('.topbar-actions'), steps: d('.help-steps .btn'), forget: d('#forgetBtn'),
+  return { cls: document.documentElement.className.trim(), nojs: d('.nojs-note'), part: d('.partfail-note'), old: d('.oldbrowser-note'), tabs: d('.tabs'), help: d('#tab-help'), study: d('#tab-study'), actions: d('.topbar-actions'), steps: d('.help-steps .btn'), forget: d('#forgetBtn'),
     hidden: [...document.querySelectorAll('[data-tab]')].filter((e) => e.hidden).map((e) => e.dataset.tab).sort(), groups: [...document.querySelectorAll('.tab-group')].filter((g) => g.hidden).map((g) => g.dataset.group),
     learnSub: document.getElementById('tabLearnSub').textContent, gamesSub: document.getElementById('tabGamesSub').textContent, shown: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id), fromStudio: !!document.getElementById('artFromStudio').hidden };
 });
@@ -46,7 +46,8 @@ const toastOf = (page) => page.evaluate(() => { const e = document.getElementByI
 const isSimple = (page) => page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), pressed: [...document.querySelectorAll('[data-mode]')].map((b) => b.dataset.mode + '=' + b.getAttribute('aria-pressed')).join(' ') }));
 const frameMode = (page) => { const f = poseFrame(page); return f ? f.evaluate(() => window.PoseAndLight ? PoseAndLight.mode() : null).catch(() => null) : null; };
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-async function step(t, name, fn) { try { await fn(); } catch (e) { t.check(false, `${name}: the step ran to its end`, String(e && e.stack || e).slice(0, 400)); } }
+const timings = [];
+async function step(t, name, fn) { const t0 = Date.now(); try { await fn(); } catch (e) { t.check(false, `${name}: the step ran to its end`, String(e && e.stack || e).slice(0, 400)); } timings.push(`${name} ${((Date.now() - t0) / 1000).toFixed(0)} s`); }
 async function reloadWith(page, script, arg) { await page.addInitScript(script, arg); await page.reload({ waitUntil: 'load' }); await sleep(500); }
 // the wait part of lib's tab() without the click: the Pose frame up (or its failure panel), Figure's pictures (or its note)
 async function settle(page, name, timeout = 15000) {
@@ -76,7 +77,9 @@ function dropLogged(page, re) { page.log.console = page.log.console.filter((m) =
 // ---- the case ---------------------------------------------------------------------------------------------
 
 export default async function appShellMore(t, site) {
-  await Promise.all([groupA(t, site), groupB(t, site), groupC(t, site)]);
+  if (process.env.PVS_NOTES) { const note = t.note; t.note = (x) => { note(x); process.stdout.write(`    NOTE ${String(x).slice(0, 400)}\n`); }; }
+  await Promise.all([groupA(t, site).then(() => groupD(t, site)), groupB(t, site), groupC(t, site)]);
+  t.note(`step timings (three groups ran side by side): ${timings.join('; ')}`);
 }
 
 // ---- A: keyboard, the guide, modes, reduced motion, hashes, an old browser, the toast --------------------------
@@ -125,10 +128,11 @@ async function groupA(t, site) {
       await page.evaluate(() => { document.getElementById('tabGamesBtn').click(); document.activeElement.blur(); });
       await page.keyboard.press('Escape');
       t.check((await menuOf(page, 'tabGamesMenu')).hidden, `${label}: Esc anywhere on the page closes an open menu`);
-      // focus order from the top of the page
-      await page.evaluate(() => { document.activeElement.blur(); window.scrollTo(0, 0); });
+      // focus order from the top of the page (a click on the title puts the starting point there)
       await click(page, '#tabStudyBtn');
-      await page.evaluate(() => { document.activeElement.blur(); });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.locator('.brand h1').click();
+      await page.evaluate(() => { if (document.activeElement) document.activeElement.blur(); });
       const order = [];
       for (let i = 0; i < 8; i++) { await page.keyboard.press('Tab'); order.push(await active(page)); }
       const want = ['simple', 'advanced', 'file', 'tabLearnBtn', 'tabPaintBtn', 'tabFigureBtn', 'tabGamesBtn'];
@@ -331,7 +335,8 @@ async function groupB(t, site) {
         if (s.shown !== 'tab-' + name) bad.push(`${name} at ${w}: shows ${s.shown}`);
         if (w <= 759 && (name === 'paint' || name === 'loomis') && s.tabs !== 'none') bad.push(`${name} at ${w}: tabs ${s.tabs} (the phone layout hides them)`);
         if (w >= 760 && s.tabs === 'none') bad.push(`${name} at ${w}: tabs hidden`);
-        if (name === 'study' && ((w >= 960 && s.cols !== 2) || (w < 960 && s.cols !== 1))) bad.push(`study at ${w}: ${s.cols} columns`);
+        // the workbench: rail, tool bar and panels side by side from 960 px (styles.css 150), one column below
+        if (name === 'study' && ((w >= 960 && s.cols !== 3) || (w < 960 && s.cols !== 1))) bad.push(`study at ${w}: ${s.cols} columns`);
       }
       layouts[name] = seen.join(' ');
       if (name === 'pose') {
@@ -354,6 +359,9 @@ async function groupB(t, site) {
     const res = await fetch(site.base + 'no-such-page');
     t.check(res.status === 404 && /Page not found/.test(await res.text()), 'a wrong address gets the 404 page with status 404', res.status);
     const page = await openPage(site, { url: 'js/vendor/no-such-file.js' });
+    // the page itself is a 404 (the browser logs that to the console); what it loads must not be
+    const subs = [];
+    page.on('response', (r) => { if (r.status() >= 400 && r.request().resourceType() !== 'document') subs.push(`${r.url()} ${r.status()}`); });
     const info = await page.evaluate(() => ({ title: document.title, cls: document.body.className, h1: document.querySelector('h1').textContent, links: [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')), radius: getComputedStyle(document.querySelector('.not-found-card')).borderRadius, font: getComputedStyle(document.querySelector('h1')).fontFamily, robots: (document.querySelector('meta[name="robots"]') || {}).content, scripts: document.scripts.length, fonts: document.fonts.status }));
     t.check(/Page not found/.test(info.title) && info.cls === 'not-found' && info.radius !== '0px' && info.robots === 'noindex' && info.scripts === 0, 'the 404 page is styled from a nested path too, noindex, no script', info);
     t.check(info.links.join() === '/,/#paint,/#game,/#battle,/#loomis,/#pose,/#figure,/#help', 'its links: the app and the seven shortcuts', info.links);
@@ -364,6 +372,8 @@ async function groupB(t, site) {
     t.check((await shownPanels(page)).join() === 'tab-battle', 'the Value battle shortcut opens that tab', await shownPanels(page));
     await page.goBack({ waitUntil: 'load' }).catch(() => null); await sleep(400);
     t.check(/Page not found/.test(await page.title()), 'Back returns to the 404 page', await page.title());
+    t.check(subs.length === 0, 'everything the 404 page loads is found', subs);
+    dropLogged(page, /status of 404/);
     await clean(t, page, '404 page desktop');
     await page.setViewportSize(PHONE); await frames(page);
     t.check((await hscroll(page)) <= 0, '404 page at phone width: no horizontal scroll', await hscroll(page));
@@ -372,6 +382,7 @@ async function groupB(t, site) {
     const dark = await openPage(site, { url: 'nowhere', dark: true, viewport: PHONE });
     const lum = await luminance(dark);
     t.check(lum >= 0 && lum < 0.25, 'the 404 page follows dark mode', lum);
+    dropLogged(dark, /status of 404/);
     await clean(t, dark, '404 page dark');
     await dark.context().close();
   });
@@ -394,8 +405,9 @@ async function groupB(t, site) {
     t.check(s.show && s.button === 'Tap again to reset' && !s.disabled, 'the first tap arms the reset', s);
     await Promise.all([page.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), page.locator('#toast button').click()]);
     await sleep(2000);
-    const after = { keys: await storageKeys(page), record: await dbRecord(page), simple: (await isSimple(page)).simple };
-    t.check(after.keys.length === 0 && after.record !== 'record' && after.simple, 'the second tap clears every key and the saved painting, and the page reloads in Simple', after);
+    // the page reloads on #paint, so the Studio's one-time "kept in this browser" note is shown anew and its flag written: the one key allowed back
+    const after = { keys: await storageKeys(page), record: await dbRecord(page), simple: (await isSimple(page)).simple, toast: (await toastOf(page)).text };
+    t.check(after.keys.every((k) => k === PVS('studioNotice')) && after.record !== 'record' && after.simple, 'the second tap clears every key and the saved painting, and the page reloads in Simple (the Studio\'s first-visit flag alone is written afresh)', after);
     await tab(page, 'paint'); await sleep(2000);
     t.check((await inked(page, '#ps-paper')) === 0, 'the paper is blank after the reset', await inked(page, '#ps-paper'));
     dropLogged(page, /reset-test/);
@@ -511,7 +523,8 @@ async function groupC(t, site) {
   for (const [label, make] of VARIANTS) {
     await step(t, `hostile keys: ${label}`, async () => {
       const page = await openPage(site, { storage: seedAll(make) });
-      const heavy = /prototype|5000|nested/.test(label);
+      // Pose and Figure are waited for on the two shapes most likely to trip them (prototype names, 5000 entries)
+      const heavy = /prototype|5000/.test(label);
       const out = await tour(page, { heavy, timeout: 20000 });
       t.check(tourOk(out), `every key ${label}: every tab opens`, out);
       const s = await page.evaluate(() => ({ polluted: 'polluted' in Object.prototype || 'polluted' in {}, simple: document.body.classList.contains('mode-simple'), toast: document.getElementById('toast').classList.contains('show') ? document.getElementById('toast').textContent.trim() : '', mine: document.querySelectorAll('#mine .pose-btn').length }));
@@ -556,11 +569,11 @@ async function groupC(t, site) {
   for (const [file, want] of BLOCKED) {
     await step(t, `${file} blocked`, async () => {
       const page = await openPage(site, { block: [site.base + file], url: want.url || '' });
-      await sleep(1200);
+      await sleep(900);
       const s = await notesOf(page);
       const noteOk = want.note === 'nojs' ? s.nojs === 'block' && s.part === 'none' && s.old === 'none' : want.note === 'part' ? s.part === 'block' && s.nojs === 'none' && s.old === 'none' : s.part === 'none' && s.nojs === 'none' && s.old === 'none';
       t.check(noteOk, `${file} blocked: the right note (${want.note})`, s);
-      if (want.note === 'nojs') t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.steps === 'none' && s.shown.join() === 'tab-help', `${file} blocked: only the guide, no tabs, no switch, no Try buttons`, s);
+      if (want.note === 'nojs') t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.study === 'none' && s.steps === 'none' && s.forget !== 'none', `${file} blocked: only the guide shows (the Study panel is off), no tabs, no switch, no Try buttons, Forget stays`, s);
       else {
         t.check(s.hidden.join() === want.hidden.join() && s.groups.length === 0, `${file} blocked: menu items off ${JSON.stringify(want.hidden)}`, { hidden: s.hidden, groups: s.groups });
         t.check(s.shown.length === 1 && s.shown[0] === (want.url ? 'tab-study' : 'tab-study'), `${file} blocked: the page shows one panel${want.url ? ', Study in place of its own route' : ''}`, s.shown);
@@ -595,6 +608,11 @@ async function groupC(t, site) {
     }
   });
 
+}
+
+// ---- D: two scripts at once, styles.css, the fonts, a picture, axe (after group A, for balance) ----------------
+
+async function groupD(t, site) {
   // two scripts blocked at once
   await step(t, 'two scripts blocked', async () => {
     let page = await openPage(site, { block: [site.base + 'js/game.js', site.base + 'js/battle.js'], url: '#battle' });
@@ -659,6 +677,8 @@ async function groupC(t, site) {
     const s = await page.evaluate(() => { const i = document.querySelector('img[src="img/help/start.jpg"]'); const r = i.getBoundingClientRect(); return { natural: i.naturalWidth, alt: i.alt.length, box: [Math.round(r.width), Math.round(r.height)], caption: i.closest('figure').querySelector('figcaption').textContent }; });
     t.check(s.natural === 0 && s.alt > 10 && s.box[0] > 0 && s.caption.length > 0 && (await notesOf(page)).nojs === 'none', 'a guide picture missing: its alt and caption stay, the frame keeps its size, no note', s);
     t.note(`a guide picture missing (404): the phone frame shows the browser's broken-image mark with the alt text; the page says nothing more, which is fair for a picture in a guide`);
+    t.check(page.log.console.length === 1 && /status of 404/.test(page.log.console[0]), 'a guide picture missing: the one console line is the browser\'s own 404 for it', page.log.console);
+    dropLogged(page, /status of 404/);
     await clean(t, page, 'guide picture 404');
     await page.context().close();
   });
@@ -679,6 +699,8 @@ async function groupC(t, site) {
     await take(nf, '404 page');
     await nf.context().close();
     t.check(serious.length === 0, 'axe: no serious or critical issue on any tab at phone width, with a menu open, or on the 404 page', serious);
+    const strips = serious.filter((s) => /scrollable-region-focusable/.test(s) && /help/.test(s));
+    if (strips.length) t.finding({ title: 'At phone width the guide\'s screenshot strips scroll sideways but cannot be reached or scrolled from the keyboard', severity: 'medium', steps: 'Open the site on a 390 × 844 window, open How to use, Tab through the page: the strips of phone screenshots (every part with more than one picture) are skipped, and the arrow keys cannot scroll them. Or run axe-core on the tab.', expected: 'A keyboard user can reach each strip and scroll it (tabindex="0" with a label on .help-shots), or the pictures wrap instead of scrolling as they do from 760 px up.', actual: `axe reports scrollable-region-focusable (serious) on ${strips[0].replace(/^phone help: /, '')}: styles.css 1609 gives .help-shots overflow-x: auto below 760 px and index.html gives the element no tabindex, so the second and later pictures of a part are out of a keyboard user's reach.` });
     for (const m of minor) t.note(`axe (not serious): ${m}`);
   });
 }
