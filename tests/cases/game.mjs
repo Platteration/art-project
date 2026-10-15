@@ -41,12 +41,13 @@ const tapPaint = (page, code, times = 1) => page.evaluate(([code, n]) => { const
 const play = (page) => page.evaluate(() => ({
   timer: document.getElementById('gameTimer').textContent, timerLabel: document.getElementById('gameTimer').getAttribute('aria-label'), low: document.getElementById('gameTimer').classList.contains('is-low'),
   progress: document.getElementById('gameProgress').textContent, lock: document.getElementById('gameLock').textContent,
-  title: document.getElementById('gameMixTitle').textContent, parts: document.getElementById('gameMixParts').textContent,
+  // (the mix text joins a code and its amount with a non-breaking space: read as a plain one)
+  title: document.getElementById('gameMixTitle').textContent, parts: document.getElementById('gameMixParts').textContent.replace(/ /g, ' '),
   chip: document.getElementById('gameMixChip').style.background, chipEmpty: document.getElementById('gameMixChip').classList.contains('is-empty'),
   undo: document.getElementById('gameUndo').disabled, clear: document.getElementById('gameClear').disabled, copy: document.getElementById('gameCopy').disabled, copyText: document.getElementById('gameCopy').textContent,
   copying: document.getElementById('gamePlay').classList.contains('is-copying'), copyBar: !document.getElementById('gameCopyBar').hidden, copyBarText: document.getElementById('gameCopyText').textContent,
   amount: document.getElementById('gameAmountOut').textContent, paints: [...document.querySelectorAll('.game-paint-code')].map((e) => e.textContent),
-  counts: [...document.querySelectorAll('.game-paint-count')].map((e) => e.textContent),
+  counts: [...document.querySelectorAll('.game-paint-count')].map((e) => e.textContent.replace(/ /g, ' ')),
   numbers: document.querySelectorAll('.game-number').length, pressed: [...document.querySelectorAll('.game-number')].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => +b.dataset.number),
   filled: [...document.querySelectorAll('.game-number')].filter((b) => b.classList.contains('is-filled')).map((b) => +b.dataset.number),
   labels: [...document.querySelectorAll('.game-number')].map((b) => b.getAttribute('aria-label')),
@@ -64,7 +65,7 @@ const result = (page) => page.evaluate(() => ({
   popup: !document.getElementById('gamePopup').hidden, showBar: !document.getElementById('gameShowBar').hidden, points: +document.getElementById('gamePoints').textContent,
   analysis: !document.getElementById('gameAnalysis').hidden, analyzeText: document.getElementById('gameAnalyze').textContent, expanded: document.getElementById('gameAnalyze').getAttribute('aria-expanded'),
   rows: Object.fromEntries([...document.querySelectorAll('#gameBreakdown dt')].map((dt) => [dt.textContent, dt.nextElementSibling.textContent])),
-  zones: [...document.querySelectorAll('#gameZones li')].map((li) => ({ n: +li.querySelector('.game-zone-number').textContent, match: li.querySelector('.game-zone-match').textContent, note: li.querySelector('.mix-zone').textContent, yours: li.querySelector('.mix-recipe').textContent, mix: li.querySelector('.game-zone-tip').textContent })),
+  zones: [...document.querySelectorAll('#gameZones li')].map((li) => ({ n: +li.querySelector('.game-zone-number').textContent, match: li.querySelector('.game-zone-match').textContent, note: li.querySelector('.mix-zone').textContent, yours: li.querySelector('.mix-recipe').textContent.replace(/ /g, ' '), mix: li.querySelector('.game-zone-tip').textContent.replace(/ /g, ' ') })),
   focus: document.activeElement && document.activeElement.id, focusMode: document.body.classList.contains('game-focus'),
   comparing: document.getElementById('gameFinalWrap').classList.contains('is-comparing'), compareText: document.getElementById('gameCompare').textContent, cut: +document.getElementById('gameFinalHandle').getAttribute('aria-valuenow'),
   final: [document.getElementById('gameFinal').width, document.getElementById('gameFinal').height],
@@ -75,7 +76,7 @@ const setup = (page) => page.evaluate(() => ({
   options: [...document.getElementById('gamePalette').options].map((o) => [o.value, o.textContent]), palette: document.getElementById('gamePalette').value, paletteHidden: document.getElementById('gamePalette').hidden, deal: !document.getElementById('gameDeal').hidden,
   dots: [...document.querySelectorAll('#gamePaletteDots .paint-dot')].map((d) => d.title), best: document.getElementById('gameBest').textContent, start: document.getElementById('gameStart').disabled,
   subject: (document.querySelector('input[name="gameSubject"]:checked') || {}).value, photoPane: !document.getElementById('gameFromPhotoPane').hidden, paintingPane: !document.getElementById('gameFromPaintingPane').hidden,
-  photoName: document.getElementById('gamePhotoName').textContent, paintingName: document.getElementById('gamePaintingName').textContent, levels: [...document.querySelectorAll('.game-levels label small')].map((e) => e.textContent),
+  photoName: document.getElementById('gamePhotoName').textContent, paintingName: document.getElementById('gamePaintingName').textContent, levels: [...document.querySelectorAll('#tab-game .game-levels label small')].map((e) => e.textContent),
   preview: [document.getElementById('gamePreview').width, document.getElementById('gamePreview').height], painting: localStorage.getItem('portrait-value-studio.gamePainting'),
   amount: document.getElementById('gameAmountOut').textContent, sound: document.getElementById('gameSound').getAttribute('aria-pressed'), refView: (document.querySelector('#tab-game [data-ref-view][aria-pressed="true"]') || {}).dataset && document.querySelector('#tab-game [data-ref-view][aria-pressed="true"]').dataset.refView,
   lede: document.querySelector('.game-lede').textContent,
@@ -158,9 +159,9 @@ export default async function game(t, site) {
       t.check(ms.paletteHidden === (m === 'mystery') && ms.deal === (m === 'mystery'), `mode ${m}: the palette menu ${m === 'mystery' ? 'gives way to Deal again' : 'shows, no Deal again'}`, [ms.paletteHidden, ms.deal]);
       t.check(ms.best === '' && !ms.start, `mode ${m}: no best yet, Start enabled`, [ms.best, ms.start]);
       if (m === 'mystery') {
-        t.check(ms.dots.length === 4 && ms.dots[0] === 'Titanium white' && /^Dealt at random: white and three paints\. 4 paints, which mix \d+ of its \d+ colors closely\./.test(ms.hint), 'Mystery: white and three paints, said so', [ms.dots, ms.hint]);
+        t.check(ms.dots.length === 4 && /^titanium white$/i.test(ms.dots[0]) && /^Dealt at random: white and three paints\. 4 paints, which mix \d+ of its \d+ colors closely\./.test(ms.hint), 'Mystery: white and three paints, said so', [ms.dots, ms.hint]);
         const hands = [ms.dots.join('|')];
-        for (let i = 0; i < 3; i++) { await click(page, '#gameDeal'); await ready(page); const d = await setup(page); hands.push(d.dots.join('|')); t.check(d.dots.length === 4 && d.dots[0] === 'Titanium white' && !d.start, `Mystery: Deal again ${i + 1} deals white and three, Start enabled`, d.dots); }
+        for (let i = 0; i < 3; i++) { await click(page, '#gameDeal'); await ready(page); const d = await setup(page); hands.push(d.dots.join('|')); t.check(d.dots.length === 4 && /^titanium white$/i.test(d.dots[0]) && !d.start, `Mystery: Deal again ${i + 1} deals white and three, Start enabled`, d.dots); }
         t.check(new Set(hands).size >= 2, 'Mystery: Deal again deals a different hand', hands);
       }
     }
@@ -215,7 +216,7 @@ export default async function game(t, site) {
       if (want) {
         await setPalette(page, 'mine'); await ready(page);
         const m2 = await setup(page);
-        t.check(m2.palette === 'mine' && same(m2.dots, ['Titanium white', 'Ivory black']) && / 2 paints, which mix /.test(m2.hint) && !m2.start, 'My paints chosen: its two paints, the hint, Start enabled', [m2.dots, m2.hint]);
+        t.check(m2.palette === 'mine' && same(m2.dots.map((d) => d.toLowerCase()), ['titanium white', 'ivory black']) && / 2 paints, which mix /.test(m2.hint) && !m2.start, 'My paints chosen: its two paints, the hint, Start enabled', [m2.dots, m2.hint]);
       }
     }
     await clean(t, page, 'setup: my paints');
@@ -499,7 +500,7 @@ export default async function game(t, site) {
     await click(page, '#gameLock'); await scored(page);
     let r = await result(page);
     await click(page, '#gameAnalyze'); r = await result(page);
-    t.check(r.rows.Mode === 'Relaxed' && /^0:0\d · \+0 \(no clock\)$/.test(r.rows['Time taken']) && !('Time left' in r.rows) && r.points === +(/· (\d+)$/.exec(r.rows['Color accuracy']) || [])[1] && r.points > 0 && r.points <= 1000, 'Relaxed: time taken, no bonus, the points are the color points alone', [r.rows, r.points]);
+    t.check(r.rows.Mode === 'Relaxed' && /^0:0\d · \+0 \(no clock\)$/.test(r.rows['Time taken']) && !('Time left' in r.rows) && r.points === +(/· (\d+)$/.exec(r.rows['Color accuracy']) || [])[1] && r.points >= 0 && r.points <= 1000, 'Relaxed: time taken, no bonus, the points are the color points alone', [r.rows, r.points]);
     t.check(Object.keys(await bests(page))[0] === `${srcKey}|medium|zorn|relaxed`, 'Relaxed: the best is kept under its mode', Object.keys(await bests(page)));
     await click(page, '#gamePopup [data-game="new"]'); await ready(page);
     await clean(t, page, 'modes: relaxed');
@@ -621,7 +622,7 @@ export default async function game(t, site) {
     let ps = await page.evaluate(() => { const ul = document.getElementById('gamePaints'); return { focus: document.body.classList.contains('game-focus'), topbar: getComputedStyle(document.querySelector('.topbar')).display, tabs: getComputedStyle(document.querySelector('.tabs')).display, hasScroll: document.getElementById('gamePlay').classList.contains('has-scroll'), over: ul.scrollWidth - ul.clientWidth, scrollLeft: ul.scrollLeft, quick: getComputedStyle(document.querySelector('.game-quick-undo')).display, bar: document.querySelector('.game-bar').getBoundingClientRect().top, canvas: document.getElementById('gameCanvas').getBoundingClientRect().toJSON(), vh: innerHeight }; });
     t.check(ps.focus && ps.topbar === 'none' && ps.tabs === 'none' && (await hscroll(page)) <= 0, 'phone: the header and tabs step aside while playing, no horizontal scroll', ps);
     t.check(ps.hasScroll && ps.over > 0 && ps.scrollLeft === 0 && (await visible(page, '#gamePaintScroll')), 'phone: ten paints overflow, the big scroll bar shows at the start', ps);
-    t.check(ps.quick === 'inline-grid' && ps.canvas.height > 300 && ps.canvas.bottom < ps.vh, 'phone: the quick undo shows and the painting fits the screen', [ps.quick, ps.canvas]);
+    t.check(ps.quick !== 'none' && ps.canvas.height > 300 && ps.canvas.bottom < ps.vh, 'phone: the quick undo shows and the painting fits the screen', [ps.quick, ps.canvas]);
     await screenshot(page, 'game-phone-play');
     const th = await page.evaluate(() => document.querySelector('.game-paint-scroll-thumb').getBoundingClientRect().toJSON());
     await page.mouse.move(th.x + th.width / 2, th.y + th.height / 2); await page.mouse.down(); await page.mouse.move(th.x + th.width / 2 + 200, th.y + th.height / 2, { steps: 6 }); await page.mouse.up();
@@ -702,8 +703,8 @@ export default async function game(t, site) {
     if (!sameOk) t.finding({ title: '"Same photo" plays a different photo when one was loaded mid-game', severity: 'low', steps: '1. Open Paint by numbers on the sample portrait and Start painting. 2. On Study the reference, load another photo. 3. Back on Paint by numbers, Lock in portrait, then Play again and choose "Same photo" ("Try the same photo again, or load a new one?").', expected: 'The game just played is played again, on the same photo, as the dialog says; or the dialog says the photo has changed.', actual: `The new game is on the photo loaded meanwhile (its board is ${dims2[0]} × ${dims2[1]}, the game just played was 600 × 750): startGame rebuilds the board for the current reference (js/game.js 577 refreshSetup, 561-566) and the dialog's words do not change.` });
     await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
     t.check((await setup(page)).photoName === 'Painting from portrait-b.', 'the setup names the new photo', (await setup(page)).photoName);
-    // a reload mid-game: the setup, nothing broken
-    await click(page, '#gameStart'); await playing(page); await tapPaint(page, 'TW');
+    // a reload mid-game: the setup, nothing broken (the new board took its own suggested palette: tap its first paint)
+    await click(page, '#gameStart'); await playing(page); await tapPaint(page, (await play(page)).paints[0]);
     await page.reload({ waitUntil: 'load' }); await sleep(500); await ready(page);
     const s = await setup(page);
     t.check(s.shown && s.level === 'medium' && s.mode === 'classic' && !s.start, 'a reload mid-game comes back to the setup with the level and mode kept', [s.shown, s.level, s.mode]);

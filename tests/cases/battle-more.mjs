@@ -20,7 +20,7 @@ const starsFor = (streak) => STARS.filter((m) => streak >= m).length;
 // ---- helpers of this case -------------------------------------------------------------------------------
 
 // the setup's controls, then Start; resolves once the board shows its swatches
-async function start(page, { palette = 'zorn', count = '2', mode = 'streak' } = {}) {
+async function start(page, { palette = 'zorn', count = '2', mode = 'streak', timeout = 5000 } = {}) {
   await page.evaluate(([p, c, m]) => {
     const sel = document.getElementById('vb-palette');
     if (sel.value !== p) { sel.value = p; sel.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -28,7 +28,7 @@ async function start(page, { palette = 'zorn', count = '2', mode = 'streak' } = 
     document.querySelector(`input[name="vbMode"][value="${m}"]`).click();
     document.getElementById('vb-start').click();
   }, [palette, count, mode]);
-  await page.waitForFunction(() => !document.getElementById('vb-play').hidden && document.querySelectorAll('.vb-swatch').length > 0, null, { timeout: 5000 }).catch(() => null);
+  await page.waitForFunction(() => !document.getElementById('vb-play').hidden && document.querySelectorAll('.vb-swatch').length > 0, null, { timeout }).catch(() => null);
 }
 // the round as the page holds it (ValueBattle.state() is the live game, exposed for tests), with the line
 // the page should say for a right answer, built the way battle.js builds it
@@ -73,6 +73,8 @@ async function answer(page, right, how = 'click') {
   return r;
 }
 const next = (page) => click(page, '#vb-next');
+// the pop-up's button by a real click: the id is doubled in the markup (see the first step), so the board's copy
+const closeMiss = (page) => page.locator('#vb-board #vb-missNext').click();
 const waitRound = (page, n) => page.waitForFunction((n) => document.getElementById('vb-score').textContent === `Round ${n}`, n, { timeout: 4000 }).then(() => true).catch(() => false);
 const waitShown = (page, sel) => page.waitForFunction((s) => !document.querySelector(s).hidden, sel, { timeout: 4000 }).then(() => true).catch(() => false);
 const waitPct = (page, n) => page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), n, { timeout: 4000 }).then(() => true).catch(() => false);
@@ -176,7 +178,7 @@ export default async function battleMore(t, site) {
     await press(page, ['ArrowLeft', 'ArrowRight', '1', '=']);
     const b3 = await board(page);
     t.check(!b3.miss && b3.round === `Streak ${played}` && b3.popup, 'arrow and digit keys while the pop-up shows do nothing', { miss: b3.miss, round: b3.round });
-    await page.locator('#vb-missNext').click();
+    await closeMiss(page);
     t.check(await waitShown(page, '#vb-popup') && await waitPct(page, played), 'See the score shows the score pop-up counting up to the streak');
     b = await board(page);
     const stars = starsFor(played);
@@ -189,7 +191,7 @@ export default async function battleMore(t, site) {
     // out on the first round: nothing saved, no New best, Play again starts at once
     await start(page, { count: '2' });
     await answer(page, false);
-    await page.locator('#vb-missNext').click();
+    await closeMiss(page);
     await waitShown(page, '#vb-popup'); await waitPct(page, 0);
     b = await board(page);
     t.check(b.kicker === 'Out on the first round' && b.pct === '0' && b.stars === 0 && b.grade === GRADES[0] && !b.newBest, 'a miss on round 1: Out on the first round, 0, no star, Keep looking, no New best', { kicker: b.kicker, pct: b.pct, stars: b.stars, grade: b.grade, newBest: b.newBest });
@@ -237,7 +239,7 @@ export default async function battleMore(t, site) {
     t.check(b.answer === `Right! ${r.why}`, 'lightest by tap: Right! with every value', { line: b.answer, want: r.why });
     await next(page); await waitRound(page, 3);
     r = await round(page);
-    t.check(r.ask === MANY_ASK[2] && r.dataMode !== 'pair', 'the third asks for the order darkest to lightest', r.ask);
+    t.check(r.ask === MANY_ASK[2] && r.mode === 'order', 'the third asks for the order darkest to lightest', r.ask);
     await press(page, [String(r.answer[0] + 1)]);
     b = await board(page);
     t.check(b.badges[r.answer[0]] === '1' && !b.undo && (await text(page, '#vb-undo')) === 'Start the round over' && !(await round(page)).answered, 'the first tap numbers its swatch 1 and offers Start the round over', { badges: b.badges, undo: b.undo });
@@ -261,7 +263,7 @@ export default async function battleMore(t, site) {
     b = await board(page);
     const orderL = [0, 1, 2].sort((x, y) => r.Ls[x] - r.Ls[y]);
     t.check(b.missWhy === r.why && JSON.stringify(b.chips.map((c) => c.text)) === JSON.stringify(orderL.map((i) => 'ABC'[i] + r.labels[i])) && JSON.stringify(b.badges) === JSON.stringify([0, 1, 2].map((i) => String(r.answer.indexOf(i) + 1))) && b.wrongRings.length === 0 && b.answerRings.length === 3, 'the miss pop-up names the right order, the chips run darkest to lightest with letters and values, the swatches show the right numbers', { why: b.missWhy, chips: b.chips.map((c) => c.text), badges: b.badges });
-    await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup'); await waitPct(page, 5);
+    await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 5);
     b = await board(page);
     t.check(b.stars === 2 && b.grade === GRADES[2] && b.newBest && JSON.parse(await storageGet(page, K.best))['zorn:3:streak'] === 5, 'a streak of 5: two stars, Getting there, New best, saved under zorn:3:streak', { stars: b.stars, grade: b.grade, best: await storageGet(page, K.best) });
     await click(page, '#vb-settings');
@@ -301,14 +303,14 @@ export default async function battleMore(t, site) {
     t.check(value.every((x) => x.d >= 1.6) && temp.every((x) => x.d >= 0.08), 'no round is closer than the floor (1.6 L*, 0.08 in warmth)', { minValue: Math.min(...value.map((x) => x.d)), minTemp: Math.min(...temp.map((x) => x.d)) });
     const early = value.filter((x) => x.i < 6).map((x) => x.d), late = value.filter((x) => x.i >= 24).map((x) => x.d);
     t.check(early.length && late.length && Math.max(...late) < Math.min(...early) && Math.max(...late) <= 6, 'the gaps close in: every value gap from round 25 on is under the smallest of the first six, and at most 6 L*', { early, late });
-    const reported = value.every((x) => x.reported.length === 2 && Math.abs(+x.reported[0] - +x.reported[1]) * 10 >= 1.5);
-    t.check(reported, 'the values the line reports (0-10 scale) differ by at least 0.1 whenever the answer is not a tie', value.filter((x) => !(x.reported.length === 2 && Math.abs(+x.reported[0] - +x.reported[1]) * 10 >= 1.5)));
+    const apart = (x) => x.reported.length === 2 && Math.abs(+x.reported[0] - +x.reported[1]) >= 0.0999;
+    t.check(value.every(apart), 'the values the line reports (0-10 scale) differ by at least 0.1 whenever the answer is not a tie', value.filter((x) => !apart(x)));
     t.note(`thirty rounds, Zorn, two colors: value gaps (L*) by round ${JSON.stringify(value.map((x) => [x.i + 1, x.d]))}; temperature gaps (warmth) ${JSON.stringify(temp.map((x) => [x.i + 1, x.d, x.lo]))}; ties dealt ${log.filter((x) => x.answer === 'same').length}`);
     const tempShort = temp.filter((x) => x.d < x.lo - 1e-6);
     if (tempShort.length) t.note(`with Zorn the early temperature rounds cannot meet the README's "clearly different in temperature": the whole usable pool spans about 0.44 in warmth while the first rounds ask for 0.6 (battle.js EASY.temp, line 98), so makePair's fallback (lines 125-130) deals the nearest pair (${JSON.stringify(tempShort.map((x) => [x.i + 1, x.d, x.lo]))}); the same holds for Rembrandt's earths; a palette with a blue meets the band. The pairs are still a yellow against a red, so the eye can tell them apart; noted, not failed`);
     b = await board(page);
     t.check(b.round === 'Streak 30' && b.milestone, 'thirty in a row, with the flourish at thirty', { round: b.round, milestone: b.milestone });
-    await answer(page, false); await waitShown(page, '#vb-miss'); await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup'); await waitPct(page, 30);
+    await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 30);
     b = await board(page);
     t.check(b.stars === 5 && b.grade === GRADES[5] && b.newBest && b.kicker === 'Streak over after round 31', 'thirty in a row: five stars, Eagle eye!, New best', { stars: b.stars, grade: b.grade, newBest: b.newBest, kicker: b.kicker });
     // a tie whose two values read differently on the 0-10 scale: measured on the dealt rounds (makeRound is
@@ -340,9 +342,9 @@ export default async function battleMore(t, site) {
     const p2 = await page.evaluate(() => ({ time: document.getElementById('vb-time').textContent, left: ValueBattle.state().left }));
     b = await board(page);
     t.check(p1.left === p2.left && p1.time === p2.time && b.missNext === 'Next ▸' && b.missWhy === r.why, 'the clock pauses while the miss shows, whose button says Next ▸', { p1, p2, btn: b.missNext });
-    await page.locator('#vb-missNext').click();
+    await closeMiss(page);
     t.check(await waitRound(page, 3), 'Next ▸ deals round 3');
-    const resumed = await page.waitForFunction((was) => { const g = ValueBattle.state(); return g.left - (performance.now() - (window.__cf || 0)) / 1000 < was && document.getElementById('vb-time').textContent !== '1:00'; }, p2.left, { timeout: 5000 }).then(() => true).catch(() => false);
+    const resumed = await page.waitForFunction((was) => document.getElementById('vb-time').textContent !== was, p2.time, { timeout: 5000 }).then(() => true).catch(() => false);
     t.check(resumed, 'the clock runs again after the pop-up closes', await text(page, '#vb-time'));
     // Enter on the clock's miss pop-up must deal exactly one round
     await answer(page, false); await waitShown(page, '#vb-miss');
@@ -360,7 +362,7 @@ export default async function battleMore(t, site) {
     await start(page, { count: '2', mode: '60' });
     await answer(page, false); await waitShown(page, '#vb-miss');
     await page.evaluate(() => { ValueBattle.state().left = 0; });
-    await page.locator('#vb-missNext').click();
+    await closeMiss(page);
     t.check(await waitShown(page, '#vb-popup'), 'with no time left, closing the answer ends the game');
     b = await board(page);
     t.check(b.kicker === "Time's up · 1 missed" && b.pct === '0' && !b.newBest, "Time's up · 1 missed, 0 right, no New best", { kicker: b.kicker, pct: b.pct, newBest: b.newBest });
@@ -370,7 +372,7 @@ export default async function battleMore(t, site) {
     // ---- the sound switch: the game's, which covers the battle's clicks and chime --------------------------
     await page.evaluate(() => { window.__nodes = 0; for (const n of ['createOscillator', 'createBufferSource']) { const o = AudioContext.prototype[n]; AudioContext.prototype[n] = function () { window.__nodes++; return o.apply(this, arguments); }; } });
     await start(page, { count: '2' });
-    await page.locator('.vb-swatch[data-index="0"]').click();
+    await answer(page, true, 'tap');
     await sleep(200);
     const onNodes = await page.evaluate(() => window.__nodes);
     t.check((await page.evaluate(() => GameSound.on())) && onNodes > 0, 'with the sound on, a tap on a swatch makes a sound (audio nodes created)', onNodes);
@@ -408,7 +410,8 @@ export default async function battleMore(t, site) {
   {
     const page = await openPage(site, { url: '#battle', viewport: PHONE });
     t.check((await hscroll(page)) <= 0 && !(await board(page)).setup, 'phone: the setup shows without horizontal scroll');
-    const sels = ['#vb-board', '#vb-bar', '#vb-round', '#vb-quit', '#vb-question', '.vb-swatch', '#vb-answer', '#vb-choices'];
+    // (the answer line and the answer row are empty, zero-width boxes until something fills them: not listed)
+    const sels = ['#vb-board', '#vb-bar', '#vb-round', '#vb-quit', '#vb-question', '.vb-swatch'];
     for (const count of ['4', '3', '2']) {
       await start(page, { count });
       let lay = await rects(page, sels.concat(['.vb-choice[data-choice="same"]']));
@@ -429,7 +432,7 @@ export default async function battleMore(t, site) {
       lay = await rects(page, ['#vb-miss', '#vb-missNext', '.vb-chip']);
       t.check(allIn(lay, ['#vb-miss', '#vb-missNext', '.vb-chip']), `phone, ${count} colors: the miss pop-up and its chips sit inside the screen`, { miss: lay['#vb-miss'][0], chips: lay['.vb-chip'].length });
       if (count === '4') await screenshot(page, 'battle-more-phone-miss');
-      await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup');
+      await closeMiss(page); await waitShown(page, '#vb-popup');
       lay = await rects(page, ['#vb-popup', '#vb-again', '#vb-settings', '#vb-stars']);
       t.check(allIn(lay, ['#vb-popup', '#vb-again', '#vb-settings', '#vb-stars']), `phone, ${count} colors: the score pop-up sits inside the screen`, lay['#vb-popup'][0]);
       await click(page, '#vb-settings');
@@ -443,7 +446,8 @@ export default async function battleMore(t, site) {
   // ---- hostile saved state for the five keys, on the #battle route ----------------------------------------
   {
     // the right types with values the setup has no row for, and best entries of the wrong type
-    const page = await openPage(site, { url: '#battle', storage: { [K.count]: '"7"', [K.mode]: '"90"', [K.palette]: '"constructor"', [K.best]: { 'zorn:mix:streak': 'constructor', 'zorn:2:streak': [1, 2], 'zorn:3:streak': { a: 1 }, 'zorn:4:streak': -5, 'zorn:2:60': true, 'zorn:3:60': '7', '__proto__': { 'zorn:4:60': 99 }, constructor: 5, toString: 'x' }, [K.mine]: ['TW', 'TW', 'constructor', '__proto__', 'hasOwnProperty', 1, {}, null, 'YO'] } });
+    // (the record is written as JSON text so that "__proto__" is an own key of the saved object)
+    const page = await openPage(site, { url: '#battle', storage: { [K.count]: '"7"', [K.mode]: '"90"', [K.palette]: '"constructor"', [K.best]: '{"zorn:mix:streak":"constructor","zorn:2:streak":[1,2],"zorn:3:streak":{"a":1},"zorn:4:streak":-5,"zorn:2:60":true,"zorn:3:60":"7","__proto__":{"zorn:4:60":99},"constructor":5,"toString":"x"}', [K.mine]: ['TW', 'TW', 'constructor', '__proto__', 'hasOwnProperty', 1, {}, null, 'YO'] } });
     let b = await board(page);
     const radios = await page.evaluate(() => ({ count: (document.querySelector('input[name="vbCount"]:checked') || {}).value || null, mode: (document.querySelector('input[name="vbMode"]:checked') || {}).value || null, palette: document.getElementById('vb-palette').value }));
     t.check(radios.palette === 'zorn' && !b.setup, 'a saved palette named constructor falls back to Zorn', radios);
@@ -460,7 +464,7 @@ export default async function battleMore(t, site) {
     // a game under the key whose entry is "constructor": one right, then a miss
     await start(page, { count: 'mix', mode: 'streak' });
     await answer(page, true); await next(page); await waitRound(page, 2);
-    await answer(page, false); await waitShown(page, '#vb-miss'); await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
+    await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
     b = await board(page);
     const store = JSON.parse(await storageGet(page, K.best));
     const savedOk = b.newBest && store['zorn:mix:streak'] === 1;
@@ -477,7 +481,7 @@ export default async function battleMore(t, site) {
     const radios = await page.evaluate(() => ({ count: (document.querySelector('input[name="vbCount"]:checked') || {}).value || null, mode: (document.querySelector('input[name="vbMode"]:checked') || {}).value || null, palette: document.getElementById('vb-palette').value }));
     t.check(radios.count === 'mix' && radios.mode === 'streak' && radios.palette === 'zorn' && !b.options.some((o) => /My paints/.test(o)) && b.best === 'No streak yet for these settings.', 'a count, mode, palette and My paints of the wrong type fall back to the defaults', { radios, options: b.options.length, best: b.best });
     await start(page, { count: '2' });
-    await answer(page, true); await next(page); await waitRound(page, 2); await answer(page, false); await waitShown(page, '#vb-miss'); await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup');
+    await answer(page, true); await next(page); await waitRound(page, 2); await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup');
     const keys = Object.keys(JSON.parse(await storageGet(page, K.best)));
     t.check(keys.length === 50 && keys[keys.length - 1] === 'zorn:2:streak' && !keys.includes('p0:2:streak') && keys.includes('p11:2:streak'), 'a record of sixty bests is pruned to the fifty most recent when a new one is saved', { n: keys.length, first: keys[0], last: keys[keys.length - 1] });
     t.note('battle bests are pruned to fifty keys like the game\'s photo bests (battle.js line 37), though a battle best is one of at most 11 palettes × 4 counts × 4 modes; the README promises the fifty-limit for photos only');
@@ -489,7 +493,7 @@ export default async function battleMore(t, site) {
     const page = await openPage(site, { url: '#battle', storage: { [K.mine]: ['TW', 'LW'] } });
     let b = await board(page);
     t.check(b.options.includes('My paints (2)'), 'two whites ticked: My paints (2) is offered', b.options);
-    await start(page, { palette: 'mine', count: '2' });
+    await start(page, { palette: 'mine', count: '2', timeout: 1500 });
     b = await board(page);
     const whitesOk = page.log.pageerrors.length === 0 && (b.swatches === 2 || !b.setup);
     t.check(whitesOk, 'Start with two whites either deals a round or says the paints cannot make colors', { errors: page.log.pageerrors.map((e) => e.split('\n')[0]), swatches: b.swatches, setup: b.setup, play: b.play });
@@ -539,9 +543,8 @@ export default async function battleMore(t, site) {
     await start(page, { palette: 'mine', count: '2' });
     const codes = await page.evaluate(() => [...new Set(ValueBattle.state().pool.flatMap((c) => c.recipe.split(' · ').map((s) => s.split(' ')[0])))].sort());
     t.check(JSON.stringify(codes) === '["CRL","TW","YO"]', 'a battle with My paints mixes from the ticked paints only', codes);
-    t.check((await text(page, '#vb-best')) === 'No streak yet for these settings.' || true, 'best line read');
     await answer(page, true); await next(page); await waitRound(page, 2);
-    await answer(page, false); await waitShown(page, '#vb-miss'); await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
+    await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
     t.check(JSON.parse(await storageGet(page, K.best))['mine:2:streak'] === 1, 'the best is filed under mine:2:streak', await storageGet(page, K.best));
     // with the score pop-up still up, the ticks change on the Study tab (down to one paint), then back
     await tick([], ['YO', 'CRL']);
@@ -557,7 +560,7 @@ export default async function battleMore(t, site) {
     const selected = await page.evaluate(() => document.getElementById('vb-palette').selectedOptions[0].text);
     const playsWhatItSays = /My paints/.test(selected) ? codes2.every((c) => ['TW'].includes(c)) : true;
     t.check(playsWhatItSays, 'the battle mixes from the palette the setup names', { selected, codes: codes2 });
-    await answer(page, true); await next(page); await waitRound(page, 2); await answer(page, false); await waitShown(page, '#vb-miss'); await page.locator('#vb-missNext').click(); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
+    await answer(page, true); await next(page); await waitRound(page, 2); await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
     const store = JSON.parse(await storageGet(page, K.best));
     if (!listOk || !playsWhatItSays) t.finding({ title: 'After the ticked paints change on the Study tab, Change settings still offers the old "My paints (3)", and Start then silently plays Zorn under that name', severity: 'medium', steps: 'Advanced, Study tab, Colors and paints, My paints, Choose my paints: tick TW, YO and CRL, Done. Games → Value battle, Palette: My paints (3), 2 colors, Streak, Start; one right, one wrong, See the score (leave the score up). Study tab: Choose my paints, untick YO and CRL, Done. Value battle tab, Change settings, Start the battle.', expected: 'The setup lists the palettes afresh: no My paints with one paint ticked (or "My paints (n)" with the new count), and the battle mixes from the palette the setup names.', actual: `The setup still says "${selected}"${b.best ? ` with the best line "${b.best}"` : ''}, and the battle deals mixes of ${JSON.stringify(codes2)} (Zorn's paints); its best is filed under ${JSON.stringify(Object.keys(store).filter((k) => /:2:streak$/.test(k)))}. Cause: Change settings (battle.js line 432) and ✕ call showBest() but not renderSetup(), which runs only on a tab switch with no game (lines 459-463); paletteNow() (line 174) then finds no "mine" in the fresh list and falls back to the first palette, Zorn, without a word.` });
     // ✕ on the score, then no ticks at all: the next visit to the tab rebuilds the list
