@@ -3,7 +3,14 @@
 // responsive, and nothing may error. Chromium-only numbers (performance.memory), reported as notes.
 import { openPage, clean, tab, DESKTOP, makeImage, loadPhoto, stroke, inked, click, sleep } from '../lib.mjs';
 
-const heap = (page) => page.evaluate(() => (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : -1));
+// the JS heap in MB, precisely (performance.memory is rounded to coarse buckets in headless Chromium)
+async function heap(page) {
+  if (!page.__cdp) page.__cdp = await page.context().newCDPSession(page);
+  await page.__cdp.send('Performance.enable').catch(() => null);
+  const { metrics } = await page.__cdp.send('Performance.getMetrics');
+  const m = metrics.find((x) => x.name === 'JSHeapUsedSize');
+  return m ? Math.round(m.value / 1048576) : -1;
+}
 const responsive = (page) => page.evaluate(() => new Promise((r) => { const t0 = performance.now(); requestAnimationFrame(() => setTimeout(() => r(Math.round(performance.now() - t0)), 0)); }));
 
 export default async function soak(t, site) {
