@@ -1,4 +1,4 @@
-﻿# Portrait Value Studio
+# Portrait Value Studio
 Contact: https://github.com/Platteration/art-project/security/advisories/new
 Expires: 2027-10-14T00:00:00.000Z
 Preferred-Languages: en

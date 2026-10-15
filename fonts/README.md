@@ -8,4 +8,4 @@ The site's three typefaces, served from this folder so that no visitor data goes
 | IBM Plex Sans (variable, weights 400–600) | `ibm-plex-sans-latin.woff2`, `ibm-plex-sans-latin-ext.woff2` | SIL Open Font License 1.1, `LICENSE-ibm-plex.txt` |
 | IBM Plex Mono (400, 500, 600 and 700) | `ibm-plex-mono-latin-{400,500,600,700}.woff2`, `ibm-plex-mono-latin-ext-{400,500,600,700}.woff2` | SIL Open Font License 1.1, `LICENSE-ibm-plex.txt` |
 
-The files are the latin and latin-ext subsets as built by Google Fonts (Bricolage Grotesque v9, IBM Plex Sans v23, IBM Plex Mono v20). The `@font-face` rules that load them are at the top of `../styles.css`. Font files never change in place: to update one, add the new file under a new name and point the rule at it, so long cache lifetimes stay safe.
+The files are the latin and latin-ext subsets as built by Google Fonts (Bricolage Grotesque v9, IBM Plex Sans v23, IBM Plex Mono v20). The `@font-face` rules that load them are in `../fonts.css`, which every page (index, pose, 404) links. Font files never change in place: to update one, add the new file under a new name and point the rule at it, so long cache lifetimes stay safe.

@@ -33,6 +33,7 @@
   }
   const MIXES_KEY = 'portrait-value-studio.paintMixes';
   const MINE_KEY = 'portrait-value-studio.myPaints';
+  const NOTICE_KEY = 'portrait-value-studio.studioNotice'; // the one-time note that the painting is kept in this browser
 
   /*
    * The studio is pinned to the screen. On a phone it fills the visual viewport: Safari's toolbars
@@ -80,7 +81,7 @@
     const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const lab = (c) => Study.rgbToLab(c[0], c[1], c[2]);
     function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
-    function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+    function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { return false; /* private mode, or storage blocked */ } }
 
     // ---- Paints and the mixing model (the same as the Study tab and the game use) ----------------
     const made = new Map();
@@ -412,20 +413,20 @@
     }
     async function dbPut(key, value) {
       const db = await openDb();
-      await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); });
+      await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); t.onabort = () => reject(t.error || new Error('aborted')); });
       db.close();
     }
     async function dbGet(key) {
       const db = await openDb();
-      const v = await new Promise((resolve, reject) => { const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const v = await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE); const r = t.objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); t.onabort = () => reject(t.error || new Error('aborted')); });
       db.close();
       return v;
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
-    let saveTimer = 0, saving = false, saveAgain = false;
-    function saveSoon() { if (!hasDb) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
+    let saveTimer = 0, saving = false, saveAgain = false, forgetting = false;
+    function saveSoon() { if (!hasDb || forgetting) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
     async function saveNow() {
-      if (!hasDb) return;
+      if (!hasDb || forgetting) return;
       if (saving) { saveAgain = true; return; }
       saving = true;
       try {
@@ -436,17 +437,22 @@
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
     const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
-    let restored = false;
+    let restored = false, dbOk = false, restoreFailed = false; // dbOk: the database answered, so saving works here
     async function restore() {
       if (!hasDb) return;
       let saved;
       try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
-      if (!saved || !saved.w || !saved.h) return;
-      const [pImg, sImg] = await Promise.all([loadBlob(saved.paper), loadBlob(saved.sketch)]);
+      dbOk = true;
+      // only a record of the expected shape is used: sizes a canvas can hold, pictures that are blobs
+      const size = (n) => Number.isInteger(n) && n > 0 && n <= 16384;
+      if (!saved || typeof saved !== 'object' || !size(saved.w) || !size(saved.h)) return;
+      const [pImg, sImg] = await Promise.all([saved.paper instanceof Blob ? loadBlob(saved.paper) : null, saved.sketch instanceof Blob ? loadBlob(saved.sketch) : null]);
       [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
       if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
       if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
-      if (saved.canvas) Object.assign(canvasState, saved.canvas);
+      if (saved.canvas && typeof saved.canvas === 'object') {
+        Object.keys(canvasState).forEach((k) => { if (k in saved.canvas && typeof saved.canvas[k] === typeof canvasState[k]) canvasState[k] = saved.canvas[k]; });
+      }
       renderWash(); applyCanvas();
       showSketch(saved.sketchShown !== false);
       undoStack.length = 0; $('undo').disabled = true;
@@ -770,13 +776,15 @@
 
     // ---- Start ---------------------------------------------------------------------------------------
     renderPalettes();
-    state.mixes = load(mixesKey, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && p.amount > 0), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
+    state.mixes = load(mixesKey, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && Number.isFinite(p.amount) && p.amount > 0 && p.amount <= 100), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
     blank();
     applyPalette();
     showStatus();
     applyView();
     let welcomed = false;
-    const ready = restore();
+    const ready = restore().catch((err) => { restoreFailed = true; if (window.StudioGuard) StudioGuard.report(err, { saved: true }); }); // a bad saved painting never stops the Studio
+    // Forget my work on this device: stop saving, so the pending autosave (or the one on pagehide) can't bring the painting back
+    window.addEventListener('studio:forget', () => { forgetting = true; clearTimeout(saveTimer); saveTimer = 0; });
 
     function activate(on) {
       active = on;
@@ -787,7 +795,15 @@
       refreshReference();
       layout();
       setTimeout(layout, 120);
-      ready.then(() => { layout(); if (restored && !welcomed && o.welcome) Studio.toast(o.welcome); welcomed = true; });
+      ready.then(() => {
+        layout();
+        if (!welcomed && !restoreFailed) { // a failed restore has the guard's reset offer on screen: leave it there
+          if (restored && o.welcome) Studio.toast(o.welcome);
+          // the one-time note is only true where the database works, and only once the flag could be kept
+          else if (o.notice && dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) Studio.toast(o.notice, 7000);
+        }
+        welcomed = true;
+      });
     }
     if (o.tab) {
       window.addEventListener('studio:tab', (e) => activate(e.detail === o.tab));
@@ -827,6 +843,7 @@
     return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
   }
 
-  const main = createStudio({ root: psRoot, prefix: 'ps-', tab: 'paint', bodyClass: 'tab-paint', welcome: 'Your painting is back from last time' });
+  const main = createStudio({ root: psRoot, prefix: 'ps-', tab: 'paint', bodyClass: 'tab-paint', welcome: 'Your painting is back from last time',
+    notice: 'Your painting is saved in this browser as you go. "Forget my work on this device", under How to use, clears it.' });
   window.PaintStudio = Object.assign(main, { pin, create: createStudio, copyMarkup });
 })();
