@@ -208,11 +208,20 @@
       { key: 'pitch', d: -1, x: cx - pad * 0.9, y: cy - R - pad, glyph: 'up' }, { key: 'pitch', d: 1, x: cx + pad * 0.9, y: cy - R - pad, glyph: 'down' },
       { key: 'roll', d: -1, x: cx - R * 0.78 - pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'ccw' }, { key: 'roll', d: 1, x: cx + R * 0.78 + pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'cw' },
     ].map(inside);
-    // a row of arrows pushed down into the picture (a small head near its top) would land the tilt arrows
-    // on the nod arrows: the tilt arrows then move outward, clear of them
-    const [, , up, down, ccw, cw] = all, r = 15 * (W / 400) * 2.3;
-    if (Math.hypot(ccw.x - up.x, ccw.y - up.y) < r) ccw.x = Math.max(m, up.x - r);
-    if (Math.hypot(cw.x - down.x, cw.y - down.y) < r) cw.x = Math.min(W - m, down.x + r);
+    // a row of arrows pushed down into the picture (a small head cut off at its top) would land the tilt
+    // arrows on the nod or the turn arrows: each tilt arrow takes the first spot clear of every other arrow
+    // by a disc and a half: its own place, the ball's lower corner, outward beside the nod arrow, under
+    // the turn arrow (or, with none clear, the clearest of the four)
+    const [left, right, up, down] = all, r = 15 * (W / 400) * 2.3;
+    const nearest = (p, others) => Math.min(...others.map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
+    const place = (h, sign, others) => {
+      const nod = sign < 0 ? up : down, turn = sign < 0 ? left : right;
+      const spots = [{ x: h.x, y: h.y }, { x: cx + sign * (R * 0.78 + pad * 0.6), y: cy + R * 0.78 + pad * 0.6 }, { x: nod.x + sign * r, y: m }, { x: turn.x, y: turn.y + r }].map((p) => inside(p));
+      const best = spots.find((p) => nearest(p, others) >= r) || spots.reduce((p, q) => (nearest(q, others) > nearest(p, others) ? q : p));
+      h.x = best.x; h.y = best.y;
+    };
+    place(all[4], -1, [left, right, up, down]);
+    place(all[5], 1, [left, right, up, down, all[4]]);
     return all;
   }
   function nudge(key, d) {
