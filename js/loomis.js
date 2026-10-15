@@ -173,7 +173,9 @@
   const NO_FIT = 'No head fits these marks: the eyes, nose, mouth and chin must be different points.';
   function announceFit() {
     if (!done()) return;
-    Studio.toast(state.fit ? 'The head is over the face' : `${NO_FIT} Press Back and move them.`, state.fit ? 1800 : 5000);
+    // a head the eye button hid stays hidden through Back one mark: the note says so, not that it is drawn
+    if (state.fit && !state.shown) Studio.toast('The head is fitted, and hidden: the eye button shows it', 4000);
+    else Studio.toast(state.fit ? 'The head is over the face' : `${NO_FIT} Press Back and move them.`, state.fit ? 1800 : 5000);
   }
   function back() {
     if (state.pending) { state.pending = null; render(); return; }
@@ -183,7 +185,8 @@
     delete state.points[current().key];
     refit();
   }
-  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; render(); }
+  // a fresh start (Start over, a new photo) shows the head again: hiding it was about the fit before
+  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; state.shown = true; render(); }
   function refit() { state.fit = fitHead(); state.auto = state.fit && { ...state.fit }; render(); }
 
   // ---- Adjusting the fitted head on the canvas: arrows turn, nod and tilt it; its lines drag -----
@@ -279,7 +282,7 @@
   function render() {
     const d = done(), fitted = d && !!state.fit;
     $('stepLabel').textContent = fitted ? 'Head fitted' : d ? 'No head' : `${state.step + 1} of ${STEPS.length}`;
-    $('ask').textContent = fitted ? 'Drag a dot or a line to adjust it' : d ? 'These marks make no head' : current().name;
+    $('ask').textContent = fitted ? (state.shown ? 'Drag a dot or a line to adjust it' : 'Hidden: the eye button shows it') : d ? 'These marks make no head' : current().name;
     $('sub').textContent = fitted ? 'The arrows turn, nod and tilt the head. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.'
       : d ? `${NO_FIT} Press Back and move them.` : `${current().ask}${state.pending ? ' Drag to fine-tune, then lock it in.' : ''}`;
     $('lock').hidden = d; $('lock').disabled = !state.pending;
