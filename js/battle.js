@@ -109,11 +109,18 @@
   const LETTERS = ['A', 'B', 'C', 'D'];
   function measure(kind, c) { return kind === 'value' ? c.L : c.warmth; }
   // a pair of colors for the question at the level, or a "same" pair when the dice say so
+  // the temperature ladder is scaled to the palette's own reach: a warm-only palette (Zorn, the earths)
+  // has no cool mix, so its first rounds ask for as wide a gap as it can make, closing from there
+  function tempBand(lv, usable) {
+    const w = usable.map((c) => c.warmth), span = Math.max(...w) - Math.min(...w), k = Math.min(1, span / 2);
+    const lo = Math.max(FLOOR.temp[0], lv.temp[0] * k);
+    return [lo, Math.max(lo + 0.04, lv.temp[1] * k)];
+  }
   function makePair(pool, lv, q) {
     const colorful = pool.filter((c) => c.chroma >= 10);
     const usable = q.kind === 'temp' && colorful.length >= 2 ? colorful : pool;
     const wantSame = Math.random() < lv.same;
-    const [lo, hi] = lv[q.kind];
+    const [lo, hi] = q.kind === 'temp' ? tempBand(lv, usable) : lv[q.kind];
     let best = null;
     for (let tries = 0; tries < 400 && !best; tries++) {
       const a = usable[rnd(usable.length)], b = usable[rnd(usable.length)];
@@ -134,7 +141,7 @@
     const d = measure(q.kind, colors[1]) - measure(q.kind, colors[0]);
     const tie = Math.abs(d) < SAME[q.kind] && (q.kind !== 'value' || vLabel(colors[0]) === vLabel(colors[1]));
     const answer = tie ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
-    return { q, n: 2, colors, answer };
+    return { q, n: 2, colors, answer, band: [lo, hi] };
   }
   // three or four colors for a swatch question: values at least a level's gap apart where the
   // question needs them told apart
@@ -187,7 +194,7 @@
     root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
     showBest();
   }
-  const bestOf = (bests, key) => (typeof bests[key] === 'number' && Number.isFinite(bests[key]) && bests[key] >= 0 ? bests[key] : null);
+  const bestOf = (bests, key) => (Number.isInteger(bests[key]) && bests[key] >= 0 && bests[key] <= 1e6 ? bests[key] : null); // a count of rounds, or no best
   function showBest() {
     const best = bestOf(load(BEST_KEY, {}), bestKey());
     els.best.textContent = best == null ? (mode() === 'streak' ? 'No streak yet for these settings.' : 'No score yet for these settings.') : mode() === 'streak' ? `Your best streak here: ${best} in a row.` : `Your best here: ${best} right in ${mode() / 60} minute${mode() === '60' ? '' : 's'}.`;
@@ -392,7 +399,7 @@
   });
   document.addEventListener('keydown', (e) => {
     if (!game || game.over || Studio.tab() !== 'battle') return;
-    if (!els.miss.hidden) { if (e.key === 'Enter' && document.activeElement !== els.missNext) els.missNext.click(); return; }
+    if (!els.miss.hidden) { if (e.key === 'Enter') { e.preventDefault(); els.missNext.click(); } return; } // one press, one answer: the key's own activation of whatever is focused next is stopped
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') {
       if (e.key === 'ArrowLeft') tapSwatch(0);
@@ -455,7 +462,12 @@
     if (on) { window.scrollTo(0, 0); layout(); setTimeout(layout, 120); }
     else els.play.style.cssText = '';
   }
-  function layout() { if (!game || els.play.hidden || !window.PaintStudio) return; PaintStudio.pin(els.play); }
+  // without painting.js (a failed download) the board is pinned to the viewport by hand
+  function pinByHand(el) {
+    const vv = window.visualViewport, ok = vv && Math.abs(vv.scale - 1) < 0.02;
+    el.style.cssText = `left:${ok ? vv.offsetLeft : 0}px;top:${ok ? vv.offsetTop : 0}px;width:${ok ? vv.width : innerWidth}px;height:${ok ? vv.height : innerHeight}px`;
+  }
+  function layout() { if (!game || els.play.hidden) return; if (window.PaintStudio) PaintStudio.pin(els.play); else pinByHand(els.play); }
   window.addEventListener('resize', layout);
   window.addEventListener('orientationchange', () => setTimeout(layout, 60));
   if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }

@@ -329,7 +329,10 @@
   const level = () => (document.querySelector('input[name="gameLevel"]:checked') || {}).value || 'medium';
   const mode = () => els.mode.value;
   // bests are kept per mode; Classic's keys stay as they were
-  const bestKey = () => `${subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
+  const subjectKey = () => (subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey());
+  // the board's own picture, not the Study tab's current one: a board replayed after a new photo was loaded
+  // keeps its best where it was played
+  const bestKey = () => `${board && board.subjectKey ? board.subjectKey : subjectKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
 
   // ---- What to paint: the player's photo or a generated painting, dealt at random ----
 
@@ -484,9 +487,11 @@
     if (board) notePreview();
   }
   // a best is a number of points: a saved value of another kind (a stray write) is no best
-  const bestOfKey = (bests, key) => (typeof bests[key] === 'number' && Number.isFinite(bests[key]) && bests[key] >= 0 ? bests[key] : null);
+  const bestOfKey = (bests, key) => (Number.isInteger(bests[key]) && bests[key] > 0 && bests[key] <= 1e6 ? bests[key] : null);
+  let boardTooSmall = false;
   function notePreview() {
     const m = mode(), lv = LEVELS[level()];
+    if (boardTooSmall) { els.previewNote.textContent = 'This picture is too small for a board: it needs at least 100 px on each side at the working size.'; return; }
     els.previewNote.textContent = `${board.groups.length} number${board.groups.length === 1 ? '' : 's'} to mix, `
       + (m === 'relaxed' ? 'no time limit.' : `${fmtTime(lv.seconds)} on the clock${m === 'memory' ? `, after a ${LOOK_SECONDS}-second look.` : '.'}`)
       + (m === 'value' ? ' Values first, then color.' : '');
@@ -511,12 +516,12 @@
         els.paletteHint.textContent = `${lead} ${p.codes.length} paints, which mix ${close} of its ${t.length} colors closely. The reference is mixed from them, so every number can be matched exactly.`;
       };
       const ready = b.targets && b.targets[p.id];
-      els.start.disabled = !ready;
+      els.start.disabled = !ready || boardTooSmall;
       if (ready) say(ready);
       else {
         targetsFor(b, p).then((t) => {
           if (!t || board !== b || chosenPalette().id !== p.id) return;
-          els.start.disabled = false;
+          els.start.disabled = boardTooSmall;
           say(t);
         });
       }
@@ -532,6 +537,9 @@
     if (board && setupFor && setupFor.from === subjectStamp() && setupFor.level === level()) { showPalette(); return; }
     setupFor = { from: subjectStamp(), level: level() };
     board = buildBoard(level());
+    board.subjectKey = subjectKey();
+    // a picture under 100 px on a side at the working size makes a board too small to see or tap
+    boardTooSmall = subject.kind !== 'painting' && (() => { const p = Studio.prep(); return !!p && (p.w < 100 || p.h < 100); })();
     if (mode() === 'mystery') dealMystery();
     drawBoard(els.preview, board, [], { selected: -1, numbers: true });
     notePreview();
@@ -976,8 +984,9 @@
   function progressText() {
     const n = game.board.groups.length;
     if (game.phase === 'look') return 'Memorize the colors. The reference hides soon.';
-    if (game.phase === 'values') return `${game.values.filter((v) => v != null).length} of ${n} values set`;
-    return `${game.fills.filter(Boolean).length} of ${n} numbers painted`;
+    const one = n === 1;
+    if (game.phase === 'values') return `${game.values.filter((v) => v != null).length} of ${n} value${one ? '' : 's'} set`;
+    return `${game.fills.filter(Boolean).length} of ${n} number${one ? '' : 's'} painted`;
   }
 
   function updateMix() {
@@ -1297,7 +1306,7 @@
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
     const was = bestOfKey(bests, game.bestKey);
-    const isBest = !was || points > was;
+    const isBest = points > 0 && (!was || points > was); // nothing scored is no best
     if (isBest) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
 
     els.play.hidden = true;

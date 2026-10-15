@@ -325,9 +325,12 @@ export default async function battle(t, site) {
     await start(page);
     await click(page, '#vb-quit'); await sleep(150); let u = await ui(page);
     t.check(u.play && !!(await state(page)) && u.toast === 'Tap ✕ again to quit this battle', 'one ✕ in the page\'s first seconds only asks again', { play: u.play, toast: u.toast });
-    await page.waitForFunction(() => performance.now() > 3300, null, { timeout: 5000 }).catch(() => null);
+    // the second tap must come within three seconds of the first: later, it only asks again
+    const armedAt = await page.evaluate(() => performance.now());
+    await page.evaluate(() => { document.getElementById('toast').textContent = ''; });
+    await page.waitForFunction((at) => performance.now() - at > 3100, armedAt, { timeout: 6000 }).catch(() => null);
     await click(page, '#vb-quit'); await sleep(150); u = await ui(page);
-    t.check(u.play && u.toast === 'Tap ✕ again to quit this battle', 'a ✕ more than three seconds later asks again rather than quitting', { play: u.play, toast: u.toast });
+    t.check(u.play && u.toast === 'Tap ✕ again to quit this battle', 'a ✕ more than three seconds after the first asks again rather than quitting', { play: u.play, toast: u.toast });
     await click(page, '#vb-quit'); await sleep(150); u = await ui(page);
     t.check(u.setup && !u.play && !u.focus && !u.pinned && !(await state(page)) && (await page.evaluate(() => document.getElementById('vb-play').getAttribute('style') || '')) === '', 'the second ✕ quits: the setup, no focus class, the board unpinned', { setup: u.setup, focus: u.focus, pinned: u.pinned });
     await start(page); await answer(page, false); await click(page, '#vb-missNext'); await sleep(200);
@@ -414,7 +417,7 @@ export default async function battle(t, site) {
     await answer(page, false); await page.keyboard.press('Shift+Tab'); await sleep(100);
     const focused = await page.evaluate(() => document.activeElement && (document.activeElement.id || document.activeElement.className));
     await page.keyboard.press('Enter'); await sleep(500); const u = await ui(page), s = await state(page);
-    if (!t.check(u.popup && s.over && !u.miss, 'Enter with the focus moved off See the score still shows the score and stays there', { focused, popup: u.popup, over: s.over, score: u.score })) t.finding({ title: 'Enter on the miss pop-up with the focus elsewhere starts a new game instead of showing the score', severity: 'medium', steps: 'Streak mode. Miss a round. Press Shift+Tab (the focus leaves See the score), then Enter.', expected: 'The score pops up and stays.', actual: `A new game begins at once (focus was on ${focused}; popup ${u.popup}, over ${s.over}, ${u.score}).`, cause: 'js/battle.js:395 clicks See the score itself when it is not focused, and finish() then focuses Play again (js/battle.js:437), which the same key press activates' });
+    if (!t.check(u.popup && s.over && !u.miss, 'Enter with the focus moved off See the score still shows the score and stays there', { focused, popup: u.popup, over: s.over, score: u.score })) t.finding({ title: 'Enter on the miss pop-up with the focus elsewhere starts a new game instead of showing the score', severity: 'medium', steps: 'Streak mode. Miss a round. Press Tab or Shift+Tab once (the focus leaves See the score: a swatch, or a section button), then Enter.', expected: 'The score pops up and stays until Play again or Change settings is pressed.', actual: `The score pop-up shows for a frame and a new game begins at round 1 (focus was on ${focused}; popup ${u.popup}, over ${s.over}, ${u.score}).`, cause: 'js/battle.js:395 clicks See the score on the keydown when it is not focused; finish() then focuses Play again (js/battle.js:437), and the same key press activates it' });
     await clean(t, page, 'Enter with the focus elsewhere');
     await page.context().close();
   }
@@ -439,7 +442,7 @@ export default async function battle(t, site) {
           const n = q.mode === 'pair' ? 2 : 4; let total = 0, met = 0, worst = Infinity;
           for (let k = 0; k < 80; k++) {
             const r = ValueBattle.makeRound(pool, lv, q, n);
-            if (n === 2) { if (r.answer === 'same') continue; const m = (c) => (q.kind === 'value' ? c.L : c.warmth); const d = Math.abs(m(r.colors[0]) - m(r.colors[1])); total++; if (d >= lv[q.kind][0] - 1e-9) met++; worst = Math.min(worst, d); }
+            if (n === 2) { if (r.answer === 'same') continue; const m = (c) => (q.kind === 'value' ? c.L : c.warmth); const d = Math.abs(m(r.colors[0]) - m(r.colors[1])); total++; const want = r.band ? r.band[0] : lv[q.kind][0]; if (d >= want - 1e-9) met++; worst = Math.min(worst, d); }
             else { const s = r.colors.slice().sort((a, b) => a.L - b.L); const gap = q.mode === 'order' ? Math.min(...s.slice(1).map((c, i) => c.L - s[i].L)) : q.dir < 0 ? s[1].L - s[0].L : s[3].L - s[2].L; total++; if (gap >= lv.gap - 1e-9) met++; worst = Math.min(worst, gap); }
           }
           out[q.key] = { total, met, worst: +worst.toFixed(3), want: +(q.kind === 'temp' ? lv.temp[0] : n === 2 ? lv.value[0] : lv.gap).toFixed(2) };
