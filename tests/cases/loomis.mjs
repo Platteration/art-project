@@ -1040,7 +1040,7 @@ export default async function loomis(t, site) {
     const focus = await app(page).evaluate(() => { const a = document.activeElement; return { id: a ? a.id : null, tag: a ? a.tagName : null, disabled: a ? !!a.disabled : null }; });
     const live = focus.tag === 'BUTTON' && !focus.disabled && /^lh-/.test(focus.id || '');
     t.check(live, 'after Lock in the keyboard focus is on a live control of the card (not lost to the page)', focus);
-    if (!live) t.finding({ title: 'Keyboard focus is lost to the page when Lock in is pressed from the keyboard', severity: 'low', steps: '1. On the Loomis head, Tab to a mark, tap it so Lock in is enabled. 2. Focus Lock in with Tab and press Enter. 3. Press Enter or Tab again.', expected: 'Focus stays on a control of the card (Back, Start over or the next step), so the keyboard user carries on.', actual: `After Lock in the focus is on ${JSON.stringify(focus)}: the button became disabled, so the focus fell to the page.` });
+    if (!live) t.finding({ title: 'Keyboard focus is lost to the page when Lock in is pressed from the keyboard', severity: 'low', steps: '1. On the Loomis head, tap the photo to place a mark, so Lock in is enabled. 2. Tab to Lock in and press Enter. 3. Press Tab or Enter again.', expected: 'Focus stays on a control of the card (Back, Start over or the next step), so the keyboard user carries on.', actual: `After Lock in the focus is on ${JSON.stringify(focus)}: the button became disabled, so the focus fell to the page.` });
     await clean(t, page, 'gap: keyboard focus');
     await page.context().close();
   });
@@ -1142,7 +1142,7 @@ export default async function loomis(t, site) {
   });
 
   // what was left out, and what the case does not measure
-  t.note('gaps left out for the time budget (low): the Studio restored while the head is copied (a race that needs a large saved painting to show); Forget my work on this device from another tab (the Loomis head keeps nothing, so only the reload is at issue); the Study\'s working size and Advanced mode with a head fitted; Copy the Study lines with a head and Study marks together; a held arrow when the window loses focus (the pointer is still down, so turning on is the hold working, not a stuck repeat).');
+  t.note('gaps left out for the time budget (low): the Studio restored while the head is copied (a race that needs a large saved painting to show); Forget my work on this device from another tab; the Study\'s working size and Advanced mode with a head fitted; Copy the Study lines with a head and Study marks together, and the head on the Check my painting panels; a held arrow when the window loses focus (a lost pointer-up cannot be simulated here).');
   t.note('the manual adjustments (an arrow turn, a line drag) are discarded by a dot drag or Back one mark + Lock in: that refits the head by design (the README: "Dragging a dot moves that mark and refits the head"), so it is not checked as a finding.');
   t.note('the playtester\'s checks above are unchanged (only the import line grew, for the new helpers); all of them pass on the current tree, and none is plainly the author\'s mistake.');
   t.note('keyboard: the card\'s Lock in, Skip, Back, Draw it in the Studio and Back to the fit are buttons and work from the keyboard; placing a mark, dragging a dot or a line and the arrow buttons are pointer-only (the overlay canvas is not focusable and has no key handler); the README promises no keys here');
