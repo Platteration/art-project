@@ -239,6 +239,10 @@ export async function axe(page, { frame = null } = {}) {
   const src = fs.readFileSync(path.join(ROOT, 'node_modules', 'axe-core', 'axe.min.js'), 'utf8');
   const fr = frame || app(page);
   await fr.evaluate(src);
+  // colors are measured as they end up: a tab that just lost or gained aria-current is still in its 0.15 s
+  // color transition, and a contrast sampled halfway is not what the visitor reads (CSS transitions only:
+  // an endless animation would never finish)
+  await fr.waitForFunction(() => !document.getAnimations().some((a) => a.playState === 'running' && typeof CSSTransition !== 'undefined' && a instanceof CSSTransition), null, { timeout: 3000 }).catch(() => null);
   const r = await fr.evaluate(() => window.axe.run(document, { resultTypes: ['violations'] }));
   return r.violations.map((v) => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.slice(0, 5).map((n) => n.target.join(' ')) , count: v.nodes.length }));
 }
