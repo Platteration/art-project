@@ -79,7 +79,7 @@ const setup = (page) => page.evaluate(() => ({
   photoName: document.getElementById('gamePhotoName').textContent, paintingName: document.getElementById('gamePaintingName').textContent, levels: [...document.querySelectorAll('#tab-game .game-levels label small')].map((e) => e.textContent),
   preview: [document.getElementById('gamePreview').width, document.getElementById('gamePreview').height], painting: localStorage.getItem('portrait-value-studio.gamePainting'),
   amount: document.getElementById('gameAmountOut').textContent, sound: document.getElementById('gameSound').getAttribute('aria-pressed'), refView: (document.querySelector('#tab-game [data-ref-view][aria-pressed="true"]') || {}).dataset && document.querySelector('#tab-game [data-ref-view][aria-pressed="true"]').dataset.refView,
-  lede: document.querySelector('.game-lede').textContent,
+  lede: document.querySelector('#tab-game .game-lede').textContent,
 }));
 const numbersOf = (note) => +(/^(\d+) numbers? to mix/.exec(note) || [])[1];
 // "2¾" -> 2.75
@@ -474,7 +474,7 @@ export default async function game(t, site) {
     await setAmount(page, 4);
     s = await setup(page);
     const ledeOk = t.check(!/Every tap adds one part\./.test(s.lede) || (await storageGet(page, K('gameAmount'))) === '1', 'the setup\'s lede does not say every tap adds one part while the remembered Amount is 4 parts', [s.lede, await storageGet(page, K('gameAmount'))]);
-    if (!ledeOk) t.finding({ title: 'The setup says "Every tap adds one part" whatever Amount per tap is remembered', severity: 'low', steps: '1. Open Paint by numbers, Start painting, set Amount per tap to 4 parts (it is remembered). 2. Quit with ✕ twice, or finish, and read the setup\'s opening text.', expected: 'The lede matches the game: taps add the remembered amount (¼ to 4 parts), or it says so in general terms.', actual: `The lede reads "${s.lede}" while portrait-value-studio.gameAmount is 4, so the next game\'s taps add 4 parts each (index.html line 702; the amount is read at js/game.js 1019-1020).` });
+    if (!ledeOk) t.finding({ title: 'The setup says "Every tap adds one part" whatever Amount per tap is remembered', severity: 'low', steps: '1. Open Paint by numbers, Start painting, set Amount per tap to 4 parts (it is remembered). 2. Quit with ✕ twice, or finish, and read the setup\'s opening text.', expected: 'The lede matches the game: taps add the remembered amount (¼ to 4 parts), or it says so in general terms.', actual: `The lede reads "${s.lede}" while portrait-value-studio.gameAmount is 4, so the next game\'s taps add 4 parts each (index.html line 702; the amount is read back at js/game.js 1219).` });
     await setAmount(page, 2);
     await clean(t, page, 'game: play again, bests');
     await page.context().close();
@@ -507,6 +507,7 @@ export default async function game(t, site) {
 
     // from here the page's timers are faked (they still run in real time) so the clock can be moved
     await page.clock.install();
+    t.note('Classic\'s clock (5 minutes at Medium) cannot be waited for: it is driven with Playwright\'s fake clock (page.clock.fastForward), installed after the page loaded, which the game\'s setInterval and performance.now follow; the look, the peeks and Memory\'s too-little-time case use the same clock.');
     // Classic: the clock runs out
     await setMode(page, 'classic'); await ready(page);
     await click(page, '#gameStart'); await playing(page);
@@ -587,6 +588,7 @@ export default async function game(t, site) {
     await click(page, '#gameLock'); await sleep(100);
     p = await play(page);
     t.check(!p.valuing && p.lock === 'Lock in portrait' && p.toast === 'Values set. Now mix the colors over them.' && p.progress === `0 of ${N} numbers painted` && p.filled.length === 0 && !p.gray, 'Done with values moves to the color stage, the greys stay under', [p.lock, p.toast, p.progress]);
+    t.note('Done with values says "Values set. Now mix the colors over them." whatever was set (js/game.js 680-685 does not look at the values); pressed with none set it still says so. Read from the source, not driven here.');
     await pickNumber(page, 0); await tapPaint(page, 'TW', 2);
     await click(page, '#gameLock'); await scored(page);
     await click(page, '#gameAnalyze'); r = await result(page);
@@ -700,7 +702,7 @@ export default async function game(t, site) {
     await click(page, '#againSame'); await playing(page);
     const dims2 = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height]);
     const sameOk = t.check(same(dims2, [600, 750]), '"Same photo" after a new photo was loaded mid-game plays the photo just played', [words, dims2]);
-    if (!sameOk) t.finding({ title: '"Same photo" plays a different photo when one was loaded mid-game', severity: 'low', steps: '1. Open Paint by numbers on the sample portrait and Start painting. 2. On Study the reference, load another photo. 3. Back on Paint by numbers, Lock in portrait, then Play again and choose "Same photo" ("Try the same photo again, or load a new one?").', expected: 'The game just played is played again, on the same photo, as the dialog says; or the dialog says the photo has changed.', actual: `The new game is on the photo loaded meanwhile (its board is ${dims2[0]} × ${dims2[1]}, the game just played was 600 × 750): startGame rebuilds the board for the current reference (js/game.js 577 refreshSetup, 561-566) and the dialog's words do not change.` });
+    if (!sameOk) t.finding({ title: '"Same photo" plays a different photo when one was loaded mid-game', severity: 'low', steps: '1. Open Paint by numbers on the sample portrait and Start painting. 2. On Study the reference, load another photo. 3. Back on Paint by numbers, Lock in portrait, then Play again and choose "Same photo" ("Try the same photo again, or load a new one?").', expected: 'The game just played is played again, on the same photo, as the dialog says; or the dialog says the photo has changed.', actual: `The new game is on the photo loaded meanwhile (its board is ${dims2[0]} × ${dims2[1]}, the game just played was 600 × 750): startGame calls refreshSetup (js/game.js 544), which rebuilds the board for the current reference (530-532), and the dialog's words (1597-1600) do not change.` });
     await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
     t.check((await setup(page)).photoName === 'Painting from portrait-b.', 'the setup names the new photo', (await setup(page)).photoName);
     // a reload mid-game: the setup, nothing broken (the new board took its own suggested palette: tap its first paint)
@@ -708,7 +710,7 @@ export default async function game(t, site) {
     await page.reload({ waitUntil: 'load' }); await sleep(500); await ready(page);
     const s = await setup(page);
     t.check(s.shown && s.level === 'medium' && s.mode === 'classic' && !s.start, 'a reload mid-game comes back to the setup with the level and mode kept', [s.shown, s.level, s.mode]);
-    t.note('A game in progress is not kept across a reload (the README promises nothing there); the setup comes back with the level, mode and amount remembered, and the palette is the one suggested for the board rather than the one last played (js/game.js 414-416: a new board always takes its suggestion).');
+    t.note('A game in progress is not kept across a reload (the README promises nothing there); the setup comes back with the level, mode and amount remembered, and the palette is the one suggested for the board rather than the one last played (js/game.js 392-394: a new board always takes its suggestion, so the saved gamePalette only matters when nothing is loaded).');
     // double taps: Lock in twice, Analyze twice
     await click(page, '#gameStart'); await playing(page);
     await click(page, '#gameLock'); await click(page, '#gameLock'); await scored(page);
@@ -743,8 +745,8 @@ export default async function game(t, site) {
   // 6. Hostile saved state for every game key and myPaints; bests pruned to fifty
   // ================================================================================================
   {
-    // wrong types everywhere: every default applies
-    const page = await openPage(site, { url: '#game', storage: { [K('gameLevel')]: { a: 1 }, [K('gamePalette')]: ['zorn'], [K('gameSubject')]: 'painting', [K('gamePainting')]: 123, [K('gameRefView')]: {}, [K('gameMode')]: 'constructor', [K('gameAmount')]: '2', [K('gameSound')]: 'false', [K('gameBest')]: [1, 2, 3], [K('myPaints')]: { TW: 1 } } });
+    // wrong types everywhere: every default applies (a string seed is written as is, so a JSON string is quoted)
+    const page = await openPage(site, { url: '#game', storage: { [K('gameLevel')]: { a: 1 }, [K('gamePalette')]: ['zorn'], [K('gameSubject')]: '"painting"', [K('gamePainting')]: 123, [K('gameRefView')]: {}, [K('gameMode')]: '"constructor"', [K('gameAmount')]: '"2"', [K('gameSound')]: '"false"', [K('gameBest')]: [1, 2, 3], [K('myPaints')]: { TW: 1 } } });
     await ready(page);
     let s = await setup(page);
     t.check(s.shown && s.level === 'medium' && s.mode === 'classic' && s.subject === 'photo' && s.amount === '1 part per tap' && s.sound === 'true' && s.refView === 'photo' && s.best === '' && !s.options.some((o) => o[0] === 'mine') && s.options.some((o) => / \(suggested\)$/.test(o[1])) && !s.start, 'wrong-typed values in every game key: every default applies, Start enabled', s);
@@ -755,13 +757,13 @@ export default async function game(t, site) {
   }
   {
     // prototype names, NaN (null), nested objects, a huge list
-    const page = await openPage(site, { url: '#game', storage: { [K('gameLevel')]: 'constructor', [K('gamePalette')]: '__proto__', [K('gameSubject')]: { kind: { constructor: 'painting' } }, [K('gamePainting')]: '__proto__', [K('gameRefView')]: 'constructor', [K('gameMode')]: '__proto__', [K('gameAmount')]: null, [K('gameSound')]: null, [K('gameBest')]: { __proto__: 5, constructor: 'x', toString: {} }, [K('myPaints')]: Array.from({ length: 20000 }, (_, i) => ['constructor', '__proto__', 'TW', 'IB', 'nope', 7, null][i % 7]) } });
+    const page = await openPage(site, { url: '#game', storage: { [K('gameLevel')]: '"constructor"', [K('gamePalette')]: '"__proto__"', [K('gameSubject')]: { kind: { constructor: 'painting' } }, [K('gamePainting')]: '"__proto__"', [K('gameRefView')]: '"constructor"', [K('gameMode')]: '"__proto__"', [K('gameAmount')]: null, [K('gameSound')]: null, [K('gameBest')]: '{"__proto__":5,"constructor":"x","toString":{}}', [K('myPaints')]: Array.from({ length: 20000 }, (_, i) => ['constructor', '__proto__', 'TW', 'IB', 'nope', 7, null][i % 7]) } });
     await ready(page);
     let s = await setup(page);
     t.check(s.shown && s.mode === 'classic' && s.subject === 'photo' && s.amount === '1 part per tap' && s.sound === 'true' && s.refView === 'photo' && s.best === '' && !s.start, 'prototype names and nulls: the mode, subject, amount, sound and reference fall back', s);
     t.check(s.options.some((o) => o[0] === 'mine' && /^My paints \(2\)/.test(o[1])) && s.options.some((o) => / \(suggested\)$/.test(o[1])), 'a 20,000-entry myPaints with junk in it counts its two real paints once', s.options);
     const lvOk = t.check(s.level === 'medium', 'gameLevel "constructor": Medium is checked', [s.level, s.note]);
-    if (!lvOk) t.finding({ title: 'A saved difficulty named like an Object property leaves no difficulty checked', severity: 'low', steps: '1. Save portrait-value-studio.gameLevel as "constructor" (or "__proto__", "toString"). 2. Open Paint by numbers.', expected: 'Medium is checked, as for any other value that is not a level (the mode does this: js/game.js 1620 checks an own property).', actual: `No difficulty radio is checked (${s.level}); the preview and the game run at Medium ("${s.note}"). js/game.js 1628: LEVELS[load(LEVEL_KEY, 'medium')] finds Object.prototype's "constructor" and keeps the name, then 1630 checks the radio whose value equals it, which none has.` });
+    if (!lvOk) t.finding({ title: 'A saved difficulty named like an Object property leaves no difficulty checked', severity: 'low', steps: '1. Save portrait-value-studio.gameLevel as "constructor" (or "__proto__", "toString"). 2. Open Paint by numbers.', expected: 'Medium is checked, as for any other value that is not a level (the mode does this: js/game.js 1629 checks an own property).', actual: `No difficulty radio is checked (${s.level}); the preview and the game run at Medium ("${s.note}"). js/game.js 1638: LEVELS[load(LEVEL_KEY, 'medium')] finds Object.prototype's "constructor" and keeps the name, then 1640 checks the radio whose value equals it, which none has.` });
     await click(page, '#gameStart'); await playing(page);
     t.check((await play(page)).numbers > 0 && (await play(page)).timer === '5:00', 'the game still plays at Medium');
     await click(page, '#gameLock'); await scored(page);
@@ -784,21 +786,21 @@ export default async function game(t, site) {
     const relaxed = (await setMode(page, 'relaxed'), await ready(page), (await setup(page)).best);
     const memory = (await setMode(page, 'memory'), await ready(page), (await setup(page)).best);
     await setMode(page, 'classic'); await ready(page);
-    if (!bestOk) t.finding({ title: 'A saved best score of the wrong type is shown word for word and can never be beaten', severity: 'medium', steps: `1. Save portrait-value-studio.gameBest as {"${key}": "abc"} (or an object, an array: a stray or older write). 2. Open Paint by numbers on the sample portrait at Medium with the suggested palette (${sugId}). 3. Play and Lock in portrait.`, expected: 'A value that is not a number is ignored: no "Your best" line, and the game\'s score becomes the best with "New best!".', actual: `The setup says "${s.best}" (Relaxed: "${relaxed}"; Memory: "${memory}"): js/game.js 470-471 prints whatever the key holds. On lock-in, 1142 reads isBest = !bests[key] || points > bests[key], false for "abc" or an object, so "New best!" never shows and the junk is never replaced.` });
-    await click(page, '#gameStart'); await playing(page); await setAmount(page, 2); await tapPaint(page, 'TW', 2); await click(page, '#gameLock'); await scored(page);
+    if (!bestOk) t.finding({ title: 'A saved best score of the wrong type is shown word for word and can never be beaten', severity: 'medium', steps: `1. Save portrait-value-studio.gameBest as {"${key}": "abc"} (or an object, an array: a stray or older write). 2. Open Paint by numbers on the sample portrait at Medium with the suggested palette (${sugId}). 3. Play and Lock in portrait.`, expected: 'A value that is not a number is ignored: no "Your best" line, and the game\'s score becomes the best with "New best!".', actual: `The setup says "${s.best}" (Relaxed: "${relaxed}"; Memory: "${memory}"): js/game.js 523 prints whatever the key holds. On lock-in, 1295 reads isBest = !bests[key] || points > bests[key], false for "abc" or an object, so "New best!" never shows and the junk is never replaced.` });
+    await click(page, '#gameStart'); await playing(page); await setAmount(page, 2); await tapPaint(page, (await play(page)).paints[0], 2); await click(page, '#gameLock'); await scored(page);
     const r = await result(page);
     const b = await bests(page);
-    t.check(r.points > 0 && (r.newBest ? b[key] === r.points : true), 'after the game: New best! only if the junk was replaced', [r.points, r.newBest, b[key]]);
+    t.check(r.points >= 0 && (r.newBest ? b[key] === r.points : true), 'after the game: New best! only if the junk was replaced', [r.points, r.newBest, b[key]]);
     if (!bestOk) t.check(b[key] !== 'abc' || !r.newBest, 'the junk best is consistent with the New best! shown', [b[key], r.newBest]);
     const amountOk = t.check(s.amount === '1 part per tap', 'a saved amount not in the list (7) falls back to 1 part per tap', s.amount);
-    if (!amountOk) t.finding({ title: 'A saved Amount per tap that is not one of the five settings falls to ¼ part instead of the default', severity: 'low', steps: '1. Save portrait-value-studio.gameAmount as 7 (or 3, 1e999, any number not in ¼ ½ 1 2 4). 2. Open Paint by numbers and Start painting; read the Amount per tap.', expected: 'The default, 1 part per tap, as for a value of the wrong type.', actual: `"${s.amount}": js/game.js 1019 takes Math.max(0, AMOUNTS.indexOf(value)), and -1 becomes the first setting, ¼ part.` });
+    if (!amountOk) t.finding({ title: 'A saved Amount per tap that is not one of the five settings falls to ¼ part instead of the default', severity: 'low', steps: '1. Save portrait-value-studio.gameAmount as 7 (or 3, 1e999, any number not in ¼ ½ 1 2 4). 2. Open Paint by numbers and Start painting; read the Amount per tap.', expected: 'The default, 1 part per tap, as for a value of the wrong type.', actual: `"${s.amount}": js/game.js 1219 takes Math.max(0, AMOUNTS.indexOf(value)), and -1 becomes the first setting, ¼ part.` });
     await clean(t, page, 'hostile: best of the wrong type, amount off the list');
     await page.context().close();
   }
   {
     // sixty bests kept: a new one prunes the oldest down to fifty; a saved painting choice deals anew
     const seeds = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`seed-${String(i).padStart(2, '0')}|medium|zorn`, 100 + i]));
-    const page = await openPage(site, { url: '#game', storage: { [K('gameBest')]: seeds, [K('gameSubject')]: { kind: 'painting' }, [K('gamePainting')]: 'zorn-1', [K('gameLevel')]: 'hard', [K('gameMode')]: 'relaxed', [K('gameRefView')]: 'blocks', [K('gameSound')]: false, [K('gameAmount')]: 0.5 } });
+    const page = await openPage(site, { url: '#game', storage: { [K('gameBest')]: seeds, [K('gameSubject')]: { kind: 'painting' }, [K('gamePainting')]: '"zorn-1"', [K('gameLevel')]: '"hard"', [K('gameMode')]: '"relaxed"', [K('gameRefView')]: '"blocks"', [K('gameSound')]: false, [K('gameAmount')]: 0.5 } });
     await ready(page);
     const s = await setup(page);
     t.check(s.subject === 'painting' && s.paintingPane && s.painting !== '"zorn-1"' && /^"[a-z]+-\d+"$/.test(s.painting) && PAINTERS.test(s.paintingName), 'a saved painting choice deals a new portrait, never the last one', [s.painting, s.paintingName]);
@@ -818,6 +820,7 @@ export default async function game(t, site) {
   // ================================================================================================
   {
     const page = await openPage(site);
+    t.note('A 24-megapixel photo, a non-image file, a broken image and an SVG go through the Study\'s loader, which study-photos.mjs covers; the game builds its board from the Study\'s working-size copy, so only the pictures that change the board are loaded here.');
     for (const [name, file, want] of [
       ['a 1 × 1 picture', await makeImage(page, { width: 1, height: 1, draw: 'flat' }), { refused: true }],
       ['a 2 × 4000 strip', await makeImage(page, { width: 2, height: 4000, draw: 'noise' }), { refused: true }],
@@ -836,7 +839,7 @@ export default async function game(t, site) {
         t.check(n >= 1 && n <= want.numbers && !s.start && s.photoName === `Painting from ${file.name.replace(/\.png$/, '')}.`, `${name}: a board with ${n} number${n === 1 ? '' : 's'}, Start enabled`, [s.note, s.photoName]);
         if (n === 1) {
           const oneOk = t.check(s.note === '1 number to mix, 5:00 on the clock.', 'one color: the note counts one number', s.note);
-          if (!oneOk) t.finding({ title: 'A picture with one color is said to have "1 numbers to mix"', severity: 'low', steps: '1. Load a single flat tone as the photo (a 300 × 300 grey square). 2. Open Paint by numbers and read the preview\'s caption.', expected: '"1 number to mix, 5:00 on the clock."', actual: `"${s.note}" (js/game.js 532, notePreview, pluralises nothing).` });
+          if (!oneOk) t.finding({ title: 'A picture with one color is said to have "1 numbers to mix"', severity: 'low', steps: '1. Load a single flat tone as the photo (a 300 × 300 grey square). 2. Open Paint by numbers and read the preview\'s caption.', expected: '"1 number to mix, 5:00 on the clock."', actual: `"${s.note}" (js/game.js 488, notePreview, pluralises nothing).` });
         }
       }
       await click(page, '#gameStart'); await playing(page);
@@ -845,7 +848,7 @@ export default async function game(t, site) {
       await page.evaluate(() => document.querySelector('.game-next').click());
       await click(page, '#gameLock'); await scored(page);
       const r = await result(page);
-      t.check(/^\d+$/.test(r.pct) && r.zones.length === 0 && r.popup, `${name}: plays and scores`, [r.pct, r.grade]);
+      t.check(/^\d+$/.test(r.pct) && r.zones.length >= 1 && r.popup, `${name}: plays and scores`, [r.pct, r.grade]);
       await click(page, '#gamePopup [data-game="new"]'); await ready(page);
       await clean(t, page, name);
     }

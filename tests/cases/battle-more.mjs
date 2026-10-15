@@ -207,7 +207,7 @@ export default async function battleMore(t, site) {
     b = await board(page);
     const enterOk = !b.popup && b.over && b.kicker === 'Streak over after round 2';
     t.check(enterOk, 'Enter on the miss pop-up (Streak) shows the score pop-up', { popup: b.popup, over: b.over, play: b.play, round: b.round, score: b.score, kicker: b.kicker });
-    if (!enterOk) t.finding({ title: 'Enter on the miss pop-up fires its button twice: in Streak mode the score pop-up is skipped and a new game starts; on the clock a round is skipped', severity: 'medium', steps: 'Games → Value battle, 2 colors, Streak, Start. Answer one round right, Next, answer the next round wrong. With the pop-up ("Not quite … See the score") up, press Enter. Then the same on the clock: 1 min, miss a round, press Enter on "Next ▸".', expected: 'Enter does what the focused See the score button does once: the score pop-up with the stars and New best (Streak), or the next round (clock), as a mouse click gives.', actual: `Streak: no score pop-up; the board shows a fresh game at Round 1, Streak 0 (seen: popup hidden ${b.popup}, score "${b.score}", round "${b.round}"), so the stars and any New best! are never seen (the best is still saved). Clock: the round after the miss is skipped (Round 1 → Round 3). Cause: battle.js line 387 clicks #vb-missNext on keydown, and the button, focused by showMiss (line 369), also gets the browser's own click for Enter; in Streak mode finish() has by then focused Play again (line 429), which takes that second click and starts a new game; on the clock the second click lands on missNext again and deals one more round.` });
+    if (!enterOk) t.finding({ title: 'Enter on the miss pop-up fires its button twice: in Streak mode the score pop-up is skipped and a new game starts; on the clock a round is skipped', severity: 'medium', steps: 'Games → Value battle, 2 colors, Streak, Start. Answer one round right, Next, answer the next round wrong. With the pop-up ("Not quite … See the score") up, press Enter. Then the same on the clock: 1 min, miss a round, press Enter on "Next ▸".', expected: 'Enter does what the focused See the score button does once: the score pop-up with the stars and New best (Streak), or the next round (clock), as a mouse click gives.', actual: `Streak: no score pop-up; the board shows a fresh game at Round 1, Streak 0 (seen: popup hidden ${b.popup}, score "${b.score}", round "${b.round}"), so the stars and any New best! are never seen (the best is still saved). Clock: the round after the miss is skipped (a miss at round N closed with Enter shows round N + 2, checked below under the clock). Cause: battle.js line 387 clicks #vb-missNext on keydown, and the button, focused by showMiss (line 369), also gets the browser's own click for Enter; in Streak mode finish() has by then focused Play again (line 429), which takes that second click and starts a new game; on the clock the second click lands on missNext again and deals one more round.` });
     // ✕ twice to quit, and the 3-second window re-arms
     if (!(await board(page)).game || (await board(page)).over) await start(page, { count: '2' });
     await afterThree(page);
@@ -292,7 +292,7 @@ export default async function battleMore(t, site) {
       r = await round(page);
       await answer(page, true);
       b = await board(page);
-      const got = b.answer.match(/V (\d+\.\d)/g) || [];
+      const got = [...b.answer.matchAll(/V (\d+\.\d)/g)].map((m) => +m[1]);
       log.push({ i: r.i, key: r.key, kind: r.kind, answer: r.answer, d: +r.d.toFixed(2), lo: +r.lo.toFixed(2), hi: +r.hi.toFixed(2), labels: r.labels, line: b.answer, ok: b.answer === `Right! ${r.why}`, reported: got });
       if (r.kind === 'value' && r.answer === 'same' && r.labels[0] !== r.labels[1] && !tieDiffers) tieDiffers = { round: r.i + 1, line: b.answer, Ls: r.Ls };
       await next(page); await waitRound(page, k + 2);
@@ -303,7 +303,7 @@ export default async function battleMore(t, site) {
     t.check(value.every((x) => x.d >= 1.6) && temp.every((x) => x.d >= 0.08), 'no round is closer than the floor (1.6 L*, 0.08 in warmth)', { minValue: Math.min(...value.map((x) => x.d)), minTemp: Math.min(...temp.map((x) => x.d)) });
     const early = value.filter((x) => x.i < 6).map((x) => x.d), late = value.filter((x) => x.i >= 24).map((x) => x.d);
     t.check(early.length && late.length && Math.max(...late) < Math.min(...early) && Math.max(...late) <= 6, 'the gaps close in: every value gap from round 25 on is under the smallest of the first six, and at most 6 L*', { early, late });
-    const apart = (x) => x.reported.length === 2 && Math.abs(+x.reported[0] - +x.reported[1]) >= 0.0999;
+    const apart = (x) => x.reported.length === 2 && Math.abs(x.reported[0] - x.reported[1]) >= 0.0999;
     t.check(value.every(apart), 'the values the line reports (0-10 scale) differ by at least 0.1 whenever the answer is not a tie', value.filter((x) => !apart(x)));
     t.note(`thirty rounds, Zorn, two colors: value gaps (L*) by round ${JSON.stringify(value.map((x) => [x.i + 1, x.d]))}; temperature gaps (warmth) ${JSON.stringify(temp.map((x) => [x.i + 1, x.d, x.lo]))}; ties dealt ${log.filter((x) => x.answer === 'same').length}`);
     const tempShort = temp.filter((x) => x.d < x.lo - 1e-6);
@@ -347,10 +347,11 @@ export default async function battleMore(t, site) {
     const resumed = await page.waitForFunction((was) => document.getElementById('vb-time').textContent !== was, p2.time, { timeout: 5000 }).then(() => true).catch(() => false);
     t.check(resumed, 'the clock runs again after the pop-up closes', await text(page, '#vb-time'));
     // Enter on the clock's miss pop-up must deal exactly one round
+    const atRound = +(await text(page, '#vb-score')).replace('Round ', '');
     await answer(page, false); await waitShown(page, '#vb-miss');
     await press(page, ['Enter']); await sleep(150);
     b = await board(page);
-    t.check(b.miss && b.score === 'Round 4', 'Enter on the miss pop-up (clock) deals round 4, not more', { score: b.score, miss: b.miss });
+    t.check(b.miss && b.score === `Round ${atRound + 1}`, `Enter on the miss pop-up (clock) deals round ${atRound + 1}, not more`, { score: b.score, miss: b.miss });
     // time's up mid-round: the round is void, the score by right answers a minute
     await page.evaluate(() => { ValueBattle.state().left = 0.3; });
     t.check(await waitShown(page, '#vb-popup') && await waitPct(page, 1), 'when the clock runs out mid-round the score pops up');
@@ -363,7 +364,7 @@ export default async function battleMore(t, site) {
     await answer(page, false); await waitShown(page, '#vb-miss');
     await page.evaluate(() => { ValueBattle.state().left = 0; });
     await closeMiss(page);
-    t.check(await waitShown(page, '#vb-popup'), 'with no time left, closing the answer ends the game');
+    t.check(await waitShown(page, '#vb-popup') && await waitPct(page, 0), 'with no time left, closing the answer ends the game');
     b = await board(page);
     t.check(b.kicker === "Time's up · 1 missed" && b.pct === '0' && !b.newBest, "Time's up · 1 missed, 0 right, no New best", { kicker: b.kicker, pct: b.pct, newBest: b.newBest });
     await click(page, '#vb-settings');
@@ -428,13 +429,16 @@ export default async function battleMore(t, site) {
         t.check(allIn(lay, sels) && withUndo['#vb-undo'][0].in && withUndo['#vb-question'][0].in && withUndo['#vb-question'][0].r <= 390, 'phone: the order question and Start the round over fit on the screen', { question: withUndo['#vb-question'][0], undo: withUndo['#vb-undo'][0] });
         await screenshot(page, 'battle-more-phone-order');
       }
+      // (the pop-ups' ids are doubled in the markup: the board's copies are the live ones)
       await answer(page, false); await waitShown(page, '#vb-miss');
-      lay = await rects(page, ['#vb-miss', '#vb-missNext', '.vb-chip']);
-      t.check(allIn(lay, ['#vb-miss', '#vb-missNext', '.vb-chip']), `phone, ${count} colors: the miss pop-up and its chips sit inside the screen`, { miss: lay['#vb-miss'][0], chips: lay['.vb-chip'].length });
+      const missSels = ['#vb-board #vb-miss', '#vb-board #vb-missNext', '.vb-chip'];
+      lay = await rects(page, missSels);
+      t.check(allIn(lay, missSels), `phone, ${count} colors: the miss pop-up and its chips sit inside the screen`, { miss: lay[missSels[0]][0], chips: lay['.vb-chip'].length });
       if (count === '4') await screenshot(page, 'battle-more-phone-miss');
       await closeMiss(page); await waitShown(page, '#vb-popup');
-      lay = await rects(page, ['#vb-popup', '#vb-again', '#vb-settings', '#vb-stars']);
-      t.check(allIn(lay, ['#vb-popup', '#vb-again', '#vb-settings', '#vb-stars']), `phone, ${count} colors: the score pop-up sits inside the screen`, lay['#vb-popup'][0]);
+      const popSels = ['#vb-board #vb-popup', '#vb-board #vb-again', '#vb-board #vb-settings', '#vb-board #vb-stars'];
+      lay = await rects(page, popSels);
+      t.check(allIn(lay, popSels), `phone, ${count} colors: the score pop-up sits inside the screen`, lay[popSels[0]][0]);
       await click(page, '#vb-settings');
     }
     const after = await rects(page, ['#vb-setup']);
