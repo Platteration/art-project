@@ -604,7 +604,7 @@
       $('eraserSub').textContent = state.eraser;
       // the Brushes icon shows the brush in hand (or the last one used)
       const b = BRUSHES.includes(state.tool) ? state.tool : state.lastBrush;
-      const brushSvg = root.querySelector(`[data-brush="${b}"] svg`); $('brushIcon').replaceChildren(...[...brushSvg.childNodes].map((n) => n.cloneNode(true)));
+      const brushSvg = root.querySelector(`[data-brush="${b}"] svg`); if (brushSvg) $('brushIcon').replaceChildren(...[...brushSvg.childNodes].map((n) => n.cloneNode(true)));
       $('brushSub').textContent = subs[b];
       $('brushBtn').setAttribute('aria-pressed', String(BRUSHES.includes(state.tool)));
       q('[data-ps-tool]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.psTool === state.tool)));

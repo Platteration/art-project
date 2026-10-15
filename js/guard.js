@@ -103,7 +103,7 @@
       return; // images have their own handling in the app
     }
     if (booting && e.filename) {
-      var m = /\/js\/([a-z]+)\.js$/.exec(e.filename);
+      var m = /\/js\/([a-z-]+)\.js$/.exec(e.filename);
       if (m && TAB_OF.hasOwnProperty(m[1])) { failed(m[1] + '.js did not start: ' + e.message, TAB_OF[m[1]]); return; }
     }
     note(APP_FAILED);

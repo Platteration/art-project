@@ -75,6 +75,9 @@
   }
   const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, location.origin); };
   const isPicture = (u) => typeof u === 'string' && /^data:image\/(jpeg|png);base64,/.test(u);
+  // The page CSP allows blob: images, not data:, so frame pictures are re-wrapped as Blob URLs on
+  // arrival (kept for the visit; the data strings themselves are dropped).
+  const asBlobUrl = (u) => { try { const m = /^data:(image\/(?:jpeg|png));base64,(.+)$/.exec(u); if (!m) return null; const bin = atob(m[2]); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return URL.createObjectURL(new Blob([bytes], { type: m[1] })); } catch (e) { return null; } };
   window.addEventListener('message', (e) => {
     if (e.source !== frame.contentWindow) return;
     const d = e.data;
@@ -87,15 +90,18 @@
       failed = false;
       buildLibrary();
     } else if (d.type === 'pose-and-light:thumb' && typeof d.id === 'string' && isPicture(d.url)) {
-      thumbs.set(d.id, d.url);
-      panel.querySelectorAll(`[data-pose-id="${CSS.escape(d.id)}"] img`).forEach((img) => { img.src = d.url; img.closest('button').classList.add('has-img'); });
+      const thumbUrl = asBlobUrl(d.url);
+      if (!thumbUrl) return;
+      thumbs.set(d.id, thumbUrl);
+      panel.querySelectorAll(`[data-pose-id="${CSS.escape(d.id)}"] img`).forEach((img) => { img.src = thumbUrl; img.closest('button').classList.add('has-img'); });
     } else if (d.type === 'pose-and-light:shot' && pending.has(d.req)) {
       const done = pending.get(d.req);
       pending.delete(d.req);
       const ok = !d.error && isPicture(d.url) && d.joints && typeof d.joints === 'object' && Number.isFinite(+d.w) && Number.isFinite(+d.h) &&
         JOINTS.every((n) => Array.isArray(d.joints[n]) && d.joints[n].length === 3 && d.joints[n].every((v) => Number.isFinite(+v)));
       const tilts = d.tilts && Number.isFinite(+d.tilts.shoulders) && Number.isFinite(+d.tilts.hips) ? { shoulders: +d.tilts.shoulders, hips: +d.tilts.hips } : null;
-      done(ok ? { id: d.id, url: d.url, w: +d.w, h: +d.h, joints: d.joints, tilts } : null);
+      const shotUrl = ok ? asBlobUrl(d.url) : null;
+      done(ok && shotUrl ? { id: d.id, url: shotUrl, w: +d.w, h: +d.h, joints: d.joints, tilts } : null);
     }
   });
   // a pose's reference picture and joints, drawn once and kept

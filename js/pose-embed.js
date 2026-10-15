@@ -2,6 +2,15 @@
 // the app's window rather than the frame's (the frame grows to fit the page), the app's light or dark
 // theme, and the page's height sent to the app so it can make the frame that tall.
 (function () {
+  // If js/pose.js itself failed to load, nothing else on this page can say so: after load, show the
+  // same failure panel pose.js shows when its 3D library is missing.
+  window.addEventListener('load', () => setTimeout(() => {
+    if (window.__poseStarted) return;
+    const f = document.getElementById('fail');
+    const h = document.getElementById('hint');
+    if (f) f.hidden = false;
+    if (h) h.hidden = true;
+  }, 1500));
   if (!/[?&]embed=1(&|$)/.test(location.search) || window.parent === window) return;
   const root = document.documentElement;
   root.classList.add('embed');

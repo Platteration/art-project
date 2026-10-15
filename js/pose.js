@@ -8,6 +8,7 @@
   const RENDER = /[?&]render=1(&|$)/.test(location.search) && window.parent !== window;
   const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, location.origin); };
   if (!window.THREE) { fail(); return; }
+  window.__poseStarted = true; // pose-embed.js shows the failure panel if this never runs
   const T = window.THREE;
   const DEG = Math.PI / 180;
   // Joint angles turn the part about its own length first (y, the twist), then swing it forward or
