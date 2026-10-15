@@ -9,7 +9,9 @@
 // at a time and two at a time against the guard's TAB_OF, styles.css, the fonts and a guide picture missing,
 // every route with a hostile state, and axe at both widths. Independent steps run three at a time, each on a
 // context of its own, so the case stays inside its time budget on a shared machine.
-import { openPage, clean, tab, TABS, DESKTOP, PHONE, poseFrame, stroke, inked, storageKeys, storageGet, click, text, visible, hscroll, screenshot, sleep, axe } from '../lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { openPage, clean, tab, TABS, DESKTOP, PHONE, poseFrame, stroke, inked, storageKeys, storageGet, click, text, hscroll, screenshot, sleep, axe } from '../lib.mjs';
 
 const PVS = (k) => 'portrait-value-studio.' + k;
 // every key the app reads (js/app.js, palette.js, painting.js, figure.js, game.js, battle.js, pose.js)
@@ -261,6 +263,12 @@ async function groupA(t, site) {
       t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.steps === 'none' && s.forget !== 'none', `${label} old browser: no tabs, no switch, the guide reads, its Try buttons are off, Forget stays`, s);
       t.check((await hscroll(page)) <= 0, `${label} old browser: no horizontal scroll`, await hscroll(page));
       t.check(/too old/.test(await text(page, '.oldbrowser-note')) && /guide below still reads/i.test(await text(page, '.oldbrowser-note')), `${label} old browser: the note says what to do`, await text(page, '.oldbrowser-note'));
+      if (label === 'desktop') {
+        // the one control left, Forget, still works there
+        await page.evaluate(() => localStorage.setItem('portrait-value-studio.mode', 'advanced'));
+        await forgetTwice(page);
+        t.check((await storageKeys(page)).length === 0 && /old-browser/.test((await notesOf(page)).cls), 'old browser: Forget clears the keys and reloads, the note stays', { keys: await storageKeys(page), cls: (await notesOf(page)).cls });
+      }
       await clean(t, page, `${label} old browser`);
       await page.context().close();
     });
@@ -288,6 +296,20 @@ async function groupA(t, site) {
     dropLogged(page, /toast-test/);
     await clean(t, page, 'toast');
     await page.context().close();
+    // on a phone, with the Studio's tool strip along the bottom, a note sits above the strip, not under it
+    const phone = await openPage(site, { viewport: PHONE, url: '#paint' });
+    await phone.waitForFunction(() => document.querySelector('.ps') && !document.querySelector('.ps').hidden, null, { timeout: 15000 }).catch(() => null);
+    await sleep(1200);
+    await phone.evaluate(() => Studio.toast('toast-test on a phone', 4000));
+    const pos = await phone.evaluate(() => { const t = document.getElementById('toast').getBoundingClientRect(); const s = document.querySelector('.ps-strip').getBoundingClientRect(); return { toastBottom: Math.round(t.bottom), stripTop: Math.round(s.top), shown: document.getElementById('toast').classList.contains('show'), within: t.right <= innerWidth && t.left >= 0 }; });
+    t.check(pos.shown && pos.toastBottom <= pos.stripTop && pos.within, 'phone Studio: a note sits above the tool strip and inside the window', pos);
+    for (const n of [1, 2, 3]) await phone.evaluate((n) => StudioGuard.report(new Error('toast-test ' + n)), n);
+    await phone.evaluate(() => { const e = document.getElementById('toast'); e.textContent = ''; e.classList.remove('show'); StudioGuard.report(new Error('toast-test 4')); });
+    await sleep(200);
+    t.check(!(await toastOf(phone)).show, 'phone: the guard shows three notes a visit at most', await toastOf(phone));
+    dropLogged(phone, /toast-test/);
+    await clean(t, phone, 'phone toast');
+    await phone.context().close();
   });
 }
 
@@ -364,6 +386,9 @@ async function groupB(t, site) {
     page.on('response', (r) => { if (r.status() >= 400 && r.request().resourceType() !== 'document') subs.push(`${r.url()} ${r.status()}`); });
     const info = await page.evaluate(() => ({ title: document.title, cls: document.body.className, h1: document.querySelector('h1').textContent, links: [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')), radius: getComputedStyle(document.querySelector('.not-found-card')).borderRadius, font: getComputedStyle(document.querySelector('h1')).fontFamily, robots: (document.querySelector('meta[name="robots"]') || {}).content, scripts: document.scripts.length, fonts: document.fonts.status }));
     t.check(/Page not found/.test(info.title) && info.cls === 'not-found' && info.radius !== '0px' && info.robots === 'noindex' && info.scripts === 0, 'the 404 page is styled from a nested path too, noindex, no script', info);
+    const policy = (/Content-Security-Policy:\s*(.+)/.exec(fs.readFileSync(path.join(site.root, '_headers'), 'utf8')) || [, ''])[1].trim();
+    const meta = await page.evaluate(() => (document.querySelector('meta[http-equiv="Content-Security-Policy"]') || {}).content || '');
+    t.check(meta === policy, 'the 404 page carries the same policy as _headers in its meta tag', { meta, policy });
     t.check(info.links.join() === '/,/#paint,/#game,/#battle,/#loomis,/#pose,/#figure,/#help', 'its links: the app and the seven shortcuts', info.links);
     for (const href of info.links) { const r = await fetch(site.base + href.replace(/^\//, '').split('#')[0]); t.check(r.status === 200, `404 page link ${href} resolves`, r.status); }
     t.check(/Bricolage/i.test(info.font) && info.fonts === 'loaded', 'the 404 page loads the site\'s typefaces', { font: info.font, fonts: info.fonts });
@@ -502,8 +527,10 @@ async function groupB(t, site) {
   // storage full: a realistic case of setItem throwing while the keys are still there to clear
   await step(t, 'forget with a full storage', async () => {
     const page = await openPage(site, { url: '#help' });
-    const fill = await page.evaluate(() => { localStorage.setItem('portrait-value-studio.mode', 'advanced'); localStorage.setItem('pose-and-light.mode', 'advanced'); const chunk = 'x'.repeat(256 * 1024); let n = 0; try { for (; n < 400; n++) localStorage.setItem('filler.' + n, chunk); } catch (e) { let throws = false; try { localStorage.setItem('portrait-value-studio.probe', 'y'); } catch (e2) { throws = true; } return { n, err: e.name, full: throws }; } return { n, full: false }; });
-    t.note(`localStorage took ${fill.n} chunks of 256 KB before ${fill.err || 'nothing'}; a small write ${fill.full ? 'then throws too' : 'still works'}`);
+    // fill it to the last byte: big chunks, then smaller and smaller ones, until a one-letter write throws
+    const fill = await page.evaluate(() => { localStorage.setItem('portrait-value-studio.mode', 'advanced'); localStorage.setItem('pose-and-light.mode', 'advanced'); let n = 0, kb = 0, err = ''; for (const size of [256 * 1024, 64 * 1024, 16 * 1024, 4 * 1024, 1024, 256, 64, 16, 4, 1]) { const chunk = 'x'.repeat(size); for (let k = 0; k < 2000; k++) { try { localStorage.setItem('filler.' + n, chunk); n++; kb += size / 1024; } catch (e) { err = e.name; break; } } } let full = false; try { localStorage.setItem('portrait-value-studio.probe', 'y'); } catch (e) { full = true; } return { n, kb: Math.round(kb), err, full }; });
+    t.note(`localStorage took ${fill.n} writes, ${fill.kb} KB, before ${fill.err || 'nothing'}; a one-letter write ${fill.full ? 'then throws too (full)' : 'still works'}`);
+    t.check(fill.full, 'the storage could be filled until any write throws', fill);
     if (fill.full) {
       await forgetTwice(page);
       const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => /^(portrait-value-studio|pose-and-light)\./.test(k)));

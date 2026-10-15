@@ -368,7 +368,10 @@ export default async function appShell(t, site) {
     await stroke(page, '#ps-paper'); await sleep(2000);
     const after = { ink: await inked(page, '#ps-paper'), toast: await toastState(page) };
     t.check(after.ink > 50, 'storage blocked: painting still works', after.ink);
-    t.note(`storage blocked (no IndexedDB): opening the Studio says "${note1.text}"; after a stroke the toast says "${after.toast.text}". The one-time "saved in this browser" note is rightly withheld (painting.js:860 needs dbOk), and nothing says the painting will not be kept.`);
+    // the guide says the Studio saves as you go: with no database to save to, the visitor must be told it does not
+    const toldNotKept = /visit only|not (be )?saved|could not be saved/.test(note1.text + ' ' + after.toast.text + ' ' + (await page.evaluate(() => document.getElementById('ps-status') ? document.getElementById('ps-status').textContent : '')));
+    t.check(toldNotKept, 'storage blocked: the Studio says the painting stays for this visit only', { onOpen: note1.text, afterStroke: after.toast.text });
+    if (!toldNotKept) t.finding({ title: 'With IndexedDB absent (window.indexedDB undefined, as Firefox with dom.indexedDB.enabled=false has it) the Studio silently keeps nothing, while the guide says it saves as you go', severity: 'low', steps: 'In an init script set window.indexedDB to undefined (or turn IndexedDB off in Firefox). Open the Studio, paint a stroke, wait.', expected: 'A note that the painting stays for this visit only (the note the Studio gives when a save fails, painting.js:447).', actual: `Nothing is said on opening ("${note1.text}") or after a stroke ("${after.toast.text}"): painting.js:412 sets hasDb false, saveSoon (434) and restore (455) return at once, and the one-time note at 860 needs dbOk, so neither the "saved as you go" note nor the "could not be saved" one appears, and the painting is gone on the next visit.` });
     t.check(page.log.pageerrors.length === err0, 'storage blocked: no page error', page.log.pageerrors);
     // Forget still reloads the page
     await tab(page, 'help');
