@@ -84,6 +84,8 @@
     if (tab && tab !== 'all') {
       var item = document.querySelector('[data-tab="' + tab + '"]');
       var panel = document.getElementById('tab-' + tab);
+      // the Study tab's "Use my Studio painting" needs the Studio: it goes with it
+      if (tab === 'paint') { var fromStudio = document.getElementById('artFromStudio'); if (fromStudio) fromStudio.hidden = true; }
       if (item) {
         item.hidden = true;
         // the group's button names one of its items: not this one any more; a group with none left goes too

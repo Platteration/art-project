@@ -2516,17 +2516,27 @@
     }
     const patch = { r: Math.round(r / k), g: Math.round(g / k), b: Math.round(b / k) };
     const gains = Study.neutralGains(patch.r, patch.g, patch.b);
+    const colorful = Study.chromaOf(patch.r, patch.g, patch.b) > NEAR_GRAY;
+    // what is wrong with the spot is said first: a strong color (orange, yellow) is a color, not a dark spot
     if (!gains) {
-      toast('That spot is too dark to judge. Pick a white or light gray area.');
+      toast(colorful ? `${toHex(patch)} is too colorful to be white or gray. Pick paper or a neutral gray area.` : 'That spot is too dark to judge. Pick a white or light gray area.');
       return;
     }
     const neutral = gains.every((v, i) => v >= GAIN_LIMITS[i][0] && v <= GAIN_LIMITS[i][1])
-      && (Study.chromaOf(patch.r, patch.g, patch.b) <= NEAR_GRAY || tintedByLight(gains));
+      && (!colorful || tintedByLight(gains));
     if (!neutral) {
       toast(`${toHex(patch)} is too colorful to be white or gray. Pick paper or a neutral gray area.`);
       return;
     }
     setPicking(false);
+    // a spot that is already neutral has no cast to remove: the photo is shown as taken
+    if (gains.every((v) => Math.abs(v - 1) < 0.02)) {
+      state.art.gains = [1, 1, 1];
+      updateColorFix();
+      toast(`${toHex(patch)} is already neutral: there is no color cast to remove`);
+      checkSoon();
+      return;
+    }
     state.art.gains = gains;
     updateColorFix();
     toast(`Color cast removed: ${toHex(patch)} is now neutral`);
@@ -2549,7 +2559,7 @@
   // or the portrait the Studio dealt, which then becomes the reference here
   els.artFromStudio.addEventListener('click', () => {
     const ps = window.PaintStudio;
-    if (!ps) return;
+    if (!ps) { toast('The Studio did not start, so there is no Studio painting to check. Load a photo of your painting instead.', 5000); return; }
     const r = ps.reference();
     if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
     setArt(ps.composite(), 'Studio painting', false);

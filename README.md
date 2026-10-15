@@ -136,11 +136,11 @@ The second game, under Games, trains the eye. Two, three or four colors mixed fr
 1. Load, drop or paste a photo of your painting, or press **Use my Studio painting** to score the paper on the Studio tab as it stands (if the Studio was painting from a dealt portrait, that portrait becomes the reference here). Shoot a photo straight on, framed like the reference. It is cropped (or stretched) to match the reference and broken into color blocks with the same settings.
 2. For each shape in the reference's color-block map, the most prominent reference color is compared with the most prominent color your painting has over the same pixels, using the CIEDE2000 color difference (ΔE).
 3. You get:
-   - **Color accuracy** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
-   - **Value accuracy** (0–100): the same idea using lightness only, `100 − 5 × |ΔL*|`. Half a value step off scores 75.
-   - **Value shapes match**: the share of the picture that lands in the same shadow, middle or light mass.
-   - **Biggest differences**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm".
-   - **Accuracy by shape**: the reference's color zones, each labelled with its match percentage (`100 − 2.5 × ΔE`, the same per-shape score the color accuracy averages). The biggest differences get white labels numbered as in the list. Zones too small to hold a label stay unlabelled. Hover any zone to see the reference color next to yours.
+   - **Color score** (0–100): each shape scores `100 − 2.5 × ΔE`, weighted by its area.
+   - **Light and dark score** (0–100): the same idea using lightness only, `100 − 5 × |ΔL*|`. Half a value step off scores 75.
+   - **Shapes in the right place**: the share of the picture that lands in the same shadow, middle or light mass.
+   - **What to fix first**: the five shapes that cost the most, with the reference and your color side by side and plain notes such as "too light by 0.4 value, too warm".
+   - **Accuracy by shape**: the reference's color zones, each labelled with its match percentage (`100 − 2.5 × ΔE`, the same per-shape score the color score averages). The biggest differences get white labels numbered as in the list. Zones too small to hold a label stay unlabelled. Hover any zone to see the reference color next to yours.
 
 **Line up and color-correct your photo** (the panel above the score) makes the comparison fair:
 

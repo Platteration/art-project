@@ -15,7 +15,9 @@
 // visitor's; Use my Studio painting with a blank paper, with strokes, twice, and with a dealt portrait,
 // and with painting.js missing; Simple and Advanced hints; hostile saved state for every key the drawer
 // depends on; and the phone width.
-import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, visible, hscroll, screenshot, sleep, DESKTOP, PHONE, PROTO_NAMES } from '../lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, sleep, PHONE, PROTO_NAMES } from '../lib.mjs';
 
 const EXAMPLE_LABEL = 'Example painting · a made-up attempt at the sample: lifted shadows, warmer skin, and photographed slightly tilted. Line it up below to see the score change. Load your own to replace it.';
 const NO_ART_LABEL = 'Load a photo of your finished painting to score it against the reference.';
@@ -137,9 +139,14 @@ export default async function checkPainting(t, site) {
     // README names against the page's words (the spec is the expectation)
     const words = await page.evaluate(() => ({ color: document.querySelector('#checkBody .score-label').textContent.trim(), subs: [...document.querySelectorAll('#checkBody .score-sub dt')].map((e) => e.textContent.trim()), list: document.querySelector('#checkBody .fixes h3').textContent.trim(), map: document.querySelector('#checkPanels figure:last-child figcaption span').textContent.trim() }));
     t.check(/Accuracy by shape/.test(words.map), 'the map panel is called Accuracy by shape, as the README does', words.map);
-    const namedAsReadme = /Color accuracy/i.test(words.color) && words.subs.some((w) => /Value accuracy/i.test(w)) && words.subs.some((w) => /Value shapes match/i.test(w)) && /Biggest differences/i.test(words.list);
-    if (!t.check(namedAsReadme, 'the scores and the list carry the README\'s names (Color accuracy, Value accuracy, Value shapes match, Biggest differences)', words)) {
-      t.finding({ title: 'The README names the results differently from the page', severity: 'low', steps: 'Open index.html#check. Read the scorecard\'s labels and the list\'s heading, then README.md lines 139-143 ("You get: Color accuracy, Value accuracy, Value shapes match, Biggest differences, Accuracy by shape").', expected: 'The page uses the names the README promises, or the README uses the page\'s (one vocabulary for the visitor who reads both).', actual: `The page says "${words.color}", "${words.subs.join('", "')}" and "${words.list}"; only "${words.map}" matches. Cause: index.html lines 348-367 (the scorecard and the fixes heading) against README.md lines 139-143.` });
+    // the README's "You get" list, read from the README as it stands, names what the page shows
+    const readme = fs.readFileSync(path.join(site.root, 'README.md'), 'utf8');
+    const section = readme.slice(readme.indexOf('### How close did I get?'), readme.indexOf('\n## How to use'));
+    const promised = [...section.matchAll(/^ {3}- \*\*([^*]+)\*\*/gm)].map((m) => m[1]);
+    const shown = [words.color, ...words.subs, words.list, words.map];
+    const namedAsReadme = section.length > 0 && shown.every((w) => section.includes(`**${w}**`));
+    if (!t.check(namedAsReadme, 'the scores, the list and the map carry the names the README promises', { page: shown, readme: promised })) {
+      t.finding({ title: 'The README names the results differently from the page', severity: 'low', steps: 'Open index.html#check. Read the scorecard\'s labels, the list\'s heading and the map\'s caption, then the "You get" list of README.md\'s "How close did I get?" section.', expected: 'One vocabulary for the visitor who reads both: the page uses the names the README promises, or the README uses the page\'s.', actual: `The page says ${shown.map((w) => `"${w}"`).join(', ')}; the README promises ${promised.map((w) => `"${w}"`).join(', ')}. Cause: index.html lines 348-385 (the scorecard, the fixes heading and the map caption) against the README section's list.` });
     }
     // Simple mode: plain-words hints, the formulas behind Show the details
     const hints = await page.evaluate(() => { const h = document.querySelector('#checkBody .scorecard > .hint'); const d = document.querySelector('#checkBody details.more'); const shown = (e) => (typeof e.checkVisibility === 'function' ? e.checkVisibility() : getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0); return { simple: document.body.classList.contains('mode-simple'), hint: h.textContent.trim(), hintShown: shown(h), more: d.open, summary: d.querySelector('summary').textContent.trim(), formula: d.querySelector('.hint').textContent.trim(), formulaShown: shown(d.querySelector('.hint')), mapHint: document.querySelector('#checkPanels figure:last-child .hint').textContent.trim() }; });
@@ -349,7 +356,7 @@ export default async function checkPainting(t, site) {
     s = await state(page);
     t.check(s.label === 'patches.png · 600 × 750 px' && s.alignPanel && !s.wbUndo && s.alignState === '', 'the new painting replaces the old one and starts unfixed', { label: s.label, wbUndo: s.wbUndo, alignState: s.alignState });
     await openAlign(page);
-    const EXPECT = { 'neutral gray': 'accept', 'warm-tinted white': 'accept', 'cool-tinted white': 'accept', skin: 'refuse', 'brick red': 'refuse', 'leaf green': 'refuse', 'dark spot': 'dark', 'bright orange': 'refuse', 'tinted white at the blue limit (×2.9)': 'accept', 'tinted white past the blue limit (×3.5)': 'refuse', 'bright yellow': 'refuse', 'cool gray needing red ×2.9': 'refuse' };
+    const EXPECT = { 'neutral gray': 'already', 'warm-tinted white': 'accept', 'cool-tinted white': 'accept', skin: 'refuse', 'brick red': 'refuse', 'leaf green': 'refuse', 'dark spot': 'dark', 'bright orange': 'refuse', 'tinted white at the blue limit (×2.9)': 'accept', 'tinted white past the blue limit (×3.5)': 'refuse', 'bright yellow': 'refuse', 'cool gray needing red ×2.9': 'refuse' };
     const results = {};
     for (let i = 0; i < PATCHES.length; i++) {
       const [name, rgb] = PATCHES[i];
@@ -368,7 +375,12 @@ export default async function checkPainting(t, site) {
         t.check(neutral(patchNow, 2), `${name}: the patch is neutral afterwards`, patchNow);
         const L0 = await lightness(page, rgb), L1 = await lightness(page, patchNow);
         t.check(Math.abs(L0 - L1) <= 1.5, `${name}: at the same brightness (tint only, not exposure)`, { before: L0.toFixed(1), after: L1.toFixed(1) });
-        if (name !== 'neutral gray') t.check(!same(elsewhereBefore, elsewhereAfter), `${name}: the same correction reaches the rest of the photo`, { before: elsewhereBefore, after: elsewhereAfter });
+        t.check(!same(elsewhereBefore, elsewhereAfter), `${name}: the same correction reaches the rest of the photo`, { before: elsewhereBefore, after: elsewhereAfter });
+      } else if (want === 'already') {
+        // a spot that is already neutral has no cast to remove: nothing to undo, no note, and the page says so
+        if (!t.check(/already neutral|no color cast/i.test(s.toast) && !/removed/i.test(s.toast) && !s.picking && !s.wbUndo && s.alignState === '' && same(patchNow, rgb) && same(elsewhereBefore, elsewhereAfter), `${name} ${JSON.stringify(rgb)}: told there is no cast to remove, picking ends, nothing to undo`, results[name])) {
+          t.finding({ title: 'Picking a spot that is already gray says "Color cast removed" and offers Remove color fix', severity: 'low', steps: 'Open #check, load a painting with a flat #808080 patch (or any neutral gray), open "Line up the photo and fix its colors", press Fix color cast and click the gray patch.', expected: 'A spot that is already neutral needs no fix: the page says so, and no Remove color fix or "color cast fixed" note appears.', actual: `The toast says "${s.toast}", the panel says "${s.alignState}", Remove color fix ${s.wbUndo ? 'appears' : 'stays hidden'}, while every pixel stays as it was (the patch reads ${JSON.stringify(patchNow)}). Cause: js/app.js pickNeutral toasts "Color cast removed" and keeps the gains for any accepted spot, and updateColorFix (line 2486) reads gains of 1.0000001 (processing.js neutralGains, line 1196: the luminance weights sum to 1.0000001) as a fix.` });
+        }
       } else if (want === 'dark') {
         t.check(TOO_DARK.test(s.toast) && s.picking && !s.wbUndo, `${name} ${JSON.stringify(rgb)}: told it is too dark to judge, picking stays on`, results[name]);
       } else {
@@ -377,15 +389,10 @@ export default async function checkPainting(t, site) {
       if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
       if (s.wbUndo) { await click(page, '#wbUndo'); await busyHidden(page); await sleep(80); }
     }
-    // the neutral pick: nothing to remove, yet it says a cast was removed
-    const g = results['neutral gray'];
-    if (!t.check(g && !/removed/.test(g.toast) && !g.wbUndo && g.alignState === '', 'picking a spot that is already neutral does not claim a color cast was removed', g)) {
-      t.finding({ title: 'Picking a spot that is already gray says "Color cast removed" and offers Remove color fix', severity: 'low', steps: 'Open #check, load a painting with a flat #808080 patch (or any neutral gray), open "Line up the photo and fix its colors", press Fix color cast and click the gray patch.', expected: 'A spot that is already neutral needs no fix: the page says so (or says nothing changed), and no Remove color fix or "color cast fixed" note appears.', actual: `The toast says "${g && g.toast}", the panel says "${g && g.alignState}" and Remove color fix appears, while every pixel stays as it was (the patch reads ${JSON.stringify(g && g.patchNow)}). Cause: js/app.js pickNeutral (lines 2505-2534) toasts "Color cast removed" and sets the gains for any accepted spot, and updateColorFix (line 2486) reads gains of 1.0000001 (processing.js neutralGains, line 1196: the luminance weights sum to 1.0000001) as a fix.` });
-    }
-    // the bright orange and the yellow: refused, but for the wrong reason
+    // the bright orange and the yellow: a strong color with one weak channel must be refused as a color, not as dark
     const wrongReason = ['bright orange', 'bright yellow'].filter((n) => results[n] && TOO_DARK.test(results[n].toast));
     if (wrongReason.length) {
-      t.finding({ title: 'A bright orange or yellow spot is refused as "too dark to judge"', severity: 'medium', steps: 'Open #check, load a painting with a flat rgb(240,140,30) patch (or rgb(250,230,20)), open "Line up the photo and fix its colors", press Fix color cast and click the patch. Twice: the orange and the yellow give the same message.', expected: 'The README refuses it as "clearly a color rather than a white tinted by the light (skin, brick red, leaf green, orange)": the message the page has for that, "#F08C1E is too colorful to be white or gray. Pick paper or a neutral gray area."', actual: `"${results['bright orange'].toast}" for rgb(240,140,30) (L* 66) and "${results['bright yellow'].toast}" for rgb(250,230,20) (L* 90): a bright spot is called too dark, so the advice to pick a lighter area misleads. Cause: js/processing.js neutralGains, line 1198, returns null when any one channel is under 0.02 in linear light (blue is 30 and 20 here), and js/app.js pickNeutral, lines 2518-2521, reads that null as "too dark" before the color test at 2522-2524 can run.` });
+      t.finding({ title: 'A bright orange or yellow spot is refused as "too dark to judge"', severity: 'medium', steps: 'Open #check, load a painting with a flat rgb(240,140,30) patch (or rgb(250,230,20)), open "Line up the photo and fix its colors", press Fix color cast and click the patch. Twice: the orange and the yellow give the same message.', expected: 'The README refuses it as "clearly a color rather than a white tinted by the light (skin, brick red, leaf green, orange)": the message the page has for that, "#F08C1E is too colorful to be white or gray. Pick paper or a neutral gray area."', actual: `"${results['bright orange'].toast}" for rgb(240,140,30) (L* 66) and "${results['bright yellow'].toast}" for rgb(250,230,20) (L* 90): a bright spot is called too dark, so the advice to pick a lighter area misleads. Cause: js/processing.js neutralGains, line 1198, returns null when any one channel is under 0.02 in linear light (blue is 30 and 20 here), and js/app.js pickNeutral reads that null as "too dark" before its color test can run.` });
     }
     // picking again replaces the earlier fix (read from the photo as taken): A then B equals B alone
     await click(page, '#wbPick'); await clickAt(page, '#cv-art', patchAt(1)[0] / 600, patchAt(1)[1] / 750);
@@ -552,10 +559,11 @@ export default async function checkPainting(t, site) {
     await resetToast(page3);
     await click(page3, '#artFromStudio'); await sleep(900);
     const after = await state(page3);
-    const dead = btn.shown && !btn.disabled && after.label === before.label && after.toast === '' && after.badge === before.badge;
-    if (!t.check(!dead, 'with painting.js missing, Use my Studio painting is taken off, disabled, or says why it cannot', { button: btn, before: before.label.slice(0, 30), after: after.label.slice(0, 30), toast: after.toast })) {
-      t.finding({ title: 'With painting.js missing, "Use my Studio painting" stays as a live button that does nothing', severity: 'high', steps: 'Block or remove js/painting.js (the guard then takes Studio, Figure study and the Loomis head off the menu and shows its "part of the app" note). Open index.html#check and press Use my Studio painting. Twice.', expected: 'The button is hidden or disabled like the Studio tab, or a message says the Studio did not load.', actual: `The button shows and is enabled (${JSON.stringify(btn)}); pressing it changes nothing and says nothing: the label stays "${after.label.slice(0, 20)}…", the badge "${after.badge}", no toast. Cause: js/app.js line 2551, \`if (!ps) return;\` in the artFromStudio handler returns silently when window.PaintStudio is missing; js/guard.js (TAB_OF, line 122) hides the tabs of a failed script but not this button.` });
+    const handled = !btn.shown || btn.disabled || /Studio/.test(after.toast);
+    if (!t.check(handled, 'with painting.js missing, Use my Studio painting is taken off, disabled, or says why it cannot', { button: btn, before: before.label.slice(0, 30), after: after.label.slice(0, 30), toast: after.toast })) {
+      t.finding({ title: 'With painting.js missing, "Use my Studio painting" stays as a live button that does nothing', severity: 'high', steps: 'Block or remove js/painting.js (the guard then takes Studio, Figure study and the Loomis head off the menu and shows its "part of the app" note). Open index.html#check and press Use my Studio painting. Twice.', expected: 'The button is hidden or disabled like the Studio tab, or a message says the Studio did not load.', actual: `The button shows and is enabled (${JSON.stringify(btn)}); pressing it changes nothing and says nothing: the label stays "${after.label.slice(0, 20)}…", the badge "${after.badge}", toast "${after.toast}". Cause: js/app.js, the artFromStudio handler's \`if (!ps) return;\` returns silently when window.PaintStudio is missing; js/guard.js (TAB_OF, line 122) hides the tabs of a failed script but not this button.` });
     }
+    t.check(after.label === before.label && after.badge === before.badge && !after.empty, 'with painting.js missing, the press leaves the example scored as it was', { before: before.badge, after: after.badge });
     t.check(page3.log.pageerrors.length === 0, 'painting.js missing: no page error', page3.log.pageerrors);
     await page3.context().close();
   }
