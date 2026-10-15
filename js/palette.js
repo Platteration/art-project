@@ -38,6 +38,7 @@
     dialogCount: $('paintDialogCount'),
     dialogDone: $('paintDialogDone'),
     search: $('paintSearch'),
+    noMatch: $('paintNoMatch'),
     addPreset: $('paintAddPreset'),
     none: $('paintNone'),
     cats: $('paintCats'),
@@ -209,21 +210,33 @@
   }
 
   let suggested = null; // { codes, cov } for the current study
+  let suggestRunning = null; // the running suggestion's checker, from runJob
+  // a suggestion cut short (the source switched, the study changed) gives the button back
+  function cancelSuggest() {
+    cancel('suggest');
+    suggestRunning = null;
+    els.suggest.disabled = false;
+    els.suggest.textContent = suggested ? 'Suggest again' : 'Suggest a palette';
+  }
   function suggest() {
     const r = Studio.result();
     if (!r) return;
+    const forResult = r;
     const codes = mine.size ? [...mine] : Paints.LIBRARY.map((p) => p.code);
     const pool = codes.map(paintFor);
     const colors = studyColors();
     const task = Mixing.suggestTask(pool, colors, +els.max.value + (pool.some((p) => p.white) ? 1 : 0));
     els.suggest.disabled = true;
-    runJob('suggest', () => {
+    suggestRunning = runJob('suggest', () => {
       const done = task.step(12);
       els.suggest.textContent = done ? 'Suggest a palette' : `Choosing paints… ${Math.round(task.progress * 100)}%`;
       return done;
     }, () => {
+      suggestRunning = null;
       els.suggest.disabled = false;
       els.suggest.textContent = 'Suggest again';
+      // B: the study moved on while this ran: these picks are for the old colors, so choose again
+      if (Studio.result() !== forResult) { suggestedFor = Studio.result(); suggest(); return; }
       const picks = task.result.picks.map((i) => codes[i]);
       suggested = { codes: picks, cov: task.result, from: mine.size ? 'your paints' : 'the whole library' };
       announce();
@@ -323,7 +336,7 @@
     els.minePane.hidden = choice.source !== 'mine';
     if (!els.drawer.open) { setState(choice.source === 'preset' ? presetName(choice.preset) : suggested ? 'Suggested palette' : ''); return; }
     if (choice.source === 'preset') {
-      cancel('suggest');
+      cancelSuggest();
       rankPresets();
       if (ranking && rankedFor === Studio.result() && choice.preset) showPreset(choice.preset);
       else if (!choice.preset) { els.result.hidden = true; setState(''); }
@@ -357,7 +370,26 @@
   els.colors.addEventListener('input', () => setState(choice.source === 'preset' ? presetName(choice.preset) : suggested ? 'Suggested palette' : ''));
   window.addEventListener('studio:result', () => {
     cancel('mix');
+    // a suggestion still running was for the colors before: start again for these, or give the button back
+    if (suggestRunning && suggestRunning()) { cancelSuggest(); if (choice.source === 'mine' && els.drawer.open) { suggestedFor = Studio.result(); suggest(); return; } }
     refresh();
+  });
+
+  // C: Simple offers its three palettes and hides My paints (README, Simple and Advanced): coming back to
+  // Simple from My paints, or from a palette Simple does not list, moves to the best of the three, and says so
+  window.addEventListener('studio:mode', (e) => {
+    if (e.detail !== 'simple') return;
+    const simpleIds = Object.keys(SIMPLE_WHY);
+    if (choice.source === 'preset' && simpleIds.includes(choice.preset)) return;
+    const best = (ranking || []).map((x) => x.preset.id).find((id) => simpleIds.includes(id)) || simpleIds[0];
+    const was = choice.source === 'mine' ? 'My paints' : (choice.preset ? presetName(choice.preset) : '');
+    choice.source = 'preset'; choice.preset = best;
+    save(CHOICE_KEY, choice);
+    document.querySelectorAll('input[name="paintSource"]').forEach((i) => { i.checked = i.value === 'preset'; });
+    cancelSuggest();
+    refresh();
+    announce();
+    if (was) Studio.toast(`Simple mode uses ${presetName(best)} instead of ${was}`, 4000);
   });
 
   // ---- The paint library dialog ---------------------------------------------
@@ -430,6 +462,7 @@
       });
       sec.hidden = !any;
     });
+    if (els.noMatch) els.noMatch.hidden = !q || [...els.cats.querySelectorAll('.paint-cat')].some((sec) => !sec.hidden);
   });
   els.mineEdit.addEventListener('click', () => {
     if (!els.cats.childElementCount) renderLibrary();

@@ -215,8 +215,8 @@ export default async function paints(t, site) {
 
   // ---- Photo vs palette block view ----------------------------------------------------------------------------
   {
-    const page = await openPage(site, { storage: { ...ADV, [K.choice]: '{"source":"preset","preset":"zorn","max":6}' } });
-    await settled(page); await ranked(page); await mixed(page);
+    const page = await openPage(site, { storage: ADV });
+    await settled(page); await ranked(page); await pickPreset(page, 'zorn');
     const photo = await canvasSum(page, '#cv-block');
     const sw = await page.evaluate(() => ({ photo: document.querySelector('[data-block-view="photo"]').getAttribute('aria-pressed'), pal: document.getElementById('blockViewPalette').getAttribute('aria-pressed'), name: document.getElementById('blockViewPalette').textContent, title: document.getElementById('blockViewPalette').title, label: document.getElementById('cv-block').getAttribute('aria-label') }));
     t.check(sw.photo === 'true' && sw.pal === 'false' && sw.name === 'Zorn' && sw.title === 'As Zorn mixes them' && sw.label === 'Color-block study', 'the switch starts on Photo and names the chosen palette', sw);
@@ -308,6 +308,10 @@ export default async function paints(t, site) {
     await click(page, '#paintDialogDone'); await suggestedDone(page); await mixed(page);
     const s2 = { count: await text(page, '#mineCount'), chips: await chips(page), rs: await rows(page) };
     t.check(s2.count === '2 paints ticked' && JSON.stringify(s2.chips) === '["TW","IB"]' && s2.rs.length === n && s2.rs.every((r) => RECIPE.test(r.recipe)), 'two paints: both go on the palette, every color gets a gray', s2);
+    const studioErr = page.log.pageerrors.filter((e) => /painting\.js/.test(e));
+    const studioToast = await text(page, '#toast');
+    t.check(studioErr.length === 0, 'the Studio takes a palette of white and one paint without throwing', studioErr);
+    if (studioErr.length) t.finding({ title: 'A palette of white plus one paint (two ticks under My paints, or the Studio\'s own "My paints (2)") throws in the Studio and leaves its mixes stale', severity: 'high', steps: '1. Advanced mode, Colors and paints, My paints, Choose my paints: tick Titanium White and Ivory Black only, Done. 2. The suggestion (TW, IB) follows into the Studio (open it, or watch the console).', expected: 'The Studio takes the palette and seeds what skin tones two paints can give (or none), with no error.', actual: `A page error: ${studioErr[0].split('\n')[0]}; the guard\'s toast says "${studioToast}", and the Studio\'s starter mixes and current color are not reset for the new palette (applyPalette stops inside seedMixes). The same happens from the Studio\'s palette menu with "My paints (2)", and with one non-white paint alone. Cause: js/painting.js 745–767 skinMixes: white plus one paint gives seven candidate mixes (one per amount of white, line 752) for the eight skin tones (SKIN, 739–744), and "used" (759–764) keeps a candidate from serving twice, so the eighth tone finds none and line 765 reads best.c of null.` });
     await tab(page, 'game');
     const gp2 = await paletteOptions(page, '#gamePalette');
     t.check(gp2.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (2)'), 'the game offers "My paints (2)"', gp2.options.map((o) => o[1]));
@@ -315,7 +319,7 @@ export default async function paints(t, site) {
     const vb2 = await paletteOptions(page, '#vb-palette');
     t.check(vb2.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (2)'), 'Value battle offers "My paints (2)"', vb2.options.map((o) => o[1]));
     ps = await paletteOptions(page, '#ps-palette');
-    t.check(ps.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (2)') && ps.value === 'study', 'the Studio lists My paints (2) and still follows the suggested palette', ps);
+    t.check(ps.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (2)') && ps.value === 'mine', 'the Studio lists My paints (2) and follows the suggestion, which is those two paints', ps);
     await tab(page, 'study');
     await clean(t, page, 'one and two paints');
 
@@ -389,7 +393,7 @@ export default async function paints(t, site) {
     t.check(back.count === '77 paints ticked' && back.mine && back.max === '10', 'after a reload the ticks, the source and the size are back', back);
     t.check(back.result && back.btn === 'Suggest a palette' && back.state === '3 per value', 'after a reload there is no suggestion until asked; the page says so by its button and header', back);
     await tab(page, 'game');
-    t.check((await paletteOptions(page, '#gamePalette')).options.some((o) => o[1] === 'My paints (77)'), 'the game offers "My paints (77)"');
+    t.check((await paletteOptions(page, '#gamePalette')).options.some((o) => /^My paints \(77\)/.test(o[1])), 'the game offers "My paints (77)"', (await paletteOptions(page, '#gamePalette')).options.map((o) => o[1]));
     await tab(page, 'study');
     await clean(t, page, 'all 77');
 
@@ -416,6 +420,7 @@ export default async function paints(t, site) {
   }
 
   // ---- two races inside a running suggestion (the whole library at size 10 takes about half a second) ----------
+  let raceA = null, raceB = null;
   for (const round of [1, 2]) {
     // a) switching the source away and back while it runs
     const page = await openPage(site, { storage: { ...ADV, [K.choice]: '{"source":"mine","preset":"","max":10}' } });
@@ -433,7 +438,7 @@ export default async function paints(t, site) {
     if (!/^Choosing paints/.test(race.during)) t.note(`round ${round}: the suggestion finished within its first step, so the source-switch race could not be driven (button read "${race.during}").`);
     else {
       t.check(!after.disabled && /^Suggest (a palette|again)$/.test(after.text), `round ${round}: Suggest is usable again after switching the source away and back mid-run`, { race, after });
-      if (after.disabled) t.finding({ title: 'Switching to Known palettes while a suggestion runs leaves Suggest a palette dead, stuck on "Choosing paints… N%"', severity: 'high', steps: '1. Advanced mode, Colors and paints, My paints, Paints on the palette at 10, nothing ticked (so the suggestion takes about half a second). 2. Press Suggest a palette. 3. While the button reads "Choosing paints…", press Known palettes, then My paints again.', expected: 'The suggestion is cancelled and the button reads "Suggest a palette" again (or the suggestion is made again for My paints).', actual: `The button stays disabled and reads "${after.text}" for good; no result shows, and nothing on the page can start a suggestion until a paint is ticked or unticked in Choose my paints. Cause: js/palette.js 326 (refresh, the preset branch) cancels the "suggest" job, but the button is only re-enabled in that job's done callback (225–226), which a cancelled job never reaches; the "mine" branch (335–337) does not restart it.` });
+      if (after.disabled) raceA = { race, after };
     }
     await clean(t, page, `race a round ${round}`);
     await page.context().close();
@@ -458,11 +463,13 @@ export default async function paints(t, site) {
       const rm = reachOf(stale.match);
       const consistent = stale.shown && rm && rm[1] === n1 && rm[0] <= n1 && JSON.stringify(stale.chips) === JSON.stringify(fresh.chips) && stale.match === fresh.match;
       t.check(consistent, `round ${round}: a result that changes mid-suggestion gets a suggestion for the new colors`, { n3, n1, stale, fresh });
-      if (!consistent) t.finding({ title: 'A study that changes while the first suggestion runs keeps that suggestion, chosen for the old colors, and reports it as this study\'s', severity: 'medium', steps: '1. Advanced mode, Colors and paints, My paints, Paints on the palette at 10, nothing ticked. 2. Press Suggest a palette and, while it reads "Choosing paints…", move Colors in each value from 3 to 1 (or load another photo).', expected: 'The suggestion is made again for the new study, as the result\'s own note promises ("Change the photo or settings and it is chosen again").', actual: `The palette chosen for the ${n3}-color study is shown for the ${n1}-color one: "${stale.match}" (${rm ? rm[0] : '?'} reached out of ${n1}), paints ${stale.chips.join(' ')}; Suggest again gives "${fresh.match}" with ${fresh.chips.join(' ')}. Cause: js/palette.js 358–361 (studio:result) calls refresh(), whose "mine" branch (330–338) only re-suggests when a suggestion already exists; with none yet it hides the result and lets the running job finish (220–231), which stores picks and coverage made from the old colors and shows them (234–238) with the new study's color count.` });
+      if (!consistent) raceB = { n3, n1, stale, fresh, rm };
     }
     await clean(t, p2, `race b round ${round}`);
     await p2.context().close();
   }
+  if (raceA) t.finding({ title: 'Switching to Known palettes while a suggestion runs leaves Suggest a palette dead, stuck on "Choosing paints… N%"', severity: 'high', steps: '1. Advanced mode, Colors and paints, My paints, Paints on the palette at 10, nothing ticked (so the suggestion takes about half a second). 2. Press Suggest a palette. 3. While the button reads "Choosing paints…", press Known palettes, then My paints again.', expected: 'The suggestion is cancelled and the button reads "Suggest a palette" again (or the suggestion is made again for My paints).', actual: `The button stays disabled and reads "${raceA.after.text}" for good (seen in both rounds); no result shows, and nothing on the page can start a suggestion until a paint is ticked or unticked in Choose my paints (or the study changes after an earlier suggestion). Cause: js/palette.js 326 (refresh, the preset branch) cancels the "suggest" job, but the button is only re-enabled in that job's done callback (225–226), which a cancelled job never reaches; the "mine" branch (335–337) does not restart it.` });
+  if (raceB) t.finding({ title: 'A study that changes while the first suggestion runs keeps that suggestion, chosen for the old colors, and reports it as this study\'s', severity: 'medium', steps: '1. Advanced mode, Colors and paints, My paints, Paints on the palette at 10, nothing ticked. 2. Press Suggest a palette and, while it reads "Choosing paints…", move Colors in each value from 3 to 1 (or load another photo).', expected: 'The suggestion is made again for the new study, as the result\'s own note promises ("Change the photo or settings and it is chosen again").', actual: `The palette chosen for the ${raceB.n3}-color study is shown for the ${raceB.n1}-color one: "${raceB.stale.match}" (${raceB.rm ? raceB.rm[0] : '?'} reached out of ${raceB.n1}), paints ${raceB.stale.chips.join(' ')}; Suggest again gives "${raceB.fresh.match}" with ${raceB.fresh.chips.join(' ')} (seen in both rounds). Cause: js/palette.js 358–361 (studio:result) calls refresh(), whose "mine" branch (330–338) only re-suggests when a suggestion already exists; with none yet it hides the result and lets the running job finish (220–231), which stores picks and coverage made from the old colors and shows them (234–238) against the new study's color count.` });
 
   // ---- Simple mode: three palettes with a reason; a saved source Simple cannot show --------------------------------
   {
@@ -505,7 +512,7 @@ export default async function paints(t, site) {
     const big = JSON.stringify(Array.from({ length: 20000 }, (_, i) => (i % 2 ? 'YO' : 'nope')));
     const cases = [
       ['"TW"', 0], ['["TW",5,null,"constructor","__proto__",{"a":1},"zorn","tw"]', 1], ['{"0":"TW"}', 0], ['NaN', 0], ['[]', 0], ['null', 0], ['not json', 0], ['', 0],
-      ['[["TW"]]', 0], ['["__proto__","constructor","toString","hasOwnProperty","valueOf"]', 0], ['["TW","TW","IB"]', 2], [big, 1], ['["TW","IB","YO"]', 3],
+      ['[["TW"]]', 0], ['["__proto__","constructor","toString","hasOwnProperty","valueOf"]', 0], ['["TW","TW","IB","YO"]', 3], [big, 1], ['["TW","IB","YO"]', 3],
     ];
     for (const [raw, want] of cases) {
       const page = await openPage(site, { storage: { ...ADV, [K.mine]: raw, [K.choice]: '{"source":"mine","preset":"","max":6}' } });
@@ -517,12 +524,14 @@ export default async function paints(t, site) {
       await click(page, '#paintDialogDone'); await sleep(100);
       await click(page, '#suggestBtn'); await suggestedDone(page); await mixed(page);
       t.check((await chips(page)).length >= 1 && (await rows(page)).every((r) => BADGES.includes(r.badge)), `myPaints ${raw.slice(0, 40)}: Suggest still works`, await chips(page));
-      if (raw === '["TW","TW","IB"]') {
+      if (raw === '["TW","TW","IB","YO"]') {
         await tab(page, 'game');
         const g = await paletteOptions(page, '#gamePalette');
         const mineOpt = g.options.find((o) => o[0] === 'mine');
-        t.check(mineOpt && mineOpt[1] === 'My paints (2)', 'a saved list with a paint twice: the game counts two paints', mineOpt);
-        if (mineOpt && mineOpt[1] !== 'My paints (2)') t.finding({ title: 'A saved myPaints list with a paint twice is counted twice by the game, the Studio and Value battle', severity: 'low', steps: '1. Save portrait-value-studio.myPaints as ["TW","TW","IB"] (a stray write; the drawer itself never writes a code twice). 2. Open Colors and paints (My paints) and then Paint by numbers.', expected: 'Two paints everywhere, as the drawer says ("2 paints ticked").', actual: `The game's palette menu says "${mineOpt[1]}" and lists titanium white twice (js/game.js 121–123, js/painting.js 109–110 and js/battle.js 47–48 filter unknown codes but not repeats; js/palette.js 71 reads the list into a Set).` });
+        const ps = await paletteOptions(page, '#ps-palette');
+        const mineStudio = ps.options.find((o) => o[0] === 'mine');
+        t.check(mineOpt && /^My paints \(3\)/.test(mineOpt[1]) && mineStudio && mineStudio[1] === 'My paints (3)', 'a saved list with a paint twice: the game and the Studio count three paints, as the drawer does', [mineOpt, mineStudio]);
+        if (mineOpt && !/^My paints \(3\)/.test(mineOpt[1])) t.finding({ title: 'A saved myPaints list with a paint twice is counted twice by the game, the Studio and Value battle', severity: 'low', steps: '1. Save portrait-value-studio.myPaints as ["TW","TW","IB","YO"] (a stray write; the drawer itself never writes a code twice). 2. Open Colors and paints (My paints), then Paint by numbers or the Studio.', expected: 'Three paints everywhere, as the drawer says ("3 paints ticked").', actual: `The game\'s palette menu says "${mineOpt[1]}" and the Studio\'s "${mineStudio && mineStudio[1]}", each listing titanium white twice (js/game.js 121–123, js/painting.js 109–110 and js/battle.js 47–48 filter unknown codes but not repeats; js/palette.js 71 reads the list into a Set).` });
         await tab(page, 'study');
       }
       await clean(t, page, `myPaints ${raw.slice(0, 30)}`);
@@ -554,7 +563,11 @@ export default async function paints(t, site) {
       if (source === 'mine') { await click(page, '#srcPreset'); await ranked(page); }
       await pickPreset(page, 'zorn');
       t.check((await text(page, '#resultName')) === 'Zorn' && (await rows(page)).length === (await nColors(page)), `paintChoice ${raw.slice(0, 44)}: Zorn can still be picked`, await text(page, '#resultName'));
-      t.check(/^\{"source":"preset","preset":"zorn","max":\d+\}$/.test(await storageGetRaw(page, K.choice)), `paintChoice ${raw.slice(0, 44)}: the saved choice is rewritten clean`, await storageGetRaw(page, K.choice));
+      const savedRaw = await storageGetRaw(page, K.choice);
+      let saved = null; try { saved = JSON.parse(savedRaw); } catch (e) { saved = null; }
+      const extras = saved && typeof saved === 'object' ? Object.keys(saved).filter((k) => !['source', 'preset', 'max'].includes(k)) : [];
+      t.check(saved && saved.source === 'preset' && saved.preset === 'zorn' && Number.isInteger(saved.max) && saved.max >= 3 && saved.max <= 10, `paintChoice ${raw.slice(0, 44)}: the saved choice is rewritten with sound values`, savedRaw);
+      if (extras.length) t.note(`paintChoice ${raw.slice(0, 44)}: the unknown key${extras.length === 1 ? '' : 's'} ${extras.join(', ')} ride along in every later save (js/palette.js 66 keeps every saved key beside the three it checks; harmless, but a stray write is never cleaned out).`);
       await clean(t, page, `paintChoice ${raw.slice(0, 30)}`);
       await page.context().close();
     }

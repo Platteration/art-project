@@ -44,7 +44,7 @@
   }
   function palettes() {
     const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
-    const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+    const mine = [...new Set(load(MINE_KEY, []))].filter((c) => Paints.byCode(c));
     if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
     return list;
   }

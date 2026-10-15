@@ -106,7 +106,7 @@
     // current palette when it is neither
     function palettes() {
       const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
-      const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+      const mine = [...new Set(load(MINE_KEY, []))].filter((c) => Paints.byCode(c));
       if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
       const cur = window.StudioPalette && StudioPalette.current();
       if (cur && cur.codes.length >= 2 && !list.some((p) => sameCodes(p.codes, cur.codes))) list.push({ id: 'study', name: `Study tab: ${cur.name}`, codes: cur.codes.slice() });
@@ -743,6 +743,7 @@
       ['Cheek and lip', '#C06A54'],
     ];
     function skinMixes(codes) {
+      codes = [...new Set(codes)];
       const whites = codes.filter((c) => paintFor(c).white), white = whites[0];
       const colors = codes.filter((c) => !whites.includes(c));
       const sets = [];
@@ -761,6 +762,8 @@
         const t = lab(hexOf(target));
         let best = null, bd = Infinity;
         candidates.forEach((k) => { if (used.has(k)) return; const d = Math.hypot(k.lab[0] - t[0], k.lab[1] - t[1], k.lab[2] - t[2]); if (d < bd) { bd = d; best = k; } });
+        // with one or two paints there are fewer mixes than skin tones: the closest serves twice
+        if (!best) candidates.forEach((k) => { const d = Math.hypot(k.lab[0] - t[0], k.lab[1] - t[1], k.lab[2] - t[2]); if (d < bd) { bd = d; best = k; } });
         used.add(best);
         return { name, c: best.c, parts: best.parts.map((p) => ({ ...p })), starter: true };
       });
