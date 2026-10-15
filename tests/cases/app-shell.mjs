@@ -9,7 +9,7 @@
 // js/app.js, js/guard.js, styles.css (.no-js/.old-browser/.load-failed/.part-failed/.all-failed), 404.html.
 import fs from 'node:fs';
 import path from 'node:path';
-import { openPage, clean, tab, TABS, DESKTOP, PHONE, poseFrame, stroke, inked, click, text, visible, hscroll, screenshot, sleep, makeImage, loadPhoto, pasteFile } from '../lib.mjs';
+import { openPage, clean, tab, TABS, DESKTOP, PHONE, poseFrame, stroke, inked, click, text, visible, hscroll, screenshot, sleep, makeImage, loadPhoto, pasteFile, dropFiles } from '../lib.mjs';
 
 const SAVED_FAILED = 'Your saved settings or painting could not be read.';
 const APP_FAILED = 'Something went wrong in the app. If a control stops responding, reload the page.';
@@ -354,6 +354,13 @@ export default async function appShell(t, site) {
     if (rm.tabCaret !== '0s') t.note(`reduced motion: the menu caret still rotates over ${rm.tabCaret} (styles.css .tab-caret transition) and the section buttons keep their colour transitions; small, and not promised either way.`);
     await page.evaluate(() => window.Studio.toast('still'));
     t.check((await toastState(page)).show, 'reduced motion: a toast still appears');
+    // the check drawer opened (it scores the example painting) and the mode flipped twice while it works
+    await page.evaluate(() => document.querySelector('#drawer-check > summary').click());
+    await click(page, '[data-mode="advanced"]'); await click(page, '[data-mode="simple"]');
+    await page.waitForFunction(() => /^Color \d+ · Value \d+$/.test(document.getElementById('checkState').textContent), null, { timeout: 20000 }).catch(() => null);
+    const badge1 = await text(page, '#checkState'); await sleep(800);
+    const scored = { badge1, badge2: await text(page, '#checkState'), open: await page.evaluate(() => document.getElementById('drawer-check').open), simple: (await shell(page)).simple };
+    t.check(/^Color \d+ · Value \d+$/.test(scored.badge1) && scored.badge2 === scored.badge1 && scored.open && scored.simple, 'mode flipped while the check drawer scores: one settled score, the drawer open, Simple', scored);
     for (const name of ['help', 'game']) await tab(page, name);
     // README Studio: "until you choose one here, the palette follows the Study tab's" (in Simple, the best of three)
     await tab(page, 'paint'); await sleep(500);
@@ -952,6 +959,12 @@ export default async function appShell(t, site) {
     await page.click('#tabFigureBtn'); await waitShown(page, 'tab-figure'); await sleep(400);
     const back = { draw: await page.evaluate(() => !document.querySelector('.fig-studio').hidden), ink: await inked(page, '#fs-paper'), bar: await page.evaluate(() => (document.querySelector('.fig-bar') || {}).textContent.replace(/\s+/g, ' ').trim().slice(0, 60)) };
     t.check(back.draw && back.ink === ink0, 'class: Study the photo and back through the top bar mid-class keeps the class and its drawing', { ink0, ...back });
+    // the Simple/Advanced switch (in view on a desktop mid-class) and a photo dropped on the page: the class goes on
+    await click(page, '[data-mode="advanced"]'); await click(page, '[data-mode="simple"]'); await settle(page);
+    await dropFiles(page, 'body', [await makeImage(page, { width: 500, height: 700, name: 'dropped-in-class.png' })]);
+    await page.waitForFunction(() => /dropped-in-class/.test(document.getElementById('source').textContent), null, { timeout: 8000 }).catch(() => null);
+    const busy = { draw: await page.evaluate(() => !document.querySelector('.fig-studio').hidden), ink: await inked(page, '#fs-paper'), tab: (await shell(page)).shown.join(), toast: (await toastState(page)).text, source: await page.evaluate(() => document.getElementById('source').textContent.slice(0, 40)) };
+    t.check(busy.draw && busy.ink === ink0 && busy.tab === 'tab-figure' && /Study the photo/.test(busy.toast) && /dropped-in-class/.test(busy.source), 'class: Advanced and back, then a photo dropped mid-class: the class and its drawing stay, the note says the photo is on Study the photo', busy);
     await tab(page, 'help');
     await click(page, '#forgetBtn'); await navigate(page, () => click(page, '#forgetBtn')); await sleep(2000);
     const afterClass = await page.evaluate(() => ({ keys: Object.keys(localStorage).filter((k) => /^(portrait-value-studio|pose-and-light)\./.test(k)), shown: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id), focus: document.body.classList.contains('figure-focus'), draw: !document.querySelector('.fig-studio').hidden }));
