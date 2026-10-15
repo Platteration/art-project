@@ -1635,7 +1635,6 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .lh-loupe canvas { display: block; width: 100%; height: 100%; }
 .lh .ps-ic[aria-pressed="true"] { background: none; color: var(--ink); border-color: var(--line); }
 .lh .ps-ic[aria-pressed="false"] { opacity: 0.55; }
-.lh label.ps-ic { cursor: pointer; }
 @media (min-width: 760px) {
   .lh { grid-template-rows: minmax(0, 1fr); }
   .lh-card { position: absolute; left: 84px; top: 14px; width: 300px; margin: 0; }

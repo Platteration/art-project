@@ -588,6 +588,9 @@
     );
   }
 
+  // the Load a photo buttons beside the header's (the Loomis strip, the Studio's reference sheet, the game's
+  // setup) open the same file input: buttons, so the keyboard reaches them, where a label for it would not
+  document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-open-file]'); if (b) els.file.click(); });
   els.file.addEventListener('change', () => {
     loadFile(els.file.files[0]);
     els.file.value = '';

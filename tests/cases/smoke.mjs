@@ -230,4 +230,24 @@ export default async function smoke(t, site) {
     t.check(cold.raw < 2 * 1024 * 1024, 'a cold load is under 2 MB raw', cold);
     await context.close();
   }
+
+  // the Load a photo buttons beside the header's (the Loomis strip, the Studio's reference sheet, the game's
+  // setup): named buttons the keyboard reaches, each opening the photo chooser
+  {
+    const page = await openPage(site);
+    const found = await page.evaluate(() => [...document.querySelectorAll('[data-open-file]')].map((b) => ({ tag: b.tagName, name: b.getAttribute('aria-label') || b.textContent.trim() })));
+    t.check(found.length === 3 && found.every((b) => b.tag === 'BUTTON' && b.name), 'three Load a photo buttons beside the header\'s, each a named button', found);
+    const opens = async (sel) => {
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null), (async () => { await page.focus(sel); await page.keyboard.press('Enter'); })()]);
+      return !!chooser;
+    };
+    await tab(page, 'loomis');
+    t.check(await opens('#lh-root [data-open-file]'), 'the Loomis strip\'s Load a photo opens the chooser from the keyboard');
+    await tab(page, 'paint'); await click(page, '#ps-refBtn');
+    t.check(await opens('#ps-root [data-open-file]'), 'the Studio reference sheet\'s Load a photo opens the chooser from the keyboard');
+    await tab(page, 'game');
+    t.check(await opens('#tab-game [data-open-file]'), 'the game setup\'s Load another photo opens the chooser from the keyboard');
+    await clean(t, page, 'the Load a photo buttons');
+    await page.context().close();
+  }
 }

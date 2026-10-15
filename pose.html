@@ -23,7 +23,7 @@
     </div>
   </header>
 
-  <div class="tool">
+  <main class="tool">
     <div class="stage" id="stage">
       <canvas id="view" aria-label="The wooden figure and the lamp. Drag a hand, a foot, the ring around the hips or the ring around the chest to pose the figure. Tap a part of the figure to pick it, then use the arrows to move it. Drag the lamp to move the light, or drag the background to walk around."></canvas>
       <div class="hint" id="hint"><span>Drag a colored control to pose</span><span class="adv-only">Tap a part for arrows</span><span class="simple-only">Tap a part to pick it</span><span>Drag the lamp to move the light</span><span>Drag the background to walk around</span></div>
@@ -118,10 +118,10 @@
         </div>
       </section>
     </div>
-  </div>
+  </main>
 </div>
 
-<dialog id="snapDialog">
+<dialog id="snapDialog" aria-label="Snapshot">
   <img id="snapImg" alt="A snapshot of the posed figure">
   <p>Press and hold the picture (or right-click it) to save it.</p>
   <button type="button" class="btn btn-primary" id="snapClose">Close</button>
