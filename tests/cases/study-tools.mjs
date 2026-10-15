@@ -196,7 +196,7 @@ export default async function studyTools(t, site) {
     await tapAt(page, 0.5, 0.5);
     await dragPx(page, 0.5, 0.5, 1, 0, { mid: false });
     t.check((await count(page, 'line')) === 0, 'a tap and a 1 px slip draw no line');
-    t.note('Lines: a tap or a slip draws nothing and says nothing (app.js 950: a line under 4 px is dropped without a word; a measure of that length gets a hint). The README promises no message, so this is noted, not failed.');
+    t.note('Lines: a tap or a slip draws nothing and says nothing (app.js 939–941: a line under 4 px is dropped without a word; a measure of that length gets a hint). The README promises no message, so this is noted, not failed.');
     await dragFrac(page, [0.2, 0.3], [0.8, 0.3]);
     t.check((await count(page, 'line')) === 1 && !(await disabled(page, '#lineUndo')) && !(await disabled(page, '#lineClear')), 'a drag draws a line: the badge says 1, Undo and Clear come on');
     t.check((await overlayHas(page, 'cv-value', 0.5, 0.3, COLORS.lcRed)) && (await overlayHas(page, 'cv-block', 0.5, 0.3, COLORS.lcRed)), 'the line appears on every image');
@@ -322,7 +322,7 @@ export default async function studyTools(t, site) {
       if (!/·/.test(want)) t.check((await toastShown(page)) === '' && (await text(page, '#toolHint')) === hint, `unit on my canvas "${value}": the page says nothing about a length it cannot use`);
       fy += 0.06;
     }
-    t.note('Unit on my canvas: 0, a negative number, 10000 or more, letters and 1e400 are silently ignored: the labels drop the length and nothing says why (app.js 1497 canvasSize: v > 0 && v < 10000). The input lets a negative or huge number stand.');
+    t.note('Unit on my canvas: 0, a negative number, 10000 or more, letters and 1e400 are silently ignored: the labels drop the length and nothing says why (app.js 1496–1499 canvasSize: v > 0 && v < 10000). The input lets a negative or huge number stand.');
     t.note('Unit on my canvas: "1e400" typed into the field is emptied by the browser (a number field keeps only finite numbers), so the labels drop the length without a word.');
     await setSize(page, '10'); await page.selectOption('#canvasSys', 'cm');
     const kept = JSON.parse(await storageGet(page, CANVAS_KEY));
@@ -487,7 +487,7 @@ export default async function studyTools(t, site) {
       if (on.counts !== before) undidOn.push(TAB_NAMES[name]);
       t.check(on.counts === before, `Ctrl+Z on the ${TAB_NAMES[name]} tab leaves the Study's marks alone`, on);
     }
-    if (undidOn.length) t.finding({ title: `Ctrl/⌘+Z on another tab (${undidOn.join(', ')}) takes back a Study mark out of sight`, severity: 'low', steps: '1. On Study the photo, choose Lines and drag a line. 2. Open Learning tools → How to use (or the Loomis head, Paint by numbers or Value battle). 3. Press Ctrl+Z.', expected: 'Nothing changes on a tab that has no undo of its own, or the shortcut is left to that tab; the Study\'s marks are not touched out of sight.', actual: `The toast says "Line removed" and the line is gone from the Study (the Lines badge drops by one), on ${undidOn.join(', ')}. Cause: js/app.js 2110–2129, the window keydown handler, skips Ctrl+Z only while state.tab is "paint" or "figure" (line 2126).` });
+    if (undidOn.length) t.finding({ title: `Ctrl/⌘+Z on another tab (${undidOn.join(', ')}) takes back a Study mark out of sight`, severity: 'low', steps: '1. On Study the photo, choose Lines and drag a line. 2. Open Learning tools → How to use (or the Loomis head, Paint by numbers or Value battle). 3. Press Ctrl+Z.', expected: 'Nothing changes on a tab that has no undo of its own, or the shortcut is left to that tab; the Study\'s marks are not touched out of sight.', actual: `The toast says "Line removed" and the line is gone from the Study (the Lines badge drops by one), on ${undidOn.join(', ')}. Cause: js/app.js 2111–2130, the window keydown handler, skips Ctrl+Z only while state.tab is "paint" or "figure" (line 2127).` });
     // the grid: off, 3 × 3, 4 × 4, off; spam
     const grid = async () => ({ label: await page.evaluate(() => document.getElementById('gridBtn').getAttribute('aria-label')), pressed: await pressed(page, '#gridBtn'), badge: await text(page, '#gridBadge'), shown: await visible(page, '#gridBadge') });
     t.check(JSON.stringify(await grid()) === JSON.stringify({ label: 'Grid: off', pressed: 'false', badge: '', shown: false }), 'the grid starts off', await grid());
@@ -533,8 +533,8 @@ export default async function studyTools(t, site) {
     const refused = [
       [textFile(), 'That file is not an image. Choose a JPG, PNG or WebP photo.', 'a text file'],
       [brokenImage(), 'This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 'a broken JPEG'],
-      [await makeImage(page, { width: 1, height: 1, name: 'dot.png' }), 'That image has no usable size. Use a JPG, PNG or WebP photo.', 'a 1 px image'],
-      [await makeImage(page, { width: 2, height: 4000, name: 'strip.png' }), 'That image has no usable size. Use a JPG, PNG or WebP photo.', 'a 2 × 4000 strip'],
+      [await makeImage(page, { width: 1, height: 1, name: 'dot.png' }), 'That picture is too small to study (1 × 1 px): it needs at least 16 px on each side.', 'a 1 px image'],
+      [await makeImage(page, { width: 2, height: 4000, name: 'strip.png' }), 'That picture is too small to study (2 × 4000 px): it needs at least 16 px on each side.', 'a 2 × 4000 strip'],
     ];
     for (const [file, want, what] of refused) {
       await resetToast(page);
@@ -542,7 +542,7 @@ export default async function studyTools(t, site) {
       expectText(t, await text(page, '#toast'), want, `${what} is refused with the right words`);
       t.check((await counts()) === '1,0,1' && /next\.png/.test(await text(page, '#source')), `${what} leaves the marks and the photo as they were`, await counts());
     }
-    t.note('A 2 × 4000 PNG and a 1 × 1 PNG are both refused as "That image has no usable size. Use a JPG, PNG or WebP photo." — a PNG told to use a PNG; the words fit a sizeless SVG better than a tiny raster.');
+    t.note('A 1 × 1 PNG and a 2 × 4000 PNG are refused with their size and the 16 px rule (app.js 476–477); "no usable size" is kept for an image with no size at all.');
     // a transparent PNG and a sized SVG load and clear the marks; the loupe reads the gray the transparency sits on
     await loadPhoto(page, await makeImage(page, { width: 400, height: 400, draw: 'transparent', name: 'cutout.png' }), { settle: 300 });
     expectText(t, await text(page, '#toast'), 'Reference lines and plumb lines cleared for the new photo.', 'a transparent PNG loads and clears the marks');
@@ -614,7 +614,7 @@ export default async function studyTools(t, site) {
     const landed = await count(page, 'line');
     t.check(/pasted\.png/.test(await text(page, '#source')) && landedBefore === 0, 'a photo pasted mid-drag loads with nothing drawn yet', { source: await text(page, '#source'), landedBefore });
     t.check(landed === 0, 'a line begun on the old photo does not land on the new one', landed);
-    if (landed === 1) t.finding({ title: 'A line (or measure) begun on the old photo lands on the photo that replaced it mid-drag', severity: 'low', steps: '1. Choose Lines and press on the photo; keep the button down and move. 2. Paste a photo from the clipboard (Ctrl+V) while still holding the button; wait for it to load. 3. Let go.', expected: 'The stroke in progress is dropped with the old photo, as the finished lines are ("Loading a new photo clears all three").', actual: 'The line lands on the new photo, at the old photo\'s coordinates; the badge says 1. A measure begun the same way lands too, and becomes the new photo\'s unit. Cause: js/app.js 2060–2061 clearMarks() empties lines, measures, plumbs and history but not state.drawing (nor state.dragging), so the pointerup handler at 920–953 still pushes it (lines 932 and 938).' });
+    if (landed === 1) t.finding({ title: 'A line (or measure) begun on the old photo lands on the photo that replaced it mid-drag', severity: 'low', steps: '1. Choose Lines and press on the photo; keep the button down and move. 2. Paste a photo from the clipboard (Ctrl+V) while still holding the button; wait for it to load. 3. Let go.', expected: 'The stroke in progress is dropped with the old photo, as the finished lines are ("Loading a new photo clears all three").', actual: 'The line lands on the new photo, at the old photo\'s coordinates; the badge says 1. A measure begun the same way lands too, and becomes the new photo\'s unit. Cause: js/app.js 2061–2062 clearMarks() empties lines, measures, plumbs and history but not state.drawing (nor state.dragging), so the pointerup handler at 921–954 still pushes it (lines 933 and 939).' });
     // Measure in progress when the photo changes: the same path makes it the unit of the new photo
     await click(page, '#lineClear').catch(() => null);
     await setTool(page, 'measure');
@@ -690,7 +690,7 @@ export default async function studyTools(t, site) {
       await clean(t, page, `hostile ${i}`);
       await page.context().close();
     }
-    t.note('Saved state read leniently: a canvas length saved as [7], true or "  7  " comes back as 7, 1 and 7 (app.js 1504: +saved.value > 0), and a saved list holding the same color twice shows it twice (readPalette filters shapes, not duplicates). Nothing breaks; the field shows what was read.');
+    t.note('Saved state read leniently: a canvas length saved as [7], true or "  7  " comes back as 7, 1 and 7 (app.js 1505: +saved.value > 0), and a saved list holding the same color twice shows it twice (readPalette filters shapes, not duplicates). Nothing breaks; the field shows what was read.');
     // a huge saved palette: it renders, and Save as PNG must say something true
     {
       const list = []; for (let i = 0; i < 1600; i++) list.push({ r: i % 256, g: (i * 7) % 256, b: (i * 13) % 256 });
@@ -704,7 +704,7 @@ export default async function studyTools(t, site) {
       const said = await text(page, '#toast');
       const ok = !!dl || (said && !/Working size/.test(said));
       t.check(ok, 'Save as PNG with 1,600 picked colors downloads, or says truly why it cannot', { downloaded: !!dl, said });
-      if (!ok) t.finding({ title: 'Save as PNG of a big picked-colors list fails with a message about the Working size, which has nothing to do with it', severity: 'medium', steps: '1. Have 1,573 or more picked colors (for instance a saved portrait-value-studio.palette list of that length; Add block colors adds a dozen a photo). 2. Open Picked colors and press Save as PNG.', expected: 'The PNG downloads (several rows), or the page says the list is too long to draw as one picture and offers to save part of it.', actual: `No download; the toast says "${said}". Cause: js/app.js 1115–1123 (palSave) lays the swatches six to a row, 234 px a row plus gaps, so from 263 rows (1,573 colors) the canvas is taller than 65,535 px, the browser's limit, toBlob gives null, and savePng (lines 198–200) answers with the Working-size message written for the study images.` });
+      if (!ok) t.finding({ title: 'Save as PNG of a big picked-colors list fails with a message about the Working size, which has nothing to do with it', severity: 'medium', steps: '1. Have 1,573 or more picked colors (for instance a saved portrait-value-studio.palette list of that length; Add block colors adds a dozen a photo). 2. Open Picked colors and press Save as PNG.', expected: 'The PNG downloads (several rows), or the page says the list is too long to draw as one picture and offers to save part of it.', actual: `No download; the toast says "${said}". Cause: js/app.js 1116–1124 (palSave) lays the swatches six to a row, 234 px a row plus gaps, so from 263 rows (1,573 colors) the canvas is taller than 65,535 px, the browser's limit, toBlob gives null, and savePng (lines 198–200) answers with the Working-size message written for the study images.` });
       await clean(t, page, 'huge palette');
       await page.context().close();
     }
