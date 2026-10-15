@@ -7,8 +7,15 @@
 // without lines, the one-time saving note, autosave and restore, hostile IndexedDB records and
 // localStorage values, Ctrl/⌘+Z, and the phone layout (strip at the bottom, sheets, the exit arrow, the
 // header hidden while painting). README: "Studio" and the autosave paragraph of "Simple and Advanced".
+// Section I adds the coverage critic's gaps: the autosave with IndexedDB off or broken, Undo / Clear / the wash then a
+// reload, the saves on hiding and pagehide, what the PNG holds (and the sandboxed save dialog with Ctrl+Z behind it),
+// changes made while the painting is restored, Ctrl+Z on each tab, Copy the Study lines with every kind of mark,
+// Values and Blocks against the Study tab's own pictures, a photo dropped or pasted on the Studio, the window changing
+// size (the reference, the paper at 4×), the palette in Simple and Advanced, narrow and short windows, Forget right
+// after changes, the Figure study's copy, and the low ones (sheets, pointers, pen pressure, blend, layers, the well,
+// keyboard, the PNG failure advice, blocked localStorage, junk keys, subjects.js missing, dark theme, two tabs).
 import fs from 'node:fs';
-import { openPage, clean, tab, PHONE, stroke, storageKeys, storageGet, click, text, visible, hscroll, screenshot, sleep, makeImage, loadPhoto, textFile } from '../lib.mjs';
+import { openPage, newTab, clean, tab, DESKTOP, PHONE, PROTO_NAMES, stroke, storageKeys, storageGet, click, text, visible, hscroll, screenshot, sleep, makeImage, loadPhoto, textFile, dropFiles, dropText, axe } from '../lib.mjs';
 
 // ---- helpers of this case ------------------------------------------------------------------------
 const setRange = (page, id, v) => page.evaluate(([id, v]) => { const s = document.getElementById(id); if (!s) throw new Error('no ' + id); s.value = String(v); s.dispatchEvent(new Event('input', { bubbles: true })); return s.value; }, [id, v]);
@@ -73,6 +80,62 @@ async function savePng(page) {
   return { name: dl.suggestedFilename(), png: buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), w: buf.readUInt32BE(16), h: buf.readUInt32BE(20), bytes: buf.length, back };
 }
 const PATH = [[0.3, 0.35], [0.7, 0.45]];
+
+// ---- helpers of the coverage gaps (section I) -------------------------------------------------------
+// a block that throws is a failed check, and the blocks after it still run
+const guard = async (t, label, fn) => { try { await fn(); } catch (e) { t.check(false, `${label}: the block ran to its end`, String((e && e.message) || e).slice(0, 300)); } };
+const NOTICE = 'portrait-value-studio.studioNotice';
+// every message the toast shows from now on, in order (one entry per change of its text)
+const watchToasts = (page) => page.evaluate(() => { window.__toasts = []; const el = document.getElementById('toast'); new MutationObserver(() => { if (el.textContent) window.__toasts.push(el.textContent); }).observe(el, { childList: true, characterData: true, subtree: true }); });
+const toasts = (page) => page.evaluate(() => window.__toasts || []);
+// whether the Studio's restore has finished, without waiting for it
+const restoreDone = (page) => page.evaluate(async () => { let done = false; PaintStudio.ready().then(() => { done = true; }); await 0; await 0; return done; });
+const markCount = (page) => page.evaluate(() => Studio.marks().length);
+// the sum of the alpha of a layer inside a box given as fractions (how much paint, not just where)
+const alphaSum = (page, sel, fx, fy, fw, fh) => page.evaluate(([s, fx, fy, fw, fh]) => { const c = document.querySelector(s); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.max(1, Math.round(c.width * fw)), Math.max(1, Math.round(c.height * fh))).data; let n = 0; for (let i = 3; i < d.length; i += 4) n += d[i]; return n; }, [sel, fx, fy, fw, fh]);
+// the reference as the Studio shows it, and the tab in front
+const refInfo = (fr) => fr.evaluate(() => { const c = document.getElementById('ps-refCanvas'); const on = (s, k) => [...document.querySelectorAll(s)].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.dataset[k])[0]; const d = c.width && c.height ? c.getContext('2d').getImageData(0, 0, c.width, c.height).data : []; const seen = new Set(); for (let i = 0; i < d.length; i += 4 * 37) seen.add(d[i] + ',' + d[i + 1] + ',' + d[i + 2]); return { w: c.width, h: c.height, distinct: seen.size, kind: on('#ps-refSheet [data-ref-kind]', 'refKind'), view: on('#ps-refSheet [data-ref-view]', 'refView'), name: document.getElementById('ps-refName').textContent.trim(), anotherHidden: document.getElementById('ps-refAnother').hidden, figHidden: document.getElementById('ps-refFig').hidden, tab: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id.replace('tab-', '')).join(), source: document.getElementById('source').textContent }; });
+// the reference canvas against one of the Study tab's own pictures (Studio.result()[key]), byte for byte
+const refSameAs = (page, key) => page.evaluate((key) => { const c = document.getElementById('ps-refCanvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const v = Studio.result() && Studio.result()[key]; if (!v || v.length !== d.length) return { len: [d.length, v ? v.length : null] }; let diff = 0; for (let i = 0; i < d.length; i++) if (d[i] !== v[i]) diff++; return { diff, bytes: d.length }; }, key);
+// Save as PNG, read back: in each box (fractions of the picture) how many pixels differ from the picture's
+// corner (the bare ground) by more than 40 on a channel, and the picture's pixels at some points
+async function savePngRead(page, { boxes = [], points = [] } = {}) {
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }).catch(() => null), click(page, '#ps-save')]);
+  if (!dl) return null;
+  const buf = fs.readFileSync(await dl.path());
+  return page.evaluate(async ([b64, boxes, points]) => {
+    const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+    const img = await new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = url; });
+    URL.revokeObjectURL(url);
+    if (!img) return null;
+    const w = img.width, h = img.height, c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    const ground = [...g.getImageData(2, 2, 1, 1).data];
+    const marks = boxes.map(([fx, fy, fw, fh]) => { const d = g.getImageData(Math.round(w * fx), Math.round(h * fy), Math.round(w * fw), Math.round(h * fh)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - ground[0]) > 40 || Math.abs(d[i + 1] - ground[1]) > 40 || Math.abs(d[i + 2] - ground[2]) > 40) n++; return n; });
+    const px = points.map(([fx, fy]) => [...g.getImageData(Math.round(w * fx), Math.round(h * fy), 1, 1).data]);
+    return { w, h, ground, marks, px };
+  }, [buf.toString('base64'), boxes, points]);
+}
+// a picture pasted from the clipboard (lib's pasteFile without its fixed wait: the caller waits on the photo itself)
+const pasteNow = (page, file) => page.evaluate((f) => { const bin = atob(f.b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const dt = new DataTransfer(); dt.items.add(new File([bytes], f.name, { type: f.mimeType })); document.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })); }, { name: file.name, mimeType: file.mimeType, b64: file.buffer.toString('base64') });
+// a new photo has reached the Study tab (its name in the source line) and the Studio's reference has its shape
+const photoArrived = (page, name, aspect) => page.waitForFunction(([n, a]) => { const c = document.getElementById('ps-refCanvas'); return document.getElementById('source').textContent.includes(n) && document.getElementById('busy').hidden && c.width > 0 && Math.abs(c.width / c.height - a) < 0.02; }, [name, aspect], { timeout: 20000 }).catch(() => null);
+// a palette picked in the Study tab's Colors and paints drawer (its presets are ranked once the drawer is open)
+async function studyPalette(page, id) {
+  await page.evaluate(() => { const d = document.getElementById('drawer-colors'); if (!d.open) d.open = true; });
+  await page.waitForFunction(() => document.querySelectorAll('#presetList .preset').length >= 3 && !document.getElementById('presetList').hasAttribute('aria-busy'), null, { timeout: 20000 }).catch(() => null);
+  await click(page, `#presetList li[data-preset="${id}"] .preset`);
+  await page.waitForFunction(() => { const rows = document.querySelectorAll('#mixList .mix-row'); return rows.length > 0 && [...rows].every((r) => r.querySelector('.mix-badge') && !r.querySelector('.mix-pending')); }, null, { timeout: 30000 }).catch(() => null);
+}
+// the Study tab's study has been made again since `token` was stored as window.__r0
+const restudied = (page) => page.waitForFunction(() => window.Studio && Studio.result() && Studio.result() !== window.__r0 && document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+// pointer events made in the page, for what a mouse cannot do (a pen's pressure, two fingers, a cancelled touch);
+// setPointerCapture is told to let a made-up pointer through (the browser knows no such pointer)
+const letCapture = (page) => page.evaluate(() => { if (window.__capPatched) return; window.__capPatched = true; const sp = Element.prototype.setPointerCapture; Element.prototype.setPointerCapture = function (id) { try { sp.call(this, id); } catch (e) { /* a made-up pointer */ } }; });
+const pointer = (page, events) => page.evaluate((events) => { const p = document.getElementById('ps-paper'); const r = p.getBoundingClientRect(); for (const [type, fx, fy, o] of events) p.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: r.left + r.width * fx, clientY: r.top + r.height * fy, pointerId: 1, pointerType: 'mouse', isPrimary: true, pressure: type === 'pointerup' ? 0 : 0.5, button: type === 'pointermove' ? -1 : 0, buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1, ...(o || {}) })); }, events);
+const line = (from, to, n, o) => [['pointerdown', from[0], from[1], o]].concat(Array.from({ length: n }, (_, i) => ['pointermove', from[0] + (to[0] - from[0]) * (i + 1) / n, from[1] + (to[1] - from[1]) * (i + 1) / n, o]), [['pointerup', to[0], to[1], o]]);
+const overlap = (a, b) => !!a && !!b && a.x < b.r - 1 && b.x < a.r - 1 && a.y < b.b - 1 && b.y < a.b - 1;
+const inside = (a, s, m = 1) => !!a && !!s && a.x >= s.x - m && a.y >= s.y - m && a.r <= s.r + m && a.b <= s.b + m;
 
 export default async function studio(t, site) {
   // ================= A. first visit, desktop: the one-time note, the layout, every brush, the eraser =================
@@ -659,4 +722,752 @@ export default async function studio(t, site) {
     await clean(t, page, 'phone');
     await page.context().close();
   }
+
+  await gaps(t, site);
+}
+
+// ================= I. the coverage critic's gaps: every high and medium one, then the low ones the time allows =================
+export async function gaps(t, site) {
+  // ---- gap (high): the autosave where IndexedDB is off or broken: one word that the painting is not kept, no
+  // one-time note that it is where the database never answered, no welcome, and painting still works
+  await guard(t, 'gap: IndexedDB off or broken', async () => {
+    const countOpenErrors = () => { const open = IDBFactory.prototype.open; IDBFactory.prototype.open = function (...a) { const r = open.apply(this, a); r.addEventListener('error', () => { window.__tries = (window.__tries || 0) + 1; }); return r; }; };
+    const SCEN = [
+      ['IndexedDB absent', () => { Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true }); }, /^The painting cannot be saved in this browser \(its storage is turned off\)\. It stays for this visit only\.$/, false],
+      ['indexedDB.open failing', () => { IDBFactory.prototype.open = function () { const r = {}; setTimeout(() => { r.error = new DOMException('The database is not available.', 'UnknownError'); window.__tries = (window.__tries || 0) + 1; if (r.onerror) r.onerror(new Event('error')); }, 0); return r; }; }, /^The painting could not be saved in this browser\. It stays for this visit only\.$/, false],
+      ['every write refused as the storage is full', () => { IDBObjectStore.prototype.put = function () { window.__tries = (window.__tries || 0) + 1; throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; }, /^The painting could not be saved: browser storage is full\. It stays for this visit only\.$/, true],
+      ['the database left at version 2 without the Studio\'s store', 'v2', /^The painting could not be saved in this browser\. It stays for this visit only\.$/, false],
+    ];
+    for (const [label, init, said, dbAnswers] of SCEN) {
+      const L = `gap: ${label}`;
+      const page = await openPage(site);
+      if (init === 'v2') {
+        await page.evaluate(async () => {
+          await new Promise((r) => { const q = indexedDB.deleteDatabase('portrait-value-studio'); q.onsuccess = q.onerror = q.onblocked = () => r(); });
+          await new Promise((res, rej) => { const r = indexedDB.open('portrait-value-studio', 2); r.onupgradeneeded = () => r.result.createObjectStore('elsewhere'); r.onsuccess = () => { r.result.close(); res(); }; r.onerror = () => rej(r.error); });
+        });
+        await page.addInitScript(countOpenErrors);
+      } else await page.addInitScript(init);
+      await page.reload({ waitUntil: 'load' }); await sleep(300);
+      await watchToasts(page);
+      await tab(page, 'paint'); await studioReady(page);
+      const opened = await toasts(page);
+      const tries0 = await page.evaluate(() => window.__tries || 0);
+      await stroke(page, '#ps-paper', PATH);
+      const ink1 = await alphaInk(page, '#ps-paper');
+      const first = await toastMatch(page, said, 5000);
+      await stroke(page, '#ps-paper', [[0.3, 0.6], [0.7, 0.7]]);
+      const ink2 = await alphaInk(page, '#ps-paper');
+      // the second stroke's save is tried (and fails) before the messages are counted
+      if (label !== 'IndexedDB absent') await page.waitForFunction((n) => (window.__tries || 0) >= n, tries0 + 2, { timeout: 6000 }).catch(() => null);
+      const all = await toasts(page);
+      const notKept = all.filter((m) => /visit only/.test(m));
+      t.check(!!first && notKept.length === 1, `${L}: the first stroke says the painting stays for this visit only, once in two strokes`, all);
+      t.check(!all.some((m) => /back from last time/.test(m)), `${L}: no welcome back`, all);
+      if (dbAnswers) t.note(`${label}: the database answered when the Studio opened, so the one-time note ("saved in this browser as you go") showed (${opened.some((m) => /saved in this browser/.test(m))}) and its flag was spent; the first save then said storage is full. The page cannot know the storage is full before it writes.`);
+      else t.check(!opened.some((m) => /saved in this browser/.test(m)) && (await storageGet(page, NOTICE)) === null, `${L}: no one-time note that the painting is kept, and its flag is not spent`, { opened, flag: await storageGet(page, NOTICE) });
+      t.check(ink1 > 50 && ink2 > ink1, `${L}: both strokes land`, { ink1, ink2 });
+      await clean(t, page, L);
+      await page.context().close();
+    }
+  });
+
+  // ---- gap (high): Undo, Clear and the underdrawing's Undo are saved like strokes: leave and come back, and the
+  // painting is the undone or cleared one; gap (medium): the page going hidden or away saves at once;
+  // gap (low): the wash paint comes back after a reload
+  await guard(t, 'gap: Undo and Clear, then leave', async () => {
+    const page = await openPage(site, { url: '#paint' });
+    await studioReady(page);
+    const back = async () => { await page.reload({ waitUntil: 'load' }); await studioReady(page); };
+    await stroke(page, '#ps-paper', PATH);
+    const one = await alphaInk(page, '#ps-paper');
+    await stroke(page, '#ps-paper', [[0.2, 0.7], [0.8, 0.8]]);
+    const two = await alphaInk(page, '#ps-paper');
+    let since = Date.now(); await click(page, '#ps-undo');
+    const undone = await alphaInk(page, '#ps-paper');
+    let rec = await waitSaved(page, since);
+    await back();
+    { const now = await alphaInk(page, '#ps-paper'); t.check(two > one && undone === one && !!rec && now === one, 'gap: Undo, then leave: the next visit finds the painting as it was undone, without the undone stroke', { one, two, undone, saved: !!rec, now }); }
+    // Clear, twice, then leave
+    since = Date.now(); await click(page, '#ps-clear'); await click(page, '#ps-clear');
+    rec = await waitSaved(page, since);
+    await back();
+    { const now = await alphaInk(page, '#ps-paper'); t.check(!!rec && now === 0, 'gap: Clear twice, then leave: the next visit finds the cleared paper', { saved: !!rec, now }); }
+    // the underdrawing cleared, Undo, then leave
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]');
+    await stroke(page, '#ps-paper', [[0.2, 0.2], [0.6, 0.3]]);
+    const s1 = await alphaInk(page, '#ps-sketch');
+    await click(page, '#ps-sketchClear');
+    since = Date.now(); await click(page, '#ps-undo');
+    rec = await waitSaved(page, since);
+    // and a wash of a paint other than the one first offered, at 45%
+    const sinceWash = Date.now();
+    await click(page, '#ps-canvasBtn'); await click(page, '#ps-root [data-ground="wash"]');
+    const washBtns = await page.evaluate(() => [...document.querySelectorAll('#ps-washRow button')].map((b) => ({ name: b.title, on: b.getAttribute('aria-pressed') === 'true' })));
+    const other = washBtns.findIndex((b) => !b.on);
+    await click(page, `#ps-washRow button:nth-child(${other + 1})`); await setRange(page, 'ps-washStr', 45);
+    const washWas = { name: (await canvasSheet(page)).washName, px: await pixel(page, '#ps-ground', 450, 600) };
+    rec = await waitSaved(page, sinceWash);
+    await back();
+    { const now = await alphaInk(page, '#ps-sketch'); t.check(s1 > 10 && !!rec && now === s1, 'gap: the underdrawing cleared and brought back by Undo, then leave: the next visit has the underdrawing', { s1, now }); }
+    { const c = await canvasSheet(page); const px = await pixel(page, '#ps-ground', 450, 600); t.check(c.ground[0] === 'wash' && c.washName === washWas.name && c.washName === washBtns[other].name && c.washOut === '45%' && px.slice(0, 3).every((v, i) => Math.abs(v - washWas.px[i]) <= 1), 'gap: a wash of the paint chosen, at 45%, comes back after a reload as it was', { before: washWas, after: { name: c.washName, out: c.washOut, px } }); }
+    // the wash paint follows a palette chosen afterwards: one of the new palette's paints, the ground repainted
+    await click(page, '#ps-colorBtn');
+    { const cur = await page.evaluate(() => document.getElementById('ps-palette').value); await page.selectOption('#ps-palette', cur === 'primary' ? 'zorn' : 'primary'); }
+    { const after = await page.evaluate(() => ({ name: document.getElementById('ps-washName').textContent, paints: [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.title), offered: document.querySelectorAll('#ps-washRow button').length })); const px = await pixel(page, '#ps-ground', 450, 600); t.check(after.paints.includes(after.name) && after.offered === after.paints.length && px.slice(0, 3).some((v, i) => Math.abs(v - washWas.px[i]) > 1), 'gap: after another palette is chosen the wash is one of its paints and the ground is repainted with it', { after, px, was: washWas }); }
+    // the page going hidden (a phone switching apps) saves the last stroke at once, without waiting for the delay
+    await stroke(page, '#ps-paper', [[0.6, 0.2], [0.8, 0.4]]);
+    let win = await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); const a = Date.now(); document.dispatchEvent(new Event('visibilitychange')); const b = Date.now(); delete document.visibilityState; return [a, b]; });
+    rec = await waitSaved(page, win[0] - 1, 4000);
+    if (rec && rec.savedAt < win[0]) t.note('the page going hidden: the stroke\'s own delayed save came first (a slow machine), so the save on hiding could not be told apart');
+    else t.check(!!rec && rec.savedAt >= win[0] && rec.savedAt <= win[1], 'gap: the page going hidden saves the last stroke at once (its record is taken during the event), not 0.8 s later', { win, savedAt: rec && rec.savedAt });
+    // the page going away (pagehide) likewise
+    await stroke(page, '#ps-paper', [[0.6, 0.6], [0.8, 0.9]]);
+    const inkLast = await alphaInk(page, '#ps-paper');
+    win = await page.evaluate(() => { const a = Date.now(); window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })); return [a, Date.now()]; });
+    rec = await waitSaved(page, win[0] - 1, 4000);
+    if (rec && rec.savedAt < win[0]) t.note('pagehide: the stroke\'s own delayed save came first (a slow machine)');
+    else t.check(!!rec && rec.savedAt >= win[0] && rec.savedAt <= win[1], 'gap: pagehide saves the last stroke at once', { win, savedAt: rec && rec.savedAt });
+    await back();
+    t.check((await alphaInk(page, '#ps-paper')) === inkLast, 'gap: after those saves the next visit has the last stroke', { inkLast, now: await alphaInk(page, '#ps-paper') });
+    await clean(t, page, 'gap: Undo and Clear saved, saves on hiding');
+    await page.context().close();
+  });
+
+  // ---- gap (high): what the PNG holds: the underdrawing when shown and not when hidden, the paint in its color, the
+  // gray ground; and inside another site's frame the save dialog, with Ctrl+Z behind it
+  await guard(t, 'gap: what Save as PNG holds', async () => {
+    const page = await openPage(site, { url: '#paint' });
+    await studioReady(page);
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]'); await click(page, '#ps-root [data-shard="soft"]');
+    await stroke(page, '#ps-paper', [[0.1, 0.1], [0.45, 0.16]], { steps: 12 });
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="chisel"]'); await click(page, '#ps-root [data-chisel="l"]');
+    await stroke(page, '#ps-paper', [[0.5, 0.78], [0.9, 0.84]], { steps: 12 });
+    const spot = [0.7, 0.81];
+    const want = await page.evaluate(([fx, fy]) => { const p = document.getElementById('ps-paper'), g = document.getElementById('ps-ground'); const x = Math.round(p.width * fx), y = Math.round(p.height * fy); const a = [...p.getContext('2d').getImageData(x, y, 1, 1).data], b = [...g.getContext('2d').getImageData(x, y, 1, 1).data]; return { paint: a, ground: b, over: [0, 1, 2].map((i) => Math.round(a[i] * a[3] / 255 + b[i] * (1 - a[3] / 255))) }; }, spot);
+    const BOXES = [[0.08, 0.07, 0.4, 0.12], [0.48, 0.74, 0.45, 0.14]];
+    const r1 = await savePngRead(page, { boxes: BOXES, points: [spot] });
+    t.check(!!r1 && r1.marks[0] > 50 && r1.marks[1] > 500 && want.paint[3] > 200 && r1.px[0].slice(0, 3).every((v, i) => Math.abs(v - want.over[i]) <= 3), 'gap: Save as PNG holds the underdrawing where it was drawn, and the paint in its own color over the ground', { r1, want });
+    await click(page, '#ps-root [data-sketch-show="0"]');
+    const r2 = await savePngRead(page, { boxes: BOXES });
+    t.check(!!r2 && r2.marks[0] === 0 && r2.marks[1] > 500, 'gap: with the underdrawing hidden the PNG leaves it out and keeps the paint', r2);
+    await click(page, '#ps-root [data-ground="gray"]');
+    const r3 = await savePngRead(page, { points: [[0.005, 0.005], [0.02, 0.5], [0.98, 0.98]] });
+    t.check(!!r3 && r3.px.every((p) => p[0] === 140 && p[1] === 138 && p[2] === 134 && p[3] === 255), 'gap: on the gray ground the PNG\'s bare canvas is the mid gray (140, 138, 134)', r3 && r3.px);
+    await clean(t, page, 'gap: what the PNG holds');
+    await page.context().close();
+
+    // inside another site's sandboxed frame the download may be blocked without a word: the picture opens in the dialog too
+    const outer = await openPage(site, { sandbox: {}, url: 'index.html#paint' });
+    const fr = outer.app;
+    await fr.waitForFunction(() => window.PaintStudio && document.body.classList.contains('tab-paint'), null, { timeout: 15000 }).catch(() => null);
+    await fr.evaluate(() => PaintStudio.ready());
+    await stroke(outer, '#ps-paper', PATH, { frame: fr });
+    const before = await alphaInk(fr, '#ps-paper');
+    await fr.evaluate(() => document.getElementById('ps-save').click());
+    await fr.waitForFunction(() => { const d = document.getElementById('saveDialog'), i = document.getElementById('saveImg'); return d.open && i.src.startsWith('blob:') && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => null);
+    const dlg = await fr.evaluate(() => { const i = document.getElementById('saveImg'); return { open: document.getElementById('saveDialog').open, src: i.src.slice(0, 5), name: document.getElementById('saveName').textContent, w: i.naturalWidth, h: i.naturalHeight, focus: document.activeElement && document.activeElement.id }; });
+    t.check(dlg.open && dlg.src === 'blob:' && dlg.name === 'painting.png' && dlg.w === 900 && dlg.h === 1200, 'gap: inside another site\'s frame the Studio\'s Save as PNG also opens the picture in the save dialog, named painting.png', dlg);
+    await outer.keyboard.press('Control+z');
+    const after = await alphaInk(fr, '#ps-paper');
+    const kept = before > 50 && after === before;
+    t.check(kept, 'gap: Ctrl+Z while the save dialog is open leaves the painting behind it alone (the dialog is modal)', { before, after, focus: dlg.focus });
+    if (!kept) t.finding({ title: 'Ctrl+Z pressed while the Studio\'s save dialog is open undoes the last stroke behind the modal dialog', severity: 'medium', steps: 'Open the site inside another site\'s sandboxed frame (an artifact viewer; here <iframe sandbox="allow-scripts allow-modals">), Studio tab, paint a stroke, Canvas icon, Save as PNG: the save-by-hand dialog opens over the page. Press Ctrl+Z (⌘+Z) before closing it.', expected: 'Nothing behind the modal dialog changes, as on the Study tab (app.js: "the save dialog is modal: Esc only closes it, and nothing behind it should change").', actual: `The stroke behind the dialog is undone (paper ink ${before} → ${after}), with no way to redo it; the dialog still shows the picture with the stroke.`, cause: 'js/painting.js:534-540, the Studio\'s keydown listener undoes on Ctrl/⌘+Z whenever the Studio is active and the focus is not in a field; it has no check of #saveDialog.open like js/app.js:2165 has' });
+    await outer.keyboard.press('Escape');
+    await fr.waitForFunction(() => !document.getElementById('saveDialog').open, null, { timeout: 3000 }).catch(() => null);
+    t.check(!(await fr.evaluate(() => document.getElementById('saveDialog').open)), 'gap: Escape closes the save dialog');
+    await clean(t, outer, 'gap: Save as PNG in a sandboxed frame');
+    await outer.context().close();
+  });
+
+  // ---- gap (medium): a stroke and a ground change made before the saved painting is back (restore() still running)
+  await guard(t, 'gap: changes while the saved painting is restored', async () => {
+    const page = await openPage(site, { url: '#paint' });
+    await studioReady(page);
+    const RED = { w: 900, h: 1200, paper: { __blob: 'png' }, canvas: { ground: 'raw', weave: 'off', washStr: 0.3 }, sketchShown: true };
+    const red = () => inkIn(page, '#ps-paper', 0.12, 0.09, 0.3, 0.22); // the record's red square (100..400 px of 900 × 1200)
+    const early = () => inkIn(page, '#ps-paper', 0.55, 0.55, 0.3, 0.3);
+    await putRecord(page, RED);
+    // as fast as a visitor can paint once the page has loaded
+    await page.reload({ waitUntil: 'load' });
+    const fast = { restoredAtLoad: await restoreDone(page) };
+    const since = Date.now();
+    await stroke(page, '#ps-paper', [[0.6, 0.6], [0.8, 0.8]]); await studioReady(page);
+    Object.assign(fast, { red: await red(), early: await early() });
+    t.check(fast.red > 1000 && fast.early > 50, 'gap: a stroke made as soon as the page has loaded lands on the saved painting, which stays', fast);
+    await waitSaved(page, since);
+    // with the database slow to open (1.5 s here, as a phone waking it can be): a stroke and a ground change made while
+    // the saved painting is still on its way
+    await putRecord(page, RED);
+    await page.addInitScript(() => {
+      const open = IDBFactory.prototype.open; let first = true;
+      IDBFactory.prototype.open = function (...a) {
+        const r = open.apply(this, a);
+        if (!first) return r;
+        first = false; let h = null;
+        Object.defineProperty(r, 'onsuccess', { configurable: true, get: () => h, set: (f) => { h = f; } });
+        r.addEventListener('success', (e) => setTimeout(() => h && h.call(r, e), 1500));
+        return r;
+      };
+    });
+    await page.reload({ waitUntil: 'load' });
+    const slow = { pending: !(await restoreDone(page)) };
+    await stroke(page, '#ps-paper', [[0.6, 0.6], [0.8, 0.8]]);
+    await click(page, '#ps-root [data-ground="gray"]');
+    await studioReady(page);
+    Object.assign(slow, { toast: await text(page, '#toast'), red: await red(), early: await early(), ground: (await canvasSheet(page)).ground[0] });
+    await page.reload({ waitUntil: 'load' }); await studioReady(page);
+    slow.redNextVisit = await red();
+    if (!slow.pending) t.note('the slow database did not hold the restore back; the check below is not meaningful this run');
+    const kept = slow.red > 1000 && slow.redNextVisit > 1000;
+    t.check(kept, 'gap: with a slow database, a stroke made while the saved painting is still being restored does not replace the saved painting', slow);
+    if (!kept) t.finding({ title: 'A stroke made while the saved painting is still loading overwrites it: the painting is lost, and the Studio says "Your painting is back from last time" over the new stroke alone', severity: 'high', steps: 'Have a painting saved (paint, wait a second). Reload on a device where opening IndexedDB is slow (simulated here: the first indexedDB.open request\'s success delayed by 1.5 s with an init script). As the Studio appears, paint a stroke at once. Wait, then reload again.', expected: 'The saved painting comes back (with the new stroke on it, or the stroke refused until it is back), and the record is never replaced by an unrestored paper.', actual: `The saved painting is gone (its red square: ${slow.red} inked pixels after the restore, ${slow.redNextVisit} on the next visit), the paper holds only the early stroke (${slow.early}), and the toast says "${slow.toast}". The early stroke's autosave (800 ms) wrote the blank paper plus the stroke before restore() read the record, so restore() brought back that.`, cause: 'js/painting.js:349-361 and 457-482: pointerdown and saveSoon()/saveNow() do not wait for restore() (line 485, the `ready` promise at 875); a save that lands before restore() reads the record (lines 488-498) replaces it' });
+    t.note(`a change made before the restore: the early stroke ${slow.early > 50 ? 'is on the paper' : 'is gone'} after it; the ground clicked to gray ${slow.ground === 'gray' ? 'stays gray' : `is reset to the saved "${slow.ground}"`}`);
+    await clean(t, page, 'gap: changes while the painting is restored');
+    await page.context().close();
+  });
+
+  // ---- gap (medium): Ctrl/⌘+Z undoes in the area in front only: a Study line and a Studio stroke; then gap (medium):
+  // Copy the Study lines with a 4 × 4 grid, measures and a plumb line, in a soft charcoal, on a turned paper, and Undo;
+  // gap (medium): Values and Blocks are the Study tab's own pictures, and follow its settings; gap (medium): a photo
+  // dropped or pasted, and text dropped, while the Studio is open
+  await guard(t, 'gap: the Study tab and the Studio side by side', async () => {
+    const page = await openPage(site);
+    await click(page, '#gridBtn'); await click(page, '.tool-btn[data-tool="line"]');
+    await stroke(page, '#cv-orig', [[0.2, 0.2], [0.8, 0.6]]);
+    const m0 = await markCount(page);
+    await tab(page, 'paint'); await studioReady(page);
+    await stroke(page, '#ps-paper', PATH);
+    const k1 = await alphaInk(page, '#ps-paper');
+    await page.keyboard.press('Control+z');
+    { const a = { paper: await alphaInk(page, '#ps-paper'), marks: await markCount(page) }; t.check(m0 === 5 && k1 > 50 && a.paper === 0 && a.marks === 5, 'gap: Ctrl+Z in the Studio undoes its stroke and leaves the Study tab\'s line alone', { m0, k1, ...a }); }
+    await stroke(page, '#ps-paper', PATH);
+    const k2 = await alphaInk(page, '#ps-paper');
+    await tab(page, 'study'); await page.keyboard.press('Control+z');
+    const m1 = await markCount(page);
+    await tab(page, 'paint');
+    t.check(m1 === 4 && (await alphaInk(page, '#ps-paper')) === k2, 'gap: Ctrl+Z on the Study tab takes back its line and leaves the Studio\'s stroke alone', { m1, k2, paper: await alphaInk(page, '#ps-paper') });
+    await click(page, '#ps-colorBtn'); await page.focus('#ps-palette'); await page.keyboard.press('Control+z');
+    { const p = await alphaInk(page, '#ps-paper'); t.note(`Ctrl+Z with the Paints sheet's palette list focused ${p === k2 ? 'does not undo (the Studio treats a select as typing; the README says only "Ctrl/⌘+Z")' : 'undoes the last stroke'}`); }
+    await page.keyboard.press('Escape');
+    await clean(t, page, 'gap: Ctrl+Z on each tab');
+
+    // the Study tab gets a 4 × 4 grid, two measures and a plumb line
+    await tab(page, 'study');
+    await click(page, '#gridBtn');
+    await click(page, '.tool-btn[data-tool="measure"]');
+    await stroke(page, '#cv-orig', [[0.1, 0.9], [0.4, 0.95]]); await stroke(page, '#cv-orig', [[0.55, 0.86], [0.9, 0.9]]);
+    await click(page, '.tool-btn[data-tool="plumb"]');
+    { const b = await page.locator('#cv-orig').boundingBox(); await page.mouse.click(b.x + b.width * 0.62, b.y + b.height * 0.38); }
+    await click(page, '.tool-btn[data-tool="plumb"]');
+    const segs = await page.evaluate(() => Studio.marks());
+    const grid = [0.25, 0.5, 0.75], isGrid = (v) => grid.some((g) => Math.abs(v - g) < 1e-9);
+    const plumb = segs.find((q) => q[0] === q[2] && q[1] === 0 && q[3] === 1 && !isGrid(q[0]));
+    const level = segs.find((q) => q[1] === q[3] && q[0] === 0 && q[2] === 1 && !isGrid(q[1]));
+    const measures = segs.filter((q) => !(q[0] === q[2] && q[1] === 0 && q[3] === 1) && !(q[1] === q[3] && q[0] === 0 && q[2] === 1));
+    t.check(segs.length === 10 && !!plumb && !!level && measures.length === 2, 'gap: the Study tab holds a 4 × 4 grid, two measures and a plumb line with its level', segs);
+    await tab(page, 'paint');
+    // what Copy the Study lines left on the underdrawing, where the marks are: bands down the grid and plumb lines,
+    // across the level, around each measure's middle, and the ink's own bounding box on the paper
+    const copyRead = () => page.evaluate(([plumb, level, measures]) => {
+      const prep = Studio.prep(), c = document.getElementById('ps-sketch'), W = c.width, H = c.height;
+      const k = Math.min(W / prep.w, H / prep.h), w = prep.w * k, h = prep.h * k, ox = (W - w) / 2, oy = (H - h) / 2;
+      const d = c.getContext('2d').getImageData(0, 0, W, H).data, a = (x, y) => d[(y * W + x) * 4 + 3] > 8;
+      const vband = (fx) => { const x = Math.round(ox + fx * w); let n = 0; for (let y = Math.round(oy); y < oy + h; y++) for (let dx = -2; dx <= 2; dx++) if (x + dx >= 0 && x + dx < W && a(x + dx, y)) n++; return +(n / h).toFixed(2); };
+      const hband = (fy) => { const y = Math.round(oy + fy * h); let n = 0; for (let x = Math.round(ox); x < ox + w; x++) for (let dy = -2; dy <= 2; dy++) if (y + dy >= 0 && y + dy < H && a(x, y + dy)) n++; return +(n / w).toFixed(2); };
+      const near = (fx, fy) => { const x0 = Math.round(ox + fx * w), y0 = Math.round(oy + fy * h); let n = 0; for (let y = y0 - 4; y <= y0 + 4; y++) for (let x = x0 - 4; x <= x0 + 4; x++) if (x >= 0 && y >= 0 && x < W && y < H && a(x, y)) n++; return n; };
+      let ink = 0, L = W, R = -1, T = H, B = -1;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (a(x, y)) { ink++; if (x < L) L = x; if (x > R) R = x; if (y < T) T = y; if (y > B) B = y; }
+      return { W, H, aspect: +(prep.w / prep.h).toFixed(3), ink, quarters: [0.25, 0.5, 0.75].map(vband), eighths: [0.125, 0.375].map(vband), across: [0.25, 0.75].map(hband), plumb: vband(plumb[0]), level: hband(level[1]), measures: measures.map((q) => near((q[0] + q[2]) / 2, (q[1] + q[3]) / 2)), box: { L, R: W - 1 - R, T, B: H - 1 - B, w: R - L + 1, h: B - T + 1 } };
+    }, [plumb, level, measures]);
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]');
+    await click(page, '#ps-sketchClear');
+    await click(page, '#ps-sketchFromStudy');
+    const hb = await copyRead();
+    t.check(hb.quarters.every((v) => v > 1) && hb.across.every((v) => v > 1) && hb.eighths.every((v) => v < hb.quarters[0] / 5), 'gap: Copy the Study lines draws the 4 × 4 grid at the quarters and nothing at the eighths', hb);
+    t.check(hb.plumb > 1 && hb.level > 1 && hb.measures.every((n) => n > 5), 'gap: Copy the Study lines draws the plumb line, its level and both measures', hb);
+    await click(page, '#ps-undo');
+    t.check((await alphaInk(page, '#ps-sketch')) === 0, 'gap: Undo after Copy the Study lines takes back just the copy', await alphaInk(page, '#ps-sketch'));
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-slead="charcoal"]'); await click(page, '#ps-root [data-shard="soft"]'); await setRange(page, 'ps-sketchSize', 30);
+    await click(page, '#ps-sketchFromStudy');
+    const soft = await copyRead();
+    t.check(soft.ink > hb.ink * 3 && hb.ink > 100, 'gap: the copy is drawn with the underdrawing\'s lead, hardness and size: soft charcoal 30 px lays far more than HB 3 px', { soft: soft.ink, hb: hb.ink });
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-slead="graphite"]'); await click(page, '#ps-root [data-shard="medium"]'); await setRange(page, 'ps-sketchSize', 3);
+    // on the turned paper the lines are fitted as the reference would be: as large as fits, centred
+    await click(page, '#ps-orient'); await click(page, '#ps-sketchClear'); await click(page, '#ps-sketchFromStudy');
+    const land = await copyRead();
+    const b = land.box, fitsTall = land.aspect < land.W / land.H;
+    const centred = fitsTall ? Math.abs(b.L - b.R) <= 10 && b.T <= 6 && b.B <= 6 : Math.abs(b.T - b.B) <= 10 && b.L <= 6 && b.R <= 6;
+    t.check(land.W === 1200 && centred && Math.abs(b.w / b.h - land.aspect) < 0.03, 'gap: on the turned paper the Study lines are fitted as large as fits and centred', land);
+    await click(page, '#ps-orient');
+    await clean(t, page, 'gap: Copy the Study lines, every kind of mark');
+
+    // Values and Blocks are the Study tab's own pictures, and follow a change made there
+    await click(page, '#ps-refBtn'); await click(page, '#ps-refSheet [data-ref-view="values"]');
+    const v = await refSameAs(page, 'valueImage');
+    t.check(v.diff === 0, 'gap: Values is the Study tab\'s own three-value study, pixel for pixel', v);
+    await click(page, '#ps-refSheet [data-ref-view="blocks"]');
+    const bl = await refSameAs(page, 'blockImage'), d3 = (await refInfo(page)).distinct;
+    t.check(bl.diff === 0, 'gap: Blocks is the Study tab\'s own color-block study, pixel for pixel', bl);
+    await tab(page, 'study');
+    await page.evaluate(() => { window.__r0 = Studio.result(); });
+    await setRange(page, 'colors', 1); await restudied(page);
+    await tab(page, 'paint');
+    { const bl1 = await refSameAs(page, 'blockImage'), d1 = (await refInfo(page)).distinct; t.check(bl1.diff === 0 && d1 < d3, 'gap: one color per value set on the Study tab: Blocks shows that study, with fewer colors', { bl1, before: d3, after: d1 }); }
+    await tab(page, 'study'); await click(page, '[data-block-view="palette"]');
+    await tab(page, 'paint');
+    { const same = await refSameAs(page, 'blockImage'); t.note(`with the Study tab's block view set to the palette's mixes, the Studio's Blocks ${same.diff === 0 ? 'still shows the photo\'s color blocks (Studio.result().blockImage), not the palette view' : 'differs from the photo\'s color blocks'}`); }
+    await tab(page, 'study'); await click(page, '[data-block-view="photo"]'); await setRange(page, 'colors', 3);
+    await tab(page, 'paint');
+    await clean(t, page, 'gap: Values and Blocks as the Study tab makes them');
+
+    // a photo dropped on the paper: the Study tab takes it, the Studio stays open and the reference follows it
+    const dropped = await makeImage(page, { width: 500, height: 700, name: 'drop.png' });
+    await dropFiles(page, '#ps-paper', [dropped]);
+    await photoArrived(page, 'drop.png', 500 / 700);
+    let r = await refInfo(page);
+    t.check(r.tab === 'paint' && r.kind === 'studio' && /Study tab/.test(r.name) && Math.abs(r.w / r.h - 5 / 7) < 0.02 && /drop\.png/.test(r.source), 'gap: a photo dropped on the Studio goes to the Study tab and the reference follows it, the Studio staying open', r);
+    // a photo pasted while a dealt portrait is the reference: the pasted photo becomes the reference
+    await click(page, '#ps-refSheet [data-ref-kind="painting"]');
+    await page.waitForFunction(() => /after /.test(document.getElementById('ps-refName').textContent), null, { timeout: 10000 }).catch(() => null);
+    await pasteNow(page, await makeImage(page, { width: 700, height: 500, name: 'paste.png' }));
+    await photoArrived(page, 'paste.png', 700 / 500);
+    r = await refInfo(page);
+    t.check(r.tab === 'paint' && r.kind === 'studio' && r.anotherHidden && Math.abs(r.w / r.h - 1.4) < 0.02 && /paste\.png/.test(r.source), 'gap: a photo pasted while a dealt portrait is the reference makes the pasted photo the reference', r);
+    // text dropped on the paper is refused with a word over the studio, and a dealt portrait stays the reference
+    await click(page, '#ps-refSheet [data-ref-kind="painting"]');
+    await page.waitForFunction(() => /after /.test(document.getElementById('ps-refName').textContent), null, { timeout: 10000 }).catch(() => null);
+    const dealt = await refInfo(page);
+    await armToast(page); await dropText(page, '#ps-paper', 'hello');
+    const said = await toastMatch(page, /text, not a picture/, 3000);
+    r = await refInfo(page);
+    t.check(!!said && (await page.evaluate(() => document.getElementById('toast').classList.contains('show'))) && r.tab === 'paint' && r.kind === 'painting' && r.name === dealt.name && !r.anotherHidden, 'gap: text dropped on the Studio is refused with a word over it, and the dealt portrait stays the reference', { said, r });
+    await clean(t, page, 'gap: a photo dropped or pasted on the Studio');
+    await page.context().close();
+  });
+
+  // ---- gap (medium): the reference dragged to a corner, then the window gets smaller (or the phone turns); and gap
+  // (medium): a resize mid-session at 4× with a pan: the paper re-fits, the strokes stay, a stroke lands under the pointer
+  await guard(t, 'gap: the window changes size', async () => {
+    const page = await openPage(site, { url: '#paint' });
+    await studioReady(page);
+    const resized = async (vp) => { const w0 = (await box(page, '#ps-stage')).w; await page.setViewportSize(vp); await page.waitForFunction((w) => Math.abs(document.getElementById('ps-stage').getBoundingClientRect().width - w) > 20, w0, { timeout: 5000 }).catch(() => null); await sleep(200); };
+    const dragFar = async () => { const fb = await box(page, '#ps-refFig .ps-frame'); await page.mouse.move(fb.x + fb.w / 2, fb.y + fb.h / 2); await page.mouse.down(); await page.mouse.move(fb.x + fb.w / 2 + 1500, fb.y + fb.h / 2 + 1500, { steps: 6 }); await page.mouse.up(); };
+    await dragFar();
+    const big = { fig: await box(page, '#ps-refFig'), st: await box(page, '#ps-stage') };
+    await resized({ width: 800, height: 600 });
+    const small = { fig: await box(page, '#ps-refFig'), st: await box(page, '#ps-stage') };
+    const okSmall = inside(small.fig, small.st);
+    t.check(inside(big.fig, big.st) && okSmall, 'gap: a reference dragged to the bottom-right corner stays on the stage when the window gets smaller (1400 × 900 to 800 × 600)', { big, small });
+    await click(page, '#ps-refBtn'); await click(page, '#ps-refSheet [data-ref-show="0"]'); await click(page, '#ps-refSheet [data-ref-show="1"]'); await click(page, '#ps-refBtn');
+    const reshown = { fig: await box(page, '#ps-refFig'), st: await box(page, '#ps-stage') };
+    // a phone held upright, the reference dragged to its corner, then turned on its side
+    await resized(PHONE); await dragFar();
+    await resized({ width: 844, height: 390 });
+    const turned = { fig: await box(page, '#ps-refFig'), st: await box(page, '#ps-stage') };
+    const okTurned = inside(turned.fig, turned.st);
+    t.check(okTurned, 'gap: a reference dragged to the corner of an upright phone stays on the stage when the phone is turned (390 × 844 to 844 × 390)', turned);
+    if (!okSmall || !okTurned) t.finding({ title: 'A reference dragged to a corner is left off the stage when the window gets smaller or a phone is turned, and nothing brings it back', severity: 'medium', steps: 'Studio tab at 1400 × 900: drag the floating reference to the bottom-right corner. Make the window 800 × 600 (or: on a 390 × 844 phone drag it to the bottom-right, then turn the phone to 844 × 390). Then Reference icon, Hidden, Shown.', expected: 'The reference stays inside the stage (its position clamped again on a resize, as it is during a drag), so it can still be seen and dragged.', actual: `At 800 × 600 the reference is drawn at ${Math.round(small.fig.x)}, ${Math.round(small.fig.y)} to ${Math.round(small.fig.r)}, ${Math.round(small.fig.b)} while the stage ends at ${Math.round(small.st.r)}, ${Math.round(small.st.b)}: ${overlap(small.fig, small.st) ? 'partly' : 'entirely'} outside it, where the stage clips it. Hidden then Shown leaves it there (${Math.round(reshown.fig.y)} to ${Math.round(reshown.fig.b)} against a stage ending at ${Math.round(reshown.st.b)}). On the turned phone it is at ${Math.round(turned.fig.x)}, ${Math.round(turned.fig.y)} to ${Math.round(turned.fig.r)}, ${Math.round(turned.fig.b)} on a stage of ${Math.round(turned.st.r)} × ${Math.round(turned.st.b)}. Only a reload resets it.`, cause: 'js/painting.js:650-656 clamps ref.x/ref.y only while dragging; layout() (152-156) and sizeReference() (605-616) never clamp the translate again when the stage shrinks' });
+
+    // mid-session: a painting at 4× panned to its bottom-right corner, the window turned to a phone and back
+    await resized(DESKTOP);
+    await click(page, '#ps-fitBtn');
+    await stroke(page, '#ps-paper', PATH);
+    const ink = await alphaInk(page, '#ps-paper');
+    await click(page, '#ps-viewBtn'); await setRange(page, 'ps-zoom', 400); await setRange(page, 'ps-panX', 100); await setRange(page, 'ps-panY', 100); await click(page, '#ps-viewBtn');
+    const corner = (wb, st) => wb.r <= st.r + 1 && wb.r >= st.r - 100 && wb.b <= st.b + 1 && wb.b >= st.b - 100;
+    for (const vp of [PHONE, { width: 844, height: 390 }, DESKTOP]) {
+      await resized(vp);
+      const s = { wrap: await box(page, '#ps-paperWrap'), st: await box(page, '#ps-stage'), ink: await alphaInk(page, '#ps-paper'), zoom: await text(page, '#ps-zoomOut') };
+      t.check(s.ink === ink && s.zoom === '400%' && corner(s.wrap, s.st), `gap: resized to ${vp.width} × ${vp.height} at 4× panned to the bottom-right: the painting is intact and that corner is still on screen`, s);
+    }
+    const before = await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12);
+    await stroke(page, '#ps-paper', [[0.92, 0.92], [0.97, 0.95]]);
+    t.check((await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12)) > before + 50, 'gap: after the resizes a stroke at 4× lands under the pointer', { before, after: await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12) });
+    await click(page, '#ps-fitBtn');
+    t.check(inside(await box(page, '#ps-paperWrap'), await box(page, '#ps-stage')), 'gap: Fit to screen after the resizes puts the whole paper on the stage', { wrap: await box(page, '#ps-paperWrap'), st: await box(page, '#ps-stage') });
+    await clean(t, page, 'gap: the window changes size');
+    await page.context().close();
+  });
+
+  // ---- gap (medium): the Studio's palette in Simple and on the switch to Advanced; gap (medium): a palette chosen in
+  // the Studio stops following the Study tab, one picked there before that is followed, and a mix in the well meanwhile
+  await guard(t, 'gap: the Studio palette in Simple and Advanced', async () => {
+    const page = await openPage(site, { storage: { 'portrait-value-studio.mode': 'simple', 'portrait-value-studio.myPaints': ['TW', 'YO', 'CRL', 'IB', 'UB'] } });
+    await tab(page, 'paint'); await studioReady(page);
+    await click(page, '#ps-colorBtn');
+    const pal = () => page.evaluate(() => { const s = document.getElementById('ps-palette'); const cur = StudioPalette.current(); return { value: s.value, name: (s.options[s.selectedIndex] || {}).textContent, ids: [...s.options].map((o) => o.value), study: cur && cur.name, well: document.getElementById('ps-wellParts').textContent, paints: [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.dataset.code) }; });
+    const simple = await pal();
+    t.check(!!simple.study && simple.name === simple.study && ['Zorn', 'Three primaries', 'Rembrandt (earths)'].includes(simple.study), 'gap: in Simple the Studio\'s palette follows the Study tab\'s, the best of its three', simple);
+    t.note(`in Simple the Studio's palette list offers ${simple.ids.length} (${simple.ids.join(', ')}), My paints among them, where the Study tab offers three and hides My paints; the README's Simple paragraph speaks of the Study tab only`);
+    await click(page, `#ps-paints .ps-paint[data-code="${simple.paints[0]}"]`); await click(page, `#ps-paints .ps-paint[data-code="${simple.paints[1]}"]`);
+    const wellSimple = (await pal()).well;
+    await page.evaluate(() => { window.__r0 = Studio.result(); });
+    await click(page, '[data-mode="advanced"]'); await restudied(page);
+    const adv = await pal();
+    t.check(adv.name === adv.study, 'gap: switched to Advanced, the Studio\'s palette still follows the Study tab\'s (now the best of ten)', adv);
+    t.note(`Simple → Advanced with the Studio open: its palette went from "${simple.name}" to "${adv.name}", and the well holding "${wellSimple}" ${/^Empty/.test(adv.well) ? 'was emptied without a word' : `still holds "${adv.well}"`} (the README says the palette follows the Study tab's, and nothing of the well)`);
+    await click(page, `#ps-paints .ps-paint[data-code="${adv.paints[0]}"]`); await click(page, `#ps-paints .ps-paint[data-code="${adv.paints[1]}"]`);
+    const wellAdv = (await pal()).well;
+    const target = adv.study === 'Zorn' ? 'sorolla' : 'zorn';
+    await tab(page, 'study'); await studyPalette(page, target);
+    await tab(page, 'paint'); await click(page, '#ps-colorBtn');
+    const followed = await pal();
+    t.check(followed.value === target && followed.name === followed.study, `gap: a palette picked on the Study tab (${target}) is followed by the Studio until one is chosen there`, followed);
+    t.note(`a palette picked on the Study tab while the Studio's well held "${wellAdv}": the well ${/^Empty/.test(followed.well) ? 'was emptied without a word' : 'kept it'}`);
+    await page.selectOption('#ps-palette', 'monet');
+    await tab(page, 'study'); await studyPalette(page, 'rembrandt');
+    await tab(page, 'paint'); await click(page, '#ps-colorBtn');
+    const held = await pal(), monet = await page.evaluate(() => Paints.PRESETS.find((x) => x.id === 'monet').paints.join());
+    t.check(held.value === 'monet' && held.paints.join() === monet && held.study === 'Rembrandt (earths)', 'gap: a palette chosen in the Studio (Monet) stays, with its paints, when the Study tab then picks another (Rembrandt)', held);
+    await clean(t, page, 'gap: the Studio palette in Simple and Advanced');
+    await page.context().close();
+  });
+
+  // ---- gap (medium): the narrowest phone, a phone on its side and the 760 px line: the strip, the stage, the
+  // status pill beside the reference, a stroke and the Paints sheet
+  await guard(t, 'gap: narrow and short windows', async () => {
+    const overlapped = [];
+    for (const vp of [{ width: 320, height: 568 }, PHONE, { width: 844, height: 390 }, { width: 759, height: 700 }, { width: 760, height: 700 }]) {
+      const L = `gap: ${vp.width} × ${vp.height}`;
+      const page = await openPage(site, { viewport: vp, url: '#paint' });
+      await studioReady(page);
+      // the longest status there is (the charcoal pencil), beside the reference at its default size
+      await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="pencil"]'); await click(page, '#ps-pencilOpts [data-lead="charcoal"]'); await click(page, '#ps-brushBtn');
+      const lay = await page.evaluate(() => { const R = (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, r: r.right, b: r.bottom }; }; const btns = [...document.querySelectorAll('#ps-root .ps-strip button')].filter((b) => getComputedStyle(b).display !== 'none').map(R); return { strip: R(document.querySelector('#ps-root .ps-strip')), stage: R(document.getElementById('ps-stage')), btns: btns.length, minW: Math.min(...btns.map((b) => b.w)), minH: Math.min(...btns.map((b) => b.h)), off: btns.filter((b) => b.x < 0 || b.y < 0 || b.r > innerWidth + 0.5 || b.b > innerHeight + 0.5).length, status: R(document.getElementById('ps-status')), statusText: document.getElementById('ps-status').textContent, fig: R(document.getElementById('ps-refFig')), exit: getComputedStyle(document.getElementById('ps-exit')).display, topbar: getComputedStyle(document.querySelector('.topbar')).display }; });
+      const wide = vp.width >= 760, full = vp.width < 760 || vp.height < 560;
+      t.check((await hscroll(page)) <= 0 && lay.off === 0 && lay.btns === (full ? 10 : 9) && lay.minW >= 24 && lay.minH >= 24, `${L}: every strip icon is on screen and at least 24 × 24 px, with no horizontal scroll`, lay);
+      t.check(wide ? lay.strip.h > lay.strip.w && lay.strip.x < 100 : lay.strip.w > lay.strip.h && lay.strip.b >= vp.height - 2, `${L}: the strip runs ${wide ? 'down the left' : 'along the bottom'}`, lay.strip);
+      t.check(lay.stage.h >= 240 && (full ? lay.exit !== 'none' && lay.topbar === 'none' : lay.exit === 'none' && lay.topbar !== 'none'), `${L}: the stage is at least 240 px tall, and ${full ? 'the header steps aside, the exit arrow in the strip' : 'the header stays, with no exit arrow'}`, lay);
+      const clear = !overlap(lay.status, lay.fig);
+      t.check(clear, `${L}: the status pill and the floating reference do not overlap`, { status: lay.status, fig: lay.fig, text: lay.statusText });
+      if (!clear) { overlapped.push(`${vp.width} × ${vp.height}: pill ${Math.round(lay.status.x)}–${Math.round(lay.status.r)} × ${Math.round(lay.status.y)}–${Math.round(lay.status.b)}, reference ${Math.round(lay.fig.x)}–${Math.round(lay.fig.r)} × ${Math.round(lay.fig.y)}–${Math.round(lay.fig.b)}`); await screenshot(page, `studio-gap-status-${vp.width}x${vp.height}`); }
+      const b = await alphaInk(page, '#ps-paper'); await stroke(page, '#ps-paper', PATH);
+      t.check((await alphaInk(page, '#ps-paper')) > b, `${L}: a stroke lands`);
+      await click(page, '#ps-colorBtn');
+      t.check(inside(await box(page, '#ps-paintSheet'), await box(page, '#ps-stage')), `${L}: the Paints sheet fits the stage`, { sheet: await box(page, '#ps-paintSheet'), stage: await box(page, '#ps-stage') });
+      await clean(t, page, L);
+      await page.context().close();
+    }
+    if (overlapped.length) t.finding({ title: 'On a phone the reference\'s Original / Values / Blocks switch covers the status pill, cutting off the pencil\'s lead, hardness and size', severity: 'low', steps: 'Open index.html#paint on a 320 × 568 or 390 × 844 window. Brushes icon, Pencil, Charcoal (the status pill now reads "Pencil · black · Charcoal · Medium · 3 px · 900 × 1200"). Look at the top of the paper.', expected: 'The status pill is readable: it stops short of the reference or wraps under it.', actual: `The pill wraps across the stage and the reference (top right, above it in z-order) covers its right part: ${overlapped.join('; ')} (screenshots tests/screens/studio-gap-status-*.png).`, cause: 'styles.css:1404 (.ps-status: left 12px, top 12px, no max-width) and styles.css:1464 (.ps-ref: right 12px, top 12px, z-index 3): both sit on the top edge and nothing keeps them apart on a narrow stage' });
+  });
+
+  // ---- gap (medium): Forget my work, pressed in the same tab within the save delay of a stroke, a Turn and a ground
+  // change: none of them comes back, and the one-time note is shown again
+  await guard(t, 'gap: Forget right after changes', async () => {
+    const page = await openPage(site, { url: '#paint' });
+    await studioReady(page);
+    await stroke(page, '#ps-paper', PATH); await click(page, '#ps-orient'); await click(page, '#ps-root [data-ground="gray"]');
+    const t0 = Date.now();
+    await tab(page, 'help', { wait: false });
+    await click(page, '#forgetBtn');
+    const within = Date.now() - t0;
+    await Promise.all([page.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), click(page, '#forgetBtn')]);
+    await tab(page, 'paint'); await studioReady(page);
+    const note = await toastMatch(page, /saved in this browser/, 3000);
+    const r = { ink: await alphaInk(page, '#ps-paper'), size: await paperSize(page), ground: (await canvasSheet(page)).ground[0], rec: await readRecord(page), within };
+    if (within > 700) t.note(`Forget was pressed ${within} ms after the last change, so its save may already have landed; Forget then deletes it`);
+    t.check(r.ink === 0 && r.size.w === 900 && r.size.h === 1200 && r.ground === 'raw' && r.rec.type !== 'object', 'gap: Forget pressed within the save delay of a stroke, a Turn and a ground change: none of them comes back', r);
+    t.check(!!note, 'gap: after Forget the one-time note that the painting is kept is shown again', note);
+    await clean(t, page, 'gap: Forget right after changes');
+    await page.context().close();
+  });
+
+  // ---- gap (medium): the Figure study's copy of the Studio leaves the Studio's painting and My mixes alone
+  await guard(t, 'gap: the Figure study copy of the Studio', async () => {
+    const page = await openPage(site);
+    await tab(page, 'paint'); await studioReady(page);
+    await stroke(page, '#ps-paper', PATH);
+    await click(page, '#ps-colorBtn');
+    const codes = await page.evaluate(() => [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.dataset.code));
+    await click(page, `#ps-paints .ps-paint[data-code="${codes[0]}"]`); await click(page, `#ps-paints .ps-paint[data-code="${codes[1]}"]`); await click(page, '#ps-lock');
+    const rec0 = await waitSaved(page, 0);
+    const before = { ink: await alphaInk(page, '#ps-paper'), savedAt: rec0 && rec0.savedAt, mixes: await storageGet(page, 'portrait-value-studio.paintMixes') };
+    await tab(page, 'figure');
+    await click(page, '#fig-relaxed'); await click(page, '#fig-start');
+    await page.waitForFunction(() => /^Pose 1: /.test(document.getElementById('fig-say').textContent), null, { timeout: 30000 }).catch(() => null);
+    await stroke(page, '#fs-paper', [[0.3, 0.3], [0.6, 0.6]]);
+    const figInk = await alphaInk(page, '#fs-paper');
+    await click(page, '#fs-colorBtn');
+    const fcodes = await page.evaluate(() => [...document.querySelectorAll('#fs-paints .ps-paint')].map((b) => b.dataset.code));
+    await click(page, `#fs-paints .ps-paint[data-code="${fcodes[0]}"]`); await click(page, '#fs-lock');
+    await click(page, '#fig-end'); await click(page, '#fig-end');
+    await page.waitForFunction(() => !window.FigureStudy.state(), null, { timeout: 5000 }).catch(() => null);
+    const figMixes = await storageGet(page, 'portrait-value-studio.figureMixes');
+    await tab(page, 'paint');
+    const after = { ink: await alphaInk(page, '#ps-paper'), mixes: await storageGet(page, 'portrait-value-studio.paintMixes'), shown: await page.evaluate(() => document.querySelectorAll('#ps-mixes .ps-mix').length) };
+    t.check(figInk > 50 && after.ink === before.ink && after.mixes === before.mixes && after.shown === 9, 'gap: drawing and locking in a mix in a Figure study class leaves the Studio\'s painting and My mixes alone', { figInk, before, after });
+    t.check(!!figMixes && JSON.parse(figMixes).length === 1, 'gap: the class\'s mix is kept under its own key', figMixes);
+    await page.reload({ waitUntil: 'load' }); await sleep(300);
+    await tab(page, 'paint'); await studioReady(page);
+    const rec1 = await readRecord(page);
+    t.check(rec1.savedAt === before.savedAt && (await alphaInk(page, '#ps-paper')) === before.ink && (await alphaInk(page, '#fs-paper')) === 0, 'gap: after a reload the Studio painting is the one saved before the class, and the class\'s paper is blank (not kept)', { rec1, before, fs: await alphaInk(page, '#fs-paper') });
+    await clean(t, page, 'gap: the Figure study copy of the Studio');
+    await page.context().close();
+  });
+
+  // ---- the low ones that need nothing but a paper, on one page: the sheets one at a time; right and middle buttons, a
+  // cancelled touch and two fingers; pen pressure; the blend brush and the underdrawing; Clear and Turn with the
+  // underdrawing, and Turn while zoomed; the well's color, the starters, building on a kept mix, Remove on a starter;
+  // Undo across the two layers; the keyboard; the advice when the PNG cannot be made
+  await guard(t, 'gap: low ones on one paper', async () => {
+    const page = await openPage(site, { url: '#paint' });
+    await studioReady(page);
+    // the sheets: each opens alone and painting closes it; another icon, ×, the same icon again and Escape close it
+    const sheets = () => page.evaluate(() => ({ open: [...document.querySelectorAll('#ps-root .ps-sheet')].filter((x) => !x.hidden).map((x) => x.id), expanded: [...document.querySelectorAll('#ps-root .ps-strip [aria-expanded="true"]')].map((b) => b.id) }));
+    const byPaint = [];
+    for (const [btn, id] of [['#ps-brushBtn', 'ps-brushSheet'], ['#ps-colorBtn', 'ps-paintSheet'], ['#ps-refBtn', 'ps-refSheet'], ['#ps-canvasBtn', 'ps-canvasSheet'], ['#ps-viewBtn', 'ps-viewSheet'], ['eraser', 'ps-eraserSheet']]) {
+      if (btn === 'eraser') { await click(page, '#ps-root [data-ps-tool="eraser"]'); await click(page, '#ps-root [data-ps-tool="eraser"]'); } else await click(page, btn);
+      const o = await sheets();
+      await stroke(page, '#ps-paper', [[0.1, 0.92], [0.2, 0.95]]);
+      byPaint.push({ id, opened: o.open.join(), after: await sheets() });
+    }
+    await click(page, '#ps-brushBtn');
+    t.check(byPaint.every((x) => x.opened === x.id && x.after.open.length === 0 && x.after.expanded.length === 0), 'gap: each sheet (brushes, paints, reference, canvas, zoom, eraser) opens alone and a stroke closes it, its icon no longer expanded', byPaint);
+    await click(page, '#ps-colorBtn'); await click(page, '#ps-refBtn');
+    let sh = await sheets();
+    t.check(sh.open.join() === 'ps-refSheet' && sh.expanded.join() === 'ps-refBtn', 'gap: Reference opened over Paints: only Reference is open and expanded', sh);
+    await click(page, '#ps-refSheet [data-close]'); sh = await sheets();
+    t.check(!sh.open.length && !sh.expanded.length, 'gap: a sheet\'s close button closes it', sh);
+    await click(page, '#ps-canvasBtn'); await click(page, '#ps-canvasBtn'); sh = await sheets();
+    t.check(!sh.open.length && !sh.expanded.length, 'gap: tapping the same icon again closes its sheet', sh);
+    await click(page, '#ps-viewBtn'); await page.keyboard.press('Escape'); sh = await sheets();
+    t.check(!sh.open.length && !sh.expanded.length, 'gap: Escape closes the zoom sheet and its icon says so', sh);
+    await click(page, '#ps-clear'); await click(page, '#ps-clear');
+    // right and middle buttons paint nothing and add no undo step; the context menu is held off the paper
+    await click(page, '#ps-orient'); await click(page, '#ps-orient'); // (a turn leaves nothing to undo)
+    await stroke(page, '#ps-paper', PATH, { button: 'right' }); await stroke(page, '#ps-paper', PATH, { button: 'middle' });
+    const menuOff = await page.evaluate(() => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); document.getElementById('ps-paper').dispatchEvent(e); return e.defaultPrevented; });
+    t.check((await alphaInk(page, '#ps-paper')) === 0 && (await undoOff(page)) && menuOff, 'gap: a right or middle button drag paints nothing and leaves nothing to undo; the context menu is held off the paper', { ink: await alphaInk(page, '#ps-paper'), undoOff: await undoOff(page), menuOff });
+    // a touch cancelled by the browser mid-stroke ends the stroke there: the next one does not join it
+    await letCapture(page);
+    await pointer(page, [['pointerdown', 0.1, 0.6, { pointerType: 'touch', pointerId: 21 }], ['pointermove', 0.2, 0.6, { pointerType: 'touch', pointerId: 21 }], ['pointercancel', 0.2, 0.6, { pointerType: 'touch', pointerId: 21 }]]);
+    const cancelled = await alphaInk(page, '#ps-paper');
+    await pointer(page, line([0.8, 0.6], [0.9, 0.6], 3, { pointerType: 'touch', pointerId: 22 }));
+    t.check(cancelled > 10 && (await alphaInk(page, '#ps-paper')) > cancelled && (await inkIn(page, '#ps-paper', 0.3, 0.57, 0.4, 0.06)) === 0, 'gap: a stroke cut short by pointercancel keeps what it laid, and the next stroke does not join it', { cancelled, between: await inkIn(page, '#ps-paper', 0.3, 0.57, 0.4, 0.06) });
+    // two fingers on the paper at once (a pinch, a resting hand): no line may join the two touches
+    await click(page, '#ps-clear'); await click(page, '#ps-clear');
+    const A = { pointerType: 'touch', pointerId: 31 }, B = { pointerType: 'touch', pointerId: 32, isPrimary: false };
+    await pointer(page, [['pointerdown', 0.1, 0.75, A], ['pointerdown', 0.9, 0.85, B], ['pointermove', 0.12, 0.76, A], ['pointermove', 0.88, 0.84, B], ['pointermove', 0.14, 0.77, A], ['pointermove', 0.86, 0.83, B], ['pointerup', 0.14, 0.77, A], ['pointerup', 0.86, 0.83, B]]);
+    const between = await inkIn(page, '#ps-paper', 0.3, 0.72, 0.4, 0.16);
+    t.check(between === 0, 'gap: two fingers on the paper at once draw no line joining them', { between, total: await alphaInk(page, '#ps-paper') });
+    if (between > 0) { await screenshot(page, 'studio-gap-two-fingers'); t.finding({ title: 'Two fingers on the paper at once (a pinch, a resting hand) draw lines straight across the painting between them', severity: 'medium', steps: 'On a touch screen, Studio tab, chisel brush: put one finger on the paper near the bottom-left and a second near the bottom-right, and move both a little (as a pinch to zoom does). Here: pointer events for two touch pointers (ids 31 and 32) at 10 %, 75 % and 90 %, 85 % of the paper, each moved a little, interleaved, then lifted.', expected: 'The second finger is ignored while the first one paints (or both are), so nothing appears between the fingers.', actual: `A band of paint runs between the two touches (${between} inked pixels in the middle of the paper, where neither finger was; tests/screens/studio-gap-two-fingers.png), and Undo needs two taps to take it back.`, cause: 'js/painting.js:349-373: every pointerdown restarts the one stroke (snapshot(), last = p) whatever its pointerId, and pointermove draws from `last` for any pointer, so moves of the two fingers alternate and each segment() joins one finger to the other; .ps-layer-paper has touch-action: none (styles.css:1398), so the browser hands both fingers to the page' }); }
+    await click(page, '#ps-clear'); await click(page, '#ps-clear');
+    // pen pressure counts: the same line with a pen pressed lightly, by the mouse, and pressed hard
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="pencil"]'); await setRange(page, 'ps-pencilSize', 10); await click(page, '#ps-brushBtn');
+    const laid = {};
+    for (const [name, o] of [['light pen', { pointerType: 'pen', pressure: 0.2 }], ['mouse', { pointerType: 'mouse' }], ['hard pen', { pointerType: 'pen', pressure: 0.9 }]]) {
+      await pointer(page, line([0.2, 0.3], [0.8, 0.3], 12, o).map((e) => e[0] === 'pointerup' ? [e[0], e[1], e[2], { ...o, pressure: 0 }] : e));
+      laid[name] = await alphaSum(page, '#ps-paper', 0.1, 0.2, 0.8, 0.2); await click(page, '#ps-undo');
+    }
+    t.check(laid['light pen'] > 0 && laid['light pen'] < laid.mouse && laid.mouse < laid['hard pen'], 'gap: pen pressure counts: a pen pressed lightly lays less than the mouse, pressed hard more', laid);
+    // the blend brush drags the paint and leaves the underdrawing alone; its strength counts
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]');
+    await stroke(page, '#ps-paper', [[0.3, 0.42], [0.7, 0.42]], { steps: 12 });
+    const sk = await page.evaluate(() => { const c = document.getElementById('ps-sketch'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 3; i < d.length; i += 4) h = (h * 31 + d[i]) % 1000000007; return h; });
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="chisel"]'); await click(page, '#ps-root [data-chisel="l"]');
+    await stroke(page, '#ps-paper', [[0.3, 0.5], [0.7, 0.5]]);
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="blend"]'); await setRange(page, 'ps-blendSize', 100);
+    const dragged = {};
+    for (const str of [10, 80]) { await setRange(page, 'ps-blendStr', str); await stroke(page, '#ps-paper', [[0.5, 0.3], [0.5, 0.7]], { steps: 20 }); dragged[str] = await alphaSum(page, '#ps-paper', 0.2, 0.58, 0.6, 0.1); if (str === 10) await click(page, '#ps-undo'); }
+    const skAfter = await page.evaluate(() => { const c = document.getElementById('ps-sketch'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 3; i < d.length; i += 4) h = (h * 31 + d[i]) % 1000000007; return h; });
+    t.check(skAfter === sk, 'gap: the blend brush dragged across an underdrawing line leaves the underdrawing exactly as it was', { sk, skAfter });
+    t.check(dragged[10] > 0 && dragged[80] > dragged[10] * 2, 'gap: the blend brush at 80% strength drags far more paint than at 10%', dragged);
+    // Clear blanks the paint only; Turn keeps the underdrawing; the eraser after Clear
+    const skInk = await alphaInk(page, '#ps-sketch');
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]'); await stroke(page, '#ps-paper', [[0.3, 0.2], [0.6, 0.22]]);
+    const skInk2 = await alphaInk(page, '#ps-sketch');
+    await click(page, '#ps-clear'); await click(page, '#ps-clear');
+    t.check((await alphaInk(page, '#ps-paper')) === 0 && (await alphaInk(page, '#ps-sketch')) === skInk2 && skInk2 > skInk, 'gap: Clear the paper blanks the paint and leaves the underdrawing', { paper: await alphaInk(page, '#ps-paper'), sketch: await alphaInk(page, '#ps-sketch'), skInk2 });
+    await click(page, '#ps-root [data-ps-tool="eraser"]');
+    t.note(`the eraser right after Clear the paper (the last stroke was on the underdrawing): "${await status(page)}" (the README: it rubs out whichever layer was drawn on last)`);
+    // (every pixel counted: a thin pencil line sampled every fourth pixel reads differently once it runs the other way)
+    const skAll = await inkIn(page, '#ps-sketch', 0, 0, 1, 1);
+    await click(page, '#ps-orient'); const skLand = await inkIn(page, '#ps-sketch', 0, 0, 1, 1); await click(page, '#ps-orient'); const skBack = await inkIn(page, '#ps-sketch', 0, 0, 1, 1);
+    t.check(skAll > 100 && Math.abs(skLand - skAll) <= skAll * 0.02 && Math.abs(skBack - skAll) <= skAll * 0.02, 'gap: Turn the paper keeps the underdrawing, both ways (within 2%)', { skAll, skLand, skBack });
+    // Turn while zoomed in and panned: the turned paper's corner is on screen and a stroke lands under the pointer
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="chisel"]'); await click(page, '#ps-brushBtn');
+    await click(page, '#ps-viewBtn'); await setRange(page, 'ps-zoom', 400); await setRange(page, 'ps-panX', 100); await setRange(page, 'ps-panY', 100); await click(page, '#ps-viewBtn');
+    await click(page, '#ps-orient');
+    { const wb = await box(page, '#ps-paperWrap'), st = await box(page, '#ps-stage'); t.check((await paperSize(page)).w === 1200 && wb.w > wb.h && wb.r <= st.r + 1 && wb.r >= st.r - 100 && wb.b <= st.b + 1 && wb.b >= st.b - 100, 'gap: turned at 4× panned to the bottom-right: the turned paper\'s bottom-right corner is on screen', { wb, st }); }
+    { const b0 = await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12); await stroke(page, '#ps-paper', [[0.92, 0.92], [0.97, 0.95]]); t.check((await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12)) > b0 + 50, 'gap: on the paper turned at 4× a stroke lands under the pointer', b0); }
+    await click(page, '#ps-fitBtn'); await click(page, '#ps-orient');
+    t.check(inside(await box(page, '#ps-paperWrap'), await box(page, '#ps-stage')), 'gap: Fit to screen, then turned back: the whole paper is on the stage');
+    // the well's color is the pigment model's prediction; the eight starters; building on a kept mix; Remove on a starter
+    await click(page, '#ps-colorBtn'); await setRange(page, 'ps-amount', 2);
+    const codes = await page.evaluate(() => [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.dataset.code));
+    await click(page, `#ps-paints .ps-paint[data-code="${codes[0]}"]`); await click(page, `#ps-paints .ps-paint[data-code="${codes[1]}"]`);
+    const chip = await page.evaluate(([a, b]) => { const m = Mixing.mix([a, b].map((c) => Mixing.makePaint(Object.assign({ strength: 'normal' }, Paints.byCode(c)))), [1, 1]); const bg = (/rgb\((\d+), (\d+), (\d+)\)/.exec(getComputedStyle(document.getElementById('ps-wellChip')).backgroundColor) || []).slice(1).map(Number); return { model: [m.rgb.r, m.rgb.g, m.rgb.b].map(Math.round), chip: bg }; }, [codes[0], codes[1]]);
+    t.check(chip.chip.length === 3 && chip.chip.every((v, i) => Math.abs(v - chip.model[i]) <= 2), 'gap: the well shows the mix as the pigment model predicts it (Mixing.mix of its parts)', chip);
+    const starters = await page.evaluate(() => [...document.querySelectorAll('#ps-mixes .ps-mix')].slice(0, 8).map((b) => { const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(b.style.getPropertyValue('--c')); const lab = m ? Study.rgbToLab(+m[1], +m[2], +m[3]) : [0, 0, 0]; return { name: b.title.split(':')[0], recipe: b.title.split(': ')[1], L: +lab[0].toFixed(1), b: +lab[2].toFixed(1) }; }));
+    const Lof = (n) => (starters.find((x) => x.name === n) || { L: NaN }).L;
+    t.check(new Set(starters.map((x) => x.recipe)).size === 8 && starters.every((x) => x.b > 0) && Lof('Light · lit') > Lof('Light · half tone') && Lof('Light · half tone') > Lof('Light · shadow') && Lof('Medium · lit') > Lof('Medium · shadow') && Lof('Deep · lit') > Lof('Deep · shadow'), 'gap: the eight starters are eight different mixes, all warm, each lit one lighter than its shadow', starters);
+    await click(page, '#ps-lock'); await click(page, '#ps-colorBtn');
+    await click(page, '#ps-mixes .ps-mix:nth-child(9)'); await click(page, `#ps-paints .ps-paint[data-code="${codes[2]}"]`);
+    const built = await text(page, '#ps-wellParts');
+    await click(page, '#ps-lock');
+    const stored = JSON.parse((await storageGet(page, 'portrait-value-studio.paintMixes')) || '[]');
+    t.check(built === `${codes[0]} 1 · ${codes[1]} 1 · ${codes[2]} 1` && stored.length === 2 && JSON.stringify(stored[1].parts) === JSON.stringify([{ code: codes[0], amount: 1 }, { code: codes[1], amount: 1 }, { code: codes[2], amount: 1 }]), 'gap: a kept mix tapped, a paint added and locked in again: a new mix holding all three parts', { built, stored });
+    await click(page, '#ps-colorBtn'); await click(page, '#ps-mixes .ps-mix:nth-child(1)'); await click(page, '#ps-dropMix');
+    { const n = await page.evaluate(() => document.querySelectorAll('#ps-mixes .ps-mix').length); const after = JSON.parse((await storageGet(page, 'portrait-value-studio.paintMixes')) || '[]'); const last = await page.evaluate(() => document.querySelector('#ps-mixes .ps-mix:last-child').title); t.check(n === 9 && after.length === 2, 'gap: Remove on a starter drops it from the sheet and leaves the kept mixes stored', { n, after }); t.note(`after a starter is removed the kept mixes are renamed by position: the last one is now "${last.split(':')[0]}"`); }
+    await page.keyboard.press('Escape');
+    // Undo goes back through the two layers in order: paint, underdrawing, eraser on the underdrawing, paint, underdrawing cleared
+    await click(page, '#ps-clear'); await click(page, '#ps-clear');
+    const both = async () => [await alphaInk(page, '#ps-paper'), await alphaInk(page, '#ps-sketch')];
+    const steps = [await both()];
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="chisel"]'); await stroke(page, '#ps-paper', [[0.2, 0.6], [0.5, 0.65]]); steps.push(await both());
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]'); await stroke(page, '#ps-paper', [[0.2, 0.8], [0.6, 0.85]], { steps: 12 }); steps.push(await both());
+    await click(page, '#ps-root [data-ps-tool="eraser"]'); await stroke(page, '#ps-paper', [[0.4, 0.75], [0.4, 0.9]]); steps.push(await both());
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="chisel"]'); await stroke(page, '#ps-paper', [[0.6, 0.3], [0.8, 0.35]]); steps.push(await both());
+    await click(page, '#ps-sketchClear'); steps.push(await both());
+    const undone = [];
+    for (let i = 0; i < 5; i++) { await click(page, '#ps-undo'); undone.push(await both()); }
+    t.check(new Set(steps.map(String)).size === 6 && JSON.stringify(undone) === JSON.stringify(steps.slice(0, 5).reverse()), 'gap: Undo five times across the paint and the underdrawing restores each layer in exact reverse order', { steps, undone });
+    // the keyboard: the zoom slider by arrows, Undo and Clear by Enter, the strip in Tab order
+    await click(page, '#ps-viewBtn'); await page.focus('#ps-zoom');
+    for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight');
+    { const z = await page.evaluate(() => ({ out: document.getElementById('ps-zoomOut').textContent, pan: !document.getElementById('ps-panX').disabled })); t.check(z.out === '120%' && z.pan, 'gap: four arrow presses on the zoom slider: 120%, with pan on', z); }
+    await page.keyboard.press('Escape'); await click(page, '#ps-fitBtn');
+    await stroke(page, '#ps-paper', PATH); const withS = await alphaInk(page, '#ps-paper');
+    await page.focus('#ps-undo'); await page.keyboard.press('Enter');
+    const afterEnter = await alphaInk(page, '#ps-paper');
+    await page.focus('#ps-clear'); await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
+    t.check(afterEnter < withS && (await alphaInk(page, '#ps-paper')) === 0, 'gap: Enter on Undo undoes; Enter twice on Clear clears', { withS, afterEnter, cleared: await alphaInk(page, '#ps-paper') });
+    const order = await page.evaluate(() => [...document.querySelectorAll('#ps-root .ps-strip button')].filter((b) => getComputedStyle(b).display !== 'none').map((b) => b.id || b.dataset.psTool));
+    await page.focus('#ps-root .ps-strip button:not(.ps-exit)');
+    const reached = [await page.evaluate(() => document.activeElement.id || document.activeElement.dataset.psTool)];
+    for (let i = 1; i < order.length; i++) { await page.keyboard.press('Tab'); reached.push(await page.evaluate(() => document.activeElement.id || document.activeElement.dataset.psTool)); }
+    t.check(JSON.stringify(reached) === JSON.stringify(order), 'gap: Tab walks the strip\'s icons in order', { order, reached });
+    // the advice when the PNG cannot be made (a canvas too big for the browser): the Studio has no Working size
+    await page.evaluate(() => { window.__toBlob = HTMLCanvasElement.prototype.toBlob; HTMLCanvasElement.prototype.toBlob = function (cb) { cb(null); }; });
+    await armToast(page); await click(page, '#ps-save');
+    const said = await toastMatch(page, /could not be made/, 3000);
+    await page.evaluate(() => { HTMLCanvasElement.prototype.toBlob = window.__toBlob; });
+    const fits = !!said && !/Working size/.test(said);
+    t.check(fits, 'gap: when the PNG cannot be made, the advice fits the Studio (which has no Working size)', said);
+    if (!fits && said) t.finding({ title: 'When the Studio\'s Save as PNG fails, the advice is "Try a smaller Working size.", a Study tab setting that has nothing to do with the painting', severity: 'low', steps: 'Studio tab, Canvas icon, Save as PNG in a browser that cannot encode the picture (simulated: HTMLCanvasElement.prototype.toBlob calling back with null).', expected: 'Advice that fits the Studio (for example: close other tabs and try again), or none.', actual: `The toast says "${said}". The Studio's paper is a fixed 900 × 1200 whatever the Working size.`, cause: 'js/painting.js:266 calls Studio.savePng(composite(), name) without its advice argument, so js/app.js:197 uses its default, "Try a smaller Working size."' });
+    await clean(t, page, 'gap: low ones on one paper');
+    await page.context().close();
+  });
+
+  // ---- gap (low): localStorage refusing every write: no one-time note (its flag cannot be kept), a mix locked in is used
+  // for the visit only, the painting itself is still kept, and nothing throws
+  await guard(t, 'gap: localStorage refusing writes', async () => {
+    const page = await openPage(site);
+    await page.addInitScript(() => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; });
+    await page.reload({ waitUntil: 'load' }); await sleep(300);
+    await watchToasts(page);
+    await tab(page, 'paint'); await studioReady(page);
+    const opened = await toasts(page);
+    t.check(!opened.some((m) => /saved in this browser/.test(m)), 'gap: with localStorage refusing writes the one-time note is not shown (its flag could not be kept, so it would come on every visit)', opened);
+    await click(page, '#ps-colorBtn');
+    const codes = await page.evaluate(() => [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.dataset.code));
+    await click(page, `#ps-paints .ps-paint[data-code="${codes[0]}"]`); await click(page, `#ps-paints .ps-paint[data-code="${codes[1]}"]`); await click(page, '#ps-lock');
+    const shown = await page.evaluate(() => document.querySelectorAll('#ps-mixes .ps-mix').length);
+    const since = Date.now(); await stroke(page, '#ps-paper', PATH);
+    const ink = await alphaInk(page, '#ps-paper'), rec = await waitSaved(page, since);
+    const all = await toasts(page);
+    await page.reload({ waitUntil: 'load' }); await sleep(300); await tab(page, 'paint'); await studioReady(page);
+    await click(page, '#ps-colorBtn');
+    const back = { ink: await alphaInk(page, '#ps-paper'), mixes: await page.evaluate(() => document.querySelectorAll('#ps-mixes .ps-mix').length) };
+    t.check(shown === 9 && back.mixes === 8, 'gap: with localStorage refusing writes a locked-in mix is used for the visit (9 mixes) and is gone after a reload (8)', { shown, back });
+    t.check(!!rec && back.ink === ink, 'gap: with localStorage refusing writes the painting is still kept (in IndexedDB) and comes back', { saved: !!rec, ink, back: back.ink });
+    t.note(`with localStorage refusing writes, a locked-in mix is lost on the next visit while the README says mixes are kept; the page said: ${all.length ? all.map((m) => `"${m.slice(0, 60)}"`).join(', ') : 'nothing'}`);
+    await clean(t, page, 'gap: localStorage refusing writes');
+    await page.context().close();
+  });
+
+  // ---- gap (low): junk in every saved key (and keys named after Object.prototype's members), opened straight on #paint
+  await guard(t, 'gap: junk in every saved key on #paint', async () => {
+    const storage = {};
+    const keys = ['mode', 'drawers', 'smoothing', 'lean', 'blockView', 'canvasUnit', 'palette', 'paintChoice', 'myPaints', 'paintMixes', 'studioNotice', 'figureStudy', 'figureMixes', 'gameMode', 'gameBest', 'battleBest'];
+    const junk = ['constructor', '{"__proto__":{"x":1}}', 'NaN', JSON.stringify(Array(5000).fill('x')), '{"a":{"b":{"c":[1,2,{"d":null}]}}}', '12', 'true', '[]', '{"constructor":1,"__proto__":2,"toString":3}', '"\\u0000"', '-1e999', 'undefined'];
+    keys.forEach((k, n) => { storage['portrait-value-studio.' + k] = junk[n % junk.length]; });
+    PROTO_NAMES.forEach((n) => { storage['portrait-value-studio.' + n] = n; });
+    const page = await openPage(site, { url: '#paint', storage });
+    await studioReady(page);
+    await stroke(page, '#ps-paper', PATH);
+    const ink = await alphaInk(page, '#ps-paper');
+    await click(page, '#ps-colorBtn');
+    const p = await page.evaluate(() => { const s = document.getElementById('ps-palette'); return { value: s.value, ids: [...s.options].map((o) => o.value), paints: document.querySelectorAll('#ps-paints .ps-paint').length, mixes: document.querySelectorAll('#ps-mixes .ps-mix').length }; });
+    const codes = await page.evaluate(() => [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.dataset.code));
+    await click(page, `#ps-paints .ps-paint[data-code="${codes[0]}"]`); await click(page, `#ps-paints .ps-paint[data-code="${codes[1]}"]`); await click(page, '#ps-lock');
+    const locked = await page.evaluate(() => document.querySelectorAll('#ps-mixes .ps-mix').length);
+    const png = await savePngRead(page);
+    t.check(ink > 50 && p.ids.includes(p.value) && p.paints >= 2 && p.mixes >= 8 && locked === p.mixes + 1 && png && png.w === 900 && png.h === 1200, 'gap: with junk in every saved key, opened on #paint: a stroke lands, a palette is chosen with its paints and starters, a mix locks in, Save as PNG works', { ink, p, locked, png: png && [png.w, png.h] });
+    await clean(t, page, 'gap: junk in every saved key on #paint');
+    await page.context().close();
+  });
+
+  // ---- gap (low): subjects.js missing: the Reference sheet offers the Study photo only, and it still serves
+  await guard(t, 'gap: subjects.js missing', async () => {
+    const page = await openPage(site, { url: '#paint', block: [site.base + 'js/subjects.js'] });
+    await studioReady(page);
+    await click(page, '#ps-refBtn');
+    const r = await refInfo(page);
+    const portraitOff = await page.evaluate(() => [...document.querySelectorAll('#ps-root [data-ref-kind="painting"]')].every((b) => b.hidden || getComputedStyle(b).display === 'none'));
+    t.check(portraitOff && r.anotherHidden && r.kind === 'studio' && !r.figHidden && r.w > 0, 'gap: with subjects.js missing the Reference sheet offers the Study photo only (no "A portrait", no Another portrait), and shows it', { portraitOff, r });
+    await click(page, '#ps-refSheet [data-ref-view="values"]');
+    const v = await refInfo(page);
+    await stroke(page, '#ps-paper', PATH);
+    t.check(v.distinct <= 3 && v.view === 'values' && (await alphaInk(page, '#ps-paper')) > 50, 'gap: with subjects.js missing Values still draws and a stroke lands', v);
+    // (the blocked request and game.js telling the guard it cannot start without subjects.js are expected console lines)
+    const EXPECTED = /^Failed to load resource: net::ERR_FAILED$|subjects\.js did not (finish )?load/;
+    const own = page.log.console.filter((l) => EXPECTED.test(l));
+    page.log.console = page.log.console.filter((l) => !EXPECTED.test(l));
+    t.check(own.some((l) => /^subjects\.js did not load$/.test(l)), 'gap: with subjects.js missing, the guard notes it (and nothing else goes to the console)', own);
+    await clean(t, page, 'gap: subjects.js missing');
+    await page.context().close();
+  });
+
+  // ---- gap (low): dark theme and reduced motion: the strip, the status pill and a sheet read, with no axe violation
+  await guard(t, 'gap: dark theme and reduced motion', async () => {
+    const page = await openPage(site, { url: '#paint', dark: true, reducedMotion: true, bypassCSP: true });
+    await studioReady(page);
+    await stroke(page, '#ps-paper', PATH);
+    await click(page, '#ps-colorBtn');
+    const v1 = await axe(page);
+    t.check(v1.length === 0, 'gap: dark theme, the Studio with the Paints sheet open: no axe violation', v1);
+    await click(page, '#ps-brushBtn');
+    const v2 = await axe(page);
+    t.check(v2.length === 0, 'gap: dark theme, the Studio with the brush sheet open: no axe violation', v2);
+    await screenshot(page, 'studio-gap-dark');
+    t.check((await alphaInk(page, '#ps-paper')) > 50, 'gap: dark theme with reduced motion: a stroke lands');
+    await clean(t, page, 'gap: dark theme and reduced motion');
+    await page.context().close();
+  });
+
+  // ---- gap (low): two tabs painting at once (not promised: what each finds after a reload is noted)
+  await guard(t, 'gap: two tabs painting at once', async () => {
+    const a = await openPage(site, { url: '#paint' }); await studioReady(a);
+    const b = await newTab(site, a, { url: '#paint' }); await studioReady(b);
+    let since = Date.now(); await stroke(a, '#ps-paper', [[0.1, 0.1], [0.3, 0.2]]); await waitSaved(a, since);
+    since = Date.now(); await stroke(b, '#ps-paper', [[0.7, 0.8], [0.9, 0.9]]); await waitSaved(b, since);
+    const mine = (pg) => Promise.all([inkIn(pg, '#ps-paper', 0.05, 0.05, 0.3, 0.2), inkIn(pg, '#ps-paper', 0.65, 0.75, 0.3, 0.2)]);
+    await a.reload({ waitUntil: 'load' }); await studioReady(a);
+    const [aA, aB] = await mine(a);
+    t.note(`two tabs painting at once: after a reload the first tab ${aA > 0 ? 'still has its stroke' : 'has lost its stroke'}${aB > 0 ? ' and shows the second tab\'s' : ''} (the one record is the last tab's to save; the README promises nothing for two tabs)`);
+    await clean(t, a, 'gap: two tabs, the first'); await clean(t, b, 'gap: two tabs, the second');
+    await a.context().close();
+  });
+
+  // ---- gap (low): a painting made from a dealt portrait, after a reload: what the Studio shows as its reference, and
+  // what Use my Studio painting then scores it against (not promised either way: noted)
+  await guard(t, 'gap: a dealt portrait after a reload', async () => {
+    const page = await openPage(site, { url: '#paint' }); await studioReady(page);
+    await click(page, '#ps-refBtn'); await click(page, '#ps-refSheet [data-ref-kind="painting"]');
+    await page.waitForFunction(() => /after /.test(document.getElementById('ps-refName').textContent), null, { timeout: 10000 }).catch(() => null);
+    const dealt = (await refInfo(page)).name;
+    const since = Date.now(); await stroke(page, '#ps-paper', PATH);
+    const ink = await alphaInk(page, '#ps-paper'); await waitSaved(page, since);
+    await page.reload({ waitUntil: 'load' }); await studioReady(page);
+    const after = await refInfo(page);
+    t.check((await alphaInk(page, '#ps-paper')) === ink && /after /.test(dealt), 'gap: a painting made from a dealt portrait comes back after a reload', { ink, now: await alphaInk(page, '#ps-paper') });
+    await tab(page, 'study'); await click(page, '#artFromStudio');
+    const source = await text(page, '#source');
+    await page.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+    t.note(`a painting made from a dealt portrait ("${dealt.split(':')[0]}"), after a reload: the Studio's reference is ${after.kind === 'painting' ? `still "${after.name.split(':')[0]}"` : 'the Study tab\'s photo again'} (the portrait is not saved with the painting), and Use my Studio painting scores it against "${source.slice(0, 80)}"`);
+    await clean(t, page, 'gap: a dealt portrait after a reload');
+    await page.context().close();
+  });
 }

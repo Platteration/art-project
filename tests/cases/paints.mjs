@@ -107,7 +107,7 @@ const rowDeltas = async (page) => {
     const b = row.querySelector('.mix-badge');
     const tgt = /#[0-9A-F]{6}/.exec(row.querySelector('.mix-add').getAttribute('aria-label'));
     const pred = /#[0-9A-F]{6}/.exec(row.querySelector('.mix-chip:nth-child(2)').title);
-    return { status: b ? b.dataset.status : '', badge: b ? b.textContent : '', dE: tgt && pred ? window.__q.dE(tgt[0], pred[0]) : NaN };
+    return { status: b ? b.dataset.status : '', badge: b ? b.textContent : '', dE: tgt && pred ? window.__q.dE(tgt[0], pred[0]) : NaN, hex: tgt ? tgt[0] : '', recipe: row.querySelector('.mix-recipe').textContent };
   }));
 };
 // nothing has changed for `ms` ms: the study's result, the suggestion and the mixes all at rest
@@ -122,6 +122,37 @@ const quiet = (page, ms = 500) => page.waitForFunction((ms) => {
 }, ms, { timeout: 30000, polling: 100 }).catch(() => null);
 const optionValues = (page, sel) => page.evaluate((s) => [...document.querySelector(s).options].map((o) => o.value), sel);
 const tickDialog = async (page, codes) => { await click(page, '#mineEdit'); await sleep(100); await setMine(page, codes); };
+// a page opened in Advanced with the drawer open and the study done (and the ten palettes ranked, unless the saved source is My paints)
+const advPage = async (site, extra = {}, { rank = true, ...opts } = {}) => {
+  const page = await openPage(site, { storage: { ...ADV, ...extra }, ...opts });
+  await settled(page);
+  if (rank) await ranked(page);
+  return page;
+};
+const MINE = (max = 4) => ({ [K.choice]: JSON.stringify({ source: 'mine', preset: '', max }) });
+const suggestNow = async (page) => { await click(page, '#suggestBtn'); await suggestedDone(page); await mixed(page); };
+// an action that changes the study (a photo, a slider) while a suggestion is on screen: stamps the rows, waits for the new
+// study result and then for rows and button to be at rest again. Resolves to whether the study result changed at all.
+async function afterChange(page, action) {
+  await page.evaluate(() => { window.__r0 = Studio.result(); document.querySelectorAll('#mixList .mix-row, #resultPaints .paint-chip').forEach((e) => { e.dataset.old = '1'; }); });
+  await action();
+  const changed = await page.waitForFunction(() => Studio.result() !== window.__r0, null, { timeout: 10000 }).then(() => true).catch(() => false);
+  if (changed) await page.waitForFunction(() => { const b = document.getElementById('suggestBtn'); const rs = document.querySelectorAll('#mixList .mix-row'); return document.getElementById('busy').hidden && !b.disabled && b.textContent === 'Suggest again' && !document.querySelector('#mixList [data-old], #resultPaints [data-old]') && rs.length > 0 && [...rs].every((r) => r.querySelector('.mix-badge') && !r.querySelector('.mix-pending')); }, null, { timeout: 30000 }).catch(() => null);
+  return changed;
+}
+// the result block as the visitor reads it, and the palette the rest of the page uses
+const shownResult = (page) => page.evaluate(() => ({
+  hidden: document.getElementById('paintResult').hidden, name: document.getElementById('resultName').textContent, match: document.getElementById('resultMatch').textContent,
+  about: document.getElementById('resultAbout').textContent, btn: document.getElementById('suggestBtn').textContent, state: document.getElementById('colorsState').textContent,
+  colors: document.getElementById('colors').value, chips: [...document.querySelectorAll('#resultPaints .paint-code')].map((e) => e.textContent),
+  rows: document.querySelectorAll('#mixList .mix-row').length, cur: (StudioPalette.current() || {}).codes || [],
+}));
+const shortName = (name) => name.replace(/\s*\(.*\)$/, '').replace(/ palette$/i, '');
+const selectedText = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return e && e.options[e.selectedIndex] ? e.options[e.selectedIndex].textContent : null; }, sel);
+const setSelect = (page, sel, v) => page.evaluate(([s, v]) => { const e = document.querySelector(s); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); }, [sel, v]);
+const tickPresetIn = (page, id) => page.evaluate((v) => { const s = document.getElementById('paintAddPreset'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }, id);
+const blockBusy = (page) => page.waitForFunction(() => !document.getElementById('blockViewPalette').classList.contains('is-busy'), null, { timeout: 20000 }).catch(() => null);
+const paintCodes = (page) => page.evaluate(() => [...document.querySelectorAll('#ps-paints .ps-paint')].map((b) => b.dataset.code));
 
 // a photo that goes further than paint does: pure white, skin, a saturated blue and pure black
 async function extremesImage(page) {
@@ -159,14 +190,20 @@ async function checkPalette(t, page, label, codes, n) {
   t.check(titleOk, `${label}: hovering a mix gives the paints' full names and parts`, rs.slice(0, 3).map((r) => r.title));
   t.check(rs.every((r) => /^Predicted mix #[0-9A-F]{6}$/.test(r.mixTitle)), `${label}: the mixed chip names its predicted color`, rs.map((r) => r.mixTitle));
   t.check(rs.every((r) => /^Add #[0-9A-F]{6} to picked colors$/.test(r.add)), `${label}: every + button says what it adds`, rs.map((r) => r.add));
-  await checkBadges(t, page, label);
-  checkRecipes(t, label, rs, await page.evaluate(() => Object.fromEntries(Paints.LIBRARY.map((p) => [p.code, Mixing.makePaint(Object.assign({ strength: 'normal' }, p)).white]))));
+  const ds = await checkBadges(t, page, label);
+  // "Mixes N of M" comes from the quick search (single paints and pairs); the rows are the full recipes, which come out as close or closer
+  const reach = reachOf(await text(page, '#resultMatch'));
+  const within = ds.filter((d) => d.dE < 6.35).length;
+  const reachOk = t.check(reach && within >= reach[0], `${label}: the rows that come within ΔE 6 (${within}) are at least the colors "Mixes N of M" promises (${reach && reach[0]})`, [within, reach]);
+  if (!reachOk && reach) (t.reachMismatch = t.reachMismatch || []).push({ label, reach, within, off: ds.filter((d) => d.dE >= 6.35).map((d) => `${d.hex} ${d.recipe} (ΔE ${d.dE.toFixed(1)}, "${d.badge}")`) });
+  checkRecipes(t, label, rs, await whiteMap(page));
   // the chips under the name carry each paint's full name (the only place a phone, with no hover, shows it)
   const chipNames = await page.evaluate(() => [...document.querySelectorAll('#resultPaints .paint-chip')].map((li) => ({ code: li.querySelector('.paint-code').textContent, name: li.querySelector('.paint-name').textContent, shown: li.querySelector('.paint-name').getClientRects().length > 0, dot: li.querySelector('.paint-dot').title })));
   t.check(chipNames.length === codes.length && chipNames.every((c, i) => c.code === codes[i] && c.name === byCode[c.code] && c.dot === byCode[c.code] && c.shown), `${label}: every chip shows its paint's full name, and its dot says it too`, chipNames);
   return rs;
 }
 
+const whiteMap = (page) => page.evaluate(() => Object.fromEntries(Paints.LIBRARY.map((p) => [p.code, Mixing.makePaint(Object.assign({ strength: 'normal' }, p)).white])));
 // Close is a ΔE00 under 3, Near under 6, Out of reach more; a value limit is never a mix that is Close. The predicted
 // color on the page is rounded to an sRGB hex, so a band's edge is allowed a little (TOL)
 const WORD = { close: 'Close', near: 'Near', far: 'Out of reach' };
@@ -303,9 +340,6 @@ export default async function paints(t, site) {
     for (const p of all) {
       await pickPreset(page, p.id);
       await checkPalette(t, page, `extremes ${p.name}`, p.paints, ne);
-      const within = (await rowDeltas(page)).filter((d) => d.dE < 6.35).length;
-      const reached = reachOf(await text(page, '#resultMatch'))[0];
-      t.check(within >= reached, `extremes ${p.name}: the rows that come within ΔE 6 are at least the colors "Mixes N of ${ne}" promises (${reached})`, [within, reached]);
     }
     await pickPreset(page, 'zorn');
     await clean(t, page, 'extremes photo');
@@ -416,6 +450,7 @@ export default async function paints(t, site) {
     await click(page, '#mineEdit'); await sleep(200);
     const lib = await page.evaluate(() => ({ open: document.getElementById('paintDialog').open, cats: [...document.querySelectorAll('#paintCats .paint-cat')].map((s) => [s.querySelector('h3').textContent, s.querySelectorAll('li').length]), items: document.querySelectorAll('#paintCats li').length, pigments: [...document.querySelectorAll('#paintCats .paint-pigment')].filter((e) => e.textContent.trim()).length, swatches: [...document.querySelectorAll('#paintCats .paint-swatch')].filter((e) => e.style.getPropertyValue('--c') && e.style.getPropertyValue('--t')).length, count: document.getElementById('paintDialogCount').textContent, library: Paints.LIBRARY.length, families: Paints.CATEGORIES.map((c) => c.name) }));
     t.check(lib.open && lib.items === 77 && lib.library === 77 && lib.cats.length === 9 && lib.cats.map((c) => c[0]).join('|') === lib.families.join('|') && lib.cats.every((c) => c[1] > 0), 'Choose my paints lists 77 paints in the nine families', lib.cats);
+    t.check(JSON.stringify(lib.cats.map((c) => c[0]).sort()) === JSON.stringify(['Blacks and grays', 'Blues', 'Earths', 'Greens', 'Oranges', 'Pinks and violets', 'Reds', 'Whites', 'Yellows']), 'the nine families are the README\'s: whites, yellows, oranges, reds, pinks and violets, blues, greens, earths, and blacks and grays', lib.cats.map((c) => c[0]));
     t.check(lib.pigments === 77 && lib.swatches === 77 && lib.count === '', 'every paint has a pigment code and a tube-and-tint swatch; the count is blank with none ticked', [lib.pigments, lib.swatches, lib.count]);
     // one paint, the white alone
     await setMine(page, ['TW']);
@@ -466,6 +501,7 @@ export default async function paints(t, site) {
     await clean(t, page, 'tick a known palette');
 
     // Suggest at every size 3..10 from those paints
+    const bySize = [];
     for (let size = 3; size <= 10; size++) {
       await setRange(page, '#paintMax', String(size));
       t.check((await text(page, '#paintMaxOut')) === `${size} + white`, `size ${size}: the output reads "${size} + white"`, await text(page, '#paintMaxOut'));
@@ -475,6 +511,24 @@ export default async function paints(t, site) {
       const rm = reachOf(await text(page, '#resultMatch'));
       t.check(rm && rm[1] === n && rm[0] <= n && (await rows(page)).length === n, `size ${size}: the match and the rows count this study's ${n} colors`, [await text(page, '#resultMatch'), (await rows(page)).length]);
       t.check(JSON.parse(await storageGetRaw(page, K.choice)).max === size, `size ${size}: saved`, await storageGetRaw(page, K.choice));
+      bySize.push({ size, cs, reached: rm && rm[0] });
+    }
+    // "one paint at a time ... until another paint would barely help or the palette reaches the size you set": the same greedy walk at
+    // every size, so a bigger palette keeps the smaller one's paints in order and never mixes fewer colors; and every paint added past
+    // the first two colors brings the weighted miss down by at least 0.4 (Mixing.MIN_GAIN)
+    t.check(bySize.every((s, i) => i === 0 || (s.cs.length >= bySize[i - 1].cs.length && bySize[i - 1].cs.every((c, j) => s.cs[j] === c))), 'sizes 3..10: each palette begins with the paints of the size below it, in the same order', bySize.map((s) => s.cs.join(' ')));
+    t.check(bySize.every((s, i) => i === 0 || s.reached >= bySize[i - 1].reached), 'sizes 3..10: a bigger palette never mixes fewer of the colors', bySize.map((s) => s.reached));
+    {
+      await qInstall(page);
+      const longest = bySize.reduce((a, s) => (s.cs.length > a.length ? s.cs : a), []);
+      const steps = await page.evaluate((codes) => {
+        const q = window.__q, colors = q.colors(), ps = codes.map(q.paint), out = [];
+        let prev = null;
+        for (let k = 2; k <= ps.length; k++) { const sc = Mixing.coverage(ps.slice(0, k), colors).score; out.push({ code: codes[k - 1], k, gain: prev === null ? null : prev - sc }); prev = sc; }
+        return out;
+      }, longest);
+      const weak = steps.filter((x) => x.k >= 4 && x.gain < 0.4 - 1e-6);
+      t.check(longest.length >= 4 && weak.length === 0, `the longest suggestion (${longest.join(' ')}): every paint after the first two colors lowers the weighted miss by at least 0.4`, steps.map((x) => [x.code, x.gain === null ? null : +x.gain.toFixed(2)]));
     }
     await clean(t, page, 'every size');
 
@@ -510,6 +564,14 @@ export default async function paints(t, site) {
     await afterSuggest(page, () => click(page, '#paintDialogDone'));
     const s77 = { count: await text(page, '#mineCount'), chips: await chips(page), about: await text(page, '#resultAbout') };
     t.check(s77.count === '77 paints ticked' && s77.chips.length >= 3 && s77.chips.length <= 11 && s77.chips[0] === 'TW' && s77.about.startsWith('Chosen from your paints'), 'all 77 ticked: a suggestion of at most 10 + white from "your paints"', s77);
+    {
+      // the biggest search: a recipe is still up to three paints plus white, and every badge still says what its ΔE says
+      const r77 = await rows(page);
+      const ds77 = await checkBadges(t, page, 'suggested (all 77)');
+      checkRecipes(t, 'suggested (all 77)', r77, await whiteMap(page));
+      const rc77 = reachOf(await text(page, '#resultMatch'));
+      t.check(r77.length === n && rc77 && ds77.filter((d) => d.dE < 6.35).length >= rc77[0], 'suggested (all 77): the rows within ΔE 6 are at least the colors "Mixes N of M" promises', [ds77.filter((d) => d.dE < 6.35).length, rc77]);
+    }
     t.note(`All 77 ticked at size 10 suggests ${s77.chips.join(', ')}; the whole library at size 6 suggested ${s0.chips.join(', ')}.`);
     await page.reload({ waitUntil: 'load' }); await sleep(300); await settled(page);
     const back = await page.evaluate(() => ({ count: document.getElementById('mineCount').textContent, mine: document.getElementById('srcMine').checked, max: document.getElementById('paintMax').value, result: document.getElementById('paintResult').hidden, btn: document.getElementById('suggestBtn').textContent, state: document.getElementById('colorsState').textContent }));
@@ -740,8 +802,826 @@ export default async function paints(t, site) {
     await clean(t, page, 'phone');
     await page.context().close();
   }
+
+  if (t.reachMismatch && t.reachMismatch.length) {
+    const m = t.reachMismatch.find((x) => !/^phone/.test(x.label)) || t.reachMismatch[0];
+    t.finding({ title: `A palette's "Mixes N of M colors" counts a color whose own recipe comes out Out of reach (${m.label}: ${m.reach[0]} of ${m.reach[1]}, but ${m.within} rows within ΔE 6)`, severity: 'medium', steps: `1. Advanced mode, Colors and paints, Known palettes, on the built-in sample study. 2. Press ${m.label}. 3. Compare "Mixes ${m.reach[0]} of ${m.reach[1]} colors" with the badges below.`, expected: 'As many Close or Near rows as the palette is said to mix (the code\'s own comment: full recipes "come out as close or closer" than the quick count that ranks the palettes).', actual: `The result says ${m.reach[0]} of ${m.reach[1]}, but only ${m.within} rows are within ΔE 6; the others: ${m.off.join('; ')}. For #3F1715 the quick count finds a mix of Alizarin Crimson and Burnt Umber at ΔE 4.7 (Near), while the row shows AC 6 · IB 1 at ΔE 7.0 (7.3 read off the rounded chip). The palette ranking uses the quick count, so a palette can sit higher than its rows justify. Cause: js/mixing.js 300-306: a target within 3 L* of the palette's darkest (Reilly's black makes that 11.2, the color is 14.0) is treated as a limit and recipeTask charges every L* the mix is lighter than the target (PER_VALUE), so the written recipe takes the darker, less accurate AC + IB; coverage() (739-749, which feeds "Mixes N of M" and the ranking) has no such charge and counts the lighter AC + BU mix as reached. The row is then neither Close/Near nor "Darkest you can mix" (that needs the mix itself within 3 L* of the darkest, lines 483-484).` });
+  }
+
+  // ---- the second pass: one block per promise the first pass left unchecked (GAP_BLOCKS, below) ------------------------
+  for (const [, fn] of GAP_BLOCKS) await fn(t, site);
 }
 
 // a saved value, raw and parsed
 const storageGetRaw = (page, key) => page.evaluate((k) => localStorage.getItem(k), key);
 const storageGetJson = async (page, key) => { const raw = await storageGetRaw(page, key); try { return JSON.parse(raw); } catch (e) { return raw; } };
+
+// ======================================================================================================================
+// GAP_BLOCKS: the second pass. Each block is one promise of the README (or of the page's own words) that nothing above
+// checked; it opens its own page(s) and ends every step with clean().
+// ======================================================================================================================
+export const GAP_BLOCKS = []; // (exported so a scratch script can run one block alone; run.mjs only uses the default export)
+const gap = (name, fn) => GAP_BLOCKS.push([name, fn]);
+
+// ---- "Change the photo or settings and it is chosen again": a suggestion on screen follows the study ---------------------
+gap('suggestion follows the study', async (t, site) => {
+  const page = await openPage(site, { storage: { ...ADV, ...MINE(4) } });
+  await settled(page);
+  await suggestNow(page);
+  const presetsNow = await presets(page);
+  const sameAsPreset = (codes) => presetsNow.some((p) => p.paints.length === codes.length && p.paints.every((c) => codes.includes(c)));
+  const compare = async (label) => {
+    const n = await nColors(page);
+    const s = await shownResult(page);
+    const rm = reachOf(s.match);
+    t.check(!s.hidden && rm && rm[1] === n && rm[0] <= n && s.rows === n && s.btn === 'Suggest again' && s.name === 'Suggested palette' && /it is chosen again\.$/.test(s.about), `${label}: the suggestion on screen is for this study (${n} colors), with nothing pressed`, { n, ...s });
+    t.check(s.state === `${s.colors} per value · Suggested palette`, `${label}: the drawer header follows`, s.state);
+    t.check(JSON.stringify(s.cur) === JSON.stringify(s.chips), `${label}: the palette the Studio and block view use is the suggestion`, [s.cur, s.chips]);
+    const ps = await paletteOptions(page, '#ps-palette');
+    t.check(sameAsPreset(s.chips) || ps.options.some((o) => o[0] === 'study' && o[1] === 'Study tab: Suggested palette'), `${label}: the Studio lists "Study tab: Suggested palette"`, ps.options.map((o) => o[1]));
+    await suggestNow(page);
+    const f = await shownResult(page);
+    t.check(f.match === s.match && JSON.stringify(f.chips) === JSON.stringify(s.chips), `${label}: pressing Suggest again gives what was already on screen (nothing was left over from the old study)`, { shown: [s.match, s.chips], again: [f.match, f.chips] });
+    return rm;
+  };
+  const first = await shownResult(page);
+  // a different photo
+  let moved = await afterChange(page, async () => loadPhoto(page, await extremesImage(page), { settle: 300 }));
+  t.check(moved, 'a new photo: the study is redone');
+  const afterPhoto = await compare('new photo');
+  t.check(afterPhoto && afterPhoto[1] === await nColors(page), 'new photo: "Mixes N of M" counts the new photo\'s colors', afterPhoto);
+  // Colors in each value, both ways
+  for (const v of ['1', '5']) {
+    moved = await afterChange(page, () => setRange(page, '#colors', v));
+    t.check(moved, `Colors per value ${v}: the study is redone`);
+    await compare(`Colors per value ${v}`);
+  }
+  // Lean toward lighter tones (Advanced only) changes the colors a study holds
+  moved = await afterChange(page, () => setRange(page, '#lean', '100'));
+  if (moved) await compare('lean toward lighter tones'); else t.note('Moving "Lean toward lighter tones" from 60 to 100 on this photo did not redo the study, so only the photo and Colors per value could be checked for the suggestion following.');
+  t.note(`The first suggestion (sample, 3 per value) was ${first.chips.join(' ')}, ${first.match.toLowerCase()}.`);
+  await clean(t, page, 'suggestion follows the study');
+  await page.context().close();
+});
+
+// ---- Simple mode: the palette in use before any choice is the best of its three ---------------------------------------
+gap('simple mode default palette', async (t, site) => {
+  const page = await openPage(site, { storage: { [K.drawers]: '["colors"]' } });
+  await settled(page); await ranked(page);
+  const nameOf = Object.fromEntries((await presets(page)).map((p) => [p.id, p.name]));
+  const THREE = ['Zorn', 'Three primaries', 'Rembrandt (earths)'];
+  const probe = async (label) => {
+    const list = await presetList(page);
+    const best = list.filter((l) => l.shown).find((l) => l.best);
+    const cur = await page.evaluate(() => { const c = StudioPalette.current(); return c && { name: c.name, chosen: c.chosen }; });
+    const bv = await page.evaluate(() => ({ text: document.getElementById('blockViewPalette').textContent, title: document.getElementById('blockViewPalette').title }));
+    t.check(best && cur && cur.name === nameOf[best.id] && cur.chosen === false && THREE.includes(cur.name), `${label}: the palette in use is the Best match among the three (${best && nameOf[best.id]}), not one the visitor has chosen`, { best: best && best.id, cur });
+    t.check(cur && bv.text === shortName(cur.name) && /best match/.test(bv.title), `${label}: the block-view switch names it and says it is the best match`, bv);
+    await tab(page, 'paint');
+    const ps = await selectedText(page, '#ps-palette');
+    await tab(page, 'study');
+    t.check(cur && ps === cur.name, `${label}: the Studio opens on it`, [ps, cur && cur.name]);
+    return { list, cur };
+  };
+  await probe('sample, Simple, nothing chosen');
+  t.check((await text(page, '#colorsState')) === '3 per value', 'with nothing chosen the header says only "3 per value"', await text(page, '#colorsState'));
+  await loadPhoto(page, await extremesImage(page), { settle: 300 });
+  await settled(page); await ranked(page);
+  const ex = await probe('photo past paint, Simple');
+  const overall = nameOf[ex.list[0].id];
+  t.note(`On the photo with a blue, the best of all ten is ${overall} and the best of Simple's three is ${ex.cur && ex.cur.name}${THREE.includes(overall) ? ' (the same palette, so this photo cannot tell the two apart)' : ''}.`);
+  // Advanced uses the best overall; going back to Simple, the best of the three again
+  await click(page, '[data-mode="advanced"]'); await settled(page);
+  const followed = await page.waitForFunction((want) => { const c = StudioPalette.current(); return c && c.name === want; }, overall, { timeout: 8000 }).then(() => true).catch(() => false);
+  const bvAdv = await text(page, '#blockViewPalette');
+  t.check(followed && !!bvAdv && bvAdv === shortName(overall), `switching to Advanced: the palette in use is the best of all ten (${overall}) and the block-view switch follows`, [followed, bvAdv]);
+  await click(page, '[data-mode="simple"]'); await settled(page);
+  const back = await page.waitForFunction((want) => { const c = StudioPalette.current(); return c && c.name === want; }, ex.cur && ex.cur.name, { timeout: 8000 }).then(() => true).catch(() => false);
+  const bvSimple = await text(page, '#blockViewPalette');
+  t.check(back && bvSimple === shortName(ex.cur.name), 'and back to Simple: the best of the three again, and the switch follows', [back, bvSimple]);
+  await clean(t, page, 'simple default palette');
+  await page.context().close();
+});
+
+// ---- the pigment model: yellow and blue make green, and each paint's strength is fitted to its tint ------------------------
+gap('pigment model', async (t, site) => {
+  const page = await advPage(site, MINE(4), { rank: false });
+  const model = await page.evaluate(() => {
+    const P = (c, s = 'normal') => Mixing.makePaint(Object.assign({}, Paints.byCode(c), { strength: s }));
+    const hx = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const greens = [['CYM', 'UB'], ['CYL', 'PBR'], ['HYL', 'CeB'], ['CLm', 'PBG']].map(([y, b]) => {
+      let best = null;
+      for (const k of [1, 2, 4, 8, 16, 32]) { const lab = Mixing.mix([P(y), P(b)], [k, 1]).lab; if (!best || lab[1] < best.lab[1]) best = { k, lab }; }
+      return { pair: y + '+' + b, k: best.k, a: +best.lab[1].toFixed(1), b: +best.lab[2].toFixed(1) };
+    });
+    // screen averaging of a classic yellow and blue: the README's "gray instead of green"
+    const avg = hx(Paints.byCode('CYM').hex).map((v, i) => Math.round((v + hx(Paints.byCode('UB').hex)[i]) / 2));
+    const avgLab = Study.rgbToLab(...avg);
+    const white = P('TW');
+    const tints = Paints.LIBRARY.filter((p) => p.tint).map((p) => {
+      const tl = Study.rgbToLab(...hx(p.tint));
+      const dd = (s) => Study.deltaE2000(...Mixing.mix([P(p.code, s), white], [1, 4]).lab, ...tl);
+      const wx = hx('#F3F1EA'), px = hx(p.hex);
+      const plain = Study.deltaE2000(...Study.rgbToLab(...px.map((v, i) => Math.round((v + 4 * wx[i]) / 5))), ...tl);
+      return { code: p.code, fit: dd('normal'), weak: dd('weak'), strong: dd('strong'), plain };
+    });
+    return { greens, avg: [+avgLab[1].toFixed(1), +avgLab[2].toFixed(1)], tints };
+  });
+  t.check(model.greens.every((g) => g.a < -8 && g.b > 15), 'yellow with blue mixes green in the model (a* below -8, b* above 15) for cadmium yellow + ultramarine, + phthalo blue, hansa + cerulean, lemon + phthalo', model.greens);
+  t.check(model.avg[0] > -5, 'averaging the screen colors of cadmium yellow and ultramarine does not give green (the contrast the README draws)', model.avg);
+  t.check(model.tints.length === 74 && model.tints.every((x) => x.fit < 8), 'every tinted paint mixed 1 : 4 with titanium white lands within ΔE 8 of its tint swatch', model.tints.filter((x) => x.fit >= 8).map((x) => [x.code, +x.fit.toFixed(1)]));
+  t.check(model.tints.every((x) => x.fit <= x.weak + 1e-6 && x.fit <= x.strong + 1e-6), 'the fitted tinting strength beats a weaker and a stronger one for every paint', model.tints.filter((x) => x.fit > x.weak + 1e-6 || x.fit > x.strong + 1e-6).map((x) => x.code));
+  t.check(model.tints.every((x) => x.fit < x.plain), 'and beats plain averaging of tube and white for every paint', model.tints.filter((x) => x.fit >= x.plain).map((x) => [x.code, +x.fit.toFixed(1), +x.plain.toFixed(1)]));
+  // through the page: a green patch painted with only a yellow, a blue and white
+  await loadPhoto(page, await bandsImage(page, [['#5a9a3a', 320], ['#e8d6a8', 240], ['#2a3258', 240]]), { settle: 300 });
+  await settled(page);
+  await click(page, '#mineEdit'); await sleep(100);
+  await setMine(page, ['TW', 'CYM', 'UB']);
+  await afterSuggest(page, () => click(page, '#paintDialogDone'));
+  const rs = await page.evaluate(() => [...document.querySelectorAll('#mixList .mix-row')].map((r) => {
+    const tg = /#[0-9A-F]{6}/.exec(r.querySelector('.mix-add').getAttribute('aria-label'))[0], pr = /#[0-9A-F]{6}/.exec(r.querySelector('.mix-chip:nth-child(2)').title)[0];
+    const c = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    return { tg: c(tg), pr: c(pr), recipe: r.querySelector('.mix-recipe').textContent, badge: r.querySelector('.mix-badge').textContent };
+  }));
+  const green = rs.filter((r) => r.tg[1] > r.tg[0] + 25 && r.tg[1] > r.tg[2] + 25);
+  t.check(green.length >= 1 && green.every((r) => /CYM/.test(r.recipe) && /UB/.test(r.recipe) && r.pr[1] > r.pr[0] && r.pr[1] > r.pr[2]), 'with only cadmium yellow, ultramarine and white ticked, the photo\'s green is mixed from yellow and blue and predicted green', green);
+  await clean(t, page, 'pigment model');
+  await page.context().close();
+});
+
+// ---- whites: titanium if you have it, another white if not, none at all ------------------------------------------------
+gap('whites and no white', async (t, site) => {
+  const page = await advPage(site, MINE(4), { rank: false });
+  const mineMenu = async () => { await click(page, '#mineEdit'); await sleep(100); };
+  const done = () => afterSuggest(page, () => click(page, '#paintDialogDone'));
+  const isWhite = (c) => ['TW', 'ZW', 'LW'].includes(c);
+  const remb = (await presets(page)).find((p) => p.id === 'rembrandt');
+  // (a) a palette that carries only lead white
+  await mineMenu(); await setMine(page, []); await tickPresetIn(page, 'rembrandt'); await sleep(100);
+  await done();
+  let cs = await chips(page);
+  t.check(cs[0] === 'LW' && !cs.includes('TW') && cs.slice(1).every((c) => remb.paints.includes(c)) && (await rows(page)).every((r) => BADGES.includes(r.badge)), 'with only Rembrandt\'s paints ticked (lead white, no titanium) the suggestion starts with lead white', cs);
+  // (b) three whites and earths: titanium, the one white
+  await mineMenu(); await setMine(page, ['TW', 'ZW', 'LW', 'YO', 'RS', 'BS', 'IB']);
+  await done();
+  cs = await chips(page);
+  t.check(cs[0] === 'TW' && cs.filter(isWhite).length === 1, 'with titanium, zinc and lead white ticked, titanium goes first and no other white is added', cs);
+  // (c) no white at all
+  await mineMenu(); await setMine(page, ['YO', 'CRL', 'IB']);
+  await done();
+  cs = await chips(page);
+  const rs = await rows(page);
+  const maxOut = await text(page, '#paintMaxOut');
+  t.check(cs.length >= 2 && cs.length <= 3 && cs.every((c) => !isWhite(c)) && rs.length === (await nColors(page)) && rs.every((r) => BADGES.includes(r.badge) && !/\b(TW|ZW|LW)\b/.test(r.recipe)), 'with no white ticked, the palette holds no white, no recipe uses one, and every color still has a badge', { cs, recipes: rs.map((r) => r.recipe) });
+  const rc = reachOf(await text(page, '#resultMatch'));
+  t.check(rc && rc[0] <= rc[1] && (await shownResult(page)).btn === 'Suggest again', 'and "Mixes N of M" is sound', await text(page, '#resultMatch'));
+  t.note(`With no white ticked the size output still reads "${maxOut}" (the hint under it says "Not counting white"), though the palette has no white in it.`);
+  // (d) only whites
+  await mineMenu(); await setMine(page, ['TW', 'ZW', 'LW']);
+  await done();
+  cs = await chips(page);
+  t.check(JSON.stringify(cs) === '["TW"]' && (await rows(page)).every((r) => r.recipe === 'TW'), 'three whites ticked: the palette is titanium white alone and every mix is that white', [cs, (await rows(page)).map((r) => r.recipe)]);
+  await clean(t, page, 'whites');
+  // what the other tabs make of three whites ("at least two" is the rule)
+  await tab(page, 'game');
+  const g3 = await paletteOptions(page, '#gamePalette');
+  t.check(g3.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (3)'), 'the game offers "My paints (3)" for three whites', g3.options.map((o) => o[1]));
+  await setSelect(page, '#gamePalette', 'mine');
+  await click(page, '#gameStart'); await page.waitForFunction(() => !document.getElementById('gamePlay').hidden && document.querySelectorAll('#gameNumbers .game-number').length > 0, null, { timeout: 30000 }).catch(() => null);
+  const gameUp = await page.evaluate(() => !document.getElementById('gamePlay').hidden && document.querySelectorAll('.game-paint').length);
+  t.check(gameUp >= 1, 'a game can be started with three whites as the palette', gameUp);
+  await page.evaluate(() => { const b = document.getElementById('gameQuit') || document.querySelector('[data-game-quit]'); if (b) b.click(); });
+  await tab(page, 'battle');
+  const v3 = await paletteOptions(page, '#vb-palette');
+  t.check(v3.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (3)'), 'Value battle offers "My paints (3)" for three whites', v3.options.map((o) => o[1]));
+  await setSelect(page, '#vb-palette', 'mine');
+  await resetToast(page);
+  await click(page, '#vb-start'); await sleep(300);
+  const bt = await text(page, '#toast');
+  t.check(/needs a paint that is not a white/.test(bt) && !(await visible(page, '#vb-play')), 'Value battle cannot be played with three whites (nothing to compare): it stays on its setup and says why', bt);
+  await tab(page, 'paint');
+  await setSelect(page, '#ps-palette', 'mine'); await sleep(300);
+  const sc = await paintCodes(page);
+  t.check(JSON.stringify(sc.slice().sort()) === '["LW","TW","ZW"]', 'the Studio takes the three whites as its palette', sc);
+  await clean(t, page, 'three whites in the game, the battle and the Studio');
+  await page.context().close();
+  // (e) one paint only: nothing to offer anywhere else (a fresh page: the Studio above has been chosen from, and stops following)
+  const one = await advPage(site, MINE(4), { rank: false });
+  await click(one, '#mineEdit'); await sleep(100); await setMine(one, ['TW']);
+  await afterSuggest(one, () => click(one, '#paintDialogDone'));
+  t.check(JSON.stringify(await chips(one)) === '["TW"]', 'one paint ticked: the palette is that white alone', await chips(one));
+  for (const [name, sel] of [['game', '#gamePalette'], ['battle', '#vb-palette'], ['paint', '#ps-palette']]) {
+    await tab(one, name);
+    const o = await paletteOptions(one, sel);
+    t.check(!o.options.some((x) => x[0] === 'mine' || x[0] === 'study'), `one paint ticked: ${name === 'paint' ? 'the Studio' : 'the ' + name} offers no My paints and no "Study tab" palette`, o.options.map((x) => x[1]));
+  }
+  await clean(t, one, 'one paint in the other tabs');
+  await one.context().close();
+});
+
+// ---- photos with nothing in them: pure white, pure black, flat gray, noise ----------------------------------------------
+gap('degenerate photos', async (t, site) => {
+  const page = await advPage(site);
+  const expect = { white: ['Lightest you can mix'], black: ['Darkest you can mix'], flat: ['Close'] };
+  for (const draw of ['white', 'black', 'flat']) {
+    await loadPhoto(page, await makeImage(page, { width: 320, height: 420, draw }), { settle: 300 });
+    await settled(page); await ranked(page);
+    const s = await page.evaluate(() => ({ n: Studio.result().blockColors.filter((c) => c.share > 0).length, reach: [...document.querySelectorAll('#presetList li')].map((li) => li.querySelector('.preset-reach').textContent), v: [...document.querySelectorAll('#presetList .preset-bar')].map((b) => b.style.getPropertyValue('--v')), best: document.querySelectorAll('#presetList .preset-best').length }));
+    t.check(s.n >= 1 && s.reach.every((r) => { const m = /^(\d+) \/ (\d+)$/.exec(r); return m && +m[2] === s.n && +m[1] <= s.n; }), `${draw} photo: every meter reads "N / ${s.n}"`, s);
+    t.check(s.v.every((v) => /^\d(\.\d+)?$/.test(v) && +v >= 0 && +v <= 1), `${draw} photo: every meter bar has a number between 0 and 1 (no NaN)`, s.v);
+    t.check(s.best === 1, `${draw} photo: exactly one palette is marked Best match`, s.best);
+    await pickPreset(page, 'zorn');
+    const rs = await rows(page);
+    t.check(rs.length === s.n && rs.every((r) => expect[draw].includes(r.badge)), `${draw} photo: Zorn's ${rs.length === 1 ? 'one row is' : 'rows are'} "${expect[draw][0]}"`, rs.map((r) => [r.zone, r.recipe, r.badge]));
+    const match = await text(page, '#resultMatch'), aria = await page.evaluate(() => document.querySelector('#presetList .preset').getAttribute('aria-label'));
+    if (s.n === 1) {
+      const singular = / of 1 color$/.test(match) && / of 1 color$/.test(aria);
+      t.check(singular, `${draw} photo (one color): the result and the palette buttons say "of 1 color"`, [match, aria]);
+      if (!singular && draw === 'white') t.finding({ title: 'A photo with one color reads "Mixes 1 of 1 colors"', severity: 'low', steps: '1. Advanced mode, Colors and paints. 2. Load a photo that is one flat color (pure white, pure black or a flat gray). 3. Pick any palette.', expected: '"Mixes 1 of 1 color" (and "1 of 1 color" in the button\'s spoken label).', actual: `The result reads "${match}" and the first palette button is labelled "${aria}". Cause: js/palette.js 126 (reachText, which also feeds the button\'s spoken label at about line 172) always writes "colors".` });
+    }
+    await clean(t, page, `${draw} photo`);
+  }
+  await page.context().close();
+  // noise at six colors per value: the longest mix list, on a phone
+  const ph = await advPage(site, {}, { viewport: PHONE });
+  await setRange(ph, '#colors', '6');
+  await settled(ph);
+  await loadPhoto(ph, await makeImage(ph, { width: 320, height: 420, draw: 'noise' }), { settle: 300 });
+  await settled(ph); await ranked(ph);
+  const nn = await nColors(ph);
+  await pickPreset(ph, 'zorn');
+  const nrs = await rows(ph);
+  t.check(nn >= 6 && nn <= 24 && nrs.length === nn && nrs.every((r) => BADGES.includes(r.badge)), `noise at Colors 6: ${nn} colors (at most 24), a row and a badge for each`, [nn, nrs.length]);
+  t.check((await hscroll(ph)) <= 0, 'noise at Colors 6 on a phone: no horizontal scroll', await hscroll(ph));
+  await clean(t, ph, 'noise');
+  await ph.context().close();
+});
+
+// ---- a first visit: the drawer is closed at load and opened by its summary ---------------------------------------------------
+gap('drawer opened by its summary', async (t, site) => {
+  const isOpen = (page) => page.evaluate(() => document.getElementById('drawer-colors').open);
+  // nothing saved: closed, no palettes rendered yet, the header says only the count
+  let page = await openPage(site);
+  await settled(page);
+  const st0 = await page.evaluate(() => ({ open: document.getElementById('drawer-colors').open, listed: document.querySelectorAll('#presetList .preset').length, state: document.getElementById('colorsState').textContent }));
+  t.check(!st0.open && st0.state === '3 per value', 'a first visit: the Colors and paints drawer is closed and its header reads "3 per value"', st0);
+  await click(page, '#drawer-colors summary');
+  await ranked(page);
+  const l0 = await presetList(page);
+  t.check((await isOpen(page)) && l0.length === 10 && l0.filter((l) => l.shown).length === 3 && l0.every((l) => !l.pressed) && !(await visible(page, '#paintResult')), 'opened by its summary the drawer ranks the palettes (Simple shows three), none pressed and no mixes yet', l0.map((l) => [l.id, l.shown, l.pressed]));
+  t.check(l0.filter((l) => l.shown && l.best).length === 1, 'and exactly one of the three shown carries Best match', l0.filter((l) => l.best).map((l) => l.id));
+  t.check((await storageGetRaw(page, K.drawers)) === '["colors"]', 'the open drawer is remembered', await storageGetRaw(page, K.drawers));
+  await pickPreset(page, 'zorn');
+  await click(page, '#drawer-colors summary'); await sleep(150);
+  t.check(!(await isOpen(page)) && (await text(page, '#colorsState')) === '3 per value · Zorn', 'closed again, the header names the palette', await text(page, '#colorsState'));
+  await clean(t, page, 'drawer: first visit');
+  await page.context().close();
+
+  // a palette saved, the drawer closed: the header names it at once; opening brings the ranking, the pressed palette and its mixes
+  page = await openPage(site, { storage: { [K.choice]: '{"source":"preset","preset":"zorn","max":6}', [K.drawers]: '[]' } });
+  await settled(page);
+  t.check((await text(page, '#colorsState')) === '3 per value · Zorn' && !(await isOpen(page)), 'a saved palette, drawer closed: the header reads "3 per value · Zorn"', await text(page, '#colorsState'));
+  // a photo loaded while it is closed counts for the ranking made when it opens
+  await loadPhoto(page, await extremesImage(page), { settle: 300 });
+  await settled(page);
+  t.check((await text(page, '#colorsState')) === '3 per value · Zorn', 'a photo loaded with the drawer closed leaves the header as it was', await text(page, '#colorsState'));
+  await click(page, '#drawer-colors summary');
+  await ranked(page); await mixed(page);
+  const ne = await nColors(page);
+  const l1 = await presetList(page);
+  t.check(l1.find((l) => l.id === 'zorn').pressed && l1.every((l) => l.reach.endsWith(` / ${ne}`)) && (await rows(page)).length === ne && (await text(page, '#resultName')) === 'Zorn', `opened, it ranks for the new photo (${ne} colors), presses Zorn and shows its ${ne} mixes`, [l1.map((l) => l.reach), (await rows(page)).length]);
+  t.check((await storageGetRaw(page, K.drawers)) === '["colors"]', 'the drawers key now holds "colors"', await storageGetRaw(page, K.drawers));
+  await clean(t, page, 'drawer: saved palette');
+  await page.context().close();
+
+  // My paints saved, drawer closed, a photo loaded: opening shows no suggestion until asked, then Suggest works
+  page = await openPage(site, { storage: { [K.mode]: 'advanced', [K.drawers]: '[]', [K.mine]: '["TW","YO","CRL","IB"]', ...MINE(4) } });
+  await settled(page);
+  t.check((await text(page, '#colorsState')) === '3 per value' && (await text(page, '#mineCount')) === '4 paints ticked', 'My paints saved, drawer closed: the header says only "3 per value" and the pane counts four paints', [await text(page, '#colorsState'), await text(page, '#mineCount')]);
+  await loadPhoto(page, await extremesImage(page), { settle: 300 });
+  await settled(page);
+  await click(page, '#drawer-colors summary'); await sleep(300);
+  const o2 = await shownResult(page);
+  t.check(o2.hidden && o2.btn === 'Suggest a palette' && o2.state === '3 per value', 'opened, there is no suggestion yet: the button asks for one', o2);
+  await suggestNow(page);
+  const o3 = await shownResult(page), n3 = await nColors(page);
+  t.check(o3.rows === n3 && JSON.stringify(o3.chips) !== '[]' && o3.chips.every((c) => ['TW', 'YO', 'CRL', 'IB'].includes(c)) && o3.state === '3 per value · Suggested palette', `then Suggest chooses from the four ticked paints for the photo's ${n3} colors`, o3);
+  await clean(t, page, 'drawer: my paints');
+  await page.context().close();
+});
+
+// ---- the chosen palette and the last suggestion are kept per source ----------------------------------------------------------
+gap('source round trip', async (t, site) => {
+  const page = await advPage(site);
+  await pickPreset(page, 'schmid');
+  const schmid = (await presets(page)).find((p) => p.id === 'schmid');
+  await click(page, '#srcMine');
+  await click(page, '#suggestBtn'); await suggestedDone(page); await mixed(page);
+  const sug = await shownResult(page);
+  // back to the known palettes: Richard Schmid is still pressed and its mixes come back without a click
+  await click(page, '#srcPreset'); await mixed(page);
+  const l = await presetList(page);
+  const n = await nColors(page);
+  t.check(l.filter((x) => x.pressed).map((x) => x.id).join() === 'schmid' && (await text(page, '#resultName')) === 'Richard Schmid' && JSON.stringify(await chips(page)) === JSON.stringify(schmid.paints) && (await rows(page)).length === n, 'back on Known palettes: Richard Schmid is still pressed and its mixes are showing', [l.filter((x) => x.pressed).map((x) => x.id), await text(page, '#resultName'), (await rows(page)).length]);
+  t.check((await text(page, '#colorsState')) === '3 per value · Richard Schmid', 'and the header names it', await text(page, '#colorsState'));
+  // and to My paints again: the suggestion is shown at once, not worked out again
+  const trace = await page.evaluate(() => new Promise((resolve) => {
+    const b = document.getElementById('suggestBtn'), seen = [];
+    document.getElementById('srcMine').click();
+    const first = { btn: b.textContent, hidden: document.getElementById('paintResult').hidden, name: document.getElementById('resultName').textContent, chips: [...document.querySelectorAll('#resultPaints .paint-code')].map((e) => e.textContent) };
+    let frames = 0;
+    (function tick() { seen.push(b.textContent); if (++frames < 12) requestAnimationFrame(tick); else resolve({ first, seen: [...new Set(seen)] }); })();
+  }));
+  await mixed(page);
+  t.check(!trace.first.hidden && trace.first.name === 'Suggested palette' && JSON.stringify(trace.first.chips) === JSON.stringify(sug.chips) && trace.seen.length === 1 && trace.seen[0] === 'Suggest again', 'back on My paints: the earlier suggestion is on screen at once, with the button reading "Suggest again" throughout (nothing is worked out again)', trace);
+  t.check((await text(page, '#colorsState')) === '3 per value · Suggested palette' && (await text(page, '#resultMatch')) === sug.match, 'and the header and the match are as they were', [await text(page, '#colorsState'), await text(page, '#resultMatch')]);
+  // a new photo while on the other source: the suggestion is made again for it when My paints is shown
+  await click(page, '#srcPreset'); await ranked(page);
+  await loadPhoto(page, await extremesImage(page), { settle: 300 });
+  await settled(page); await ranked(page); await mixed(page);
+  await afterSuggest(page, () => click(page, '#srcMine'));
+  const s2 = await shownResult(page), n2 = await nColors(page), rm = reachOf(s2.match);
+  t.check(rm && rm[1] === n2 && s2.rows === n2 && s2.btn === 'Suggest again', `a photo loaded while on Known palettes: My paints then shows a suggestion for the new photo's ${n2} colors`, s2);
+  await clean(t, page, 'source round trip');
+  await page.context().close();
+});
+
+// ---- Forget my work on this device clears the paints drawer's state too ----------------------------------------------------------
+gap('forget clears the paints', async (t, site) => {
+  const page = await advPage(site);
+  await click(page, '#srcMine');
+  await tickDialog(page, ['TW', 'YO', 'CRL', 'IB', 'UB']);
+  await afterSuggest(page, () => click(page, '#paintDialogDone'));
+  await setRange(page, '#paintMax', '9');
+  await click(page, '#srcPreset'); await ranked(page);
+  await pickPreset(page, 'schmid');
+  await click(page, '#blockViewPalette'); await blockBusy(page);
+  const kept = await storageKeys(page);
+  t.check(['myPaints', 'paintChoice', 'blockView'].every((k) => kept.includes('portrait-value-studio.' + k)), 'before Forget the browser holds the ticks, the choice and the block view', kept);
+  await tab(page, 'help');
+  await click(page, '#forgetBtn'); await sleep(300);
+  await Promise.all([page.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), click(page, '#forgetBtn')]);
+  await sleep(800);
+  await settled(page);
+  // (openPage's seed of Advanced and the open drawer is written again by the reload, so only the paints' own keys are looked for)
+  const left = (await storageKeys(page)).filter((k) => /\.(myPaints|paintChoice|blockView|palette)$/.test(k));
+  t.check(left.length === 0, 'after Forget none of the paints\' keys is left', left);
+  await ranked(page);
+  const st = await page.evaluate(() => ({
+    preset: document.getElementById('srcPreset').checked, pressed: document.querySelectorAll('#presetList .preset[aria-pressed="true"]').length, result: !document.getElementById('paintResult').hidden,
+    count: document.getElementById('mineCount').textContent, max: document.getElementById('paintMax').value, maxOut: document.getElementById('paintMaxOut').textContent,
+    photo: document.querySelector('[data-block-view="photo"]').getAttribute('aria-pressed'), palette: document.getElementById('blockViewPalette').getAttribute('aria-pressed'), state: document.getElementById('colorsState').textContent,
+  }));
+  t.check(st.preset && st.pressed === 0 && !st.result && st.count === 'No paints ticked yet: suggestions come from the whole library.' && st.max === '6' && st.maxOut === '6 + white' && st.photo === 'true' && st.palette === 'false' && st.state === '3 per value', 'the drawer starts over: Known palettes with none pressed, no ticks, the size at 6 + white, the block view on Photo', st);
+  await click(page, '#srcMine'); await click(page, '#mineEdit'); await sleep(200);
+  t.check((await ticked(page)).length === 0, 'and the library dialog has nothing ticked', (await ticked(page)).length);
+  await clean(t, page, 'forget');
+  await page.context().close();
+});
+
+// ---- the Palette block view is the picture the rows describe ---------------------------------------------------------------------
+gap('palette block view matches the rows', async (t, site) => {
+  const compare = async (label) => {
+    await blockBusy(page);
+    await sleep(200);
+    const r = await page.evaluate(() => {
+      const res = Studio.result(), cv = document.getElementById('cv-block'), g = cv.getContext('2d');
+      const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+      const pred = {};
+      document.querySelectorAll('#mixList .mix-row').forEach((row) => { pred[/#[0-9A-F]{6}/.exec(row.querySelector('.mix-add').getAttribute('aria-label'))[0]] = hexOf(/#[0-9A-F]{6}/.exec(row.querySelector('.mix-chip:nth-child(2)').title)[0]); });
+      const out = [];
+      for (const c of res.blockColors) {
+        if (!(c.share > 0)) continue;
+        const hex = Studio.toHex(c);
+        let k = -1;
+        for (let i = 0; i < res.block.length; i++) if (res.block[i] === c.label) { const p = i * 4; if (res.blockImage[p] === c.r && res.blockImage[p + 1] === c.g && res.blockImage[p + 2] === c.b) { k = i; break; } }
+        if (k < 0) { out.push({ hex, noPixel: true }); continue; }
+        const d = g.getImageData(k % cv.width, Math.floor(k / cv.width), 1, 1).data;
+        out.push({ hex, px: [d[0], d[1], d[2]], pred: pred[hex] || null });
+      }
+      return { out, label: cv.getAttribute('aria-label'), width: cv.width === res.w };
+    });
+    const bad = r.out.filter((x) => !x.noPixel && (!x.pred || x.px.some((v, i) => Math.abs(v - x.pred[i]) > 1)));
+    t.check(r.out.length > 0 && r.width && r.out.every((x) => !x.noPixel) && bad.length === 0, `${label}: every block of the Palette picture is the predicted mix its row shows (within 1 per channel)`, bad.length ? bad : r.out.length);
+    return r.label;
+  };
+  var page = await advPage(site);
+  await pickPreset(page, 'zorn');
+  await click(page, '#blockViewPalette');
+  const lab1 = await compare('Zorn');
+  t.check(lab1 === 'Color-block study as Zorn mixes it', 'the picture says it is as Zorn mixes it', lab1);
+  await pickPreset(page, 'reilly');
+  await compare('Frank Reilly');
+  await click(page, '#srcMine');
+  await suggestNow(page);
+  const lab3 = await compare('suggested palette');
+  t.check(/as Suggested palette mixes it/.test(lab3), 'and for the suggestion, it says so', lab3);
+  await clean(t, page, 'block view vs rows');
+  await page.context().close();
+});
+
+// ---- axe over the open drawer, the mixes and the library dialog (the Study tab's default state is all smoke.mjs covers) --------------
+gap('axe over the drawer', async (t, site) => {
+  for (const dark of [false, true]) {
+    const label = dark ? 'dark' : 'light';
+    const page = await openPage(site, { bypassCSP: true, dark, storage: { ...ADV, ...MINE(4) } });
+    await settled(page);
+    await click(page, '#srcPreset'); await ranked(page);
+    await pickPreset(page, 'schmid');
+    const a1 = await axe(page);
+    t.check(!a1.some((v) => v.impact === 'serious' || v.impact === 'critical'), `${label}: axe finds nothing serious in the open drawer with a palette's mixes`, a1);
+    if (a1.length) t.note(`${label}, palette mixes: axe also lists ${a1.map((v) => `${v.id} (${v.impact}, ${v.count})`).join(', ')}.`);
+    await click(page, '#srcMine'); await suggestNow(page);
+    const a2 = await axe(page);
+    t.check(!a2.some((v) => v.impact === 'serious' || v.impact === 'critical'), `${label}: axe finds nothing serious under My paints with a suggestion`, a2);
+    if (a2.length) t.note(`${label}, My paints: axe also lists ${a2.map((v) => `${v.id} (${v.impact}, ${v.count})`).join(', ')}.`);
+    await click(page, '#mineEdit'); await sleep(300);
+    const a3 = await axe(page);
+    t.check((await dialogOpen(page)) && !a3.some((v) => v.impact === 'serious' || v.impact === 'critical'), `${label}: axe finds nothing serious in the 77-paint library dialog`, a3);
+    if (a3.length) t.note(`${label}, library dialog: axe also lists ${a3.map((v) => `${v.id} (${v.impact}, ${v.count})`).join(', ')}.`);
+    await clean(t, page, `axe ${label}`);
+    await page.context().close();
+  }
+});
+
+// ---- the toast that says why a choice moved when Simple mode is switched on ---------------------------------------------------------
+gap('simple mode toast', async (t, site) => {
+  const SAYS = /^Simple mode uses (.+) instead of (.+)$/;
+  const toastNow = (page) => text(page, '#toast');
+  // switching: Advanced, My paints, then Simple
+  let page = await advPage(site);
+  const nameOf = Object.fromEntries((await presets(page)).map((p) => [p.id, p.name]));
+  await click(page, '#srcMine'); await sleep(100);
+  await resetToast(page);
+  await page.evaluate(() => { window.__r0 = Studio.result(); });
+  await click(page, '[data-mode="simple"]');
+  await page.waitForFunction(() => /^Simple mode uses/.test(document.getElementById('toast').textContent), null, { timeout: 4000 }).catch(() => null);
+  let said = await toastNow(page);
+  // (the switch redoes the study, and the list of palettes is drawn again once it is ranked)
+  await page.waitForFunction(() => Studio.result() !== window.__r0, null, { timeout: 10000 }).catch(() => null);
+  await settled(page); await ranked(page);
+  const list = await presetList(page);
+  const shownBest = nameOf[list.filter((l) => l.shown).find((l) => l.best).id];
+  t.check(SAYS.test(said) && said === `Simple mode uses ${shownBest} instead of My paints`, `from My paints to Simple the toast says "Simple mode uses ${shownBest} instead of My paints" (the Best match among the three)`, said);
+  t.check(list.find((l) => l.shown && l.pressed) && nameOf[list.find((l) => l.shown && l.pressed).id] === shownBest, 'and that palette is the one pressed', list.filter((l) => l.pressed).map((l) => l.id));
+  await clean(t, page, 'toast: switching');
+  await page.context().close();
+  // a palette Simple does not list, at load
+  page = await openPage(site, { storage: { [K.drawers]: '["colors"]', [K.choice]: '{"source":"preset","preset":"schmid","max":6}' } });
+  await settled(page);
+  said = await toastNow(page);
+  t.check(said === 'Simple mode uses Zorn instead of Richard Schmid', 'a saved Richard Schmid met in Simple: the toast says "Simple mode uses Zorn instead of Richard Schmid" at load', said);
+  await clean(t, page, 'toast: at load');
+  await page.context().close();
+  // nothing moved: no word
+  for (const [label, choice] of [['Zorn saved', '{"source":"preset","preset":"zorn","max":6}'], ['nothing chosen', '{"source":"preset","preset":"","max":6}']]) {
+    page = await openPage(site, { storage: { [K.drawers]: '["colors"]', [K.choice]: choice } });
+    await settled(page); await sleep(500);
+    t.check(!/^Simple mode uses/.test(await toastNow(page)), `${label}: Simple mode moves nothing and says nothing`, await toastNow(page));
+    await clean(t, page, `toast: ${label}`);
+    await page.context().close();
+  }
+});
+
+// ---- the Studio follows the Study tab only until a palette is chosen in the Studio ----------------------------------------------------
+gap('the Studio stops following once touched', async (t, site) => {
+  const page = await advPage(site);
+  await tab(page, 'paint');
+  await setSelect(page, '#ps-palette', 'monet');
+  await tab(page, 'study');
+  await pickPreset(page, 'reilly');
+  await tab(page, 'paint');
+  t.check((await paletteOptions(page, '#ps-palette')).value === 'monet', 'a palette chosen in the Studio is left alone when the Study tab picks another (Monet stays, Reilly picked)', (await paletteOptions(page, '#ps-palette')).value);
+  await tab(page, 'study');
+  await click(page, '#srcMine');
+  await tickDialog(page, ['TW', 'CYM', 'UB', 'QM', 'Vir', 'RS', 'BS', 'IB']);
+  await page.evaluate(() => { const e = document.getElementById('paintMax'); e.value = '3'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+  await afterSuggest(page, () => click(page, '#paintDialogDone'));
+  const cs1 = await chips(page);
+  await tab(page, 'paint');
+  const ps1 = await paletteOptions(page, '#ps-palette');
+  t.check(ps1.value === 'monet', 'and a suggestion made afterwards does not move it either', ps1.value);
+  const hasStudy = ps1.options.some((o) => o[0] === 'study' && o[1] === 'Study tab: Suggested palette');
+  const hasMine = ps1.options.some((o) => o[0] === 'mine' && o[1] === 'My paints (8)');
+  t.check(hasStudy && hasMine, 'the Studio\'s menu lists the new "Study tab: Suggested palette" and "My paints (8)" for the paints ticked since', ps1.options.slice(10).map((o) => o[1]));
+  if (hasStudy) { await setSelect(page, '#ps-palette', 'study'); t.check(JSON.stringify((await paintCodes(page)).slice().sort()) === JSON.stringify(cs1.slice().sort()), 'and the "Study tab" entry holds the suggestion\'s paints', [await paintCodes(page), cs1]); }
+  if (!hasStudy || !hasMine) {
+    // a reload shows what the menu should have shown
+    const fresh = await openPage(site, { storage: { ...ADV, ...MINE(3), [K.mine]: JSON.stringify(['TW', 'CYM', 'UB', 'QM', 'Vir', 'RS', 'BS', 'IB']) } });
+    await settled(fresh); await tab(fresh, 'paint');
+    const f = await paletteOptions(fresh, '#ps-palette');
+    await fresh.context().close();
+    t.finding({ title: 'Once a palette has been chosen in the Studio, its menu never learns about paints ticked later: no "My paints", no "Study tab" palette', severity: 'medium', steps: '1. Advanced mode. 2. Studio tab: choose Monet (or any palette) in the Palette menu. 3. Study tab, Colors and paints, My paints, Choose my paints: tick eight paints, Done (a palette is suggested). 4. Studio tab: open the Palette menu.', expected: 'The menu lists "My paints (8)" and "Study tab: Suggested palette", as it does for a visitor who has not chosen in the Studio (the README: "the known palettes and My paints from the Study tab"); changing the ticks again changes the count.', actual: `The menu is still the ten known palettes (${ps1.options.length} entries, none of them "My paints" or "Study tab"). After a reload the same menu lists ${f.options.slice(10).map((o) => '"' + o[1] + '"').join(' and ') || 'nothing more'}. The same staleness keeps "My paints (3)" at 3 after the ticks become 5 or 1 (seen when My paints had been picked in the Studio first). Cause: js/painting.js 862: followPalette returns at once when paletteTouched, so renderPalettes (lines 850-858: it rebuilds paletteList from palettes(), 109-116, and already knows how to keep a touched choice, line 858) is never called again after the first choice in the Studio.` });
+  }
+  await clean(t, page, 'the Studio stops following');
+  await page.context().close();
+});
+
+// ---- the greedy choice: each pick is the best one left, and it stops when another paint would barely help -------------------------------
+gap('greedy choice', async (t, site) => {
+  const page = await advPage(site, MINE(5), { rank: false });
+  await qInstall(page);
+  const runPool = async (label, pool, max, expectEarlyStop) => {
+    await setRange(page, '#paintMax', String(max));
+    await tickDialog(page, pool);
+    await afterSuggest(page, () => click(page, '#paintDialogDone'));
+    const cs = await chips(page);
+    const r = await page.evaluate(([pool, cs, max]) => {
+      const q = window.__q, colors = q.colors();
+      const score = (codes) => Mixing.coverage(codes.map(q.paint), colors).score;
+      const restOf = (prefix) => pool.filter((c) => !prefix.includes(c) && !q.paint(c).white);
+      const steps = [];
+      for (let k = 1; k < cs.length; k++) {
+        const prefix = cs.slice(0, k), scores = restOf(prefix).map((c) => [c, score(prefix.concat(c))]);
+        const chosen = scores.find((x) => x[0] === cs[k]);
+        steps.push({ pick: cs[k], chosen: chosen && +chosen[1].toFixed(3), best: +Math.min(...scores.map((x) => x[1])).toFixed(3), ok: !!chosen && chosen[1] <= Math.min(...scores.map((x) => x[1])) + 1e-9 });
+      }
+      const left = restOf(cs), base = score(cs);
+      const stopGain = left.length ? base - Math.min(...left.map((c) => score(cs.concat(c)))) : null;
+      return { steps, left: left.length, stopGain, nonWhite: cs.filter((c) => !q.paint(c).white).length };
+    }, [pool, cs, max]);
+    t.check(r.steps.length >= 2 && r.steps.every((s) => s.ok), `${label}: every pick is the paint that brings the colors closest with what is already on the palette`, r.steps);
+    const early = r.nonWhite < max && r.left > 0;
+    t.check(!early || (r.nonWhite < 2) || r.stopGain < 0.4 + 1e-6, `${label}: it stops (${r.nonWhite} of ${max} paints) only when the best remaining paint would gain less than 0.4`, r);
+    if (expectEarlyStop) t.check(early, `${label}: and here it does stop early, before the size ${max} it was allowed`, [cs, r]);
+    return cs;
+  };
+  await runPool('eight paints, size 5', ['TW', 'YO', 'CRL', 'IB', 'UB', 'CYM', 'CoB', 'QM'], 5, false);
+  await runPool('near-duplicate yellows and earths, size 10', ['TW', 'YO', 'YOP', 'GO', 'TOY', 'RS', 'TR'], 10, true);
+  await clean(t, page, 'greedy choice');
+  await page.context().close();
+});
+
+// ---- mid-action: a suggestion that is running meets a Simple switch, the size slider, the library dialog, the drawer closing ------------
+gap('mid-suggestion actions', async (t, site) => {
+  const RUN = '{"source":"mine","preset":"","max":10}';
+  // (a) Simple mode switched on while it runs
+  let page = await openPage(site, { storage: { ...ADV, [K.choice]: RUN } });
+  await settled(page); await sleep(200);
+  const a = await page.evaluate(() => { const b = document.getElementById('suggestBtn'); b.click(); const during = b.textContent; document.querySelector('[data-mode="simple"]').click(); return { during, disabled: b.disabled }; });
+  await page.waitForFunction(() => !document.getElementById('suggestBtn').disabled, null, { timeout: 8000 }).catch(() => null);
+  await settled(page); await ranked(page); await sleep(300);
+  const a1 = await page.evaluate(() => ({ disabled: document.getElementById('suggestBtn').disabled, btn: document.getElementById('suggestBtn').textContent, preset: document.getElementById('srcPreset').checked, shown: [...document.querySelectorAll('#presetList li')].filter((li) => getComputedStyle(li).display !== 'none').length, pressed: document.querySelectorAll('#presetList .preset[aria-pressed="true"]').length }));
+  if (/^Choosing paints/.test(a.during)) t.check(!a1.disabled && a1.preset && a1.shown === 3 && a1.pressed === 1, 'Simple switched on while a suggestion runs: the three palettes show, one is chosen and Suggest is not left stuck', { a, a1 });
+  else t.note(`the suggestion finished within its first step (button read "${a.during}"), so the Simple switch could not be dropped into it.`);
+  await click(page, '[data-mode="advanced"]'); await click(page, '#srcMine'); await sleep(200);
+  t.check((await text(page, '#suggestBtn')) === 'Suggest a palette' && !(await page.evaluate(() => document.getElementById('suggestBtn').disabled)), 'back in Advanced on My paints Suggest is ready again', await text(page, '#suggestBtn'));
+  await clean(t, page, 'race: simple');
+  await page.context().close();
+
+  // (b) the size slider moved while it runs
+  page = await openPage(site, { storage: { ...ADV, [K.choice]: RUN } });
+  await settled(page); await sleep(200);
+  const b = await page.evaluate(() => { const btn = document.getElementById('suggestBtn'); btn.click(); const during = btn.textContent; const e = document.getElementById('paintMax'); e.value = '3'; e.dispatchEvent(new Event('input', { bubbles: true })); return during; });
+  await suggestedDone(page); await mixed(page);
+  const cb = await chips(page);
+  t.check(cb.length >= 3 && cb.length <= 11 && JSON.parse(await storageGetRaw(page, K.choice)).max === 3 && (await text(page, '#paintMaxOut')) === '3 + white', 'the size slider moved during a suggestion: it finishes, the new size is saved and shown', [cb, await text(page, '#paintMaxOut')]);
+  await suggestNow(page);
+  const cb2 = await chips(page);
+  t.check(cb2.length >= 3 && cb2.length <= 4, 'and the next Suggest keeps to the new size (3 + white)', cb2);
+  await clean(t, page, 'race: size');
+  await page.context().close();
+
+  // (c) Done in the library dialog while it runs
+  page = await openPage(site, { storage: { ...ADV, [K.choice]: RUN } });
+  await settled(page); await sleep(200);
+  const c = await page.evaluate(() => {
+    const btn = document.getElementById('suggestBtn'); btn.click(); const during = btn.textContent;
+    document.getElementById('mineEdit').click();
+    ['TW', 'IB', 'YO'].forEach((code) => document.querySelector(`#paintCats input[value="${code}"]`).click());
+    document.getElementById('paintDialogDone').click();
+    return during;
+  });
+  await suggestedDone(page); await mixed(page); await sleep(300);
+  const rc = await shownResult(page);
+  t.check(JSON.stringify(rc.chips.slice().sort()) === '["IB","TW","YO"]' && rc.btn === 'Suggest again' && rc.rows === (await nColors(page)) && /your paints/.test(rc.about), 'Done in the library while a suggestion runs: the one result on screen is made from the three paints just ticked', rc);
+  await clean(t, page, 'race: dialog');
+  await page.context().close();
+
+  // (d) the drawer closed while it runs
+  page = await openPage(site, { storage: { ...ADV, [K.choice]: RUN } });
+  await settled(page); await sleep(200);
+  const d = await page.evaluate(() => { document.getElementById('suggestBtn').click(); const during = document.getElementById('suggestBtn').textContent; document.getElementById('drawer-colors').open = false; return during; });
+  await suggestedDone(page);
+  t.check(!(await page.evaluate(() => document.getElementById('drawer-colors').open)), 'the drawer closed during a suggestion stays closed while it finishes');
+  await click(page, '#drawer-colors summary'); await mixed(page);
+  const rd = await shownResult(page);
+  t.check(!rd.hidden && rd.btn === 'Suggest again' && rd.chips.length >= 3 && rd.rows === (await nColors(page)) && rd.state === '3 per value · Suggested palette', 'reopened, the finished suggestion and all its rows are there', rd);
+  await clean(t, page, 'race: drawer');
+  await page.context().close();
+});
+
+// ---- Colors in each value spammed while a suggestion is on screen -----------------------------------------------------------------------
+gap('slider spam under a suggestion', async (t, site) => {
+  const page = await openPage(site, { storage: { ...ADV, ...MINE(4) } });
+  await settled(page);
+  await suggestNow(page);
+  for (const v of ['2', '5', '1', '6', '3']) await setRange(page, '#colors', v);
+  await settled(page); await suggestedDone(page); await quiet(page);
+  const n = await nColors(page), s = await shownResult(page), rm = reachOf(s.match);
+  t.check(rm && rm[1] === n && s.rows === n && s.state === '3 per value · Suggested palette' && s.btn === 'Suggest again', `five quick changes of Colors per value end on one suggestion for the last study (${n} colors), with the header of the last value`, s);
+  await suggestNow(page);
+  const f = await shownResult(page);
+  t.check(f.match === s.match && JSON.stringify(f.chips) === JSON.stringify(s.chips), 'and it is the palette a fresh Suggest gives', [s.chips, f.chips]);
+  await clean(t, page, 'slider spam');
+  await page.context().close();
+});
+
+// ---- a dark blue is a color out of reach, not "the darkest you can mix" -------------------------------------------------------------------
+gap('dark cool colors', async (t, site) => {
+  const page = await advPage(site);
+  await loadPhoto(page, await bandsImage(page, [['#ffffff', 160], ['#c98f6a', 160], ['#1030ff', 160], ['#0a1a3a', 160], ['#141414', 160]]), { settle: 300 });
+  await settled(page); await ranked(page);
+  const rowFor = async (hex) => (await rows(page)).find((r) => r.add === `Add ${hex} to picked colors`);
+  for (const id of ['zorn', 'zorn-blue', 'reilly']) {
+    await pickPreset(page, id);
+    const navy = await rowFor('#0A1A3A'), black = await rowFor('#141414');
+    t.check(navy && navy.status !== 'limit' && navy.status !== 'close', `${id}: a dark navy (#0A1A3A) is Near or Out of reach, never a value limit`, navy);
+    t.check(black && black.status === 'limit' && black.badge === 'Darkest you can mix', `${id}: a near-black (#141414), darker than the palette goes, is "Darkest you can mix"`, black);
+  }
+  await pickPreset(page, 'zorn');
+  const navy = await rowFor('#0A1A3A');
+  t.check(navy && navy.status === 'far' && navy.badge === 'Out of reach', 'with Zorn, which has no blue, the navy is "Out of reach"', navy);
+  await clean(t, page, 'dark cool colors');
+  await page.context().close();
+});
+
+// ---- the pending rows and the progress words ------------------------------------------------------------------------------------------------------
+gap('pending rows and progress', async (t, site) => {
+  const page = await advPage(site);
+  const pend = await page.evaluate(() => {
+    document.querySelector('#presetList li[data-preset="schmid"] .preset').click();
+    const rs = [...document.querySelectorAll('#mixList .mix-row')], last = rs[rs.length - 1], chip = last && last.querySelector('.mix-pending');
+    return { n: rs.length, pending: rs.filter((r) => r.querySelector('.mix-pending')).length, recipe: last && last.querySelector('.mix-recipe').textContent, badge: !!(last && last.querySelector('.mix-badge')), stripes: chip ? /gradient/.test(getComputedStyle(chip).backgroundImage) : null, firstRecipe: rs[0].querySelector('.mix-recipe').textContent };
+  });
+  t.check(pend.n > 3 && pend.pending >= 1 && pend.recipe === 'Working it out…' && !pend.badge && pend.stripes === true, 'right after a palette is picked the rows not yet worked out say "Working it out…", show a striped chip and have no badge', pend);
+  await mixed(page);
+  t.check((await rows(page)).every((r) => RECIPE.test(r.recipe) && BADGES.includes(r.badge)) && !(await page.evaluate(() => !!document.querySelector('.mix-pending'))), 'and every one is replaced by its recipe and badge, none left pending');
+  await click(page, '#srcMine');
+  await page.evaluate(() => { window.__texts = []; const b = document.getElementById('suggestBtn'); new MutationObserver(() => window.__texts.push(b.textContent)).observe(b, { childList: true, characterData: true, subtree: true }); });
+  await page.evaluate(() => { const e = document.getElementById('paintMax'); e.value = '10'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+  await click(page, '#suggestBtn'); await suggestedDone(page); await mixed(page);
+  const texts = await page.evaluate(() => window.__texts);
+  const pcts = texts.map((x) => /^Choosing paints… (\d+)%$/.exec(x)).filter(Boolean).map((m) => +m[1]);
+  t.check(texts.length > 0 && texts.every((x) => /^Choosing paints… \d+%$/.test(x) || x === 'Suggest again') && texts[texts.length - 1] === 'Suggest again', 'while a suggestion runs the button reads "Choosing paints… N%" and ends on "Suggest again"', texts.slice(0, 12));
+  t.check(pcts.length >= 1 && pcts.every((p, i) => i === 0 || p >= pcts[i - 1]) && pcts.every((p) => p >= 0 && p <= 100), 'and the percentage never goes backwards', pcts);
+  await clean(t, page, 'pending rows and progress');
+  await page.context().close();
+});
+
+// ---- the library dialog: a family as a search word, and a known palette ticked while a search hides rows --------------------------------------
+gap('search by family', async (t, site) => {
+  const page = await advPage(site, MINE(4), { rank: false });
+  await click(page, '#mineEdit'); await sleep(200);
+  await page.fill('#paintSearch', 'Earths '); await sleep(100);
+  const fam = await page.evaluate(() => ({ cats: [...document.querySelectorAll('#paintCats .paint-cat')].filter((s) => !s.hidden).map((s) => s.querySelector('h3').textContent), items: [...document.querySelectorAll('#paintCats li')].filter((li) => !li.hidden).length, earths: Paints.LIBRARY.filter((p) => p.category === 'earth').length }));
+  t.check(JSON.stringify(fam.cats) === '["Earths"]' && fam.items === fam.earths, 'searching a family name ("Earths ", the way the no-match hint suggests) shows just that family', fam);
+  await page.fill('#paintSearch', 'blue'); await sleep(100);
+  const zorn = (await presets(page)).find((p) => p.id === 'zorn');
+  await tickPresetIn(page, 'zorn'); await sleep(100);
+  t.check(JSON.stringify((await ticked(page)).sort()) === JSON.stringify(zorn.paints.slice().sort()) && (await text(page, '#paintDialogCount')) === '4 ticked', 'Zorn\'s four paints are ticked from the menu while the search "blue" hides them, and the count says 4', [await ticked(page), await text(page, '#paintDialogCount')]);
+  await page.fill('#paintSearch', ''); await sleep(100);
+  const shown = await page.evaluate(() => ({ items: [...document.querySelectorAll('#paintCats li')].filter((li) => !li.hidden).length, on: [...document.querySelectorAll('#paintCats li input:checked')].filter((b) => !b.closest('li').hidden).map((b) => b.value) }));
+  t.check(shown.items === 77 && JSON.stringify(shown.on.sort()) === JSON.stringify(zorn.paints.slice().sort()), 'clearing the search shows all 77 with exactly those four ticked', shown);
+  await click(page, '#paintDialogDone'); await sleep(200);
+  await clean(t, page, 'search by family');
+  await page.context().close();
+});
+
+// ---- + and Add block colors: the second toast, and the Picked colors header while that drawer is closed ----------------------------------
+gap('plus with the picked colors closed', async (t, site) => {
+  const page = await advPage(site);
+  await page.evaluate(() => { document.getElementById('drawer-swatches').open = false; });
+  await pickPreset(page, 'zorn');
+  const before = await text(page, '#swatchesState');
+  await click(page, '#mixList .mix-row:first-child .mix-add'); await sleep(200);
+  const after = await text(page, '#swatchesState');
+  t.check(!(await page.evaluate(() => document.getElementById('drawer-swatches').open)) && after !== before && /1/.test(after), 'pressing + with the Picked colors drawer closed moves its header count', [before, after]);
+  await resetToast(page);
+  await click(page, '#addBlocks'); await sleep(200);
+  const added = await text(page, '#toast'), cnt = await pickedCount(page), distinct = await page.evaluate(() => new Set(Studio.result().blockColors.map((c) => Studio.toHex(c))).size);
+  t.check(/^Added \d+ block colors?$/.test(added) && cnt === distinct, 'Add block colors adds the rest (the header of the closed drawer follows)', [added, cnt, distinct, await text(page, '#swatchesState')]);
+  await resetToast(page);
+  await click(page, '#addBlocks'); await sleep(200);
+  t.check((await text(page, '#toast')) === 'Those colors are already in Picked colors' && (await pickedCount(page)) === cnt, 'pressing it again says "Those colors are already in Picked colors" and adds nothing', [await text(page, '#toast'), await pickedCount(page)]);
+  await clean(t, page, 'plus with drawer closed');
+  await page.context().close();
+});
+
+// ---- the library dialog and the + buttons on a phone ------------------------------------------------------------------------------------------------
+gap('phone dialog and tap targets', async (t, site) => {
+  let page = await advPage(site, {}, { viewport: PHONE });
+  await pickPreset(page, 'zorn');
+  const add = await page.locator('#mixList .mix-row:first-child .mix-add').boundingBox();
+  t.check(add && add.width >= 24 && add.height >= 24, 'phone: a + button is at least 24 px square (WCAG 2.2 minimum target size)', add);
+  if (add && (add.width < 44 || add.height < 44)) t.note(`The + buttons are ${Math.round(add.width)} x ${Math.round(add.height)} px on a phone, under the 44 px usually advised for a fingertip (they pass the 24 px minimum).`);
+  await click(page, '#srcMine'); await click(page, '#mineEdit'); await sleep(300);
+  await page.fill('#paintSearch', 'blue'); await sleep(100);
+  const box = await page.evaluate(() => { const r = (id) => { const b = document.getElementById(id).getBoundingClientRect(); return { l: Math.round(b.left), t: Math.round(b.top), r: Math.round(b.right), b: Math.round(b.bottom) }; }; return { dialog: r('paintDialog'), done: r('paintDialogDone'), shown: [...document.querySelectorAll('#paintCats li')].filter((li) => !li.hidden).length, w: innerWidth, h: innerHeight }; });
+  t.check(box.dialog.l >= 0 && box.dialog.r <= box.w && box.dialog.t >= 0 && box.dialog.b <= box.h, 'phone: the library dialog sits inside the screen', box);
+  t.check(box.done.l >= 0 && box.done.r <= box.w && box.done.t >= 0 && box.done.b <= box.h, 'phone: Done is on the screen without scrolling the dialog', box.done);
+  t.check(box.shown > 0 && box.shown < 77, 'phone: the search filters the list', box.shown);
+  await click(page, '#paintDialogDone'); await sleep(200);
+  await clean(t, page, 'phone dialog');
+  await page.context().close();
+  // Simple mode's three palettes on a phone
+  page = await openPage(site, { viewport: PHONE, storage: { [K.drawers]: '["colors"]' } });
+  await settled(page); await ranked(page);
+  const btn = page.locator('#presetList li[data-simple] .preset').first();
+  await btn.scrollIntoViewIfNeeded();
+  await btn.tap().catch(async () => btn.click());
+  await mixed(page);
+  const shown = (await presetList(page)).filter((l) => l.shown);
+  t.check(shown.length === 3 && (await hscroll(page)) <= 0 && (await rows(page)).length === (await nColors(page)), 'phone, Simple: the three palettes fit, and a tap on one shows its mixes', [shown.length, await hscroll(page)]);
+  await clean(t, page, 'phone simple');
+  await page.context().close();
+});
+
+// ---- keyboard: Tab to the + buttons and the block-view switch, and focus after the dialog closes -----------------------------------------------
+gap('keyboard reach', async (t, site) => {
+  const page = await advPage(site);
+  await pickPreset(page, 'zorn');
+  const was = await pickedCount(page);
+  await page.focus('#presetList li:last-child .preset');
+  let onAdd = false;
+  for (let i = 0; i < 20 && !onAdd; i++) { await page.keyboard.press('Tab'); onAdd = await page.evaluate(() => document.activeElement.classList.contains('mix-add')); }
+  t.check(onAdd, 'Tab from the last palette reaches a + button');
+  if (onAdd) { await page.keyboard.press('Enter'); await sleep(150); t.check((await pickedCount(page)) === was + 1, 'Enter on + keeps the color', [was, await pickedCount(page)]); }
+  await page.focus('[data-block-view="photo"]');
+  await page.keyboard.press('Tab');
+  const onSwitch = await page.evaluate(() => document.activeElement.id);
+  t.check(onSwitch === 'blockViewPalette', 'Tab from Photo reaches the Palette switch', onSwitch);
+  await page.keyboard.press('Space'); await blockBusy(page);
+  t.check((await page.evaluate(() => document.getElementById('blockViewPalette').getAttribute('aria-pressed'))) === 'true', 'Space on it turns the palette view on');
+  await click(page, '#srcMine'); await sleep(100);
+  await page.focus('#mineEdit'); await page.keyboard.press('Enter'); await sleep(250);
+  t.check(await dialogOpen(page), 'Enter opens the library');
+  await page.keyboard.press('Escape'); await sleep(250);
+  const back = await page.evaluate(() => document.activeElement && document.activeElement.id);
+  t.check(!(await dialogOpen(page)) && back === 'mineEdit', 'Escape closes it and focus returns to Choose my paints', back);
+  await clean(t, page, 'keyboard reach');
+  await page.context().close();
+});
+
+// ---- two tabs: ticks made in one are not seen by the other ---------------------------------------------------------------------------------------
+gap('two tabs', async (t, site) => {
+  const a = await advPage(site, MINE(4), { rank: false });
+  const b = await newTab(site, a);
+  await settled(b);
+  const tickOne = async (page, code) => { await click(page, '#mineEdit'); await sleep(150); await page.evaluate((c) => document.querySelector(`#paintCats input[value="${c}"]`).click(), code); await click(page, '#paintDialogDone'); await sleep(250); };
+  await click(a, '#mineEdit'); await sleep(100); await setMine(a, ['TW', 'YO']);
+  await afterSuggest(a, () => click(a, '#paintDialogDone'));
+  // tab B, open all along, hears of it ("Your paints are kept in your browser", and the picked colors are shared by every tab)
+  const heard = await b.waitForFunction(() => document.getElementById('mineCount').textContent === '2 paints ticked', null, { timeout: 3000 }).then(() => true).catch(() => false);
+  const bSays = await text(b, '#mineCount');
+  t.check(heard, 'tab B, open all along, shows the two paints tab A ticked', bSays);
+  await b.reload({ waitUntil: 'load' }); await sleep(300); await settled(b);
+  t.check((await text(b, '#mineCount')) === '2 paints ticked', 'reloaded, tab B has the two ticks', await text(b, '#mineCount'));
+  // a tick in B, then another in A (not reloaded since): both must be kept
+  await a.reload({ waitUntil: 'load' }); await sleep(300); await settled(a);
+  await tickOne(b, 'IB');
+  await tickOne(a, 'CRL');
+  const saved = await storageGetJson(a, K.mine);
+  const all = Array.isArray(saved) && ['TW', 'YO', 'IB', 'CRL'].every((c) => saved.includes(c));
+  t.check(all, 'a tick made in tab B (IB) and then one in tab A (CRL) are both kept', saved);
+  if (!all || !heard) t.finding({ title: 'Paints ticked in one open tab are overwritten by a tick in another: the last tab to save wins', severity: 'low', steps: '1. Open the site in two tabs, Advanced mode, Colors and paints, My paints (TW and YO already ticked in both). 2. In tab B, Choose my paints, tick Ivory Black, Done. 3. In tab A (not reloaded), Choose my paints, tick Cadmium Red Light, Done. 4. Reload either tab.', expected: 'Both ticks are kept ("Your paints are kept in your browser between visits"): TW, YO, IB, CRL.', actual: `Tab B read "${bSays}" after tab A ticked two paints, and the saved list ends as ${JSON.stringify(saved)}: tab A wrote its own list over tab B's, so the black ticked in B is gone. Picked colors do listen for changes from other tabs (js/app.js 1062); My paints did not. Cause: js/palette.js 443 (saveMine) writes this tab's Set whole, and palette.js had no storage listener to refresh it.` });
+  await clean(t, a, 'two tabs: A'); await clean(t, b, 'two tabs: B');
+  await a.context().close();
+});
+
+// ---- no storage: the ticks work for the visit and are not kept, quietly ------------------------------------------------------------------------------------------------
+gap('storage unavailable', async (t, site) => {
+  // a quota that is full
+  const page = await advPage(site, MINE(4), { rank: false });
+  const filled = await page.evaluate(() => { let n = 0; const chunk = 'x'.repeat(1 << 18); try { for (; n < 100; n++) localStorage.setItem('filler.' + n, chunk + n); } catch (e) { /* full */ } for (let k = 0; k < 40; k++) { try { localStorage.setItem('filler.s' + k, 'y'.repeat(4096)); } catch (e) { break; } } return n; });
+  await click(page, '#mineEdit'); await sleep(100); await setMine(page, ['TW', 'IB', 'YO']);
+  await afterSuggest(page, () => click(page, '#paintDialogDone'));
+  const fullToast = await text(page, '#toast');
+  const fullSays = await page.evaluate(() => /not (kept|saved|remembered)|storage (is|are) (full|off|blocked|unavailable)/i.test(document.body.innerText));
+  t.check((await text(page, '#mineCount')) === '3 paints ticked' && (await chips(page)).length >= 2, 'with the browser\'s storage full, ticking three paints and getting a suggestion still works for the visit', [await text(page, '#mineCount'), await chips(page)]);
+  await clean(t, page, 'storage full');
+  await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('filler.')).forEach((k) => localStorage.removeItem(k)));
+  await page.context().close();
+  t.note(`Storage was filled with ${filled} blocks of 256 KB (and then the small gaps). The ticks and the suggestion worked; after the Done the toast read "${fullToast}" and the page ${fullSays ? 'does' : 'does not'} say anywhere that a save may have been refused.`);
+  // the page framed by another site with scripts allowed but no storage
+  const sb = await openPage(site, { sandbox: {}, storage: null });
+  const fr = sb.app;
+  await fr.waitForFunction(() => window.Studio && !!Studio.result() && document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+  await fr.evaluate(() => { document.querySelector('[data-mode="advanced"]').click(); document.getElementById('drawer-colors').open = true; });
+  await sleep(300);
+  await fr.evaluate(() => { document.getElementById('srcMine').click(); document.getElementById('mineEdit').click(); ['TW', 'IB'].forEach((c) => document.querySelector(`#paintCats input[value="${c}"]`).click()); document.getElementById('paintDialogDone').click(); });
+  await fr.waitForFunction(() => { const b = document.getElementById('suggestBtn'); return b.textContent === 'Suggest again' && !b.disabled; }, null, { timeout: 30000 }).catch(() => null);
+  const inFrame = await fr.evaluate(() => ({ count: document.getElementById('mineCount').textContent, chips: [...document.querySelectorAll('#resultPaints .paint-code')].map((e) => e.textContent), storage: (() => { try { localStorage.getItem('x'); return 'works'; } catch (e) { return 'blocked'; } })() }));
+  t.check(inFrame.count === '2 paints ticked' && inFrame.chips.length === 2, 'in a frame with no storage the ticks and the suggestion work for the visit', inFrame);
+  if (inFrame.storage === 'works') t.note('The sandboxed frame turned out to have working storage, so the no-storage path was not driven.');
+  else {
+    const toastIn = await fr.evaluate(() => document.getElementById('toast').textContent);
+    await fr.evaluate(() => location.reload()).catch(() => null);
+    await sleep(800);
+    await fr.waitForFunction(() => window.Studio && !!Studio.result() && document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+    const again = await fr.evaluate(() => document.getElementById('mineCount').textContent).catch(() => null);
+    t.note(`In a frame with storage blocked the toast reads "${toastIn}" after the ticks and the suggestion, and after a reload My paints reads "${again}": the README's "kept in your browser between visits" cannot hold there and the page does not say so.`);
+  }
+  await clean(t, sb, 'sandboxed frame');
+  await sb.context().close();
+});
