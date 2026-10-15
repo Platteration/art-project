@@ -16,3 +16,7 @@ node_modules/
 *.orig
 .cache/
 .claude/settings.local.json
+
+# the tests' own output
+tests/screens/
+tests/report.json
