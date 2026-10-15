@@ -6,10 +6,15 @@
   // same failure panel pose.js shows when its 3D library is missing.
   window.addEventListener('load', () => setTimeout(() => {
     if (window.__poseStarted) return;
+    document.documentElement.classList.add('failed');
     const f = document.getElementById('fail');
     const h = document.getElementById('hint');
     if (f) f.hidden = false;
     if (h) h.hidden = true;
+    // drawing for Figure study (pose.html?render=1): tell it now rather than let it wait out its timeout
+    if (/[?&]render=1(&|$)/.test(location.search) && window.parent !== window) {
+      window.parent.postMessage({ type: 'pose-and-light:failed' }, self.origin && self.origin !== 'null' ? self.origin : '*');
+    }
   }, 1500));
   if (!/[?&]embed=1(&|$)/.test(location.search) || window.parent === window) return;
   const root = document.documentElement;

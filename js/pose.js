@@ -42,6 +42,11 @@
   try {
     renderer = new T.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   } catch (err) { fail(); return; }
+  // A lost WebGL context (a tab left in the background on a phone, a GPU reset) draws nothing until it comes
+  // back: a picture drawn meanwhile would be black, so the picture queue waits, and the view is redrawn on return.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); contextLost = true; });
+  canvas.addEventListener('webglcontextrestored', () => { contextLost = false; requestRender(); pumpThumbs(); });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputEncoding = T.sRGBEncoding;
   renderer.shadowMap.enabled = true;
@@ -1076,6 +1081,7 @@
   // [across, down] from 0 to 1, and how much nearer than the middle of the body it is; `tilts` gives the
   // shoulders' and hips' tilt.
   function shoot(entry, w, h, snug) {
+    if (contextLost) return null;            // it would come out black
     const W2 = w * 2, H2 = h * 2;
     const keep = copyPose(pose), keepLight = Object.assign({}, light), keepTarget = TARGET.clone();
     const vis = [bulb.visible, beam.visible, stand.visible, outlineMat.visible];
@@ -1186,9 +1192,13 @@
   function thumbLater(entry, btn, first) {
     if (RENDER) return;                      // nobody sees the buttons; Figure study asks for the pictures it needs
     if (first) thumbQueue.unshift([entry, btn]); else thumbQueue.push([entry, btn]);
-    if (thumbBusy) return;
+    pumpThumbs();
+  }
+  function pumpThumbs() {
+    if (thumbBusy || !thumbQueue.length || contextLost) return;
     thumbBusy = true;
     const next = () => {
+      if (contextLost) { thumbBusy = false; return; }   // the queue waits for the context to come back
       const job = thumbQueue.shift();
       if (!job) { thumbBusy = false; requestRender(); return; }
       if (job[1].isConnected) {
@@ -1313,13 +1323,14 @@
     removed = null;
     const id = 'mine-' + Date.now().toString(36);
     mine.push({ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } });
-    if (mine.length > MINE_MAX) mine.shift();
+    const madeRoom = mine.length > MINE_MAX; // the oldest goes once the twelve are full
+    if (madeRoom) mine.shift();
     const kept = keepMine();
     showMine();
     choose(id, `Your pose ${mine.length}`);
     // the button says what happened: a pose that could not be stored is still in the library for this visit
-    $('savePose').textContent = kept ? 'Saved in the pose library' : 'In the library for this visit only: storage is full';
-    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, kept ? 2200 : 6000);
+    $('savePose').textContent = !kept ? 'In the library for this visit only: storage is full' : madeRoom ? 'Saved in the pose library; the oldest of your twelve made room' : 'Saved in the pose library';
+    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, kept && !madeRoom ? 2200 : 6000);
   });
   showMine();
 
