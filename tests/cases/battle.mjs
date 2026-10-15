@@ -177,8 +177,13 @@ export default async function battle(t, site) {
     // a shorter streak is no new best; out on the first round; Play again from the pop-up
     await start(page);
     for (let i = 0; i < 3; i++) { await answer(page, true); await next(page); }
-    await answer(page, false, 'tap', { wrongWith: 'swatch' }); u = await ui(page);
-    t.check(u.rings.filter((r) => r.includes('W')).length === 1 && u.rings.filter((r) => r.includes('A')).length === 1, 'a wrong color is ringed red beside the right one in gold', u.rings);
+    const missed = await answer(page, false, 'tap', { wrongWith: 'swatch' }); u = await ui(page);
+    // a tie (Both the same was right) rings both colors gold, the one tapped among them; otherwise the wrong
+    // color is ringed red beside the right one in gold
+    const ringsOk = missed.answer === 'same'
+      ? u.rings.every((r) => r.includes('A')) && !u.rings.some((r) => r.includes('W'))
+      : u.rings.filter((r) => r.includes('W')).length === 1 && u.rings.filter((r) => r.includes('A')).length === 1;
+    t.check(ringsOk, 'a miss rings the right colors in gold and a wrong one in red (on a tie, both gold)', { tie: missed.answer === 'same', rings: u.rings });
     await click(page, '#vb-missNext'); await page.waitForFunction(() => document.getElementById('vb-pct').textContent === '3', null, { timeout: 3000 }).catch(() => null); u = await ui(page);
     t.check(u.kicker === 'Streak over after round 4' && u.pct === '3' && u.stars === STARS.filter((m) => 3 >= m).length && u.grade === GRADES[1] && !u.newBest, 'three in a row: one star, Warming up, no New best', { kicker: u.kicker, pct: u.pct, stars: u.stars, grade: u.grade, newBest: u.newBest });
     await click(page, '#vb-again'); await waitRound(page, 0); u = await ui(page);
