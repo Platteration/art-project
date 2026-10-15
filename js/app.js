@@ -473,6 +473,8 @@
       refuse('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
       return;
     }
+    // an empty file, or a folder (which a browser hands over as a file of no size), is said to be one
+    if (!file.size) { refuse('That is an empty file or a folder. Choose a JPG, PNG or WebP photo.', 5000); return; }
     const job = ++readJobs[slot];
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -627,6 +629,8 @@
     loadForTab(pick, files.length > 1 ? `Of the ${files.length} files dropped, only ${pick.name || 'the first'} was taken.` : '');
   });
   window.addEventListener('paste', (e) => {
+    // pasting into a field (the canvas length) is for the field, even with a picture on the clipboard too
+    if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
     const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith('image/'));
     if (item) loadForTab(item.getAsFile());
   });

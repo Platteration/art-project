@@ -1669,7 +1669,9 @@
   // the setup shows the current reference; a game in progress keeps the one it started with
   window.addEventListener('studio:result', () => { if (Studio.tab() === 'game' && !game) refreshSetup(); });
   // loading a photo from the game's setup means painting from it
-  document.getElementById('file').addEventListener('change', () => { if (Studio.tab() === 'game' && !game && subject.kind !== 'photo') setSubject({ kind: 'photo' }, false); });
+  // a photo that arrives while the setup shows a dealt painting (Load another photo, a drop or a paste) is
+  // what the visitor means to paint: the setup switches to My photo
+  window.addEventListener('studio:source', () => { if (Studio.tab() === 'game' && !game && subject.kind !== 'photo') setSubject({ kind: 'photo' }, false); });
   window.addEventListener('studio:tab', (e) => {
     setFocus(e.detail === 'game' && !!game && !game.over);
     if (e.detail !== 'game') return;

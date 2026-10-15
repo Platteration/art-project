@@ -278,6 +278,17 @@
         if (v > best) { best = v; t1 = a; t2 = b; }
       }
     }
+    // Two tones with nothing between them (a graphic, a flat test card, a study with Simplify off): every
+    // split that keeps them apart scores the same, and the first found leaves the shadow empty and paints
+    // the dark tone as the middle. The dark tone is the shadow and the light one the light instead, with
+    // both splits in the gap between them.
+    const n0 = P[t1], n1 = P[t2] - P[t1], n2 = P[BINS] - P[t2];
+    if (n1 > 0 && (n0 === 0) !== (n2 === 0)) {
+      const edge = n0 === 0 ? t2 : t1; // where the darker tone's class meets the lighter one's
+      let last = edge - 1; while (last > 0 && !hist[last]) last--;
+      let first = edge; while (first < BINS - 1 && !hist[first]) first++;
+      if (first - last >= 4) return [Math.round((last + (first - last) / 3) / 2.56), Math.round((last + (2 * (first - last)) / 3) / 2.56)];
+    }
     // Each class starts at bin a. Put the split mid-way along any empty bins from there, and
     // never below a: rounding down could drop a flat tone into the zone below it.
     const split = (a) => {
