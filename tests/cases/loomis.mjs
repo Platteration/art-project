@@ -207,7 +207,7 @@ export default async function loomis(t, site) {
     await tab(page, 'study');
     t.check((await studyInk(page, 'cv-orig')).red === 0, 'with the head hidden the Study tab shows no head');
     await tab(page, 'loomis');
-    t.check(!c.studio && s.segs > 0, 'with the head hidden Draw it in the Studio is still offered, and the head is still what it draws', { studioDisabled: c.studio, segs: s.segs });
+    t.check(!c.studio && s.segs === 0, 'with the head hidden Draw it in the Studio is still offered, and there are no lines to copy until it is shown', { studioDisabled: c.studio, segs: s.segs });
     const noticeBefore = await storageGet(page, 'portrait-value-studio.studioNotice');
     armToast(page); await click(page, '#lh-studio');
     const hiddenToast = await toastMatch(page, /Nothing to copy|head|hidden/i, 2500);

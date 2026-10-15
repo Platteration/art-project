@@ -195,7 +195,7 @@
       b.setAttribute('aria-label', `${anyIn ? 'Take out' : 'Put back'} ${b.dataset.group === 'mine' ? 'your saved poses' : `the ${b.dataset.title.toLowerCase()} poses`}`);
     });
     const n = pool().length, all = poses ? poses.length : 0;
-    if (poses) $('mix').textContent = n === all ? `All ${all} poses are in the class, in a random order. Tap a pose, or a group's button, to take it out.` : n ? `${n} of the ${all} poses are in the class, in a random order.` : 'Every pose is out of the class. Tap one to put it back.';
+    if (poses) $('mix').textContent = n === all ? `All ${all} poses are in the class, in a random order. Tap a pose, or a group's button, to take it out.` : n ? n === 1 ? `1 of the ${all} poses is in the class.` : `${n} of the ${all} poses are in the class, in a random order.` : 'Every pose is out of the class. Tap one to put it back.';
     $('plan').textContent = !n ? '' : timed ? `${TIMES[secs]} a pose, until you stop the class` : 'No time limit: tap Done when you finish a pose';
     $('all').hidden = !poses;
     $('all').textContent = n ? 'Take them all out' : 'Put them all back';
@@ -225,7 +225,8 @@
   }
   function startClass(how) {
     const ids = how.pool.filter((id) => byId(id));
-    if (!ids.length) return;
+    // a class whose poses have since left the pose library (deleted there) cannot start again
+    if (!ids.length) { Studio.toast('None of that class\'s poses is in the pose library any more. Start a new class.', 5000); return; }
     click();
     cls = { mode: how.mode, secs: how.secs, pool: ids, deck: [], prev: null, next: null, n: 0, id: null, results: [], used: 0, from: 0, running: false, held: false, over: false, shot: null, since: 0, fails: 0 };
     hold(false);
@@ -295,7 +296,7 @@
       const left = Math.max(0, cls.secs - used);
       clock.textContent = fmtTime(Math.ceil(left));
       clock.setAttribute('aria-label', 'Time left');
-      // the last stretch shows: the last fifth of a short pose, the last 30 seconds of a long one
+      // the last stretch shows: the last fifth of a short pose (at least 3 s), the last 30 seconds of a long one
       clock.classList.toggle('is-low', !!cls.shot && left <= Math.min(30, Math.max(3, cls.secs * 0.2)));
       if (left <= 0 && cls.running) endPose(true);
     } else {

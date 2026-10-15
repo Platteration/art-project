@@ -284,7 +284,8 @@
   $('reset').addEventListener('click', reset);
   $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; Studio.redraw(); drawTab(); } });
   $('show').addEventListener('click', () => { state.shown = !state.shown; render(); });
-  const toStudio = () => { Studio.go('paint'); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
+  // Draw it in the Studio draws the head, so a hidden head is shown again first
+  const toStudio = () => { if (state.fit && !state.shown) { state.shown = true; render(); } Studio.go('paint'); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
   $('studio').addEventListener('click', toStudio);
   $('cardStudio').addEventListener('click', toStudio);
   $('save').addEventListener('click', () => {
@@ -479,7 +480,7 @@
   }
   // the near-side lines as straight segments in picture fractions, for the Studio's underdrawing
   function segments() {
-    if (!state.fit) return []; // hidden here or not: Draw it in the Studio asks for the head
+    if (!state.fit || !state.shown) return []; // a hidden head is in none of the Study's pictures, nor in a copy
     const W = 1000, H = Math.round(W * state.aspect), f = state.fit, out = [], n = 48;
     for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2, b = ((i + 1) / n) * Math.PI * 2; out.push([f.tx + f.s * Math.cos(a), (f.ty + f.s * Math.sin(a)) / state.aspect, f.tx + f.s * Math.cos(b), (f.ty + f.s * Math.sin(b)) / state.aspect]); }
     projected(W).forEach((piece) => { for (let i = 1; i < piece.pts.length; i++) { const a = piece.pts[i - 1], b = piece.pts[i]; if (a[2] && b[2]) out.push([a[0] / W, a[1] / H, b[0] / W, b[1] / H]); } });

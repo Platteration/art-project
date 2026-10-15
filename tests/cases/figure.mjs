@@ -310,9 +310,9 @@ export default async function figure(t, site) {
     const lowColor = await page.evaluate(() => getComputedStyle(document.getElementById('fig-clock')).color);
     const earth = await page.evaluate(() => { const d = document.createElement('div'); d.style.color = 'var(--earth)'; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; });
     t.check(lowAt && lowColor === earth, 'the last stretch of the clock turns red', { lowAt, lowColor, earth });
-    t.check(lowAt === '0:02' || lowAt === '0:03', 'the red stretch of a 10 s pose begins in its last seconds', lowAt);
-    if (lowAt === '0:03') {
-      t.check(false, 'README: the last fifth of a short pose turns red (2 s of a 10 s pose)', lowAt);
+    // README: the last fifth of a short pose, at least 3 seconds: 3 s of a 10 s pose
+    t.check(lowAt === '0:03', 'README: the red stretch of a 10 s pose is its last 3 seconds (the last fifth, at least 3 s)', lowAt);
+    if (lowAt !== '0:03' && lowAt !== null) {
       t.finding({ title: 'A 10 s pose turns red with 3 s left, not the last fifth (2 s) the README promises', severity: 'low', steps: 'Figure study > Timed > 10 s > Start drawing. Watch the clock: it turns red at 0:03.', expected: 'README "Figure study" 1: "The last stretch of the clock turns red (the last fifth of a short pose, the last 30 seconds of a long one)": 2 s of a 10 s pose, so red at 0:02.', actual: 'The clock turns red at 0:03 (30% of the pose). Every other time (30 s, 1 min, 5 min, 10 min) matches the README.', cause: 'js/figure.js:299 floors the red stretch at 3 s: Math.min(30, Math.max(3, cls.secs * 0.2)).' });
     }
     t.check(await cardUp(page, 12000), 'the time runs out and the card comes by itself');

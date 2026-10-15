@@ -377,12 +377,13 @@
       state.lastLayer = 'sketch';
       closeSheets();
       saveSoon();
-      Studio.toast(withNotice('The Study lines are on the underdrawing, in pencil'), noticeAt ? 8000 : 1800);
+      const said = withNotice('The Study lines are on the underdrawing, in pencil');
+      Studio.toast(said, said.length > 60 ? 8000 : 1800);
     });
     // the one-time note, shown as the Studio opens, is not lost to a message that follows at once
     // (Draw it in the Studio copies the head a moment after opening it): that message carries it
     let noticeAt = 0;
-    function withNotice(msg) { return noticeAt && performance.now() - noticeAt < 7000 ? `${msg}. ${o.notice}` : msg; }
+    function withNotice(msg) { return noticeAt && performance.now() - noticeAt < 7000 ? `${msg.replace(/\.$/, '')}. ${o.notice}` : msg; }
     function showSketch(on) {
       wrap.classList.toggle('ps-no-sketch', !on);
       q('[data-sketch-show]').forEach((x) => x.setAttribute('aria-pressed', String(!!+x.dataset.sketchShow === on)));
