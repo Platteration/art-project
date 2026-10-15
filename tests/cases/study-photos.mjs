@@ -401,10 +401,12 @@ export default async function studyPhotos(t, site) {
       for (let i = 0; i < 40 && !reached; i++) { await page.keyboard.press('Tab'); reached = await page.evaluate(() => document.activeElement && document.activeElement.id === 'file'); }
       const ring = reached ? await page.evaluate(() => getComputedStyle(document.querySelector('label[for="file"]')).outlineStyle) : null;
       t.check(reached && ring && ring !== 'none', 'keyboard: Tab reaches Load photo and its label shows a focus ring', { reached, ring });
-      const chooser = page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
+      // (8 s: it failed once in CI at 4 s and never here; the detail says where the focus was if it fails again)
+      const chooser = page.waitForEvent('filechooser', { timeout: 8000 }).catch(() => null);
+      const before = await page.evaluate(() => ({ active: document.activeElement && document.activeElement.id, busy: !document.getElementById('busy').hidden }));
       await page.keyboard.press('Space');
       const fc = await chooser;
-      t.check(!!fc, 'keyboard: Space on Load photo opens the file chooser');
+      t.check(!!fc, 'keyboard: Space on Load photo opens the file chooser', fc ? 'opened' : { before, after: await page.evaluate(() => document.activeElement && (document.activeElement.id || document.activeElement.tagName)) });
       if (fc) { await fc.setFiles(await makeImage(page, { width: 500, height: 700, name: 'by-keyboard.png' })); t.check(await waitLabel(page, 'by-keyboard.png'), 'keyboard: the chosen file loads', (await study(page)).label); }
     }
     await clean(t, page, 'keyboard');

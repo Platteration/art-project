@@ -423,6 +423,7 @@
         const parts = amounts.map((a, j) => (touch[j] ? (a / mainSum) * size : Math.round((a / mainSum) * size)));
         const whole = parts.filter((v, j) => !touch[j]);
         if (whole.some((v) => v < 1) || whole.reduce(gcd) > 1) continue; // a gcd > 1 is a smaller size again
+        if (sumOf(whole) > MAX_PARTS) continue; // rounding each share up can take a size past the cap
         const cp = colorParts(parts);
         const dE = evaluate(c.set, cp, c.white ? parts[parts.length - 1] / sumOf(cp) : 0);
         const cost = dE + PER_PAINT * (ids.length - 1) + PER_PART * sumOf(whole);
