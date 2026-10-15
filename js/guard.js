@@ -25,6 +25,10 @@
   function forget(reload) {
     try { window.dispatchEvent(new Event('studio:forget')); } catch (e) { /* nothing listening */ }
     try {
+      // the site's other open tabs hear this (a storage event) and start over too, so a painting one of
+      // them is still saving cannot come back; the marker itself is gone at once
+      localStorage.setItem(PREFIX + 'forget', String(Date.now()));
+      localStorage.removeItem(PREFIX + 'forget');
       Object.keys(localStorage).filter(function (k) { return k.indexOf(PREFIX) === 0 || k.indexOf('pose-and-light.') === 0; }).forEach(function (k) { localStorage.removeItem(k); });
     } catch (e) { /* storage unavailable: nothing kept */ }
     var done = false;
@@ -102,6 +106,14 @@
   }
 
   window.StudioGuard = { report: report, forget: forget, failed: failed };
+
+  // Forget my work on this device, pressed in another tab of this site: this tab stops saving and starts
+  // over as well (the Studio hears studio:forget and drops its pending autosave)
+  window.addEventListener('storage', function (e) {
+    if (e.key !== PREFIX + 'forget' || !e.newValue) return;
+    try { window.dispatchEvent(new Event('studio:forget')); } catch (err) { /* nothing listening */ }
+    setTimeout(function () { location.reload(); }, 300);
+  });
 
   // Until the page has loaded, the scripts are still starting: an error from one of them then means
   // that module did not start, and its tab is taken off the menu (a module cannot do that for itself).

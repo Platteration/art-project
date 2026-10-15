@@ -741,7 +741,11 @@
     markLibrary();
   });
   const KEY = 'pose-and-light.v2';
-  function save(s) { try { localStorage.setItem(KEY, s); } catch (err) { /* not kept */ } }
+  // Forget my work on this device, pressed in the app (this page's frame reloads with it) or in another tab
+  // of the site: nothing more is written, and a page of its own starts over
+  let forgotten = false;
+  window.addEventListener('storage', (e) => { if (e.key === 'portrait-value-studio.forget' && e.newValue) { forgotten = true; if (window.parent === window) setTimeout(() => location.reload(), 300); } });
+  function save(s) { if (forgotten) return; try { localStorage.setItem(KEY, s); } catch (err) { /* not kept */ } }
   function restore() { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (!v || typeof v !== 'object' || Array.isArray(v)) return null; if (v.pose != null && (typeof v.pose !== 'object' || Array.isArray(v.pose))) return null; if (v.light != null && (typeof v.light !== 'object' || Array.isArray(v.light))) return null; return v; } catch (err) { return null; } } // a saved pose of the wrong shape is ignored
 
   // ---- Picking a part: a yellow outline and arrows ------------------------------------------------
@@ -1283,7 +1287,7 @@
     const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
     if (Array.isArray(m)) mine = m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX);
   } catch (err) { /* none kept */ }
-  const keepMine = () => { try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); return true; } catch (err) { const n = document.getElementById('libNote'); if (n) n.textContent = 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.'; return false; } };
+  const keepMine = () => { if (forgotten) return true; try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); return true; } catch (err) { const n = document.getElementById('libNote'); if (n) n.textContent = 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.'; return false; } };
   let removed = null;                        // the last pose taken away, until it is put back or another changes
   function showMine() {
     $('mine').textContent = '';

@@ -73,6 +73,21 @@ export async function openPage(site, opts = {}) {
 }
 function matchGlob(glob, url) { return new RegExp('^' + glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*') + '$').test(url); }
 
+// another tab of the same site in the same browser context (the same storage), recorded like the first
+export async function newTab(site, page, { url = '' } = {}) {
+  const p = await page.context().newPage();
+  const log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
+  p.log = log;
+  p.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
+  p.on('console', (m) => { const t = m.text(); if (NOISE.test(t)) return; if (m.type() === 'error') log.console.push(t.slice(0, 300)); else if (m.type() === 'warning') log.warnings.push(t.slice(0, 300)); });
+  p.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) log.offsite.push(u); });
+  p.on('requestfailed', (r) => { const u = r.url(); const why = (r.failure() || {}).errorText || ''; if (u.startsWith('blob:') || why === 'net::ERR_ABORTED') return; log.failed.push(u + ' ' + why); });
+  await p.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)} ${(e.sourceFile || '').split('/').pop()}:${e.lineNumber}`); }); });
+  await p.goto(site.base + url, { waitUntil: 'load' });
+  await sleep(300);
+  return p;
+}
+
 // every policy violation seen by the page and its frames
 export async function violations(page) {
   const out = [];
