@@ -558,6 +558,9 @@ export default async function gameMore(t, site) {
       const during = await page.evaluate(() => ({ play: !document.getElementById('gamePlay').hidden, canvas: [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height], ref: [document.getElementById('gameRef').width, document.getElementById('gameRef').height], key: Studio.sourceKey(), progress: document.getElementById('gameProgress').textContent }));
       t.check(during.play && during.key === `later${i}:${size[0]}x${size[1]}` && during.canvas.join('x') !== size.join('x') && during.ref.join('x') === during.canvas.join('x') && during.progress === `1 of ${numbers} numbers painted`, `photo ${i} loaded mid-game: the game goes on with its own board and reference`, during);
       await lockIn(page);
+      // the analysis gives every number's recipe on this board: the replay below mixes them, so it scores
+      await click(page, '#gameAnalyze');
+      const boardRecipes = (await zones(page)).map((r) => ({ k: r.n - 1, recipe: parseRecipe(r.tip) }));
       t.check(Object.keys(await bests(page)).some((k) => k.startsWith(keyBefore + '|')) && !Object.keys(await bests(page)).some((k) => k.startsWith(during.key + '|')), `the best is kept under the photo the game was played on (${keyBefore})`, Object.keys(await bests(page)));
       await click(page, '#gamePopup [data-game="again"]');
       const hint = await text(page, '#againHint'); const btn = await text(page, '#againSame');
@@ -567,7 +570,7 @@ export default async function gameMore(t, site) {
       if (now.slice(0, 2).join('x') === size.join('x')) onNew++;
       t.check(now.slice(0, 2).join('x') === during.canvas.join('x'), `"${btn}" after a photo was loaded mid-game plays the board just scored, not the photo loaded since (documented as a finding if not)`, { hint, btn, board: now, loadedSince: size });
       const keysBefore = Object.keys(await bests(page));
-      await tapPaint(page, await firstPaint(page), 5); // a better score than the first game's, so it is written
+      for (const { k, recipe } of boardRecipes) { await click(page, `.game-number[data-number="${k}"]`); await mixExact(page, recipe); } // every number to its recipe: a better score than the first game's, so it is written
       await lockIn(page);
       const added = Object.keys(await bests(page)).filter((k) => !keysBefore.includes(k));
       if (added.some((k) => k.startsWith(now[2] + '|'))) wrongKey++;
@@ -644,8 +647,9 @@ export default async function gameMore(t, site) {
     if (label === 'gameBest with an object value') {
       // a game on that board becomes its best, the junk record replaced
       await start(page); await tapPaint(page, await firstPaint(page), 3); await lockIn(page);
-      const p = await popup(page); const saved = await bests(page);
-      t.check(p.newBest && typeof saved['sample-study:600x750|medium|sorolla'] === 'number', 'a game scored on it is a New best and its points replace the record', { newBest: p.newBest, saved });
+      const p = await popup(page); const saved = await bests(page); const points = +(await text(page, '#gamePoints')).replace(/\D/g, '');
+      // the junk record is replaced by the game's points; New best! shows only for a score above 0
+      t.check(typeof saved['sample-study:600x750|medium|sorolla'] === 'number' && p.newBest === (points > 0), 'a game scored on it replaces the record, with New best! for a score above 0', { newBest: p.newBest, points, saved });
       if (!p.newBest && typeof saved['sample-study:600x750|medium|sorolla'] === 'object') hostileSeen.best++;
     }
     if (label === 'everything hostile at once') {
@@ -784,7 +788,7 @@ export default async function gameMore(t, site) {
     t.note('The mix line writes a paint and its amount with a non-breaking space ("TW 2", game.js 963), the analysis\'s "Mix:" recipe with a plain one (1579): the same recipe is written two ways, which only a copy of the text shows.');
     }
     t.check(Object.keys(tiny).length === 2 && Object.values(tiny).every((x) => (x.refused ? /too small for a board/.test(x.refused) && x.start : Math.min(x.css[0], x.css[1]) >= 100)), 'the smallest photos the Study accepts give a board big enough to tap, or the setup says the picture is too small and keeps Start off', tiny);
-    if (Object.keys(tiny).length === 2 && Object.values(tiny).every((x) => Math.min(x.css[0], x.css[1]) < 20)) t.finding({ title: 'A tiny photo (16 × 16, the smallest the Study accepts) or a thin strip (40 × 4000) gives a board a few pixels wide on screen, too small to see or tap', severity: 'low', steps: '1. Load a 16 × 16 PNG (or a 40 × 4000 one) as the photo: the Study accepts it (16 px a side is its minimum). 2. Games → Paint by numbers → Start painting.', expected: 'The board is drawn at a size that can be looked at and tapped (scaled up to the space, with the numbers legible), or the setup says the picture is too small for a board.', actual: `The 16 × 16 board is ${tiny['16 × 16'].css.join(' × ')} CSS px on a 1400 × 900 window and the strip's ${tiny['40 × 4000 strip'].css.join(' × ')}: the shapes and numbers cannot be made out, and the numbers are written at 10 px on a 16 px canvas. The number buttons still work, so the game can be played blind. Cause: styles.css 816–818, .game-board canvas { max-width: 100%; height: auto } with no minimum: the board is shown at the working size of the photo (js/game.js 186, Studio.prep()), which never upscales a small picture.` });
+    if (Object.keys(tiny).length === 2 && Object.values(tiny).every((x) => x.css && Math.min(x.css[0], x.css[1]) < 20)) t.finding({ title: 'A tiny photo (16 × 16, the smallest the Study accepts) or a thin strip (40 × 4000) gives a board a few pixels wide on screen, too small to see or tap', severity: 'low', steps: '1. Load a 16 × 16 PNG (or a 40 × 4000 one) as the photo: the Study accepts it (16 px a side is its minimum). 2. Games → Paint by numbers → Start painting.', expected: 'The board is drawn at a size that can be looked at and tapped (scaled up to the space, with the numbers legible), or the setup says the picture is too small for a board.', actual: `The 16 × 16 board is ${tiny['16 × 16'].css.join(' × ')} CSS px on a 1400 × 900 window and the strip's ${tiny['40 × 4000 strip'].css.join(' × ')}: the shapes and numbers cannot be made out, and the numbers are written at 10 px on a 16 px canvas. The number buttons still work, so the game can be played blind. Cause: styles.css 816–818, .game-board canvas { max-width: 100%; height: auto } with no minimum: the board is shown at the working size of the photo (js/game.js 186, Studio.prep()), which never upscales a small picture.` });
     // the files the Study refuses, chosen from the game's own Load another photo: the setup keeps its photo and says why
     for (const [label, file, said] of [['a text file', textFile(), 'That file is not an image. Choose a JPG, PNG or WebP photo.'], ['a broken JPEG', brokenImage(), 'This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.'], ['a 1 × 1 PNG', await makeImage(page, { width: 1, height: 1, name: 'one.png' }), 'That picture is too small to study (1 × 1 px): it needs at least 16 px on each side.'], ['a 2 × 4000 strip', await makeImage(page, { width: 2, height: 4000, name: 'thin.png' }), 'That picture is too small to study (2 × 4000 px): it needs at least 16 px on each side.']]) {
       const before = await text(page, '#gamePhotoName'); const bytes = await previewBytes(page);
