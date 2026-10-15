@@ -2150,7 +2150,7 @@
     if (name !== 'study') setPicking(false); // picking a neutral spot only works on Your painting
     Object.entries(els.tabPanels).forEach(([key, panel]) => { panel.hidden = key !== name; });
     const group = GROUP_OF[name];
-    Object.entries(groupBtns).forEach(([key, btn]) => btn.setAttribute('aria-selected', String(key === group)));
+    Object.entries(groupBtns).forEach(([key, btn]) => btn.setAttribute('aria-current', String(key === group)));
     if (groupSubs[group]) groupSubs[group].textContent = TAB_NAMES[name];
     document.querySelectorAll('.tab-item').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.tab === name)));
     closeMenus();

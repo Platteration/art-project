@@ -40,9 +40,9 @@
     </div>
   </header>
 
-  <div class="tabs" aria-label="Sections">
+  <nav class="tabs" aria-label="Sections">
     <div class="tab-group" data-group="learn">
-      <button type="button" class="tab" id="tabLearnBtn" aria-selected="true" aria-haspopup="menu" aria-expanded="false" aria-controls="tabLearnMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2z"/></svg><span class="tab-text"><span>Learning tools</span><span class="tab-sub" id="tabLearnSub">Study the photo</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <button type="button" class="tab" id="tabLearnBtn" aria-current="true" aria-haspopup="menu" aria-expanded="false" aria-controls="tabLearnMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2z"/></svg><span class="tab-text"><span>Learning tools</span><span class="tab-sub" id="tabLearnSub">Study the photo</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       <div class="tab-menu" id="tabLearnMenu" role="menu" hidden>
         <button type="button" role="menuitemradio" class="tab-item" id="tabStudyBtn" data-tab="study" aria-checked="true"><span>Study the photo</span><small>Dark, middle, light; colors and paints; how close you got</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabLoomisBtn" data-tab="loomis" aria-checked="false"><span>Loomis head</span><small>Mark the features, get the head construction</small></button>
@@ -50,17 +50,17 @@
         <button type="button" role="menuitemradio" class="tab-item" id="tabHelpBtn" data-tab="help" aria-checked="false"><span>How to use</span><small>Every part of the app, with pictures</small></button>
       </div>
     </div>
-    <button type="button" class="tab" id="tabPaintBtn" data-tab="paint" aria-selected="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span class="tab-text"><span>Studio</span><span class="tab-sub">Paint on the paper</span></span></button>
-    <button type="button" class="tab" id="tabFigureBtn" data-tab="figure" aria-selected="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg><span class="tab-text"><span>Figure study</span><span class="tab-sub">Draw from a pose</span></span></button>
+    <button type="button" class="tab" id="tabPaintBtn" data-tab="paint" aria-current="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span class="tab-text"><span>Studio</span><span class="tab-sub">Paint on the paper</span></span></button>
+    <button type="button" class="tab" id="tabFigureBtn" data-tab="figure" aria-current="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg><span class="tab-text"><span>Figure study</span><span class="tab-sub">Draw from a pose</span></span></button>
     <div class="tab-group" data-group="games">
-      <button type="button" class="tab" id="tabGamesBtn" aria-selected="false" aria-haspopup="menu" aria-expanded="false" aria-controls="tabGamesMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span class="tab-text"><span>Games</span><span class="tab-sub" id="tabGamesSub">Paint by numbers</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <button type="button" class="tab" id="tabGamesBtn" aria-current="false" aria-haspopup="menu" aria-expanded="false" aria-controls="tabGamesMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span class="tab-text"><span>Games</span><span class="tab-sub" id="tabGamesSub">Paint by numbers</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
       <div class="tab-menu" id="tabGamesMenu" role="menu" hidden>
         <button type="button" role="menuitemradio" class="tab-item" id="tabGameBtn" data-tab="game" aria-checked="false"><span>Paint by numbers</span><small>Mix every number's color against the clock</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabBattleBtn" data-tab="battle" aria-checked="false"><span>Value battle</span><small>Two colors: which is darker, lighter, cooler or warmer?</small></button>
         <p class="tab-menu-note">More games are on the way.</p>
       </div>
     </div>
-  </div>
+  </nav>
 
   <div class="layout">
     <aside class="rail" aria-label="Tools and settings">
@@ -978,10 +978,10 @@
               </div>
             </div>
           </div>
-        </div>
+        </main>
       </section>
 
-      <section class="tabpanel help" id="tab-help" hidden>
+      <section class="tabpanel help" id="tab-help" aria-label="How to use" hidden>
         <div class="help-intro">
           <h2 class="help-title">How to use Portrait Value Studio</h2>
           <p class="help-lede">Everything here runs in your browser. Your photos and paintings stay on your device. Here is the whole app, one part at a time, with pictures from a phone.</p>
@@ -1202,7 +1202,7 @@
           </div>
         </section>
       </section>
-    </main>
+    </div>
   </div>
 </div>
 
