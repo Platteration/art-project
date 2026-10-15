@@ -298,10 +298,11 @@ async function groupA(t, site) {
     await page.context().close();
     // on a phone, with the Studio's tool strip along the bottom, a note sits above the strip, not under it
     const phone = await openPage(site, { viewport: PHONE, url: '#paint' });
-    await phone.waitForFunction(() => document.querySelector('.ps') && !document.querySelector('.ps').hidden, null, { timeout: 15000 }).catch(() => null);
+    // (the Loomis head has a strip of its own, earlier in the page: the Studio's is the one in #tab-paint)
+    await phone.waitForFunction(() => { const p = document.getElementById('tab-paint'); return p && !p.hidden && p.querySelector('.ps-strip') && p.querySelector('.ps-strip').getBoundingClientRect().height > 0; }, null, { timeout: 15000 }).catch(() => null);
     await sleep(1200);
     await phone.evaluate(() => Studio.toast('toast-test on a phone', 4000));
-    const pos = await phone.evaluate(() => { const t = document.getElementById('toast').getBoundingClientRect(); const s = document.querySelector('.ps-strip').getBoundingClientRect(); return { toastBottom: Math.round(t.bottom), stripTop: Math.round(s.top), shown: document.getElementById('toast').classList.contains('show'), within: t.right <= innerWidth && t.left >= 0 }; });
+    const pos = await phone.evaluate(() => { const t = document.getElementById('toast').getBoundingClientRect(); const s = document.querySelector('#tab-paint .ps-strip').getBoundingClientRect(); return { toastBottom: Math.round(t.bottom), stripTop: Math.round(s.top), shown: document.getElementById('toast').classList.contains('show'), within: t.right <= innerWidth && t.left >= 0 }; });
     t.check(pos.shown && pos.toastBottom <= pos.stripTop && pos.within, 'phone Studio: a note sits above the tool strip and inside the window', pos);
     for (const n of [1, 2, 3]) await phone.evaluate((n) => StudioGuard.report(new Error('toast-test ' + n)), n);
     await phone.evaluate(() => { const e = document.getElementById('toast'); e.textContent = ''; e.classList.remove('show'); StudioGuard.report(new Error('toast-test 4')); });
