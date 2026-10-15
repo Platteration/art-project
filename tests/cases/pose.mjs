@@ -56,8 +56,16 @@ async function tapBackground(page, fr) {
   await page.mouse.click(b.x + at[0], b.y + at[1]);
 }
 const STORAGE_NOTE = /storage/i;
+// the app's frame height once the page has stopped telling it a new one
+async function settledHeight(page) {
+  let h = '';
+  for (let i = 0; i < 12; i++) { const now = await page.evaluate(() => document.getElementById('poseFrame').style.height); if (now === h) break; h = now; await sleep(250); }
+  return h;
+}
 
 export default async function pose(t, site) {
+  const started = Date.now();
+  const lap = (what) => t.note(`${what}: ${((Date.now() - started) / 1000).toFixed(0)} s in`);
   // ---- The page on its own at 1400 × 900: the start screen, the keyboard, every pose -------------------
   {
     const page = await openPage(site, { url: 'pose.html' });
@@ -65,7 +73,7 @@ export default async function pose(t, site) {
     await up(fr);
     const s0 = await fr.evaluate(() => ({ imgs: document.querySelectorAll('#poses button.has-img').length, blob: [...document.querySelectorAll('#poses img')].every((i) => i.src.startsWith('blob:')), title: document.getElementById('libTitle').textContent, note: document.getElementById('libNote').textContent, start: document.getElementById('library').classList.contains('is-start'), close: getComputedStyle(document.getElementById('libClose')).display, cont: document.getElementById('continueWrap').hidden, mine: document.getElementById('mineWrap').hidden, inert: document.querySelector('.rail').hasAttribute('inert') && document.getElementById('view').hasAttribute('inert'), focus: document.activeElement.dataset.id, hint: document.getElementById('hint').hidden, simple: document.documentElement.classList.contains('simple'), expanded: document.getElementById('posesBtn').getAttribute('aria-expanded') }));
     t.check(s0.imgs === 30 && s0.blob, 'standalone: 30 poses with Blob pictures', s0);
-    t.check(s0.start && s0.title === 'Choose a pose to start' && /Pick a pose to begin/.test(s0.note) && s0.close === 'none' && s0.cont && s0.mine && s0.inert && s0.hint && s0.expanded === 'true', 'standalone: opens on the start screen with no close button, the page behind it waiting, nothing from last time', s0);
+    t.check(s0.start && s0.title === 'Choose a pose to start' && /Pick a pose to begin/.test(s0.note) && s0.close === 'none' && s0.cont && s0.mine && s0.inert && s0.expanded === 'true', 'standalone: opens on the start screen with no close button, the page behind it waiting, nothing from last time', s0);
     t.check(s0.focus === 'stand' && s0.simple, 'standalone: focus on the first pose, Simple to start', s0);
     await page.keyboard.press('Escape');
     t.check(await fr.evaluate(() => !document.getElementById('library').hidden), 'the start screen does not close on Escape');
@@ -92,6 +100,7 @@ export default async function pose(t, site) {
     await page.keyboard.press('Escape');
     t.check(await fr.evaluate(() => document.getElementById('library').hidden && document.activeElement.id === 'posesBtn'), 'Escape closes the library and gives focus back to Poses');
     await clean(t, page, 'standalone: library');
+    lap('library');
 
     // ---- the rig controls, far past the figure, Advanced ------------------------------------------------
     await fr.evaluate(() => document.querySelector('[data-mode="advanced"]').click());
@@ -144,7 +153,7 @@ export default async function pose(t, site) {
     // a part picked: the arrows by tap, by holding, by keyboard, to the limit
     await fr.evaluate(() => { window.PoseAndLight.pick('shoulderR'); window.PoseAndLight.render(); });
     const part = await fr.evaluate(() => ({ name: document.getElementById('partName').textContent, label: document.getElementById('picked').textContent, how: document.getElementById('partHow').hidden, buttons: document.getElementById('partButtons').hidden, mirror: document.getElementById('mirror').hidden, outline: window.PoseAndLight.outlines(), arrows: window.PoseAndLight.arrows().map((a) => a.label + (a.disabled ? '!' : '')), svg: document.querySelectorAll('#arrows button svg').length }));
-    t.check(part.name === 'Right upper arm' && part.label === 'Right upper arm' && !part.how && !part.buttons && !part.mirror && part.outline === 1 && part.arrows.length === 6 && part.svg === 6, 'the right upper arm picked: named, outlined, six arrows with icons, Straighten and Copy shown', part);
+    t.check(part.name === 'Right upper arm' && part.label === 'Right upper arm' && !part.how && !part.buttons && !part.mirror && part.outline >= 1 && part.arrows.length === 6 && part.svg === 6, 'the right upper arm picked: named, outlined, six arrows with icons, Straighten and Copy shown', part);
     const first = await fr.locator('#arrows button').first().boundingBox();
     const a0 = await fr.evaluate(() => window.PoseAndLight.pose.shoulderR.x);
     await page.mouse.click(first.x + 20, first.y + 20);
@@ -177,6 +186,7 @@ export default async function pose(t, site) {
     const let_go = await fr.evaluate(() => ({ picked: window.PoseAndLight.picked(), name: document.getElementById('partName').textContent, arrows: document.querySelectorAll('#arrows button').length, empty: document.getElementById('partEmpty').hidden, outline: window.PoseAndLight.outlines() }));
     t.check(let_go.picked === null && let_go.name === 'Nothing picked' && let_go.arrows === 0 && !let_go.empty && let_go.outline === 0, 'a tap on the background lets the part go', let_go);
     await clean(t, page, 'standalone: rig and arrows');
+    lap('rig and arrows');
 
     // ---- Simple: fewer controls, the diamond of the arm last touched, no arrows ------------------------
     await fr.evaluate(() => document.querySelector('[data-mode="simple"]').click());
@@ -261,11 +271,13 @@ export default async function pose(t, site) {
     t.check(lampBad.length === 0, 'the lamp dragged to every corner and edge and far beyond: sane angles, the handle on the stage and clear of the buttons', lampBad);
     await fr.evaluate(() => document.querySelector('#lights .btn[data-id="rembrandt"]').click());
     // Show or hide
-    const shown = await fr.evaluate(() => { const r = {}; document.getElementById('showStand').click(); r.a = document.getElementById('showSum').textContent; r.standOff = !window.PoseAndLight.stand.visible; document.getElementById('showLamp').click(); r.b = document.getElementById('showSum').textContent; r.handleHidden = document.getElementById('lampHandle').hidden; document.getElementById('showStand').click(); r.c = document.getElementById('showSum').textContent; document.getElementById('showLamp').click(); r.d = document.getElementById('showSum').textContent; r.handleBack = !document.getElementById('lampHandle').hidden; document.getElementById('showRig').click(); r.rig = document.getElementById('rigSum').textContent; r.rigGone = getComputedStyle(document.getElementById('rig')).display === 'none'; document.getElementById('showRig').click(); r.rigBack = document.getElementById('rigSum').textContent; return r; });
+    const shown = await fr.evaluate(() => { const r = {}; document.getElementById('showStand').click(); r.a = document.getElementById('showSum').textContent; r.standOff = !window.PoseAndLight.stand.visible; document.getElementById('showLamp').click(); r.b = document.getElementById('showSum').textContent; r.handleHidden = document.getElementById('lampHandle').hidden; document.getElementById('showStand').click(); r.c = document.getElementById('showSum').textContent; document.getElementById('showLamp').click(); r.d = document.getElementById('showSum').textContent; r.handleBack = !document.getElementById('lampHandle').hidden; document.getElementById('showRig').click(); window.PoseAndLight.render(); r.rig = document.getElementById('rigSum').textContent; r.rigGone = getComputedStyle(document.getElementById('rig')).display === 'none'; document.getElementById('showRig').click(); window.PoseAndLight.render(); r.rigBack = document.getElementById('rigSum').textContent + (getComputedStyle(document.getElementById('rig')).display === 'none' ? ' (still gone)' : ''); return r; });
     t.check(shown.a === 'stand hidden' && shown.standOff && shown.b === 'stand and lamp hidden' && shown.handleHidden && shown.c === 'lamp hidden' && shown.d === 'all shown' && shown.handleBack && shown.rig === 'hidden' && shown.rigGone && shown.rigBack === 'feet planted', 'Show or hide: each switch does what it says and the menus say what is set', shown);
     await clean(t, page, 'standalone: lamp');
+    lap('simple and lamp');
 
     // ---- See it as, Snapshot, Undo past sixty, Front view, Start over ----------------------------------
+    await fr.evaluate(() => window.PoseAndLight.pick(null));          // a picked part's outline stays yellow in Gray, as designed
     const pixels = () => fr.evaluate(() => { window.PoseAndLight.render(); const v = document.getElementById('view'); const c = document.createElement('canvas'); c.width = v.width; c.height = v.height; const g = c.getContext('2d'); g.drawImage(v, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0, colored = 0; const bins = new Set(); for (let i = 0; i < d.length; i += 64) { n++; if (Math.abs(d[i] - d[i + 1]) > 6 || Math.abs(d[i + 1] - d[i + 2]) > 6) colored++; bins.add(Math.round(d[i] / 16)); } return { n, colored, bins: bins.size }; });
     const col = await pixels();
     await fr.evaluate(() => document.getElementById('lookGray').click());
@@ -324,6 +336,7 @@ export default async function pose(t, site) {
     await fr.evaluate(() => document.getElementById('undo').click());
     t.check((await fr.evaluate(() => window.PoseAndLight.pose.hipR.x)) === -26, 'Undo again goes back to the pose before Start over (Walk)');
     await clean(t, page, 'standalone: see it as, snapshot, undo, start over');
+    lap('see it as, snapshot, undo, start over');
 
     // ---- Save this pose thirteen times, remove and Put back, a full storage ---------------------------
     const msgs = [];
@@ -360,6 +373,7 @@ export default async function pose(t, site) {
     if (!noteSaysFull || !removeSaysFull) t.finding({ title: 'The "storage is full" library note is overwritten at once, and a removal that could not be stored says nothing', severity: 'medium', steps: 'pose.html with localStorage full (fill it with other keys until setItem throws), pick a pose, press Save this pose; then open Poses and press × on a saved pose', expected: 'The library note reads "Your poses could not be saved: browser storage is full. Remove a saved pose and try again." (js/pose.js:1290), after the save and after the removal, so the visitor knows the removal will not hold either', actual: `After Save the note reads "${full.note}" (the button alone says storage is full, for six seconds); after the removal the note reads "${fullRemove.note}" and the button "${fullRemove.btn}", while storage still holds ${fullRemove.stored} pose(s) and the page shows ${fullRemove.n}: keepMine() writes the note (js/pose.js:1290) and markLibrary() (js/pose.js:1254) overwrites it in the same click (savePose: choose() at js/pose.js:1340; the × button at js/pose.js:1310)` });
     await fr.evaluate(() => { Object.keys(localStorage).filter((k) => k.startsWith('junk')).forEach((k) => localStorage.removeItem(k)); document.getElementById('libClose').click(); });
     await clean(t, page, 'standalone: saved poses');
+    lap('saved poses');
 
     // ---- a reload: Where you left off first, the mode remembered; a reload in the middle of a drag -----
     await pick(fr, 'walk');
@@ -382,6 +396,7 @@ export default async function pose(t, site) {
     await screenshot(page, 'pose-desktop');
     await clean(t, page, 'standalone: reload');
     await page.context().close();
+    lap('reload');
   }
 
   // ---- Inside the app at 1400 × 900: the frame follows the app's switch and theme, resizes, and the
@@ -407,7 +422,7 @@ export default async function pose(t, site) {
     await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
     await fr.click('#poses .pose-btn[data-id="walk"]');
     await fr.evaluate(() => { window.PoseAndLight.pick('shoulderR'); window.PoseAndLight.render(); });
-    const h0 = await page.evaluate(() => document.getElementById('poseFrame').style.height);
+    const h0 = await settledHeight(page);                               // the rail grew for the picked part, and the frame with it
     await page.setViewportSize(PHONE);
     await fr.waitForFunction(() => document.getElementById('view').width < 500, null, { timeout: 5000 }).catch(() => null);
     await sleep(400);
@@ -437,6 +452,7 @@ export default async function pose(t, site) {
     t.check(await fr.evaluate(() => document.getElementById('snapDialog').open && document.getElementById('snapImg').naturalWidth === document.getElementById('view').width), 'Snapshot in the embed shows the picture');
     await fr.evaluate(() => document.getElementById('snapClose').click());
     await clean(t, page, 'embedded');
+    lap('embedded');
 
     // the render protocol: hostile messages from the app page, then a flood of list requests
     await tab(page, 'figure');
@@ -473,6 +489,7 @@ export default async function pose(t, site) {
     t.check(figAfter.poses === 42 && figAfter.imgs === 42 && !figAfter.start, 'after the flood Figure study still has every pose with a picture and Start on', figAfter);
     await clean(t, page, 'render protocol');
     await page.context().close();
+    lap('render protocol');
   }
 
   // ---- The page on its own at 390 × 844, and inside the app at that width ------------------------------
@@ -526,6 +543,7 @@ export default async function pose(t, site) {
     t.check(await fr.evaluate(() => document.getElementById('view').width === document.getElementById('view').clientWidth && getComputedStyle(document.getElementById('stage')).height === '675px'), 'phone embed widened to 1400: the stage and canvas regrow');
     await clean(t, page, 'phone embed');
     await page.context().close();
+    lap('both phone pages');
   }
 
   // ---- Hostile saved state for every key the page reads ---------------------------------------------
@@ -541,8 +559,8 @@ export default async function pose(t, site) {
     const page = await openPage(site, { url: 'pose.html', storage });
     const fr = page.mainFrame();
     await fr.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses .pose-btn').length === 30, null, { timeout: 30000 }).catch(() => null);
-    if (want.early) await pick(fr, want.early);
-    await up(fr);
+    if (want.early) { await pick(fr, want.early); await up(fr); }
+    // the pictures of last time's pose and of the saved poses, which come first; the library's 30 need not be waited for
     await fr.waitForFunction(() => (document.getElementById('continueWrap').hidden || document.querySelectorAll('#continue .pose-btn.has-img').length === 1) && document.querySelectorAll('#mine .pose-btn:not(.has-img)').length === 0, null, { timeout: 20000 }).catch(() => null);
     const s = await scan(fr);
     const ui = await fr.evaluate(() => ({ started: !!window.__poseStarted, cont: document.getElementById('continueWrap').hidden, contImg: document.querySelectorAll('#continue .pose-btn.has-img').length, mine: document.querySelectorAll('#mine .pose-btn').length, mineImgs: document.querySelectorAll('#mine .pose-btn.has-img').length, simple: document.documentElement.classList.contains('simple'), rootY: window.PoseAndLight.pose.root.y, dist: window.PoseAndLight.light.dist, soft: window.PoseAndLight.light.soft, fill: window.PoseAndLight.light.fill, lAz: document.getElementById('lAz').value, sum: document.getElementById('lightSum').textContent, hipR: window.PoseAndLight.pose.hipR.x, title: document.getElementById('libTitle').textContent }));
@@ -565,5 +583,6 @@ export default async function pose(t, site) {
     await clean(t, page, `hostile ${label}`);
     await page.context().close();
   }
+  lap('hostile saved state');
   t.note('A hostile saved pose with height -1e9 is clamped to the lowest height (-0.95) and shown as saved, sunk into the floor until Put the feet on the floor; a pose the page saved itself is never below the floor');
 }

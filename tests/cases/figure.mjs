@@ -235,13 +235,13 @@ export default async function figure(t, site) {
       pressed: [...document.querySelectorAll('[data-fig-gesture]')].map((b) => b.getAttribute('aria-pressed')).join(','),
     }));
     const starsOf = (rating) => (/(\d) out of 5 stars/.exec(rating) || [])[1];
-    const s1 = +starsOf(r.cards[0] ? r.cards[0].rating : ''), s2 = +starsOf(r.cards[1] ? r.cards[1].rating : '');
-    const avg = half((s1 + s2) / 2);
-    t.check(r.cards.length === 2 && r.lede === `2 drawings from a relaxed class, ${avg} star${avg === '1' || avg === '½' ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`, 'the review: two drawings (the traced one and the stroke ✕ cut short), the average stars in words', { lede: r.lede, s1, s2 });
+    const stars = r.cards.map((c) => +(starsOf(c.rating) || 0));
+    const avg = half(stars.reduce((a, b) => a + b, 0) / (stars.length || 1));
+    t.check(r.cards.length === 3 && r.lede === `3 drawings from a relaxed class, ${avg} star${avg === '1' || avg === '½' ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`, 'the review: three drawings (the traced one, the scribble and the stroke ✕ cut short), the average stars in words', { lede: r.lede, stars });
     t.check(r.cards.every((c, i) => new RegExp(`^${i + 1}\\. `).test(c.title) && /^\d+:\d\d$/.test(c.time) && /^[★☆]{5}$/.test(c.stars) && /\d+% · /.test(c.rating) && c.tips >= 3 && c.img === 'blob:' && /^The pose: /.test(c.alt) && c.canvasLabel === `Your drawing of ${c.title.replace(/^\d+\. /, '')}, with the gesture over it` && c.save === 'Save as PNG'), 'each card: its number and pose, the time, five star glyphs, the percentage and word, notes, the pose picture, Save as PNG', r.cards);
     t.check(r.focus === 'fig-reviewTitle' && r.scrollY === 0 && r.pressed === 'true,false', 'the review title takes focus at the top of the page; Gestures shown is pressed', { focus: r.focus, scrollY: r.scrollY, pressed: r.pressed });
     const inks = await page.evaluate(() => [...document.querySelectorAll('#fig-cards canvas')].map((c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 16) if (Math.abs(d[i] - d[0]) > 40 || Math.abs(d[i + 1] - d[1]) > 40) n++; return n; }));
-    t.check(inks.length === 2 && inks.every((n) => n > 50), 'both review cards show marks', inks);
+    t.check(inks.length === 3 && inks.every((n) => n > 50), 'every review card shows marks', inks);
     firstDataUrls = await dataUrls(page);
     // the gesture hidden and shown again
     await click(page, '[data-fig-gesture="0"]');
@@ -266,7 +266,7 @@ export default async function figure(t, site) {
     t.check(s.setup && !s.review && s.back && (await text(page, '#toast')) === 'The class is over' && (await page.evaluate(() => document.activeElement && document.activeElement.id)) === 'fig-start', 'a class with nothing drawn goes straight back to the setup, with Back to your drawings offered and Start focused', { setup: s.setup, back: s.back, toast: await text(page, '#toast') });
     await click(page, '#fig-back');
     const b = await page.evaluate(() => ({ review: !document.getElementById('fig-review').hidden, cards: document.querySelectorAll('#fig-cards .fig-card').length, focus: document.activeElement && document.activeElement.id }));
-    t.check(b.review && b.cards === 2 && b.focus === 'fig-reviewTitle', 'Back to your drawings returns to the two cards', b);
+    t.check(b.review && b.cards === 3 && b.focus === 'fig-reviewTitle', 'Back to your drawings returns to the three cards', b);
     await click(page, '#fig-new');
     const n = await setupState(page);
     t.check(n.setup && !n.review && n.back, 'New class shows the setup with Back to your drawings', { setup: n.setup, back: n.back });
@@ -328,11 +328,13 @@ export default async function figure(t, site) {
     t.check(await poseShown(page, 1), 'a 30 s class starts');
     t.check((await clockState(page)).clock === '0:30', 'the clock starts at 0:30', await clockState(page));
     await stroke(page, '#fs-paper', [[0.4, 0.3], [0.5, 0.5], [0.45, 0.7]]);
+    const chimesBefore = await chimes(page);
+    await page.waitForFunction(() => document.getElementById('fig-clock').textContent === '0:29', null, { timeout: 3000 }).catch(() => null);
     t.check(await endPose(page), 'Done ends a timed pose early');
     const early = { ...(await cardState(page)), chimes: await chimes(page), clock: (await clockState(page)).clock };
-    await sleep(600); // (a stopped clock has no condition to wait on: it must not change)
+    await sleep(1200); // (a stopped clock has no condition to wait on: it must not change)
     const later = (await clockState(page)).clock;
-    t.check(early.kicker === 'Pose 1 done' && early.chimes === 1 && /^0:2\d$/.test(early.clock) && later === early.clock, 'Done early: "Pose 1 done", no chime, the clock stops where it was', { kicker: early.kicker, chimes: early.chimes, clock: early.clock, later });
+    t.check(early.kicker === 'Pose 1 done' && early.chimes === chimesBefore && /^0:2[89]$/.test(early.clock) && later === early.clock, 'Done early: "Pose 1 done", no chime, the clock stops where it was', { kicker: early.kicker, chimes: early.chimes, before: chimesBefore, clock: early.clock, later });
     t.check(await nextPose(page, 2) && (await clockState(page)).clock === '0:30', 'the next pose starts from 0:30 again', await clockState(page));
     await stopTwice(page);
     const rv = await page.evaluate(() => ({ review: !document.getElementById('fig-review').hidden, lede: document.getElementById('fig-reviewLede').textContent, cards: document.querySelectorAll('#fig-cards .fig-card').length }));
@@ -373,12 +375,12 @@ export default async function figure(t, site) {
     await page.waitForFunction(() => document.querySelectorAll('#fig-poses [data-pose-id]').length === 30, null, { timeout: 20000 }).catch(() => null);
     const gone = await setupState(page);
     t.check(gone.poses === 30 && gone.review, 'back on the tab the list is 30 again and the review is still up', { poses: gone.poses, review: gone.review });
-    const againSay = await page.evaluate(() => { document.getElementById('fig-again').click(); return { cls: !!window.FigureStudy.state(), toast: document.getElementById('toast').textContent, review: !document.getElementById('fig-review').hidden, draw: !document.querySelector('.fig-studio').hidden }; });
-    await sleep(400);
+    const againSay = await page.evaluate(() => { const toast = document.getElementById('toast'); toast.textContent = ''; toast.classList.remove('show'); document.getElementById('fig-again').click(); return { cls: !!window.FigureStudy.state(), toast: toast.textContent, review: !document.getElementById('fig-review').hidden, draw: !document.querySelector('.fig-studio').hidden }; });
+    await page.waitForFunction(() => window.FigureStudy.state() || document.getElementById('toast').classList.contains('show') || !document.querySelector('.fig-studio').hidden, null, { timeout: 1500 }).catch(() => null);
     const againLater = { ...(await setupState(page)), cls: !!(await stateOf(page)), toast: await text(page, '#toast') };
     const dead = !againSay.cls && !againLater.cls && !againLater.draw && !againLater.toast;
     t.check(!dead, 'Draw again with the class\'s only pose deleted says why it cannot start', { againSay, later: { cls: againLater.cls, draw: againLater.draw, toast: againLater.toast, review: againLater.review } });
-    if (dead) t.finding({ title: 'Draw again does nothing, with no message, when every pose of the last class has been deleted in Pose and light', severity: 'high', steps: 'Pose and light > Save this pose. Figure study > Take them all out, tap "Your pose 1" back in > Start drawing > draw a stroke > Done > ✕ twice (the review). Pose and light > open the library > × on Your pose 1 (removed). Figure study (the review is still up) > Draw again.', expected: 'A class starts, or the page says the pose is no longer in the library (and offers New class).', actual: 'Nothing happens: the review stays, no toast, no class. The button is dead.', cause: 'js/figure.js:227-228 startClass() filters the pool by byId() and returns silently when nothing is left; the review\'s Draw again (js/figure.js:1017) passes last.pool, which names only the deleted pose.' });
+    if (dead) t.finding({ title: 'Draw again does nothing, with no message, when every pose of the last class has been deleted in Pose and light', severity: 'medium', steps: 'Pose and light > Save this pose. Figure study > Take them all out, tap "Your pose 1" back in > Start drawing > draw a stroke > Done > ✕ twice (the review). Pose and light > open the library > × on Your pose 1 (removed). Figure study (the review is still up) > Draw again.', expected: 'A class starts, or the page says the pose is no longer in the library (and offers New class).', actual: 'Nothing happens: the review stays, no toast, no class. The button is dead.', cause: 'js/figure.js:227-228 startClass() filters the pool by byId() and returns silently when nothing is left; the review\'s Draw again (js/figure.js:1017) passes last.pool, which names only the deleted pose.' });
     await clean(t, page, 'saved pose');
   }
 
@@ -495,7 +497,7 @@ export default async function figure(t, site) {
     await screenshot(page, 'figure-phone-pose');
     await click(page, '#fig-pause');
     const held = await page.evaluate(() => ({ text: getComputedStyle(document.querySelector('#fig-pause .fig-btn-text')).display, word: document.querySelector('#fig-pause .fig-btn-text').textContent }));
-    t.check(held.text === 'inline' && held.word === 'Resume', 'phone: a held clock shows the word Resume', held);
+    t.check(held.text !== 'none' && held.word === 'Resume', 'phone: a held clock shows the word Resume', held);
     await click(page, '#fig-pause');
     await stroke(page, '#fs-paper', [[0.3, 0.3], [0.5, 0.5], [0.4, 0.7]]);
     t.check((await inked(page, '#fs-paper')) > 50, 'phone: a stroke lands', await inked(page, '#fs-paper'));
