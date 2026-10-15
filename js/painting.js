@@ -436,9 +436,12 @@
       if (!hasDb || forgetting) return;
       if (saving) { saveAgain = true; return; }
       saving = true;
+      // the record is stamped with the moment its pictures were taken (toBlob copies the canvas as it is
+      // called), not the moment the slow write lands, so a later change is never older than the record
+      const at = Date.now();
       try {
         const [paperBlob, sketchBlob] = await Promise.all([toBlob(paper), toBlob(sketch)]);
-        await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: Date.now() });
+        await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: at });
       } catch (e) {
         // said once a visit, since the first visit was told the painting is kept: it is not, this time
         if (!saveFailed) { saveFailed = true; Studio.toast(e && e.name === 'QuotaExceededError' ? 'The painting could not be saved: browser storage is full. It stays for this visit only.' : 'The painting could not be saved in this browser. It stays for this visit only.', 7000); }
