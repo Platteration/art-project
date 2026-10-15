@@ -11,6 +11,7 @@ import { openPage, clean, tab, makeImage, dropFiles, dropText, pasteFile, textFi
 
 const SAMPLE_LABEL = 'Sample study · a painted stand-in. Load, drop or paste a portrait to use your own.';
 const NO_SIZE = /That image has no usable size\. Use a JPG, PNG or WebP photo\./;
+const TOO_SMALL = /too small to study \(\d+ × \d+ px\): it needs at least 16 px on each side/; // a picture with a size, but under the floor
 const NOT_IMAGE = /That file is not an image\. Choose a JPG, PNG or WebP photo\./;
 const NOT_OPENED = /This image could not be opened\. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first\./;
 const WORKING = 900; // the default Working size
@@ -85,11 +86,11 @@ export default async function studyPhotos(t, site) {
 
     // every kind of file: accepted (dims, label, what is said) or rejected (the toast, the study untouched)
     const kinds = [
-      { title: '1 × 1 PNG', make: () => makeImage(page, { width: 1, height: 1 }), reject: NO_SIZE },
-      { title: '15 × 15 PNG (under the 16 px floor)', make: () => makeImage(page, { width: 15, height: 15 }), reject: NO_SIZE },
+      { title: '1 × 1 PNG', make: () => makeImage(page, { width: 1, height: 1 }), reject: TOO_SMALL },
+      { title: '15 × 15 PNG (under the 16 px floor)', make: () => makeImage(page, { width: 15, height: 15 }), reject: TOO_SMALL },
       { title: '16 × 16 PNG (the floor itself)', make: () => makeImage(page, { width: 16, height: 16 }), dims: [16, 16] },
-      { title: '2 × 4000 strip', make: () => makeImage(page, { width: 2, height: 4000 }), reject: NO_SIZE },
-      { title: '4000 × 2 strip', make: () => makeImage(page, { width: 4000, height: 2 }), reject: NO_SIZE },
+      { title: '2 × 4000 strip', make: () => makeImage(page, { width: 2, height: 4000 }), reject: TOO_SMALL },
+      { title: '4000 × 2 strip', make: () => makeImage(page, { width: 4000, height: 2 }), reject: TOO_SMALL },
       { title: '20 × 4000 strip (the thinnest that passes)', make: () => makeImage(page, { width: 20, height: 4000, draw: 'noise' }), dims: [20, 4000] },
       { title: '4000 × 20 strip', make: () => makeImage(page, { width: 4000, height: 20, draw: 'noise' }), dims: [4000, 20] },
       { title: 'flat gray', make: () => makeImage(page, { draw: 'flat' }), dims: [600, 800], flat: [128, 128, 128] },
@@ -100,7 +101,7 @@ export default async function studyPhotos(t, site) {
       { title: 'JPEG 900 × 1200', make: () => makeImage(page, { width: 900, height: 1200, type: 'image/jpeg' }), dims: [900, 1200] },
       { title: 'WebP 800 × 600', make: () => makeImage(page, { width: 800, height: 600, type: 'image/webp' }), dims: [800, 600] },
       { title: 'SVG 400 × 400', make: async () => svgImage('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="#246"/><circle cx="200" cy="200" r="120" fill="#e9b"/></svg>', 'square.svg'), dims: [400, 400] },
-      { title: 'SVG 10 × 10', make: async () => svgImage('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>', 'tiny.svg'), reject: NO_SIZE },
+      { title: 'SVG 10 × 10', make: async () => svgImage('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>', 'tiny.svg'), reject: TOO_SMALL },
       { title: 'SVG without a size (Chromium gives it 300 × 150)', make: async () => svgImage(), dims: [300, 150], corner: [127, 127, 127], at: [200, 100] },
       { title: 'a text file', make: async () => textFile(), reject: NOT_IMAGE },
       { title: 'a broken JPEG', make: async () => brokenImage(), reject: NOT_OPENED },
@@ -135,9 +136,7 @@ export default async function studyPhotos(t, site) {
     // what the timings looked like for the biggest photo: when the indicator went up after the file was chosen
     const timing = await page.evaluate(() => ({ busy: window.__busy, fileAt: window.__fileAt }));
     t.note(`busy indicator: went up ${timing.busy.length ? Math.round(timing.busy[timing.busy.length - 2][0] - timing.fileAt) : '?'} ms after the last file was chosen (6000 × 4000), ${timing.busy.length} hidden-attribute changes over the kinds above`);
-    // the message a too-small photo gets tells a PNG user to use a PNG and never says why it was refused
-    t.check(false, 'a 15 × 15 PNG is told it is too small, not to "use a JPG, PNG or WebP photo"', 'toast: ' + NO_SIZE.source.replace(/\\/g, ''));
-    t.finding({ title: 'A photo under 16 px is refused with advice to use a JPG, PNG or WebP photo, which it already is, and the size floor is never named', severity: 'low', steps: 'Load photo → choose a 15 × 15 PNG (or a 2 × 4000 strip, or a 10 × 10 SVG).', expected: 'A message that says the picture is too small (under 16 px on a side) to study.', actual: 'Toast: "That image has no usable size. Use a JPG, PNG or WebP photo." The file was a PNG; nothing says what size would do.', cause: 'js/app.js:475-478 (readImage): the under-16-px branch reuses the wording meant for a sizeless SVG.' });
+    // (a too-small photo is told it is too small, and the floor, since the fix: the rejections above check the words)
 
     // a file with no type at all (a photo saved without an extension gets '' from the browser): built in the page
     await resetToast(page);
@@ -390,7 +389,7 @@ export default async function studyPhotos(t, site) {
       { title: 'dropped JPEG', files: [await makeImage(page, { width: 800, height: 1000, type: 'image/jpeg', name: 'dropped.jpg' })], name: 'dropped.jpg', dims: [800, 1000] },
       { title: 'dropped text file', files: [textFile()], reject: NOT_IMAGE },
       { title: 'dropped broken image', files: [brokenImage()], reject: NOT_OPENED },
-      { title: 'dropped 15 × 15 PNG', files: [await makeImage(page, { width: 15, height: 15 })], reject: NO_SIZE },
+      { title: 'dropped 15 × 15 PNG', files: [await makeImage(page, { width: 15, height: 15 })], reject: TOO_SMALL },
       { title: 'dropped sizeless SVG', files: [svgImage()], name: 'drawing.svg', dims: [300, 150] },
       { title: 'two files dropped at once (the first is taken)', files: [await makeImage(page, { width: 400, height: 500, name: 'first.png' }), await makeImage(page, { width: 300, height: 300, name: 'second.png' })], name: 'first.png', dims: [400, 500] },
     ];
@@ -422,7 +421,7 @@ export default async function studyPhotos(t, site) {
       { title: 'pasted transparent PNG', file: await makeImage(page, { draw: 'transparent', name: 'cut.png' }), name: 'cut.png', dims: [600, 800], corner: [127, 127, 127] },
       { title: 'pasted broken image', file: brokenImage('clip.jpg'), reject: NOT_OPENED },
       { title: 'pasted text file (no image on the clipboard)', file: textFile(), nothing: true },
-      { title: 'pasted 1 × 1 PNG', file: await makeImage(page, { width: 1, height: 1, name: 'dot.png' }), reject: NO_SIZE },
+      { title: 'pasted 1 × 1 PNG', file: await makeImage(page, { width: 1, height: 1, name: 'dot.png' }), reject: TOO_SMALL },
     ];
     for (const p of pastes) {
       await resetToast(page);

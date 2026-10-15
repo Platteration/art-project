@@ -471,9 +471,10 @@
       settled = true;
       URL.revokeObjectURL(url);
       const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-      // an image with no size (an SVG without width and height) would become a blank 1 x 1 study
+      // an image with no size (an SVG without width and height) would become a blank 1 x 1 study, and one
+      // under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
-        toast('That image has no usable size. Use a JPG, PNG or WebP photo.', 5000);
+        toast(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to study (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
         return;
       }
       const r = shrinkIfHuge(img, w, h);
@@ -2598,13 +2599,26 @@
   function setMode(mode, remember = true) {
     document.body.classList.toggle('mode-simple', mode === 'simple');
     document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    if (mode === 'simple') syncDetail();
     if (remember) { try { localStorage.setItem(MODE_KEY, mode); } catch (err) { /* not remembered */ } }
     window.dispatchEvent(new CustomEvent('studio:mode', { detail: mode }));
     if (state.result) runSoon(0);
   }
   document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
-  // Simple mode's Detail presets set Simplify and Merge together
+  // Simple mode's Detail presets set Simplify and Merge together. Coming back to Simple, the preset shown
+  // is the one in force: the one the sliders match, or, when Advanced left them matching none, the
+  // checked preset is applied, so the header and the study agree.
   const DETAIL = { soft: [6, 6], normal: [3, 4], sharp: [1, 2] };
+  function syncDetail() {
+    const radios = [...document.querySelectorAll('input[name="detailPreset"]')];
+    const match = radios.find((r) => DETAIL[r.value] && DETAIL[r.value][0] === +els.simplify.value && DETAIL[r.value][1] === +els.merge.value);
+    if (match) { match.checked = true; return; }
+    const shown = radios.find((r) => r.checked) || radios.find((r) => r.value === 'normal');
+    if (!shown || !DETAIL[shown.value]) return;
+    shown.checked = true;
+    [els.simplify.value, els.merge.value] = DETAIL[shown.value];
+    updateOutputs();
+  }
   document.querySelectorAll('input[name="detailPreset"]').forEach((r) => r.addEventListener('change', () => {
     const [simplify, merge] = DETAIL[r.value];
     els.simplify.value = simplify; els.merge.value = merge;
