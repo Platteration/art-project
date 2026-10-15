@@ -37,13 +37,15 @@ const setAmount = async (page, i) => { await setRange(page, 'gameAmount', i); re
 // a paint tapped by its code, through click() (the keyboard path: detail 0 adds a part, as a tap does)
 const tapPaint = (page, code, n = 1) => page.evaluate(([code, n]) => { const b = [...document.querySelectorAll('#gamePaints .game-paint')].find((x) => x.querySelector('.game-paint-code').textContent === code); if (!b) throw new Error('no paint ' + code); for (let i = 0; i < n; i++) b.click(); }, [code, n]);
 const firstPaint = (page) => page.evaluate(() => document.querySelector('#gamePaints .game-paint-code').textContent);
-const mix = (page) => text(page, '#gameMixParts');
+// the mix writes a code and its amount with a non-breaking space (game.js 963); read as plain spaces
+const plain = (v) => (v == null ? v : String(v).replace(/\u00a0/g, ' '));
+const mix = async (page) => plain(await text(page, '#gameMixParts'));
 const title = (page) => text(page, '#gameMixTitle');
 const progress = (page) => text(page, '#gameProgress');
 const numberCount = (page) => page.evaluate(() => document.querySelectorAll('#gameNumbers .game-number').length);
 const numberLabel = (page, k) => page.evaluate((k) => document.querySelector(`.game-number[data-number="${k}"]`).getAttribute('aria-label'), k);
 const breakdown = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#gameBreakdown dt')].map((dt) => [dt.textContent, dt.nextElementSibling.textContent])));
-const zones = (page) => page.evaluate(() => [...document.querySelectorAll('#gameZones .game-zone')].map((z) => ({ n: +z.querySelector('.game-zone-number').textContent, tip: z.querySelector('.game-zone-tip').textContent, match: z.querySelector('.game-zone-match').textContent, note: z.querySelector('.mix-zone').textContent, yours: z.querySelector('.mix-recipe').textContent })));
+const zones = (page) => page.evaluate(() => [...document.querySelectorAll('#gameZones .game-zone')].map((z) => ({ n: +z.querySelector('.game-zone-number').textContent, tip: z.querySelector('.game-zone-tip').textContent, match: z.querySelector('.game-zone-match').textContent, note: z.querySelector('.mix-zone').textContent, yours: z.querySelector('.mix-recipe').textContent.replace(/\u00a0/g, ' ') })));
 const popup = (page) => page.evaluate(() => ({ shown: !document.getElementById('gamePopup').hidden, kicker: document.getElementById('gameKicker').textContent, pct: document.getElementById('gamePct').textContent, grade: document.getElementById('gameGrade').textContent, newBest: !document.getElementById('gameNewBest').hidden, stars: document.querySelectorAll('#gameStars .game-star.is-on').length, starsLabel: document.getElementById('gameStars').getAttribute('aria-label'), points: document.getElementById('gamePoints').textContent, focus: document.activeElement && document.activeElement.id }));
 const countedUp = (page, want) => page.waitForFunction((w) => document.getElementById('gamePct').textContent === String(w), want, { timeout: 4000 }).then(() => true).catch(() => false);
 const cut = (page) => page.evaluate(() => document.getElementById('gameFinalHandle').getAttribute('aria-valuenow'));
@@ -317,10 +319,10 @@ export default async function gameMore(t, site) {
     const s = await popup(page); const b = await breakdown(page); const saved = await bests(page);
     t.check(s.shown && s.kicker === 'Portrait locked in' && s.pct === '0' && s.grade === 'Keep mixing' && s.stars === 0 && s.starsLabel === '0 out of 5 stars, 0% color match' && s.points === '0', 'Lock in with nothing painted: 0%, no stars, Keep mixing, 0 points', s);
     t.check(s.focus === 'gameAnalyze', 'the pop-up focuses Analyze', s.focus);
-    t.check(b['Color accuracy'] === '0% · 0' && /^4:5\d · \+0 \(some numbers unpainted\)$/.test(b['Time left']) && b.Mode === 'Classic' && b.Palette === 'Zorn', 'the breakdown says no bonus because numbers are unpainted', b);
+    t.check(b['Color accuracy'] === '0% · 0' && /^(5:00|4:5\d) · \+0 \(some numbers unpainted\)$/.test(b['Time left']) && b.Mode === 'Classic' && b.Palette === 'Zorn', 'the breakdown says no bonus because numbers are unpainted', b);
     t.check(saved['sample-study:600x750|medium|zorn'] === 0, 'the 0 is kept as the best under portrait|level|palette', saved);
     t.check(s.newBest, 'New best! shows on the first game, even at 0 points (documented as a finding)', s.newBest);
-    if (s.newBest) t.finding({ title: '"New best!" flashes on a first game with nothing painted (0 points)', severity: 'low', steps: '1. Open Games → Paint by numbers on a fresh browser. 2. Start painting and press Lock in portrait at once, with no number mixed.', expected: 'The README says New best! flashes "when you beat your score": with no score to beat and 0 points, no New best!; the setup should not then boast "Your best … 0 points" either.', actual: 'The pop-up shows 0% / 0 points with "New best!" flashing, 0 is stored as the best, and the setup then says "Your best on this portrait at this level in Classic mode: 0 points". Cause: js/game.js 1295, `const isBest = !bests[game.bestKey] || points > bests[game.bestKey]`: a missing best counts as beaten whatever the points, and 1340 shows the badge from it.' });
+    if (s.newBest) t.finding({ title: '"New best!" flashes on a first game with nothing painted (0 points)', severity: 'low', steps: '1. Open Games → Paint by numbers on a fresh browser. 2. Start painting and press Lock in portrait at once, with no number mixed. 3. Close the score and press Change settings.', expected: 'The README says New best! flashes "when you beat your score": with no score to beat and nothing scored, no New best! (or, if 0 counts as a best, the setup reporting it).', actual: 'The pop-up shows 0% / 0 points with "New best!" flashing and 0 is stored as the best, yet the setup then shows no best line at all (a stored 0 reads as none), so the best celebrated is one the setup never reports; a second 0 is not a New best. Cause: js/game.js 1299–1300, `const was = bestOfKey(bests, game.bestKey); const isBest = !was || points > was`: no best yet counts as beaten whatever the points, 1345 shows the badge from it, and 524–525 show a best only when it is truthy, so a stored 0 is never reported.' });
     await click(page, '#gameAnalyze');
     t.check(await visible(page, '#gameAnalysis') && (await text(page, '#gameAnalyze')) === 'Hide analysis' && (await page.evaluate(() => document.getElementById('gameAnalyze').getAttribute('aria-expanded'))) === 'true', 'Analyze opens the details and reads Hide analysis');
     const z = await zones(page);
@@ -329,7 +331,7 @@ export default async function gameMore(t, site) {
     t.check(!(await visible(page, '#gameAnalysis')) && (await text(page, '#gameAnalyze')) === 'Analyze', 'Hide analysis closes it');
   }
   await toSetup(page);
-  t.check((await text(page, '#gameBest')) === 'Your best on this portrait at this level in Classic mode: 0 points', 'the setup reports the best kept', await text(page, '#gameBest'));
+  t.check((await text(page, '#gameBest')) === '', 'the setup shows no best line for the stored 0 (game.js 523 shows a best only when it is truthy)', await text(page, '#gameBest'));
   // every number painted with one mix: the bonus, the order of the analysis
   await start(page);
   let recipes;
@@ -373,7 +375,7 @@ export default async function gameMore(t, site) {
     t.check(await countedUp(page, 100), 'the match counts up to 100');
     const s = await popup(page); const b = await breakdown(page);
     t.check(s.grade === 'Master colorist!' && s.stars === 5 && s.starsLabel === '5 out of 5 stars, 100% color match' && s.newBest, 'a perfect game: five stars, Master colorist!, New best!', s);
-    t.check(b['Color accuracy'] === '100% · 1000' && /^4:5\d · \+(19\d|200)$/.test(b['Time left']) && +s.points === 1000 + +(/\+(\d+)/.exec(b['Time left']) || [])[1], 'the score is 1,000 for the colors plus nearly the whole 200 for the time', { b, points: s.points });
+    t.check(b['Color accuracy'] === '100% · 1000' && /^(5:00|4:5\d) · \+(19\d|200)$/.test(b['Time left']) && +s.points === 1000 + +(/\+(\d+)/.exec(b['Time left']) || [])[1], 'the score is 1,000 for the colors plus nearly the whole 200 for the time', { b, points: s.points });
     await click(page, '#gameAnalyze');
     const z = await zones(page);
     t.check(z.every((r) => r.match === '100% match' && r.note === 'spot on' && r.yours === 'You: ' + r.tip.replace('Mix: ', '')), 'every number reads 100% match, spot on, your recipe the target\'s', z.map((r) => r.match + ' ' + r.note));
@@ -417,10 +419,10 @@ export default async function gameMore(t, site) {
     const t0 = await page.evaluate(() => [document.getElementById('gameTimer').textContent, document.getElementById('gameTimer').getAttribute('aria-label')]);
     const moved = await page.waitForFunction(() => document.getElementById('gameTimer').textContent !== '0:00', null, { timeout: 4000 }).then(() => true).catch(() => false);
     t.check(t0[0] === '0:00' && t0[1] === 'Time taken' && moved, 'Relaxed: the timer counts up from 0:00 as a stopwatch', { t0, now: await text(page, '#gameTimer') });
-    await tapPaint(page, 'TW', 2);
+    await mixExact(page, recipes.find((r) => r.k === 0).recipe); // number 1 spot on: some points
     await lockIn(page);
     const b = await breakdown(page);
-    t.check(b.Mode === 'Relaxed' && /^0:\d\d · \+0 \(no clock\)$/.test(b['Time taken']) && !('Time left' in b), 'Relaxed: the breakdown shows the time taken and no bonus', b);
+    t.check(b.Mode === 'Relaxed' && /^0:\d\d · \+0 \(no clock\)$/.test(b['Time taken']) && !('Time left' in b) && +(await popup(page)).points > 0 && +(await popup(page)).points === +b['Color accuracy'].split(' · ')[1], 'Relaxed: the breakdown shows the time taken and no bonus; the score is the colors alone', b);
     t.check('sample-study:600x750|medium|zorn|relaxed' in await bests(page), 'the best is kept per mode (…|relaxed)', Object.keys(await bests(page)));
   }
   await toSetup(page);
@@ -559,13 +561,17 @@ export default async function gameMore(t, site) {
       t.check(Object.keys(await bests(page)).some((k) => k.startsWith(keyBefore + '|')) && !Object.keys(await bests(page)).some((k) => k.startsWith(during.key + '|')), `the best is kept under the photo the game was played on (${keyBefore})`, Object.keys(await bests(page)));
       await click(page, '#gamePopup [data-game="again"]');
       const hint = await text(page, '#againHint'); const btn = await text(page, '#againSame');
+      t.check(btn === 'Same photo' && /changed since this game began/.test(hint) && /Same photo plays the one just played/.test(hint), 'Play again says the Study photo has changed and what each button plays', { hint, btn });
       await click(page, '#againSame'); await playing(page);
-      const now = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height]);
-      if (now.join('x') === size.join('x')) onNew++;
-      t.check(now.join('x') !== size.join('x'), `"${btn}" after a photo was loaded mid-game plays the same photo as the game just scored (documented as a finding if not)`, { hint, btn, board: now, loadedSince: size });
-      await lockIn(page); await toSetup(page);
+      const now = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height, Studio.sourceKey()]);
+      if (now.slice(0, 2).join('x') === size.join('x')) onNew++;
+      t.check(now.slice(0, 2).join('x') === during.canvas.join('x'), `"${btn}" after a photo was loaded mid-game plays the board just scored, not the photo loaded since (documented as a finding if not)`, { hint, btn, board: now, loadedSince: size });
+      await lockIn(page);
+      t.check(Object.keys(await bests(page)).filter((k) => k.startsWith(keyBefore + '|')).length === 1 && !Object.keys(await bests(page)).some((k) => k.startsWith(now[2] + '|')), 'its score goes to the same best as the first game', Object.keys(await bests(page)));
+      await toSetup(page);
+      t.check(await ready(page) && (await page.evaluate(() => [document.getElementById('gamePreview').width, document.getElementById('gamePreview').height])).join('x') === size.join('x') && (await text(page, '#gamePhotoName')) === `Painting from later${i}.`, 'Change settings then shows the photo now on the Study tab', await text(page, '#gamePhotoName'));
     }
-    if (onNew === 2) t.finding({ title: 'Play again → "Same photo" starts on a photo loaded since the game began, not the one just scored', severity: 'medium', steps: '1. Games → Paint by numbers, My photo, Start painting. 2. While the game is on (on a desktop the topbar stays), load another photo with Load photo on the Study tab. 3. Lock in portrait; press Play again; the dialog asks "Try the same photo again, or load a new one?": press Same photo.', expected: 'The same photo as the portrait just scored (the one shown on the result screen and in its best score), or the dialog saying the photo has changed.', actual: 'A game starts on the photo loaded in step 2 (its board has that photo\'s size and shapes), while the result screen, its best score and the dialog were about the first. Cause: js/game.js 1612, Same photo calls startGame(), whose refreshSetup() (543–545, 526–533) rebuilds the board whenever Studio.result() has changed; the game keeps no reference of its own to replay.' });
+    if (onNew === 2) t.finding({ title: 'Play again → "Same photo" starts on a photo loaded since the game began, not the one just scored', severity: 'medium', steps: '1. Games → Paint by numbers, My photo, Start painting. 2. While the game is on (on a desktop the topbar stays), load another photo with Load photo on the Study tab. 3. Lock in portrait; press Play again; the dialog asks "Try the same photo again, or load a new one?": press Same photo.', expected: 'The same photo as the portrait just scored (the one shown on the result screen and in its best score), or the dialog saying the photo has changed.', actual: 'A game starts on the photo loaded in step 2 (its board has that photo\'s size and shapes), while the result screen, its best score and the dialog were about the first. Cause: js/game.js, Same photo calls startGame() (now 1618), whose refreshSetup() (528–535) rebuilds the board whenever Studio.result() has changed, unless startGame is told to keep the board (546–547, the keep flag of commit 294e50d).' });
   }
   // Forget mid-game: the game is gone with everything else, no error
   await start(page); await tapPaint(page, await firstPaint(page), 2);
@@ -582,8 +588,8 @@ export default async function gameMore(t, site) {
 
   // ================= F. hostile saved state, on the #game route =================
   const hostile = [
-    ['gameLevel "constructor"', { [P + 'gameLevel']: J('constructor') }, (s) => s.level === null, 'the Difficulty shows no choice (documented as a finding)'],
-    ['gameLevel "__proto__"', { [P + 'gameLevel']: J('__proto__') }, (s) => s.level === null, 'the Difficulty shows no choice (documented as a finding)'],
+    ['gameLevel "constructor"', { [P + 'gameLevel']: J('constructor') }, (s) => s.level === 'medium', 'Medium checked'],
+    ['gameLevel "__proto__"', { [P + 'gameLevel']: J('__proto__') }, (s) => s.level === 'medium', 'Medium checked'],
     ['gameLevel 7', { [P + 'gameLevel']: 7 }, (s) => s.level === 'medium', 'Medium'],
     ['gameLevel "Easy"', { [P + 'gameLevel']: J('Easy') }, (s) => s.level === 'medium', 'Medium (the case is not the app\'s)'],
     ['gameLevel "easy"', { [P + 'gameLevel']: J('easy') }, (s) => s.level === 'easy' && /6:00/.test(s.note), 'Easy'],
@@ -601,8 +607,8 @@ export default async function gameMore(t, site) {
     ['gameRefView "blocks"', { [P + 'gameRefView']: J('blocks') }, (s) => s.refView === 'blocks', 'Blocks'],
     ['gameAmount "2" (a string)', { [P + 'gameAmount']: J('2') }, (s) => s.amount === '1 part per tap', '1 part per tap'],
     ['gameAmount NaN', { [P + 'gameAmount']: 'NaN' }, (s) => s.amount === '1 part per tap', '1 part per tap'],
-    ['gameAmount 3 (not a step)', { [P + 'gameAmount']: 3 }, (s) => s.amount === '¼ part per tap', '¼ part per tap (documented as a finding)'],
-    ['gameAmount 1e308', { [P + 'gameAmount']: 1e308 }, (s) => s.amount === '¼ part per tap', '¼ part per tap (documented as a finding)'],
+    ['gameAmount 3 (not a step)', { [P + 'gameAmount']: 3 }, (s) => s.amount === '1 part per tap', '1 part per tap'],
+    ['gameAmount 1e308', { [P + 'gameAmount']: 1e308 }, (s) => s.amount === '1 part per tap', '1 part per tap'],
     ['gameSound "false" (a string)', { [P + 'gameSound']: J('false') }, (s) => s.sound === 'true', 'sound on'],
     ['gameSound 0', { [P + 'gameSound']: 0 }, (s) => s.sound === 'true', 'sound on'],
     ['gameSound false', { [P + 'gameSound']: false }, (s) => s.sound === 'false', 'sound off'],
@@ -610,8 +616,11 @@ export default async function gameMore(t, site) {
     ['gameBest [1,2,3]', { [P + 'gameBest']: [1, 2, 3] }, (s) => s.best === '', 'no best'],
     ['gameBest {not json', { [P + 'gameBest']: '{not json' }, (s) => s.best === '', 'no best'],
     ['gameBest with a null value', { [P + 'gameBest']: { 'sample-study:600x750|medium|sorolla': null } }, (s) => s.best === '', 'no best'],
-    ['gameBest with an object value', { [P + 'gameBest']: '{"sample-study:600x750|medium|sorolla":{"a":1},"constructor":"x","__proto__":{"y":2}}' }, (s) => s.best === 'Your best on this portrait at this level in Classic mode: [object Object] points', '"[object Object] points" (documented as a finding)'],
-    ['gameBest with "12abc"', { [P + 'gameBest']: { 'sample-study:600x750|medium|sorolla': '12abc' } }, (s) => s.best === 'Your best on this portrait at this level in Classic mode: 12abc points', '"12abc points" (documented as a finding)'],
+    ['gameBest with an object value', { [P + 'gameBest']: '{"sample-study:600x750|medium|sorolla":{"a":1},"constructor":"x","__proto__":{"y":2}}' }, (s) => s.best === '', 'no best (a value that is not a number is none)'],
+    ['gameBest with "12abc"', { [P + 'gameBest']: { 'sample-study:600x750|medium|sorolla': '12abc' } }, (s) => s.best === '', 'no best'],
+    ['gameBest with "900" (a string)', { [P + 'gameBest']: { 'sample-study:600x750|medium|sorolla': '900' } }, (s) => s.best === '', 'no best'],
+    ['gameBest with -5', { [P + 'gameBest']: { 'sample-study:600x750|medium|sorolla': -5 } }, (s) => s.best === '', 'no best'],
+    ['gameBest with 950', { [P + 'gameBest']: { 'sample-study:600x750|medium|sorolla': 950 } }, (s) => s.best === 'Your best on this portrait at this level in Classic mode: 950 points', 'the best'],
     ['myPaints {TW:1,YO:1}', { [P + 'myPaints']: { TW: 1, YO: 1 } }, (s) => s.options === 10, 'no My paints'],
     ['myPaints with junk among two real', { [P + 'myPaints']: ['TW', 'XX', 'constructor', '__proto__', 1, null, { a: 1 }, 'YO'] }, (s) => s.options === 11, 'My paints (2)'],
     ['myPaints without a white', { [P + 'myPaints']: ['IB', 'LB'] }, (s) => s.options === 11, 'My paints (2), mixed without a white'],
@@ -628,10 +637,11 @@ export default async function gameMore(t, site) {
     if (/^gameAmount (3|1e308)/.test(label) && s.amount === '¼ part per tap') hostileSeen.amount++;
     if (/^gameBest with (an object value|"12abc")/.test(label) && /(\[object Object\]|12abc) points$/.test(s.best)) hostileSeen.best++;
     if (label === 'gameBest with an object value') {
-      // a game on that board can never become its best
+      // a game on that board becomes its best, the junk record replaced
       await start(page); await tapPaint(page, await firstPaint(page), 3); await lockIn(page);
       const p = await popup(page); const saved = await bests(page);
-      t.check(!p.newBest && typeof saved['sample-study:600x750|medium|sorolla'] === 'object', 'a game scored on it is not a New best and the record stays an object (documented as a finding)', { newBest: p.newBest, saved });
+      t.check(p.newBest && typeof saved['sample-study:600x750|medium|sorolla'] === 'number', 'a game scored on it is a New best and its points replace the record', { newBest: p.newBest, saved });
+      if (!p.newBest && typeof saved['sample-study:600x750|medium|sorolla'] === 'object') hostileSeen.best++;
     }
     if (label === 'everything hostile at once') {
       await start(page); await tapPaint(page, await firstPaint(page), 2); await lockIn(page);
@@ -640,9 +650,9 @@ export default async function gameMore(t, site) {
     await clean(t, page, `#game with ${label}`);
     await page.context().close();
   }
-  if (hostileSeen.level === 2) t.finding({ title: 'A saved difficulty that is a prototype name ("constructor", "__proto__") leaves Difficulty with no option chosen', severity: 'low', steps: '1. In localStorage set portrait-value-studio.gameLevel to "\\"constructor\\"" (the JSON string). 2. Open index.html#game.', expected: 'An unknown saved level falls back to Medium, shown as checked (as a number, a wrong case or any other unknown word does).', actual: 'No Difficulty is checked; the board and the note are Medium\'s, so the setup disagrees with itself until a level is tapped. Cause: js/game.js 1638, `LEVELS[load(LEVEL_KEY, \'medium\')]` is a plain lookup, so Object.prototype\'s names pass as levels (1640 then checks no radio); the mode line at 1629 uses hasOwnProperty for the same reason.' });
-  if (hostileSeen.amount === 2) t.finding({ title: 'A saved Amount per tap that is none of the five steps lands on ¼ part instead of the default 1 part', severity: 'low', steps: '1. In localStorage set portrait-value-studio.gameAmount to 3 (or any number other than 0.25, 0.5, 1, 2, 4). 2. Open index.html#game.', expected: 'The default, 1 part per tap, as a string or NaN gets.', actual: 'The slider sits at ¼ part per tap. Cause: js/game.js 1219, `Math.max(0, AMOUNTS.indexOf(load(AMOUNT_KEY, 1)))` turns indexOf\'s −1 into the first step.' });
-  if (hostileSeen.best === 2) t.finding({ title: 'A best score of the wrong type is shown as it is ("[object Object] points", "12abc points") and can never be beaten', severity: 'low', steps: '1. In localStorage set portrait-value-studio.gameBest to {"sample-study:600x750|medium|sorolla":{"a":1}}. 2. Open index.html#game (the sample portrait, Medium, Sorolla suggested). 3. Start painting, mix something, Lock in portrait.', expected: 'A best that is not a number is dropped (load() already drops a record of the wrong shape), so the setup shows no best and the game\'s score becomes the best.', actual: 'The setup says "Your best on this portrait at this level in Classic mode: [object Object] points"; the game scores without New best! and the object stays stored, so no score on that board is ever kept. Cause: js/game.js 523 prints the stored value unchecked, and 1295 compares `points > bests[key]`, which is false against an object or a non-numeric string.' });
+  if (hostileSeen.level >= 1) t.finding({ title: 'A saved difficulty that is a prototype name ("constructor", "__proto__") leaves Difficulty with no option chosen', severity: 'low', steps: '1. In localStorage set portrait-value-studio.gameLevel to "\\"constructor\\"" (the JSON string). 2. Open index.html#game.', expected: 'An unknown saved level falls back to Medium, shown as checked (as a number, a wrong case or any other unknown word does).', actual: 'No Difficulty is checked; the board and the note are Medium\'s, so the setup disagrees with itself until a level is tapped. Cause: js/game.js, the saved level looked up in LEVELS with a plain lookup (now an own-property check at 1644, commit 294e50d), so Object.prototype\'s names passed as levels and no radio was checked.' });
+  if (hostileSeen.amount >= 1) t.finding({ title: 'A saved Amount per tap that is none of the five steps lands on ¼ part instead of the default 1 part', severity: 'low', steps: '1. In localStorage set portrait-value-studio.gameAmount to 3 (or any number other than 0.25, 0.5, 1, 2, 4). 2. Open index.html#game.', expected: 'The default, 1 part per tap, as a string or NaN gets.', actual: 'The slider sits at ¼ part per tap. Cause: js/game.js, `Math.max(0, AMOUNTS.indexOf(…))` turned indexOf\'s −1 into the first step (now 1222–1223 fall back to one part, commit 294e50d).' });
+  if (hostileSeen.best >= 1) t.finding({ title: 'A best score of the wrong type is shown as it is ("[object Object] points", "12abc points") and can never be beaten', severity: 'low', steps: '1. In localStorage set portrait-value-studio.gameBest to {"sample-study:600x750|medium|sorolla":{"a":1}}. 2. Open index.html#game (the sample portrait, Medium, Sorolla suggested). 3. Start painting, mix something, Lock in portrait.', expected: 'A best that is not a number is dropped (load() already drops a record of the wrong shape), so the setup shows no best and the game\'s score becomes the best.', actual: 'The setup says "Your best on this portrait at this level in Classic mode: [object Object] points"; the game scores without New best! and the object stays stored, so no score on that board is ever kept. Cause: js/game.js, the stored value printed unchecked and compared with `points >` (now read through bestOfKey, 487, at 524 and 1299, commit 294e50d).' });
   // best scores: the oldest go once there are more than fifty, the newest kept and the new one added last
   {
     const seeded = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`old-${i}:1x1|medium|zorn`, 100 + i]));
@@ -661,7 +671,7 @@ export default async function gameMore(t, site) {
     t.check((await hscroll(page)) <= 0, 'phone setup: no horizontal scroll', await hscroll(page));
     await page.selectOption('#gamePalette', 'schmid'); await ready(page); // fourteen paints: the big scroll bar
     await start(page); await sleep(400);
-    const s = await page.evaluate(() => { const r = (sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return { y: Math.round(b.y), b: Math.round(b.bottom), x: Math.round(b.x), r: Math.round(b.right), w: Math.round(b.width), h: Math.round(b.height) }; }; return { focus: document.body.classList.contains('game-focus'), topbar: getComputedStyle(document.querySelector('.topbar')).display, tabs: getComputedStyle(document.querySelector('.tabs')).display, ih: innerHeight, scrollY, bar: r('.game-bar'), canvas: r('#gameCanvas'), board: r('.game-board'), paints: r('#gamePaints'), amount: r('.game-amount'), hasScroll: document.getElementById('gamePlay').classList.contains('has-scroll'), scrollBar: r('#gamePaintScroll'), ref: r('#gameRefFig'), quickUndo: getComputedStyle(document.getElementById('gameQuickUndo')).display, amountLabel: document.querySelector('.game-amount label').textContent.trim(), wideOnly: getComputedStyle(document.querySelector('.game-amount .wide-only')).display }; });
+    const s = await page.evaluate(() => { const r = (sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return { y: Math.round(b.y), b: Math.round(b.bottom), x: Math.round(b.x), r: Math.round(b.right), w: Math.round(b.width), h: Math.round(b.height) }; }; return { focus: document.body.classList.contains('game-focus'), topbar: getComputedStyle(document.querySelector('.topbar')).display, tabs: getComputedStyle(document.querySelector('.tabs')).display, ih: innerHeight, scrollY, bar: r('.game-bar'), canvas: r('#gameCanvas'), board: r('.game-board'), paints: r('#gamePaints'), amount: r('.game-amount'), hasScroll: document.getElementById('gamePlay').classList.contains('has-scroll'), scrollBar: r('#gamePaintScroll'), ref: r('#gameRefFig'), quickUndo: getComputedStyle(document.getElementById('gameQuickUndo')).display, amountLabel: document.querySelector('.game-amount label').firstChild.textContent.trim(), wideOnly: getComputedStyle(document.querySelector('.game-amount .wide-only')).display }; });
     t.check(s.focus && s.topbar === 'none' && s.tabs === 'none' && s.scrollY === 0, 'phone: the page header and tabs step aside while playing', s);
     t.check(s.bar.y >= 0 && s.bar.b < s.canvas.y && s.canvas.b <= s.paints.y && s.paints.b <= s.amount.y && s.amount.b <= s.ih, 'the timer bar, the painting, the paints and the Amount row fill one screen top to bottom', s);
     t.check(s.canvas.w > 300 && s.canvas.h > 300 && s.ref.x >= s.board.x && s.ref.r <= s.board.r + 1 && s.ref.y >= s.board.y && s.ref.w < s.board.w / 2, 'the painting is as large as the space allows and the reference sits in its corner', { canvas: s.canvas, ref: s.ref, board: s.board });
@@ -735,12 +745,12 @@ export default async function gameMore(t, site) {
       ['noise', await makeImage(page, { width: 300, height: 300, draw: 'noise', name: 'noise.png' })],
       ['an SVG', svgImage('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#446"/><circle cx="100" cy="120" r="60" fill="#d9a"/></svg>')],
     ];
-    const tiny = {}; let oneNumber = null;
+    const tiny = {}; let oneNumber = null; const seen = {};
     for (const [label, file] of photos) {
       await loadPhoto(page, file, { settle: 400 }); await studyIdle(page);
       const up = await ready(page);
       const s = await page.evaluate(() => ({ name: document.getElementById('gamePhotoName').textContent, note: document.getElementById('gamePreviewNote').textContent, hint: document.getElementById('gamePaletteHint').textContent, preview: [document.getElementById('gamePreview').width, document.getElementById('gamePreview').height] }));
-      const n = parseInt(s.note);
+      const n = parseInt(s.note); seen[label] = n;
       t.check(up && s.name === `Painting from ${file.name.replace(/\.[^.]+$/, '')}.` && n >= 1 && HINT.test(s.hint) && +HINT.exec(s.hint)[4] === n, `${label}: the setup is ready, names the photo and counts its numbers`, s);
       if (!up) continue;
       await start(page);
@@ -757,10 +767,13 @@ export default async function gameMore(t, site) {
       await toSetup(page);
       await clean(t, page, label);
     }
-    t.check(!!oneNumber, 'a picture of one flat color gives a one-number board');
+    t.note(`numbers on the extreme pictures: ${Object.entries(seen).map(([k, v]) => `${k} ${v}`).join(', ')}.`);
+    t.check(!!oneNumber, 'a picture of one flat color gives a one-number board', seen);
     if (oneNumber) {
-      t.check(oneNumber.note === '1 number to mix, 5:00 on the clock.' && oneNumber.progress === '0 of 1 number painted', 'a one-number board is counted in the singular (documented as a finding if not)', oneNumber);
-      if (oneNumber.note === '1 numbers to mix, 5:00 on the clock.') t.finding({ title: 'A one-color picture is announced as "1 numbers to mix" and "0 of 1 numbers painted"', severity: 'low', steps: '1. Load a picture of one flat color (a 300 × 300 gray PNG) as the photo. 2. Open Games → Paint by numbers; read the preview note; Start painting and read the bar.', expected: '"1 number to mix" and "0 of 1 number painted".', actual: `The note says "${oneNumber.note}" and the bar "${oneNumber.progress}". Cause: js/game.js 488 and 977 always write "numbers".` });
+      t.check(oneNumber.note === '1 number to mix, 5:00 on the clock.', 'a one-number board: the preview note counts it in the singular', oneNumber.note);
+      t.check(oneNumber.progress === '0 of 1 number painted', 'a one-number board: the bar counts it in the singular (documented as a finding if not)', oneNumber.progress);
+      if (oneNumber.note !== '1 number to mix, 5:00 on the clock.' || oneNumber.progress !== '0 of 1 number painted') t.finding({ title: `A one-color picture is counted in the plural: ${[oneNumber.note !== '1 number to mix, 5:00 on the clock.' && `"${oneNumber.note}"`, oneNumber.progress !== '0 of 1 number painted' && `"${oneNumber.progress}" in the bar`].filter(Boolean).join(' and ')}`, severity: 'low', steps: `1. Load a picture of one flat color (here a 300 × 300 ${oneNumber.label} PNG) as the photo. 2. Open Games → Paint by numbers; read the preview note; Start painting and read the bar (and, in Value first, "0 of 1 values set").`, expected: '"1 number to mix" and "0 of 1 number painted".', actual: `The note says "${oneNumber.note}" and the bar "${oneNumber.progress}". Cause: js/game.js progressText, 979–980, always writes "values set" and "numbers painted" (the note at 490 was made singular in commit 294e50d).` });
+    t.note('The mix line writes a paint and its amount with a non-breaking space ("TW 2", game.js 963), the analysis\'s "Mix:" recipe with a plain one (1579): the same recipe is written two ways, which only a copy of the text shows.');
     }
     t.check(Object.keys(tiny).length === 2 && Object.values(tiny).every((x) => Math.min(x.css[0], x.css[1]) >= 100), 'the smallest photos the Study accepts still give a board big enough to tap (documented as a finding if not)', tiny);
     if (Object.keys(tiny).length === 2 && Object.values(tiny).every((x) => Math.min(x.css[0], x.css[1]) < 20)) t.finding({ title: 'A tiny photo (16 × 16, the smallest the Study accepts) or a thin strip (40 × 4000) gives a board a few pixels wide on screen, too small to see or tap', severity: 'low', steps: '1. Load a 16 × 16 PNG (or a 40 × 4000 one) as the photo: the Study accepts it (16 px a side is its minimum). 2. Games → Paint by numbers → Start painting.', expected: 'The board is drawn at a size that can be looked at and tapped (scaled up to the space, with the numbers legible), or the setup says the picture is too small for a board.', actual: `The 16 × 16 board is ${tiny['16 × 16'].css.join(' × ')} CSS px on a 1400 × 900 window and the strip's ${tiny['40 × 4000 strip'].css.join(' × ')}: the shapes and numbers cannot be made out, and the numbers are written at 10 px on a 16 px canvas. The number buttons still work, so the game can be played blind. Cause: styles.css 816–818, .game-board canvas { max-width: 100%; height: auto } with no minimum: the board is shown at the working size of the photo (js/game.js 186, Studio.prep()), which never upscales a small picture.` });
