@@ -7,7 +7,15 @@
 // and Advanced and what each hides; the preset shown against the setting in force; what is remembered
 // across a reload (drawers, lean, block view, smoothing, mode); hostile saved state for every key app.js
 // reads; keyboard-only operation; and the phone width.
-import { openPage, clean, tab, makeImage, dropFiles, dropText, pasteFile, textFile, brokenImage, svgImage, storageGet, click, text, visible, hscroll, screenshot, sleep, DESKTOP, PHONE } from '../lib.mjs';
+// Then the studies themselves on pictures drawn with known tones (hard edges and halftone bands, Simplify off,
+// Photo average, Set values' grays on the canvas, Outline shapes, Auto split, Merge small shapes, Edge-aware
+// against Soft, the most prominent color and the shape rescue, the lean, Colors per value, the Palette view's
+// Save PNG); a phone photo with an EXIF orientation; the page opened from disk; storage that throws and storage
+// that is full; the Show switch; a photo dropped or pasted on another tab and what the Studio's reference and the
+// game do with it; the heaviest settings on the biggest photo; the keyboard for every other control; dark mode's
+// histogram; the phone's drawers and long file names; and odd drops and pastes.
+import fs from 'node:fs';
+import { openPage, clean, tab, makeImage, dropFiles, dropText, pasteFile, textFile, brokenImage, svgImage, storageGet, storageKeys, click, text, visible, hscroll, screenshot, stroke, sleep, DESKTOP, PHONE } from '../lib.mjs';
 
 const SAMPLE_LABEL = 'Sample study · a painted stand-in. Load, drop or paste a portrait to use your own.';
 const NO_SIZE = /That image has no usable size\. Use a JPG, PNG or WebP photo\./;
@@ -21,7 +29,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ---- helpers for this case -------------------------------------------------
 
-const toast = (page) => text(page, '#toast');
+const toast = (page) => page.evaluate(() => { const e = document.getElementById('toast'); return e ? e.textContent.trim() : null; }); // a page or a frame
 const resetToast = (page) => page.evaluate(() => { const t = document.getElementById('toast'); t.textContent = ''; t.classList.remove('show'); });
 const busyHidden = (page, timeout = 30000) => page.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout }).then(() => true).catch(() => false);
 // the label names the photo and the study has been redrawn (the busy indicator went up and came down)
@@ -69,6 +77,63 @@ async function loadKind(page, file, { reject = null, name = file.name } = {}) {
   return { loaded, toast: await toast(page), ...(await study(page)) };
 }
 
+// a picture painted in the page in exact sRGB tones, as a file: rect [x, y, w, h], ellipse [cx, cy, rx, ry], or a
+// dither [x, y, w, h] of two tones (of every `of` pixels, the first `on` are `a`); a tone with a fourth number is
+// see-through by that much, and bg null leaves the rest transparent
+async function paintPng(page, { width = 600, height = 800, name = 'synthetic.png', type = 'image/png', bg = [128, 128, 128], shapes = [] } = {}) {
+  const url = await page.evaluate(([w, h, type, bg, shapes]) => {
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+    const css = (t) => (t.length > 3 ? `rgba(${t.join(',')})` : `rgb(${t.join(',')})`);
+    if (bg) { g.fillStyle = css(bg); g.fillRect(0, 0, w, h); }
+    for (const s of shapes) {
+      if (s.rect) { g.fillStyle = css(s.rgb); g.fillRect(...s.rect); }
+      else if (s.ellipse) { g.fillStyle = css(s.rgb); g.beginPath(); g.ellipse(s.ellipse[0], s.ellipse[1], s.ellipse[2], s.ellipse[3], 0, 0, Math.PI * 2); g.fill(); }
+      else if (s.dither) { const [x0, y0, dw, dh] = s.dither; const d = g.getImageData(x0, y0, dw, dh); for (let i = 0; i < dw * dh; i++) { const tone = i % s.of < s.on ? s.a : s.b; d.data[i * 4] = tone[0]; d.data[i * 4 + 1] = tone[1]; d.data[i * 4 + 2] = tone[2]; d.data[i * 4 + 3] = 255; } g.putImageData(d, x0, y0); }
+    }
+    return c.toDataURL(type, 0.95);
+  }, [width, height, type, bg, shapes]);
+  return { name, mimeType: type, buffer: Buffer.from(url.split(',')[1], 'base64') };
+}
+// a JPEG with an EXIF Orientation tag, as a phone writes it (6: the camera was turned a quarter clockwise), after its JFIF segment
+function withOrientation(file, orientation) {
+  const buf = file.buffer;
+  const at = buf[2] === 0xff && buf[3] === 0xe0 ? 4 + buf.readUInt16BE(4) : 2;
+  const app1 = Buffer.from('ffe10022' + '457869660000' + '4d4d002a00000008' + '0001' + '0112' + '0003' + '00000001' + orientation.toString(16).padStart(4, '0') + '0000' + '00000000', 'hex');
+  return { ...file, buffer: Buffer.concat([buf.subarray(0, at), app1, buf.subarray(at)]) };
+}
+// both splits at once (shadow first, so the light split never has to push it), then the rerun
+async function splits(page, a, b) {
+  await page.evaluate(([a, b]) => { for (const [id, v] of [['t1', a], ['t2', b]]) { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input', { bubbles: true })); } }, [a, b]);
+  await busyHidden(page); await sleep(40);
+}
+// what the studies hold: the value shares and grays, the block colors, the zone and block of some pixels, and how
+// many pixels have a block color from another value than their own
+const res = (page, at = []) => page.evaluate((at) => {
+  const r = Studio.result(), w = r.w;
+  let off = 0; for (let i = 0; i < r.zone.length; i++) if (r.zone[i] !== r.zoneOf[r.block[i]]) off++;
+  return { share: r.zoneShare.slice(), zoneL: r.zoneL.slice(), t1: +document.getElementById('t1').value, t2: +document.getElementById('t2').value, colors: r.blockColors.map((c) => ({ rgb: [c.r, c.g, c.b], zone: c.zone, share: c.share, label: c.label })), at: at.map(([x, y]) => ({ zone: r.zone[y * w + x], block: r.block[y * w + x] })), off, settings: Studio.settings() };
+}, at);
+// for each color, the nearest of some tones and how far it is from it (CIEDE2000, as the page measures)
+const nearestTone = (page, colors, tones) => page.evaluate(([cs, ts]) => cs.map((c) => { const p = Study.rgbToLab(...c); let best = -1, d = Infinity; ts.forEach((tn, i) => { const q = Study.rgbToLab(...tn); const e = Study.deltaE2000(p[0], p[1], p[2], q[0], q[1], q[2]); if (e < d) { d = e; best = i; } }); return [best, +d.toFixed(2)]; }), [colors, tones]);
+const pngDims = (buf) => (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47 ? [buf.readUInt32BE(16), buf.readUInt32BE(20)] : null);
+async function download(page, act, timeout = 10000) {
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout }).catch(() => null), act()]);
+  if (!dl) return null;
+  const p = await dl.path().catch(() => null);
+  return { name: dl.suggestedFilename(), buf: p ? fs.readFileSync(p) : Buffer.alloc(0) };
+}
+// a downloaded PNG decoded in the page and compared with a canvas there, pixel for pixel
+const pngVsCanvas = (page, buf, id) => page.evaluate(async ([b64, id]) => {
+  const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
+  const a = g.getImageData(0, 0, c.width, c.height).data; const cv = document.getElementById(id); const b = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+  let diff = 0; if (a.length === b.length) for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1) diff++;
+  return { w: bmp.width, h: bmp.height, same: a.length === b.length && diff === 0, diff: a.length === b.length ? diff : -1 };
+}, [buf.toString('base64'), id]);
+// the page as it is right now, as a visitor would see the Study tab's settings
+const ui = (page) => page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), smoothing: document.querySelector('input[name="smoothing"]:checked').value, lean: document.getElementById('lean').value, leanOut: document.getElementById('leanOut').value, palettePressed: document.querySelector('[data-block-view="palette"]').getAttribute('aria-pressed'), drawers: [...document.querySelectorAll('.rail details.drawer')].filter((d) => d.open).map((d) => d.dataset.drawer), header: document.getElementById('valuesState').textContent.trim(), toast: document.getElementById('toast').textContent, label: document.getElementById('source').textContent.trim(), busy: document.getElementById('busy').hidden, inForce: Studio.settings().smoothing }));
+
 export default async function studyPhotos(t, site) {
   // ---- the sample on the first load, and the file kinds through the file input (desktop) ----
   {
@@ -79,6 +144,14 @@ export default async function studyPhotos(t, site) {
     t.check(first.simple && first.header === 'Normal detail' && first.preset === 'normal', 'first load: Simple mode, the drawer header says "Normal detail"', { simple: first.simple, header: first.header });
     t.check(first.t1 < first.t2 && first.t2 - first.t1 >= 2, 'first load: the sample got an auto split (dark < light)', [first.t1, first.t2]);
     t.check((await storageGet(page, 'portrait-value-studio.mode')) === null, 'first load: a visit that chose nothing writes no mode key', await storageGet(page, 'portrait-value-studio.mode'));
+    // Set values' defaults (README Settings: V 2 / 5 / 8.5), and the grays the value study is really painted in
+    const grays = await page.evaluate(() => {
+      const r = Studio.result(); const c = document.getElementById('cv-value'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const seen = new Set(); let tinted = 0; for (let i = 0; i < d.length; i += 4) { seen.add(d[i]); if (d[i] !== d[i + 1] || d[i + 1] !== d[i + 2]) tinted++; }
+      return { set: ['g0', 'g1', 'g2'].map((id) => [document.getElementById(id).value, document.getElementById(id + 'Out').value]), mode: document.querySelector('input[name="grayMode"]:checked').value, seen: [...seen].sort((a, b) => a - b), want: [20, 50, 85].filter((_, z) => r.zoneShare[z] > 0).map((l) => Study.grayForL(l)).sort((a, b) => a - b), tinted };
+    });
+    t.check(grays.mode === 'custom' && same(grays.set, [['20', 'V 2.0'], ['50', 'V 5.0'], ['85', 'V 8.5']]), 'first load: Gray values is Set values, at V 2 / 5 / 8.5', grays);
+    t.check(same(grays.seen, grays.want) && grays.tinted === 0, 'first load: the value study is painted in exactly those grays, one per value', grays);
     await clean(t, page, 'first load');
     // the busy indicator and the moment the file was chosen, for the timings below
     await page.evaluate(() => { window.__busy = []; const b = document.getElementById('busy'); new MutationObserver(() => window.__busy.push([performance.now(), b.hidden])).observe(b, { attributes: true, attributeFilter: ['hidden'] }); document.getElementById('file').addEventListener('change', () => { window.__fileAt = performance.now(); }); });
@@ -249,6 +322,14 @@ export default async function studyPhotos(t, site) {
     t.check(s.blurRadius === Math.round((5 * 900) / 450) && s.minSize === Math.round(675 * 900 * 0.012) && s.busy, 'the settings in force follow the sliders (Simplify 5, Merge 10 on 675 × 900)', { blurRadius: s.blurRadius, minSize: s.minSize });
     const tones = await page.evaluate(() => [...document.querySelectorAll('#zones .tone')].map((e) => e.style.background));
     t.check(same(tones, ['rgb(255, 255, 255)', 'rgb(0, 0, 0)', 'rgb(118, 118, 118)']) || (tones[0] === 'rgb(255, 255, 255)' && tones[1] === 'rgb(0, 0, 0)'), 'inverted gray values (shadow white, middle black) are drawn as set', tones);
+    // the value study itself follows the grays, not only the swatches in the list
+    const painted = await page.evaluate(() => {
+      const r = Studio.result(); const c = document.getElementById('cv-value'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+      let wrong = 0; for (let i = 0, p = 0; i < r.zone.length; i++, p += 4) { const g = Study.grayForL([100, 0, 50][r.zone[i]]); if (d[p] !== g || d[p + 1] !== g || d[p + 2] !== g) wrong++; }
+      return { seen: [...seen].sort(), wrong, shares: r.zoneShare.map((s) => Math.round(s * 100)) };
+    });
+    t.check(painted.wrong === 0 && painted.seen.length <= 3, 'the value study is painted in the grays set: shadow white (V 10), middle black (V 0), light V 5', painted);
     await clickWait(page, '#grayAvg');
     t.check((await display(page, '#customGrays')) === 'hidden' && (await study(page)).zoneText.every((z) => /^V \d+\.\d · \d+%$/.test(z)), 'Photo average hides the gray sliders and the zones show the averages', (await study(page)).zoneText);
     await clickWait(page, '#grayCustom');
@@ -505,6 +586,655 @@ export default async function studyPhotos(t, site) {
     const kept = await page.evaluate(() => ({ drawers: [...document.querySelectorAll('.rail details.drawer')].filter((d) => d.open).map((d) => d.dataset.drawer), simple: document.body.classList.contains('mode-simple'), label: document.getElementById('source').textContent.trim() }));
     t.check(same(kept.drawers, ['values']) && !kept.simple && kept.label === SAMPLE_LABEL, 'phone: after a reload the drawer and Advanced are remembered, the photo is not', kept);
     await clean(t, page, 'phone');
+    await page.context().close();
+  }
+
+  // ==== the studies themselves, and what the first pass left out ====
+
+  // ---- pictures drawn with known tones: what each study promises, read off Studio.result() and the canvases ----
+  {
+    const page = await openPage(site);
+    await clickWait(page, '[data-mode="advanced"]');
+    await setRange(page, 'merge', 0);
+    const D = [50, 50, 50], M = [119, 119, 119], LT = [196, 196, 196]; // L* 20.8, 50.0 and 79.2
+    const [LD, , LL] = await page.evaluate((ts) => ts.map((x) => Study.rgbToLab(...x)[0]), [D, M, LT]);
+    const G = await page.evaluate(() => [20, 50, 85].map((l) => Study.grayForL(l))); // Set values' default grays
+
+    // Hard edges stay hard: a hard step from shadow to light gets no middle band, a halftone band stays, a 2 px one goes
+    const edge = {
+      hard: await paintPng(page, { name: 'edge-hard.png', bg: LT, shapes: [{ rect: [0, 0, 300, 800], rgb: D }] }),
+      band30: await paintPng(page, { name: 'edge-band30.png', bg: LT, shapes: [{ rect: [0, 0, 285, 800], rgb: D }, { rect: [285, 0, 30, 800], rgb: M }] }),
+      band2: await paintPng(page, { name: 'edge-band2.png', bg: LT, shapes: [{ rect: [0, 0, 299, 800], rgb: D }, { rect: [299, 0, 2, 800], rgb: M }] }),
+    };
+    await setRange(page, 'simplify', 10);
+    for (const [kind, file] of Object.entries(edge)) {
+      await loadKind(page, file);
+      await splits(page, 35, 65);
+      for (const [radio, mode] of [['#smoothSoft', 'Soft'], ['#smoothEdge', 'Edge-aware']]) {
+        await clickWait(page, radio);
+        const r = await res(page);
+        if (kind === 'hard') {
+          const other = await page.evaluate(([g0, g2]) => { const c = document.getElementById('cv-value'); const d = c.getContext('2d').getImageData(296, 0, 8, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] !== g0 && d[i] !== g2) n++; return n; }, [G[0], G[2]]);
+          t.check(r.share[1] < 0.005 && other === 0, `hard edge, ${mode} at Simplify 10 (splits 35/65): straight from shadow to light, no middle band (the value study within 4 px of the edge holds only the shadow and light grays)`, { middle: r.share[1], otherGrays: other });
+        } else if (kind === 'band30') {
+          t.check(Math.abs(r.share[1] - 30 / 600) < 0.01, `a 30 px halftone between shadow and light, ${mode} at Simplify 10: it stays a middle band (5% of the picture)`, r.share);
+        } else {
+          t.check(r.share[1] < 0.002, `a 2 px halftone between shadow and light, ${mode} at Simplify 10: split with the edge (under about 4 px)`, r.share);
+        }
+      }
+    }
+    await setRange(page, 'simplify', 0);
+    t.check(Math.abs((await res(page)).share[1] - 2 / 600) < 0.0005, 'Simplify off: the 2 px halftone stays middle (every pixel split by its own value)', (await res(page)).share);
+    await clean(t, page, 'hard edges stay hard');
+
+    // Simplify off: nothing smoothed, every pixel split by its own L* (noise, both smoothings)
+    await loadKind(page, await makeImage(page, { draw: 'noise', name: 'noise.png' }));
+    await splits(page, 35, 65);
+    for (const [radio, mode] of [['#smoothSoft', 'Soft'], ['#smoothEdge', 'Edge-aware']]) {
+      await clickWait(page, radio);
+      const own = await page.evaluate(() => { const r = Studio.result(), p = Studio.prep(), s = Studio.settings(); const d = document.getElementById('cv-orig').getContext('2d').getImageData(0, 0, p.w, p.h).data; let off = 0; for (let i = 0; i < p.w * p.h; i++) { const L = Study.rgbToLab(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])[0]; if ((L < s.t1 ? 0 : L < s.t2 ? 1 : 2) !== r.zone[i]) off++; } return { off, n: p.w * p.h, cacheRadius: p.blurCache && p.blurCache.r, blurRadius: s.blurRadius }; });
+      t.check(own.off <= own.n * 0.001 && own.cacheRadius === 0 && own.blurRadius === 0, `Simplify off, ${mode}: the value study is the photo's own L* split pixel by pixel (noise, splits 35/65)`, own);
+    }
+    await clean(t, page, 'simplify off');
+
+    // Photo average: each mass painted at its own average value; the empty middle keeps its default (V 5)
+    await loadKind(page, edge.hard); await splits(page, 35, 65); // Simplify off: the halves are L* 20.8 and 79.2 exactly
+    await clickWait(page, '#grayAvg');
+    {
+      const r = await res(page);
+      const shown = await page.evaluate(() => ({ px: [[100, 400], [500, 400]].map(([x, y]) => [...document.getElementById('cv-value').getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3)), want: Studio.result().zoneL.map((l) => Study.grayForL(l)), meta: [...document.querySelectorAll('#zones li .meta')].map((e) => e.textContent) }));
+      t.check(Math.abs(r.zoneL[0] - LD) < 1 && r.zoneL[1] === 50 && Math.abs(r.zoneL[2] - LL) < 1 && Math.abs(r.share[0] - 0.5) < 0.001 && r.share[1] === 0, `Photo average on halves of L* ${LD.toFixed(1)} and ${LL.toFixed(1)}: the masses average to them, the empty middle keeps V 5`, { zoneL: r.zoneL, share: r.share });
+      t.check(same(shown.px[0], [shown.want[0], shown.want[0], shown.want[0]]) && same(shown.px[1], [shown.want[2], shown.want[2], shown.want[2]]), 'Photo average: the value study is painted in those averages', shown);
+      t.check(same(shown.meta, ['V 2.1 · 50%', 'V 5.0 · 0%', 'V 7.9 · 50%']), 'Photo average: the list says V 2.1 · 50%, V 5.0 · 0%, V 7.9 · 50%', shown.meta);
+    }
+    await clickWait(page, '#grayCustom');
+
+    // Outline shapes: every border on both studies darkened, and nothing else; the block colors don't count them
+    const outlined = (on) => page.evaluate((on) => {
+      const r = Studio.result(), w = r.w, n = r.zone.length, color = new Map(r.blockColors.map((c) => [c.label, [c.r, c.g, c.b]]));
+      const out = {};
+      for (const [id, lab, base] of [['cv-value', r.zone, (i) => { const g = r.zoneGray[r.zone[i]]; return [g, g, g]; }], ['cv-block', r.block, (i) => color.get(r.block[i])]]) {
+        const c = document.getElementById(id); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let edges = 0, wrong = 0;
+        for (let i = 0; i < n; i++) {
+          const x = i % w, isEdge = (x < w - 1 && lab[i + 1] !== lab[i]) || (i < n - w && lab[i + w] !== lab[i]);
+          const b = base(i), p = i * 4, want = on && isEdge ? [b[0] * 0.2 + 16, b[1] * 0.2 + 14.4, b[2] * 0.2 + 17.6] : b;
+          if (isEdge) edges++;
+          if (Math.abs(d[p] - want[0]) > 1 || Math.abs(d[p + 1] - want[1]) > 1 || Math.abs(d[p + 2] - want[2]) > 1) wrong++;
+        }
+        out[id] = { edges, wrong };
+      }
+      return out;
+    }, on);
+    {
+      const before = (await res(page)).colors.map((c) => c.rgb.join());
+      await clickWait(page, '#outlines');
+      const on = await outlined(true);
+      t.check(on['cv-value'].edges >= 800 && on['cv-value'].wrong === 0 && on['cv-block'].edges >= 800 && on['cv-block'].wrong === 0, 'Outline shapes: both studies have every shape border darkened, and no other pixel changed', on);
+      t.check(same((await res(page)).colors.map((c) => c.rgb.join()), before), 'Outline shapes: the block colors are the shapes\' colors, not the outline tone', { before, now: (await res(page)).colors.map((c) => c.rgb.join()) });
+      await clickWait(page, '#outlines');
+      const off = await outlined(false);
+      t.check(off['cv-value'].wrong === 0 && off['cv-block'].wrong === 0, 'Outline shapes off: both studies are flat shapes again', off);
+    }
+    await clean(t, page, 'photo average, outlines');
+
+    // Auto split (three-class Otsu) on thirds of L* 20.8 / 50 / 79.2: a split between each pair, a third in each value
+    const thirds = await paintPng(page, { name: 'thirds.png', bg: M, shapes: [{ rect: [0, 0, 200, 800], rgb: D }, { rect: [400, 0, 200, 800], rgb: LT }] });
+    await loadKind(page, thirds);
+    for (const sim of [0, 3]) {
+      await setRange(page, 'simplify', sim); await splits(page, 90, 95); await clickWait(page, '#autoSplit');
+      const r = await res(page);
+      t.check(r.t1 > LD && r.t1 < 50 && r.t2 > 50 && r.t2 < LL && r.share.every((s) => Math.abs(s - 1 / 3) < 0.02), `Auto split on three flat thirds (Simplify ${sim}): a split between each pair of tones, a third in each value`, { t1: r.t1, t2: r.t2, share: r.share });
+    }
+    // and on two tones: the dark one is the shadow, the light one the light (the middle is the empty one)
+    const twoTone = {};
+    await loadKind(page, edge.hard);
+    for (const sim of [3, 0]) {
+      await setRange(page, 'simplify', sim); await splits(page, 90, 95); await clickWait(page, '#autoSplit');
+      const r = await res(page);
+      twoTone[sim] = r;
+      t.check(Math.abs(r.share[0] - 0.5) < 0.01 && r.share[1] < 0.01 && Math.abs(r.share[2] - 0.5) < 0.01, `Auto split on two flat tones, L* ${LD.toFixed(1)} and ${LL.toFixed(1)} (Simplify ${sim}): the dark half is the shadow, the light half the light`, { t1: r.t1, t2: r.t2, share: r.share });
+    }
+    if (twoTone[0].share[1] > 0.4) t.finding({ title: 'Auto split with Simplify off on a picture of two flat tones leaves Shadow empty and paints the dark tone as the middle gray', severity: 'medium', steps: 'Advanced → Dark, middle, light: Simplify to Off. Load a PNG whose left half is rgb(50,50,50) and right half rgb(196,196,196) (L* 20.8 and 79.2), or press Auto split with it loaded.', expected: 'The dark half in Shadow (V 2 gray) and the light half in Light (V 8.5), the middle the empty value, as Auto split gives at Simplify 3 (splits 31/51).', actual: `Splits at V ${(twoTone[0].t1 / 10).toFixed(1)} and ${(twoTone[0].t2 / 10).toFixed(1)}: Shadow ${Math.round(twoTone[0].share[0] * 100)}%, Middle ${Math.round(twoTone[0].share[1] * 100)}%, Light ${Math.round(twoTone[0].share[2] * 100)}%; the dark half is painted V 5 middle gray. The same happens on loading such a picture at Simplify off, since a new photo gets an auto split.`, cause: 'js/processing.js:273-290 (autoThresholds): with two tones every split that puts them in different classes scores the same between-class variance, and the loop keeps the first it finds (a = 1, line 278 takes only a strictly better one), whose shadow class [0, a) is empty; split(1) then puts t1 at 11, below the dark tone. A loaded photo gets the same split (js/app.js:398).' });
+    await clean(t, page, 'auto split on known tones');
+
+    // Merge small shapes: a speck smaller than the size threshold folds into the shape it shares the most edge with
+    const speck = await paintPng(page, { name: 'speck.png', bg: [210, 210, 210], shapes: [{ rect: [0, 700, 600, 100], rgb: [40, 40, 40] }, { ellipse: [300, 300, 27.64, 27.64], rgb: [40, 40, 40] }] }); // a disc of 0.5%
+    await loadKind(page, speck); await setRange(page, 'simplify', 0); await splits(page, 35, 65);
+    for (const m of [0, 6, 7, 10]) {
+      await setRange(page, 'merge', m);
+      const r = await res(page, [[300, 300]]);
+      const s = await page.evaluate(() => { const r = Studio.result(); let disc = 0; for (let i = 0; i < 700 * r.w; i++) if (r.zone[i] === 0) disc++; return { disc, block: [...document.getElementById('cv-block').getContext('2d').getImageData(300, 300, 1, 1).data].slice(0, 3) }; });
+      const min = r.settings.minSize;
+      if (m === 0 || m === 6) t.check(r.at[0].zone === 0 && s.disc >= Math.max(min, 2200) && same(s.block, [40, 40, 40]), `Merge ${m} (shapes under ${min} px fold): the ${s.disc} px dark disc stays a shadow shape on both studies`, { min, ...s, zone: r.at[0].zone });
+      else t.check(r.at[0].zone === 2 && s.disc === 0 && r.share[0] === 60000 / 480000 && same(s.block, [210, 210, 210]), `Merge ${m} (shapes under ${min} px fold): the 0.5% dark disc folds into the light field around it, on both studies`, { min, ...s, zone: r.at[0].zone, shadow: r.share[0] });
+    }
+    await setRange(page, 'merge', 0);
+    await clean(t, page, 'merge small shapes');
+
+    // Edge-aware against Soft: corners of shadow shapes stay sharp, small dark shapes keep their place
+    const square = await paintPng(page, { name: 'square.png', bg: [200, 200, 200], shapes: [{ rect: [100, 100, 200, 200], rgb: [40, 40, 40] }, { ellipse: [200, 550, 20, 20], rgb: [40, 40, 40] }, { ellipse: [420, 550, 20, 20], rgb: [40, 40, 40] }] });
+    await loadKind(page, square); await splits(page, 35, 65);
+    const shapesNow = () => page.evaluate(() => { const r = Studio.result(), w = r.w; let sq = 0, miss = 0, discs = 0; for (let y = 0; y < r.h; y++) for (let x = 0; x < w; x++) { const z0 = r.zone[y * w + x] === 0; if (y < 400 && z0) sq++; if (y >= 400 && z0) discs++; if (x >= 100 && x < 130 && y >= 100 && y < 130 && !z0) miss++; } return { corner: r.zone[101 * w + 101], square: +(sq / 40000).toFixed(4), cornerLost: miss, discs: +(discs / (2 * Math.PI * 400)).toFixed(3) }; });
+    const sm = {};
+    for (const sim of [3, 5, 10]) {
+      await setRange(page, 'simplify', sim);
+      for (const [radio, mode] of [['#smoothEdge', 'edge'], ['#smoothSoft', 'soft']]) { await clickWait(page, radio); sm[mode + sim] = await shapesNow(); }
+    }
+    await clickWait(page, '#smoothEdge');
+    t.check(sm.edge3.corner === 0 && sm.soft3.corner !== 0, 'Simplify 3 (the default): the square\'s corner pixel stays shadow with Edge-aware, and Soft rounds it off', { edge: sm.edge3, soft: sm.soft3 });
+    t.check(sm.edge5.discs >= 0.9 && sm.edge5.discs - sm.soft5.discs >= 0.1, 'Simplify 5: two small dark discs (40 px) keep their shadow area with Edge-aware, and shrink with Soft', { edge: sm.edge5.discs, soft: sm.soft5.discs });
+    t.check(Math.abs(sm.edge10.square - 1) < 0.03 && sm.edge10.cornerLost * 2 < sm.soft10.cornerLost, 'Simplify 10: Edge-aware keeps the square\'s shadow area within 3% and its corner far sharper than Soft', { edge: sm.edge10, soft: sm.soft10 });
+    t.note(`Edge-aware vs Soft on a 200 px dark square and two 40 px discs (zone-0 area kept, pixels lost from the 30 × 30 corner): Simplify 3 ${JSON.stringify(sm.edge3)} / ${JSON.stringify(sm.soft3)}; 5 ${JSON.stringify(sm.edge5)} / ${JSON.stringify(sm.soft5)}; 10 ${JSON.stringify(sm.edge10)} / ${JSON.stringify(sm.soft10)}. At Simplify 10 the discs merge away with either smoothing, as the README says small features do the more you simplify.`);
+    await clean(t, page, 'edge-aware and soft');
+
+    // The most prominent color, and the shape rescue: faces sharing one color group (Colors per value 1) with a
+    // green-gray wall of the same value, each ringed by dark hair so it is a shape of its own
+    await setRange(page, 'colors', 1); await setRange(page, 'lean', 0); await setRange(page, 'simplify', 0);
+    const WALL = [110, 125, 110], ORANGE = [170, 105, 80], BLUE = [95, 121, 180], PURPLE = [160, 100, 170], HAIR = [30, 30, 30], LA = [230, 230, 230], LB = [205, 230, 255];
+    const ringed = (cx, cy, rx, ry, rgb) => [{ ellipse: [cx, cy, rx + 10, ry + 10], rgb: HAIR }, { ellipse: [cx, cy, rx, ry], rgb }];
+    const faces = await paintPng(page, { name: 'faces.png', bg: WALL, shapes: [
+      { dither: [0, 0, 600, 80], a: LA, b: LB, of: 5, on: 3 }, { rect: [0, 740, 600, 60], rgb: HAIR },
+      ...ringed(160, 250, 70, 87.3, ORANGE), ...ringed(450, 250, 60, 76.4, BLUE), ...ringed(160, 520, 55, 69.4, PURPLE), // 4%, 3% and 2.5% of the picture
+      ...ringed(400, 470, 22, 27.8, ORANGE), ...ringed(500, 620, 11, 13.9, ORANGE), // 0.4% and 0.1%
+      { ellipse: [300, 650, 40, 50], rgb: ORANGE }, // touching the wall, no hair around it
+    ] });
+    await loadKind(page, faces); await splits(page, 35, 65);
+    {
+      // the 4% face, the 0.4% one, the 0.1% one, the one touching the wall, the wall, the blue face, the purple face
+      const pts = [[160, 250], [400, 470], [500, 620], [300, 650], [50, 400], [450, 250], [160, 520]];
+      const r = await res(page, pts);
+      const tones = [WALL, ORANGE, BLUE, PURPLE, HAIR, LA, LB];
+      const near = await nearestTone(page, r.colors.map((c) => c.rgb), tones);
+      const colorOf = (label) => r.colors.find((c) => c.label === label);
+      const at = r.at.map((a) => colorOf(a.block));
+      const [atNear, mean] = [await nearestTone(page, at.map((c) => c.rgb), tones), [0, 1, 2].map((k) => Math.round(0.6 * LA[k] + 0.4 * LB[k]))];
+      const light = r.colors.filter((c) => c.zone === 2);
+      const lightVsMean = await nearestTone(page, light.map((c) => c.rgb), [LA, mean]);
+      t.check(near.every(([, d]) => d <= 2), 'Colors per value 1: every block color is one of the tones in the picture (within ΔE 2), never a mix', r.colors.map((c, i) => [c.rgb.join(), c.zone, near[i]]));
+      t.check(light.length === 1 && lightVsMean[0][0] === 0 && lightVsMean[0][1] <= 2, 'the light strip, 60% one gray and 40% a pale blue: its color is the gray that covers the most of it, not their mix', { light: light.map((c) => c.rgb), vsGrayAndMean: lightVsMean });
+      const mid = r.colors.filter((c) => c.zone === 1);
+      t.check(mid.length >= 2 && mid.length <= 3 && atNear[0][0] === 1 && atNear[0][1] <= 2 && colorOf(r.at[0].block).zone === 1 && atNear[4][0] === 0, 'a face (4%) in the wall\'s group: it gets a new color of its own, its orange, in its value; the wall keeps its green-gray; at most two new colors in the value', { middle: mid.map((c) => c.rgb), face: atNear[0], wall: atNear[4] });
+      t.check(r.at[1].block === r.at[0].block, 'a smaller face (0.4%, too small to add a color) joins the first face\'s orange, the closest color of its value', { small: at[1].rgb, face: at[0].rgb });
+      t.check(atNear[2][0] === 0, 'a face under 0.2% of the picture keeps its group\'s color (the wall\'s)', { tiny: at[2].rgb });
+      t.check(r.off === 0, 'every pixel\'s block color belongs to its own value (the color study agrees with the value study)', r.off);
+      const px = await page.evaluate(() => [[160, 250], [50, 400]].map(([x, y]) => [...document.getElementById('cv-block').getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3)));
+      t.check(same(px[0], at[0].rgb) && same(px[1], at[4].rgb), 'the color study shows the face orange and the wall green-gray', px);
+      const toneName = ([i, d]) => `${['the wall\'s green-gray', 'orange', 'blue', 'purple', 'the hair', 'gray', 'pale blue'][i]} (ΔE ${d})`;
+      t.note(`shape rescue, Colors per value 1: the middle value's colors ${mid.map((c) => c.rgb.join('/')).join(', ')}; the blue face (3%) took ${toneName(atNear[5])}; the purple face (2.5%, after the value's two new colors) took ${toneName(atNear[6])}; the orange face touching the wall took ${toneName(atNear[3])}${atNear[3][0] === 0 ? ': one shape with the wall, as the README says such a shape keeps its color' : ''}.`);
+    }
+    await clean(t, page, 'most prominent color, shape rescue');
+
+    // Lean toward lighter tones: one hue, a busy darker tone and a lighter one; Off takes the busiest, 100% reaches
+    // to one a quarter as common, and no further
+    const A = [200, 150, 120], B = [235, 195, 170];
+    const leanFile = (rows, name) => paintPng(page, { name, bg: [40, 40, 40], shapes: [{ rect: [0, 0, 600, 480], rgb: A }, { rect: [0, 480, 600, rows], rgb: B }] });
+    await loadKind(page, await leanFile(240, 'lean-half.png')); await splits(page, 30, 55);
+    const lightColor = async () => { const r = await res(page); const c = r.colors.filter((x) => x.zone === 2); return { rgb: c.map((x) => x.rgb), near: await nearestTone(page, c.map((x) => x.rgb), [A, B]) }; };
+    const lean = {};
+    for (const v of [0, 60, 100]) { await setRange(page, 'lean', v); lean[v] = await lightColor(); }
+    t.check(lean[0].near.length === 1 && lean[0].near[0][0] === 0 && lean[0].near[0][1] <= 2, 'Lean Off: the light group takes its most common color (the darker tone, twice as common)', lean[0]);
+    t.check(lean[100].near.length === 1 && lean[100].near[0][0] === 1 && lean[100].near[0][1] <= 2, 'Lean 100%: the group takes the lighter tone of the same hue (half as common)', lean[100]);
+    t.check(lean[60].near[0][0] === 0, 'Lean 60% (the default) reaches only to tones 55% as common: the darker tone stays', lean[60]);
+    await loadKind(page, await leanFile(80, 'lean-sixth.png')); await splits(page, 30, 55); await setRange(page, 'lean', 100);
+    const rare = await lightColor();
+    t.check(rare.near[0][0] === 0, 'Lean 100% with the lighter tone a sixth as common (under a quarter): the darker tone stays', rare);
+    await setRange(page, 'lean', 60);
+    await clean(t, page, 'lean toward lighter tones');
+
+    // Colors per value on a portrait: how many colors, where they are, and the same picture twice
+    await loadKind(page, await makeImage(page, { name: 'portrait.png' }));
+    await setRange(page, 'simplify', 3); await setRange(page, 'merge', 4);
+    const perK = [];
+    for (let k = 1; k <= 6; k++) {
+      await setRange(page, 'colors', k);
+      const c = await page.evaluate(() => {
+        const r = Studio.result(); const d = document.getElementById('cv-block').getContext('2d').getImageData(0, 0, r.w, r.h).data;
+        const seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(`${d[i]},${d[i + 1]},${d[i + 2]}`);
+        const listed = new Set(r.blockColors.map((b) => `${b.r},${b.g},${b.b}`));
+        let off = 0; for (let i = 0; i < r.zone.length; i++) if (r.zone[i] !== r.zoneOf[r.block[i]]) off++;
+        return { n: r.blockColors.length, perZone: [0, 1, 2].map((z) => r.blockColors.filter((b) => b.zone === z).length), sameSet: seen.size === listed.size && [...seen].every((x) => listed.has(x)), shown: seen.size, off, sum: r.blockColors.reduce((s, b) => s + b.share, 0), positive: r.blockColors.every((b) => b.share > 0) };
+      });
+      perK.push(`${k}: ${c.n} (${c.perZone.join('/')})`);
+      t.check(c.n >= 3 && c.n <= 3 * k + 6 && c.perZone.every((z) => z >= 1 && z <= k + 2) && c.positive && Math.abs(c.sum - 1) < 1e-6, `Colors per value ${k}: ${c.n} block colors, ${k} groups and at most two new colors in each value, shares adding up to the picture`, c);
+      t.check(c.sameSet && c.off === 0, `Colors per value ${k}: the color study shows exactly the listed colors, each pixel's inside its own value`, c);
+    }
+    t.note(`Colors per value on the drawn portrait, block colors (shadow/middle/light): ${perK.join('; ')}`);
+    await setRange(page, 'colors', 3);
+    const hash = () => page.evaluate(() => { const b = Studio.result().blockImage; let h = 0; for (let i = 0; i < b.length; i++) h = (h * 31 + b[i]) >>> 0; return h; });
+    const h1 = await hash();
+    await clickWait(page, '#outlines'); await clickWait(page, '#outlines');
+    t.check(h1 === (await hash()), 'the same settings twice give the same color study, byte for byte (seeded k-means)', [h1, await hash()]);
+    await clean(t, page, 'colors per value');
+
+    // Big color shapes as a palette mixes them: outlines kept, Save PNG and the magnifier use the colors shown
+    await clickWait(page, '#outlines');
+    const photoPng = await download(page, () => click(page, '[data-save="block"]'));
+    await page.evaluate(() => { document.getElementById('drawer-colors').open = true; });
+    await page.waitForFunction(() => document.querySelectorAll('#presetList .preset').length === 10 && !document.getElementById('presetList').hasAttribute('aria-busy'), null, { timeout: 20000 }).catch(() => null);
+    await click(page, '#presetList li[data-preset="zorn"] .preset');
+    await click(page, '[data-block-view="palette"]');
+    await page.waitForFunction(() => !document.getElementById('blockViewPalette').classList.contains('is-busy'), null, { timeout: 60000 }).catch(() => null);
+    {
+      const kept = await page.evaluate(() => { const r = Studio.result(), w = r.w, n = r.block.length; const shown = document.getElementById('cv-block').getContext('2d').getImageData(0, 0, r.w, r.h).data; const b = r.blockImage; let edges = 0, edgeSame = 0, moved = 0; for (let i = 0; i < n; i++) { const x = i % w, e = (x < w - 1 && r.block[i + 1] !== r.block[i]) || (i < n - w && r.block[i + w] !== r.block[i]); const p = i * 4, eq = shown[p] === b[p] && shown[p + 1] === b[p + 1] && shown[p + 2] === b[p + 2]; if (e) { edges++; if (eq) edgeSame++; } else if (!eq) moved++; } return { edges, edgeSame, moved, name: document.getElementById('blockViewPalette').textContent }; });
+      t.check(kept.name === 'Zorn' && kept.edges > 0 && kept.edgeSame === kept.edges && kept.moved > 0, 'Palette view (Zorn) with outlines on: the blocks are remixed, the outlines stay as they are', kept);
+      const palPng = await download(page, () => click(page, '[data-save="block"]'));
+      const asShown = palPng && await pngVsCanvas(page, palPng.buf, 'cv-block');
+      const photoVs = photoPng && await pngVsCanvas(page, photoPng.buf, 'cv-block');
+      t.check(palPng && palPng.name === 'portrait-color-blocks.png' && asShown.same && photoVs && !photoVs.same, 'Save PNG in the Palette view: the PNG is the blocks as Zorn mixes them, as shown (not the photo\'s colors)', { name: palPng && palPng.name, asShown, photoPngAgainstShown: photoVs });
+      const cv = page.locator('#cv-block'); await cv.scrollIntoViewIfNeeded();
+      const bx = await cv.boundingBox();
+      const [mx, my] = [Math.round(bx.x + bx.width * 0.5), Math.round(bx.y + bx.height * 0.42)];
+      await page.mouse.move(mx, my); await sleep(120);
+      // the pixel under the pointer, found as the magnifier finds it (app.js sampleAt)
+      const lp = await page.evaluate(([cx, cy]) => { const c = document.getElementById('cv-block'); const rect = c.getBoundingClientRect(); const x = Math.floor(((cx - rect.left) / rect.width) * c.width), y = Math.floor(((cy - rect.top) / rect.height) * c.height); const d = c.getContext('2d').getImageData(x, y, 1, 1).data; const r = Studio.result(); const own = r.blockColors.find((b) => b.label === r.block[y * r.w + x]); const hex = (a) => '#' + a.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase(); return { loupe: document.getElementById('loupeHex').textContent.trim(), shown: hex([d[0], d[1], d[2]]), photo: hex([own.r, own.g, own.b]), up: !document.getElementById('loupe').hidden }; }, [mx, my]);
+      t.check(lp.up && lp.loupe === lp.shown, 'Palette view: the magnifier reads the mixed color shown', lp);
+      await page.mouse.move(5, 5);
+      await click(page, '[data-block-view="photo"]'); await clickWait(page, '#outlines');
+    }
+    await clean(t, page, 'palette view, save png, magnifier');
+
+    // a phone photo: a JPEG stored on its side with EXIF Orientation 6 is shown upright, and labelled upright
+    const sideways = withOrientation(await paintPng(page, { width: 128, height: 64, type: 'image/jpeg', name: 'phone.jpg', bg: [230, 230, 230], shapes: [{ rect: [0, 0, 64, 64], rgb: [20, 20, 20] }] }), 6);
+    {
+      const r = await loadKind(page, sideways);
+      const top = await pixel(page, 'cv-orig', 32, 16), bottom = await pixel(page, 'cv-orig', 32, 112);
+      t.check(r.loaded && r.label === 'phone.jpg · 64 × 128 px' && same(r.orig, [64, 128]) && same(r.value, [64, 128]), 'a JPEG stored 128 × 64 with EXIF Orientation 6: labelled and studied upright, 64 × 128', { label: r.label, orig: r.orig });
+      t.check(top[0] < 60 && bottom[0] > 200, 'EXIF Orientation 6: the stored left half (dark) is at the top, as the camera saw it', { top, bottom });
+      const dl = await download(page, () => click(page, '[data-save="orig"]'));
+      t.check(dl && dl.name === 'phone-original.png' && same(pngDims(dl.buf), [64, 128]), 'EXIF Orientation 6: Save PNG of the photo is upright too', dl && { name: dl.name, dims: pngDims(dl.buf) });
+    }
+    await clean(t, page, 'exif orientation');
+
+    // a half see-through PNG is laid on mid gray (not black), and a pasted picture with no name
+    await loadKind(page, await paintPng(page, { name: 'half.png', bg: null, shapes: [{ rect: [0, 0, 600, 800], rgb: [255, 0, 0, 0.5] }] }));
+    t.check(near(await pixel(page, 'cv-orig', 300, 400), [191, 64, 64], 3), 'a PNG of half see-through red: laid on mid gray, rgb(191, 64, 64)', await pixel(page, 'cv-orig', 300, 400));
+    await resetToast(page);
+    await pasteFile(page, { ...(await makeImage(page, { width: 500, height: 400 })), name: '' });
+    const unnamed = await study(page);
+    const dlUnnamed = await download(page, () => click(page, '[data-save="value"]'));
+    t.check(unnamed.label === 'Pasted image · 500 × 400 px' && dlUnnamed && dlUnnamed.name === 'portrait-three-value.png', 'a pasted picture with no name: labelled "Pasted image", saved as portrait-…', { label: unnamed.label, saved: dlUnnamed && dlUnnamed.name });
+    await clean(t, page, 'half see-through, unnamed paste');
+    await page.context().close();
+  }
+
+  // ---- opened from disk (README Running it: "Opened from disk, the page works too"): Load photo, a drop, a paste, Save PNG ----
+  {
+    const page = await site.browser.newPage({ viewport: DESKTOP });
+    const log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
+    page.log = log;
+    page.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
+    page.on('console', (m) => { if (m.type() === 'error' && !/GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i.test(m.text())) log.console.push(m.text().slice(0, 300)); });
+    page.on('request', (r) => { if (!/^(file|blob|data):/.test(r.url())) log.offsite.push(r.url()); });
+    page.on('requestfailed', (r) => { const why = (r.failure() || {}).errorText || ''; if (r.url().startsWith('blob:') || why === 'net::ERR_ABORTED') return; log.failed.push(r.url() + ' ' + why); });
+    await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)} ${(e.sourceFile || '').split('/').pop()}:${e.lineNumber}`); }); });
+    await page.goto('file://' + site.root + '/index.html', { waitUntil: 'load' }); await busyHidden(page); await sleep(300);
+    t.check((await study(page)).label === SAMPLE_LABEL, 'from disk: the sample study is drawn', (await study(page)).label);
+    const r = await loadKind(page, await makeImage(page, { width: 900, height: 1200, type: 'image/jpeg', name: 'disk.jpg' }));
+    const ok = await page.evaluate(() => !!Studio.result() && Studio.result().w === 675 && Studio.result().blockColors.length > 3);
+    t.check(r.loaded && r.label === 'disk.jpg · 900 × 1200 px' && same(r.value, [675, 900]) && same(r.block, [675, 900]) && r.toast === '' && ok, 'from disk: Load photo studies the photo (675 × 900), nothing said', { label: r.label, value: r.value, toast: r.toast, ok });
+    await clean(t, page, 'from disk: load photo');
+    await dropFiles(page, 'body', [await makeImage(page, { width: 800, height: 600, name: 'disk-drop.png' })]);
+    t.check(await waitLabel(page, 'disk-drop.png') && same((await study(page)).value, [800, 600]), 'from disk: a dropped photo is studied', (await study(page)).label);
+    await pasteFile(page, await makeImage(page, { width: 500, height: 700, name: 'disk-paste.png' }));
+    t.check(await waitLabel(page, 'disk-paste.png') && same((await study(page)).value, [500, 700]), 'from disk: a pasted photo is studied', (await study(page)).label);
+    const dl = await download(page, () => click(page, '[data-save="value"]'));
+    t.check(dl && dl.name === 'disk-paste-three-value.png' && same(pngDims(dl.buf), [500, 700]), 'from disk: Save PNG downloads the study', dl && { name: dl.name, dims: pngDims(dl.buf) });
+    await clean(t, page, 'from disk: drop, paste, save');
+    await page.context().close();
+  }
+
+  // ---- storage that throws: inside another site's sandboxed frame (no storage at all), and with site data blocked ----
+  for (const how of ['sandboxed frame', 'site data blocked']) {
+    const page = how === 'sandboxed frame' ? await openPage(site, { sandbox: {} }) : await openPage(site);
+    if (how === 'site data blocked') {
+      await page.addInitScript(() => { try { Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } }); } catch (e) { /* left as it is */ } });
+      await page.reload({ waitUntil: 'load' }); await sleep(300);
+    }
+    const appFrame = () => (how === 'sandboxed frame' ? page.frames().find((f) => f !== page.mainFrame() && f.url().startsWith(site.base)) : page.mainFrame());
+    const press = async (fr, sel) => { await fr.evaluate((s) => document.querySelector(s).click(), sel); await busyHidden(fr); await sleep(40); };
+    let fr = appFrame();
+    await busyHidden(fr);
+    const throws = await fr.evaluate(() => { try { return localStorage.length < 0; } catch (e) { return true; } });
+    t.check(throws, `${how}: localStorage throws here (the condition under test)`, throws);
+    const r = await loadKind(fr, await makeImage(page, { width: 600, height: 800, name: 'nostore.png' }));
+    t.check(r.loaded && r.label === 'nostore.png · 600 × 800 px', `${how}: a photo loads`, r.label);
+    await press(fr, '[data-mode="advanced"]'); await press(fr, '#smoothSoft'); await setRange(fr, 'lean', 0); await press(fr, '[data-block-view="palette"]');
+    await fr.evaluate(() => { for (const d of document.querySelectorAll('.rail details.drawer')) d.open = true; }); await sleep(200);
+    let s = await ui(fr);
+    t.check(!s.simple && s.smoothing === 'soft' && s.inForce === 'soft' && s.lean === '0' && s.leanOut === 'Off' && s.palettePressed === 'true' && same(s.drawers, ['values', 'colors', 'swatches', 'check']) && /^Splits at/.test(s.header), `${how}: Advanced, Soft, lean Off, the Palette view and every drawer open all apply`, s);
+    await fr.evaluate(() => { for (const d of document.querySelectorAll('.rail details.drawer')) d.open = false; }); await sleep(100);
+    await press(fr, '[data-mode="simple"]'); await press(fr, 'label[for="dpSoft"]');
+    s = await ui(fr);
+    t.check(s.simple && s.header === 'Soft detail' && same(s.drawers, []) && s.busy, `${how}: back in Simple, the Soft preset applies and the drawers close`, s);
+    await clean(t, page, `${how}: settings without storage`);
+    await page.reload({ waitUntil: 'load' }); await sleep(600);
+    for (let i = 0; i < 20 && !appFrame(); i++) await sleep(250);
+    fr = appFrame(); await busyHidden(fr); await sleep(200);
+    s = await ui(fr);
+    t.check(s.simple && s.smoothing === 'edge' && s.lean === '60' && s.palettePressed === 'false' && same(s.drawers, []) && s.label === SAMPLE_LABEL && !/could not be read/.test(s.toast), `${how}: after a reload the defaults, and no "could not be read" note`, s);
+    await clean(t, page, `${how}: reloaded`);
+    await page.context().close();
+  }
+
+  // ---- storage that is full: every choice still applies for the visit, nothing is said, and a reload has the defaults ----
+  {
+    const page = await openPage(site);
+    const filled = await page.evaluate(() => { let n = 0; for (const size of [1 << 20, 1 << 16, 1 << 12, 1 << 8, 16, 1]) for (let i = 0; i < 4000; i++) { try { localStorage.setItem(`another-app.junk${size}_${i}`, 'x'.repeat(size)); n++; } catch (e) { break; } } return n; });
+    await resetToast(page);
+    await clickWait(page, '[data-mode="advanced"]'); await setRange(page, 'lean', 0); await clickWait(page, '#smoothSoft'); await click(page, '[data-block-view="palette"]');
+    await page.evaluate(() => { document.getElementById('drawer-values').open = true; }); await sleep(200);
+    const s = await ui(page);
+    t.check(!s.simple && s.lean === '0' && s.smoothing === 'soft' && s.inForce === 'soft' && s.palettePressed === 'true' && same(s.drawers, ['values']) && s.toast === '', 'storage full: Advanced, lean Off, Soft, the Palette view and an open drawer apply for the visit, and nothing is said', { ...s, filled });
+    await clean(t, page, 'storage full');
+    await page.reload({ waitUntil: 'load' }); await sleep(600); await busyHidden(page);
+    const back = await ui(page);
+    t.check(back.simple && back.lean === '60' && back.smoothing === 'edge' && back.palettePressed === 'false' && same(back.drawers, []) && !/could not be read/.test(back.toast), 'storage full, reloaded: the defaults come back, nothing half-written', back);
+    await clean(t, page, 'storage full, reloaded');
+    // Simple keeps what Advanced chose for smoothing and the lean (README Simple and Advanced): what a classroom visitor gets
+    await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('another-app.')) localStorage.removeItem(k); });
+    await clickWait(page, '[data-mode="advanced"]'); await clickWait(page, '#smoothSoft'); await setRange(page, 'lean', 0); await clickWait(page, '[data-mode="simple"]');
+    await page.reload({ waitUntil: 'load' }); await sleep(600); await busyHidden(page);
+    const simple = await page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), header: document.getElementById('valuesState').textContent, smoothing: Studio.settings().smoothing, lean: Studio.settings().lighter, smoothingShown: getComputedStyle(document.getElementById('smoothSoft').closest('fieldset')).display !== 'none', leanShown: getComputedStyle(document.getElementById('lean').closest('.field')).display !== 'none' }));
+    t.note(`Simple after Advanced chose Soft smoothing and lean Off, then a reload: the header says "${simple.header}" while smoothing "${simple.smoothing}" and lean ${simple.lean} stay in force (Smoothing shown: ${simple.smoothingShown}, lean shown: ${simple.leanShown}). The README says Simple hides those controls; it does not say whether their saved values still act, so this is noted, not found.`);
+    await page.context().close();
+  }
+
+  // ---- the Show switch (All three, Photo, Values, Shapes), the drawers' headers, and on a phone the drawers and long names ----
+  for (const viewport of [DESKTOP, PHONE]) {
+    const where = viewport === PHONE ? 'phone' : 'desktop';
+    const page = await openPage(site, { viewport });
+    const shown = () => page.evaluate(() => ({ view: document.getElementById('panels').dataset.view, radio: document.querySelector('input[name="view"]:checked').id, panels: [...document.querySelectorAll('#panels > .panel[data-panel]')].filter((p) => getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().height > 0).map((p) => p.dataset.panel), tallest: Math.round(Math.max(...[...document.querySelectorAll('#panels > .panel .view')].map((c) => c.getBoundingClientRect().height))), ih: innerHeight }));
+    for (const [id, v] of [['vValue', 'value'], ['vOrig', 'orig'], ['vBlock', 'block'], ['vAll', 'all']]) {
+      await click(page, `label[for="${id}"]`); await sleep(100);
+      const s = await shown();
+      t.check(s.view === v && same(s.panels, v === 'all' ? ['orig', 'value', 'block'] : [v]) && (v === 'all' || s.tallest <= s.ih * 0.84 + 1) && (await hscroll(page)) <= 0, `${where}: Show ${{ value: 'Values', orig: 'Photo', block: 'Shapes', all: 'All three' }[v]}: ${v === 'all' ? 'the three studies' : 'that study alone, no taller than 84% of the window'}, no horizontal scroll`, s);
+    }
+    await click(page, 'label[for="vBlock"]');
+    await loadKind(page, await makeImage(page, { width: 700, height: 900, name: `shapes-${where}.png` }));
+    let s = await shown();
+    t.check(s.view === 'block' && same(s.panels, ['block']), `${where}: a photo loaded while Shapes is shown: Shapes stays alone`, s);
+    const dl = await download(page, () => click(page, '[data-save="block"]'));
+    t.check(dl && dl.name === `shapes-${where}-color-blocks.png` && same(pngDims(dl.buf), [700, 900]), `${where}: Save PNG of the study shown alone`, dl && { name: dl.name, dims: pngDims(dl.buf) });
+    // the Dark, middle, light header says what it is set to with the drawer closed, and follows a change
+    await page.evaluate(() => { document.getElementById('drawer-values').open = false; }); await sleep(80);
+    const closedSimple = { shown: await visible(page, '#valuesState'), text: await text(page, '#valuesState') };
+    await clickWait(page, '[data-mode="advanced"]');
+    const closedAdv = { shown: await visible(page, '#valuesState'), text: await text(page, '#valuesState') };
+    t.check(closedSimple.shown && closedSimple.text === 'Normal detail' && closedAdv.shown && /^Splits at V \d\.\d and \d\.\d · Simplify 3$/.test(closedAdv.text), `${where}: with the drawer closed its header reads "Normal detail", then the splits in Advanced`, { closedSimple, closedAdv });
+    if (viewport === PHONE) {
+      // every drawer open in Advanced, a long header, long and odd file names
+      await page.evaluate(() => { for (const d of document.querySelectorAll('.rail details.drawer')) d.open = true; }); await sleep(150);
+      await setRange(page, 'simplify', 10); await splits(page, 97, 99);
+      const lay = await page.evaluate(() => ({ drawers: document.querySelectorAll('.rail details.drawer').length, railTop: document.querySelector('.rail').getBoundingClientRect().top, stripTop: document.querySelector('.toolstrip').getBoundingClientRect().top, clipped: [...document.querySelectorAll('.drawer-state')].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => [e.id, e.textContent, e.scrollWidth, e.clientWidth]), header: document.getElementById('valuesState').textContent }));
+      t.check(lay.railTop < lay.stripTop && lay.clipped.length === 0 && (await hscroll(page)) <= 0, 'phone, Advanced with every drawer open: the drawers sit above the tool bar, no header is cut off, no horizontal scroll', { ...lay, hscroll: await hscroll(page) });
+      await screenshot(page, 'study-photos-phone-all-drawers');
+      t.note(`phone: the rail holds ${lay.drawers} drawers (the README's "The settings fold away into three drawers" lists three settings drawers; How close did I get? is the fourth, "the last drawer of the Study tab")`);
+      await page.evaluate(() => { for (const d of document.querySelectorAll('.rail details.drawer')) d.open = false; });
+      const long = 'a'.repeat(200) + '.jpg';
+      const r = await loadKind(page, await makeImage(page, { width: 600, height: 800, type: 'image/jpeg', name: long }));
+      const box = await page.evaluate(() => { const r = document.getElementById('source').getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), w: innerWidth }; });
+      t.check(r.loaded && r.label === `${long} · 600 × 800 px` && box.left >= 0 && box.right <= box.w && (await hscroll(page)) <= 0, 'phone: a 200-character file name is labelled in full, inside the screen, no horizontal scroll', { box, hscroll: await hscroll(page) });
+      for (const [name, saved] of [['.png', 'portrait-three-value.png'], ['noext', 'noext-three-value.png']]) {
+        const k = await loadKind(page, await makeImage(page, { width: 400, height: 500, name }));
+        const d = await download(page, () => click(page, '[data-save="value"]'));
+        t.check(k.loaded && k.label === `${name} · 400 × 500 px` && d && d.name === saved, `phone: a file named "${name}" is labelled so and saved as ${saved}`, { label: k.label, saved: d && d.name });
+      }
+    } else {
+      // Simple shows the outline switch, the values list and Add block colors besides the preset; the outlines work there
+      await clickWait(page, '[data-mode="simple"]');
+      const sh = { outlines: await display(page, '#outlines'), zones: await display(page, '#zones'), addBlocks: await display(page, '#addBlocks') };
+      await page.evaluate(() => { document.getElementById('drawer-values').open = true; }); await sleep(80);
+      const shOpen = { outlines: await display(page, '#outlines'), zones: await display(page, '#zones'), addBlocks: await display(page, '#addBlocks') };
+      await clickWait(page, '#outlines');
+      const lines = await page.evaluate(() => { const r = Studio.result(); const c = document.getElementById('cv-value'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0, p = 0; i < r.zone.length; i++, p += 4) if (d[p] !== r.zoneGray[r.zone[i]]) n++; return { outlines: Studio.settings().outlines, darkened: n }; });
+      t.check(lines.outlines && lines.darkened > 100, 'Simple: Draw an outline around every shape is live there too', { lines, closed: sh, open: shOpen });
+      t.note(`Simple mode shows, besides the Detail preset and Colors per value (drawers open): the outline switch ${shOpen.outlines}, the three values list ${shOpen.zones}, Add block colors ${shOpen.addBlocks}; the README's Simple list names only the preset.`);
+      await clickWait(page, '#outlines');
+    }
+    await page.reload({ waitUntil: 'load' }); await sleep(600); await busyHidden(page);
+    s = await shown();
+    t.check(s.view === 'all' && s.radio === 'vAll' && same(s.panels, ['orig', 'value', 'block']), `${where}: after a reload, All three again, and the switch says so`, s);
+    await clean(t, page, `${where}: show switch, headers, names`);
+    await page.context().close();
+  }
+
+  // ---- a photo dropped or pasted on another tab: Paint by numbers' setup, the Loomis head, the Studio and its reference;
+  // and a Study setting change reaching the Studio's reference ----
+  {
+    const page = await openPage(site);
+    await tab(page, 'game');
+    const subjectNow = () => page.evaluate(() => document.querySelector('input[name="gameSubject"]:checked').value);
+    await click(page, '#gameFromPainting'); await sleep(500);
+    const before = await subjectNow();
+    await dropFiles(page, 'body', [await makeImage(page, { width: 600, height: 800, name: 'game-drop.png' })]);
+    const dropped = await waitLabel(page, 'game-drop.png');
+    const afterDrop = await subjectNow();
+    await click(page, '#gameFromPainting'); await sleep(500);
+    await page.setInputFiles('#file', await makeImage(page, { width: 600, height: 800, name: 'game-load.png' }));
+    await waitLabel(page, 'game-load.png');
+    const afterLoad = await subjectNow();
+    t.check(before === 'painting' && afterLoad === 'photo', 'Paint by numbers with a dealt painting: Load photo switches the setup to My photo', { before, afterLoad });
+    t.check(dropped && afterDrop === 'photo', 'Paint by numbers with a dealt painting: a dropped photo switches the setup to My photo too, as Load photo does', { dropped, afterDrop });
+    if (dropped && afterDrop !== 'photo' && afterLoad === 'photo') t.finding({ title: 'A photo dropped (or pasted) on Paint by numbers\' setup loads on the Study tab, but the setup keeps the dealt painting and nothing is said', severity: 'medium', steps: 'Games → Paint by numbers. Choose A painting. Drag a portrait photo from the desktop onto the page (or paste one). Then, for comparison, choose A painting again and use Load photo in the header.', expected: 'The dropped photo becomes what to paint from (My photo), as Load photo makes it; or the page says the photo went to the Study tab.', actual: `After the drop the setup still has "${afterDrop}" chosen and shows the painting; nothing is said, so the drop looks ignored (the photo is on the Study tab). Load photo switches the setup to "${afterLoad}".`, cause: 'js/game.js:1669 switches the subject to the photo only on the file input\'s change event; the drop and paste handlers (js/app.js:613-632) call loadForTab without telling the game.' });
+    await clean(t, page, 'drop on paint by numbers');
+    await tab(page, 'loomis');
+    await resetToast(page);
+    await pasteFile(page, await makeImage(page, { width: 640, height: 800, name: 'loomis-paste.png' }));
+    const onLoomis = { label: await waitLabel(page, 'loomis-paste.png'), toast: await toast(page) };
+    await tab(page, 'study');
+    t.check(onLoomis.label && same((await study(page)).value, [640, 800]), 'a photo pasted on the Loomis head tab is the Study photo when you come back', { ...onLoomis, value: (await study(page)).value });
+    t.note(`a photo pasted on the Loomis head tab: the toast there said "${onLoomis.toast}" (nothing to clear, so nothing is said)`);
+    await clean(t, page, 'paste on loomis');
+    // the Studio: its reference follows a photo pasted there, and the Study tab's settings
+    await tab(page, 'paint');
+    await click(page, '#ps-refBtn'); await sleep(200);
+    await pasteFile(page, await makeImage(page, { width: 500, height: 700, name: 'studio-paste.png' }));
+    await waitLabel(page, 'studio-paste.png'); await sleep(200);
+    const ref = () => page.evaluate(() => { const c = document.getElementById('ps-refCanvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const r = Studio.result(); const g0 = r.zoneGray[0]; let dark = 0; for (let i = 0; i < d.length; i += 4) if (d[i] === g0) dark++; return { w: c.width, h: c.height, darkShare: +(dark / (d.length / 4)).toFixed(3), name: document.getElementById('ps-refName').textContent.trim() }; });
+    const sameAs = (id) => page.evaluate((id) => { const a = document.getElementById('ps-refCanvas'), b = document.getElementById(id); if (a.width !== b.width || a.height !== b.height) return false; const x = a.getContext('2d').getImageData(0, 0, a.width, a.height).data, y = b.getContext('2d').getImageData(0, 0, b.width, b.height).data; for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false; return true; }, id);
+    let rf = await ref();
+    t.check(rf.w === 500 && rf.h === 700 && /Study tab/.test(rf.name), 'the Studio: a photo pasted there becomes its reference', { w: rf.w, h: rf.h, name: rf.name });
+    await click(page, '#ps-refSheet [data-ref-view="values"]'); await sleep(100);
+    const darkBefore = (await ref()).darkShare;
+    await tab(page, 'study');
+    await clickWait(page, '[data-mode="advanced"]'); await splits(page, 90, 92);
+    await tab(page, 'paint'); await sleep(100);
+    rf = await ref();
+    t.check(rf.darkShare > darkBefore && await sameAs('cv-value'), 'the Studio\'s Values reference follows a split moved on the Study tab: more shadow, the same pixels as the value study', { darkBefore, darkAfter: rf.darkShare });
+    await tab(page, 'study'); await clickWait(page, '#outlines'); await tab(page, 'paint');
+    await click(page, '#ps-refSheet [data-ref-view="blocks"]'); await sleep(100);
+    t.check(await sameAs('cv-block'), 'the Studio\'s Blocks reference follows Outline shapes turned on, the same pixels as the color study', null);
+    await clean(t, page, 'studio reference follows the study');
+    await page.context().close();
+  }
+
+  // ---- the heaviest settings a visitor can pick, on the biggest photo that is not reduced ----
+  {
+    const page = await openPage(site);
+    await clickWait(page, '[data-mode="advanced"]');
+    await loadKind(page, await makeImage(page, { width: 6000, height: 4000, type: 'image/jpeg', name: 'huge.jpg' }));
+    await setRange(page, 'merge', 10); await setRange(page, 'colors', 6); await setRange(page, 'simplify', 10); await clickWait(page, '#smoothEdge'); await clickWait(page, '#outlines');
+    const t0 = Date.now();
+    await page.evaluate(() => { const sel = document.getElementById('detail'); sel.value = '1400'; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+    const done = await busyHidden(page, 60000);
+    const ms = Date.now() - t0;
+    const s = await study(page);
+    const lag = await page.evaluate(() => new Promise((r) => { const t1 = performance.now(); requestAnimationFrame(() => setTimeout(() => r(Math.round(performance.now() - t1)), 0)); }));
+    t.check(done && same(s.value, [1400, 933]) && same(s.block, [1400, 933]) && s.busy, 'a 6000 × 4000 photo at Working size 1400, Simplify 10, Edge-aware, Merge 10, Colors 6, outlines on: studied within a minute', { ms, value: s.value });
+    t.check(lag < 500, 'and the page answers within half a second after it', lag);
+    t.note(`the heaviest settings on a 6000 × 4000 JPEG: the 1400 px study took ${ms} ms on this shared 4-core machine`);
+    await page.evaluate(() => { window.__runs = 0; window.addEventListener('studio:result', () => { window.__runs++; }); const e = document.getElementById('simplify'); for (let i = 0; i < 30; i++) { e.value = String(i % 11); e.dispatchEvent(new Event('input', { bubbles: true })); } e.value = '8'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+    await busyHidden(page, 60000); await sleep(300);
+    const spam = await page.evaluate(() => ({ runs: window.__runs, simplify: document.getElementById('simplify').value, blurRadius: Studio.settings().blurRadius }));
+    t.check(spam.runs >= 1 && spam.runs <= 3 && spam.simplify === '8' && spam.blurRadius === Math.round((8 * 1400) / 450), 'slider spam at 1400: the last value is in force, recomputed at most three times', spam);
+    await clean(t, page, 'heaviest settings');
+    await page.context().close();
+  }
+
+  // ---- the keyboard for the rest of the Study tab: the Detail preset, Smoothing, Gray values, Working size, Auto split,
+  // the block view and the drawer headers ----
+  {
+    const page = await openPage(site);
+    await loadKind(page, await makeImage(page, { width: 900, height: 1200, type: 'image/jpeg', name: 'keys.jpg' }));
+    await page.evaluate(() => { document.getElementById('drawer-values').open = true; }); await sleep(100);
+    await page.focus('#dpNormal'); await page.keyboard.press('ArrowRight'); await busyHidden(page); await sleep(60);
+    let s = await study(page);
+    t.check(s.preset === 'sharp' && s.header === 'Sharp detail' && s.simplify === 1 && s.merge === 2, 'keyboard: ArrowRight on the Detail preset chooses Sharp, and it applies', { preset: s.preset, header: s.header, simplify: s.simplify, merge: s.merge });
+    await page.focus('[data-mode="advanced"]'); await page.keyboard.press('Enter'); await busyHidden(page);
+    await page.focus('#smoothEdge'); await page.keyboard.press('ArrowLeft'); await busyHidden(page); await sleep(60);
+    t.check((await page.evaluate(() => Studio.settings().smoothing)) === 'soft' && (await storageGet(page, K('smoothing'))) === 'soft', 'keyboard: ArrowLeft on Smoothing chooses Soft, in force and remembered', await page.evaluate(() => Studio.settings().smoothing));
+    await page.focus('#grayCustom'); await page.keyboard.press('ArrowRight'); await busyHidden(page); await sleep(60);
+    t.check((await page.evaluate(() => Studio.settings().grayMode)) === 'average' && (await display(page, '#customGrays')) === 'hidden', 'keyboard: ArrowRight on Gray values chooses Photo average', await page.evaluate(() => Studio.settings().grayMode));
+    await page.keyboard.press('ArrowLeft'); await busyHidden(page);
+    await page.focus('#detail'); await page.keyboard.press('ArrowDown'); await busyHidden(page); await sleep(100);
+    s = await study(page);
+    t.check(s.detail === '1400' && same(s.value, [900, 1200]), 'keyboard: ArrowDown on Working size picks 1400 px, and the studies follow (900 × 1200)', { detail: s.detail, value: s.value });
+    await resetToast(page);
+    await page.focus('#autoSplit'); await page.keyboard.press('Enter'); await busyHidden(page); await sleep(60);
+    t.check((await toast(page)) === 'Splits set from this photo', 'keyboard: Enter on Auto split sets the splits', await toast(page));
+    await page.focus('[data-block-view="palette"]'); await page.keyboard.press('Enter'); await sleep(100);
+    t.check((await page.evaluate(() => document.querySelector('[data-block-view="palette"]').getAttribute('aria-pressed'))) === 'true', 'keyboard: Enter on the Palette block view switches to it');
+    await click(page, '[data-block-view="photo"]');
+    await page.focus('#drawer-swatches summary'); await page.keyboard.press('Space'); await sleep(150);
+    t.check((await drawersOpen(page)).includes('swatches') && JSON.parse((await storageGet(page, K('drawers'))) || '[]').includes('swatches'), 'keyboard: Space on the Picked colors header opens it, remembered', await storageGet(page, K('drawers')));
+    // Tab walks through every control in the open Dark, middle, light drawer
+    await page.focus('#drawer-values summary');
+    const reached = new Set();
+    for (let i = 0; i < 30; i++) { await page.keyboard.press('Tab'); const id = await page.evaluate(() => document.activeElement && (document.activeElement.id || document.activeElement.tagName)); reached.add(id); if (id === 'outlines') break; }
+    const want = ['simplify', 'merge', 'detail', 'autoSplit', 't1', 't2', 'g0', 'g1', 'g2', 'outlines'];
+    t.check(want.every((id) => reached.has(id)) && ['smoothSoft', 'smoothEdge'].some((id) => reached.has(id)) && ['grayCustom', 'grayAvg'].some((id) => reached.has(id)), 'keyboard: Tab reaches every control of the open Dark, middle, light drawer', [...reached]);
+    await clean(t, page, 'keyboard, the rest');
+    await page.context().close();
+  }
+
+  // ---- dark mode: the histogram drawn in the theme's colors, the value ramp under it, the splits marked ----
+  {
+    const page = await openPage(site, { dark: true });
+    await clickWait(page, '[data-mode="advanced"]');
+    await page.evaluate(() => { document.getElementById('drawer-values').open = true; }); await sleep(200);
+    const hist = () => page.evaluate(() => {
+      const c = document.getElementById('hist'); const W = c.width, H = c.height; const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+      const css = (v) => { const e = document.createElement('i'); e.style.color = getComputedStyle(document.documentElement).getPropertyValue(v); document.body.append(e); const rgb = getComputedStyle(e).color.match(/\d+/g).slice(0, 3).map(Number); e.remove(); return rgb; };
+      const accent = css('--accent'), muted = css('--muted');
+      const is = (p, rgb) => Math.abs(d[p] - rgb[0]) < 10 && Math.abs(d[p + 1] - rgb[1]) < 10 && Math.abs(d[p + 2] - rgb[2]) < 10 && d[p + 3] > 200;
+      const cols = []; for (let x = 0; x < W; x++) { let n = 0; for (let y = 0; y < H; y++) if (is((y * W + x) * 4, accent)) n++; if (n > H * 0.8) cols.push(x); }
+      const marks = []; for (const x of cols) { if (!marks.length || x - marks[marks.length - 1][1] > 1) marks.push([x, x]); else marks[marks.length - 1][1] = x; }
+      let bars = 0; for (let p = 0; p < d.length; p += 4) if (is(p, muted)) bars++;
+      const y = H - 2, at = (x) => d[(y * W + x) * 4];
+      return { W, marks: marks.map(([a, b]) => +(((a + b) / 2 + 0.5) / W * 100).toFixed(1)), bars, ramp: [at(1), at(W - 2)], t1: +document.getElementById('t1').value, t2: +document.getElementById('t2').value, accent };
+    });
+    let h = await hist();
+    const marksAt = (hh) => hh.marks.length === 2 && Math.abs(hh.marks[0] - hh.t1) < 2 && Math.abs(hh.marks[1] - hh.t2) < 2;
+    t.check(h.bars > 50 && h.ramp[0] < 40 && h.ramp[1] > 200 && marksAt(h), 'dark mode: the histogram has its bars, the dark-to-light ramp under them and a mark at each split', h);
+    await splits(page, 20, h.t2); h = await hist();
+    t.check(marksAt(h), 'dark mode: moving the shadow split moves its mark', h);
+    const darkAccent = h.accent;
+    await page.emulateMedia({ colorScheme: 'light' }); await sleep(200);
+    h = await hist();
+    t.check(marksAt(h) && !same(h.accent, darkAccent) && h.bars > 50, 'switching to the light theme redraws the histogram in its colors', { light: h.accent, dark: darkAccent, marks: h.marks });
+    await clean(t, page, 'dark mode histogram');
+    await page.context().close();
+  }
+
+  // ---- odd drops and pastes: the drop hint counted in and out, a text drag, an empty untyped file (what a dropped folder
+  // gives), a clipboard of text and a picture, two pictures, a paste into a text field, a BMP, a TIFF and a HEIC ----
+  {
+    const page = await openPage(site);
+    const enter = (types) => page.evaluate((types) => { const dt = new DataTransfer(); if (types === 'files') dt.items.add(new File(['x'], 'x.png', { type: 'image/png' })); else dt.setData('text/plain', 'words'); for (const el of [window, document.getElementById('tab-study')]) el.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt })); }, types);
+    const leave = () => page.evaluate(() => window.dispatchEvent(new DragEvent('dragleave', { bubbles: true })));
+    await enter('files'); await leave();
+    const afterOne = await visible(page, '#dropHint');
+    await leave();
+    t.check(afterOne && !(await visible(page, '#dropHint')), 'the drop hint: entering the page and a part of it, it stays after one leave and goes after the second', { afterOne });
+    await enter('text');
+    t.check(!(await visible(page, '#dropHint')), 'dragging text over the page shows no drop hint');
+    await leave(); await leave();
+    await resetToast(page);
+    await dropFiles(page, 'body', [{ name: 'Pictures', mimeType: '', buffer: Buffer.alloc(0) }]);
+    await page.waitForFunction(() => document.getElementById('toast').textContent !== '', null, { timeout: 5000 }).catch(() => null);
+    const empty = await toast(page);
+    t.check(empty !== '' && (await study(page)).label === SAMPLE_LABEL, 'an empty file with no type dropped (as a dropped folder arrives): refused, the study stays', empty);
+    t.check(empty !== '' && !NOT_OPENED.test(empty), 'an empty file with no type dropped: the words name the problem (an empty file or a folder), not HEIC photos', empty);
+    if (NOT_OPENED.test(empty)) t.finding({ title: 'A folder (or an empty file) dropped on the page is told about HEIC photos', severity: 'low', steps: 'Drag a folder from the desktop onto the Study tab (Chromium hands the page a File of size 0 and no type; the same for any empty file).', expected: 'A sentence that names the problem: that was a folder or an empty file, drop a JPG, PNG or WebP photo.', actual: `The toast says "${empty}": a phone-photo format the visitor did not drop.`, cause: 'js/app.js:470-506 (readImage): a file with no type is tried by its content, so a folder or a 0-byte file goes to the decoder and fails into the HEIC sentence (line 504); neither its size nor DataTransferItem.webkitGetAsEntry().isDirectory is looked at.' });
+    // a clipboard with text and a picture, and one with two pictures
+    const pasteMany = (items) => page.evaluate(async (items) => {
+      const dt = new DataTransfer();
+      for (const it of items) { if (it.text) dt.setData('text/plain', it.text); else { const c = document.createElement('canvas'); c.width = it.w; c.height = it.h; c.getContext('2d').fillRect(0, 0, it.w, it.h); const b = await new Promise((r) => c.toBlob(r, 'image/png')); dt.items.add(new File([b], it.name, { type: 'image/png' })); } }
+      (document.activeElement || document.body).dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+    }, items);
+    await pasteMany([{ text: 'a caption' }, { name: 'clip-a.png', w: 300, h: 400 }]);
+    t.check(await waitLabel(page, 'clip-a.png'), 'a paste of text and a picture: the picture loads', (await study(page)).label);
+    await pasteMany([{ name: 'clip-b.png', w: 320, h: 400 }, { name: 'clip-c.png', w: 340, h: 400 }]);
+    t.check(await waitLabel(page, 'clip-b.png'), 'a paste of two pictures: the first loads', (await study(page)).label);
+    // a paste into Unit on my canvas (a number field) with a picture on the clipboard as well, as a copied spreadsheet cell carries one
+    await click(page, '[data-tool="measure"]');
+    await stroke(page, '#cv-orig', [[0.3, 0.3], [0.5, 0.5], [0.6, 0.7]]);
+    const measures = await page.evaluate(() => +(document.querySelector('[data-tool="measure"]').dataset.count || 0));
+    await page.focus('#canvasSize');
+    const beforeField = (await study(page)).label;
+    await pasteMany([{ text: '30' }, { name: 'cell.png', w: 200, h: 100 }]);
+    await sleep(300); await busyHidden(page);
+    const afterField = { label: (await study(page)).label, measures: await page.evaluate(() => +(document.querySelector('[data-tool="measure"]').dataset.count || 0)), toast: await toast(page) };
+    t.check(measures >= 1 && afterField.label === beforeField && afterField.measures === measures, 'a paste into the Unit on my canvas field goes to the field: the photo and the measures stay', { measuresBefore: measures, labelBefore: beforeField, after: afterField });
+    if (measures >= 1 && afterField.label !== beforeField) t.finding({ title: 'Pasting into "Unit on my canvas" while the clipboard also holds a picture replaces the photo and clears the measures', severity: 'medium', steps: '1. Load a photo, press Measure and draw a measure. 2. Copy something that puts text and a picture on the clipboard together (a cell copied from a spreadsheet does; any screenshot also does if you meant to paste a number but the clipboard still holds it). 3. Click into Unit on my canvas and press Ctrl+V.', expected: 'A paste into a text field goes to that field; the photo and the measures stay.', actual: `The photo is replaced by the clipboard picture (label "${afterField.label}") and the measures are cleared (${measures} → ${afterField.measures}; toast "${afterField.toast}").`, cause: 'js/app.js:629-632: the window-level paste handler takes the first image item whatever the paste\'s target is, so a paste aimed at an input or textarea loads a photo.' });
+    await click(page, '[data-tool="measure"]');
+    await clean(t, page, 'odd drops and pastes');
+    // a BMP loads like any photo; a TIFF and a HEIC the browser cannot open are told so
+    const bmp = (() => { const w = 20, h = 20, row = w * 3, size = 54 + row * h; const b = Buffer.alloc(size); b.write('BM', 0); b.writeUInt32LE(size, 2); b.writeUInt32LE(54, 10); b.writeUInt32LE(40, 14); b.writeInt32LE(w, 18); b.writeInt32LE(h, 22); b.writeUInt16LE(1, 26); b.writeUInt16LE(24, 28); b.writeUInt32LE(row * h, 34); for (let i = 54; i < size; i += 3) { b[i] = 200; b[i + 1] = 120; b[i + 2] = 60; } return { name: 'scan.bmp', mimeType: 'image/bmp', buffer: b }; })();
+    const rb = await loadKind(page, bmp);
+    t.check(rb.loaded && rb.label === 'scan.bmp · 20 × 20 px' && rb.toast === '', 'a 20 × 20 BMP loads, nothing said', { label: rb.label, toast: rb.toast });
+    for (const [name, type] of [['photo.tif', 'image/tiff'], ['IMG_0001.heic', 'image/heic']]) {
+      const k = await loadKind(page, { name, mimeType: type, buffer: Buffer.from('II*\0 not a picture the browser decodes', 'binary') }, { reject: NOT_OPENED });
+      t.check(k.said && k.label === rb.label, `a ${type} file the browser cannot decode: refused with "could not be opened", the study stays`, k.toast);
+    }
+    t.note('a TIFF the browser cannot decode gets the same sentence as a HEIC ("HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first"): its advice to save as JPG or PNG fits, the HEIC part does not.');
+    await clean(t, page, 'bmp, tiff, heic');
+    // how long a message stays (the toast's own timer, so this waits on time): a refusal outlasts a confirmation
+    await resetToast(page);
+    await page.setInputFiles('#file', textFile());
+    await waitToast(page, NOT_IMAGE);
+    await sleep(2500);
+    const refusalUp = await page.evaluate(() => document.getElementById('toast').classList.contains('show'));
+    await click(page, '#addBlocks'); await sleep(2500);
+    const confirmUp = await page.evaluate(() => document.getElementById('toast').classList.contains('show'));
+    t.check(refusalUp && !confirmUp, 'a refusal ("not an image") is still up after 2.5 s; a confirmation (Add block colors) is gone by then', { refusalUp, confirmUp });
+    await clean(t, page, 'toast lifetimes');
+    await page.context().close();
+  }
+
+  // ---- while a big photo is still being read: Simplify and the mode changed, then Forget my work pressed ----
+  {
+    const page = await openPage(site);
+    await clickWait(page, '[data-mode="advanced"]');
+    const huge = await makeImage(page, { width: 6000, height: 4000, type: 'image/jpeg', name: 'decoding.jpg' });
+    await page.setInputFiles('#file', huge);
+    const early = await page.evaluate(() => { const e = document.getElementById('simplify'); e.value = '9'; e.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-mode="simple"]').click(); return !document.getElementById('source').textContent.includes('decoding.jpg'); });
+    const arrived = await waitLabel(page, 'decoding.jpg', 60000);
+    const s = await study(page);
+    const own = await page.evaluate(() => { const st = Studio.settings(); const [a, b] = Study.autoThresholds(Studio.prep(), st.blurRadius, st.smoothing); const t1 = Math.max(1, Math.min(a, 97)); return [t1, Math.max(t1 + 2, Math.min(b, 99))]; });
+    t.check(early && arrived && s.simple && s.header === 'Normal detail' && s.simplify === 3 && s.merge === 4 && same([s.t1, s.t2], own) && same(s.value, [900, 600]) && s.busy, 'Simplify 9 then Simple chosen while a 6000 × 4000 photo is still being read: it arrives at the preset shown (Normal, 3 / 4) with its own auto split', { early, arrived, header: s.header, simplify: s.simplify, merge: s.merge, splits: [s.t1, s.t2], own, value: s.value });
+    await clean(t, page, 'settings changed while a photo is read');
+    await page.setInputFiles('#file', huge);
+    await tab(page, 'help');
+    await click(page, '#forgetBtn');
+    await Promise.all([page.waitForNavigation({ timeout: 20000 }).catch(() => null), click(page, '#forgetBtn')]);
+    await sleep(600); await busyHidden(page); await sleep(200);
+    const after = { label: (await study(page)).label, keys: await storageKeys(page) };
+    t.check(after.label === SAMPLE_LABEL && after.keys.length === 0, 'Forget my work pressed while a photo is being read: the page comes back with the sample and keeps nothing', after);
+    await clean(t, page, 'forget while a photo is read');
+    await page.context().close();
+  }
+
+  // ---- a browser out of canvas memory: the 2800 px reducing canvas cannot be made, the big photo is kept as it is ----
+  {
+    const page = await openPage(site);
+    await page.addInitScript(() => { const get = HTMLCanvasElement.prototype.getContext; let once = true; HTMLCanvasElement.prototype.getContext = function (...a) { if (once && this.width === 2800) { once = false; window.__refused = true; return null; } return get.apply(this, a); }; });
+    await page.reload({ waitUntil: 'load' }); await sleep(300); await busyHidden(page);
+    const r = await loadKind(page, await makeImage(page, { width: 5000, height: 5000, type: 'image/jpeg', name: 'nomemory.jpg' }));
+    const refused = await page.evaluate(() => !!window.__refused);
+    t.check(refused && r.loaded && r.label === 'nomemory.jpg · 5000 × 5000 px' && same(r.value, [900, 900]) && r.toast === '', 'no canvas for reducing a 5000 × 5000 photo: it is studied as it is (900 × 900), labelled 5000 × 5000, no reduction note', { refused, label: r.label, value: r.value, toast: r.toast });
+    await clean(t, page, 'no canvas for the reduction');
     await page.context().close();
   }
 }
