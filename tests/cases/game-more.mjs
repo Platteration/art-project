@@ -548,7 +548,7 @@ export default async function gameMore(t, site) {
   // a new Study photo loaded mid-game: the game keeps its board; the best goes under the photo it was played on;
   // Play again → Same photo then plays the photo loaded since
   {
-    let onNew = 0;
+    let onNew = 0, wrongKey = 0;
     for (const [i, size] of [[1, [300, 420]], [2, [360, 360]]]) {
       await start(page);
       const keyBefore = await page.evaluate(() => Studio.sourceKey());
@@ -566,11 +566,16 @@ export default async function gameMore(t, site) {
       const now = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height, Studio.sourceKey()]);
       if (now.slice(0, 2).join('x') === size.join('x')) onNew++;
       t.check(now.slice(0, 2).join('x') === during.canvas.join('x'), `"${btn}" after a photo was loaded mid-game plays the board just scored, not the photo loaded since (documented as a finding if not)`, { hint, btn, board: now, loadedSince: size });
+      const keysBefore = Object.keys(await bests(page));
+      await tapPaint(page, await firstPaint(page), 5); // a better score than the first game's, so it is written
       await lockIn(page);
-      t.check(Object.keys(await bests(page)).filter((k) => k.startsWith(keyBefore + '|')).length === 1 && !Object.keys(await bests(page)).some((k) => k.startsWith(now[2] + '|')), 'its score goes to the same best as the first game', Object.keys(await bests(page)));
+      const added = Object.keys(await bests(page)).filter((k) => !keysBefore.includes(k));
+      if (added.some((k) => k.startsWith(now[2] + '|'))) wrongKey++;
+      t.check(added.every((k) => k.startsWith(keyBefore + '|')) && (await popup(page)).newBest, `the replayed board's score is kept as a best of the photo it was played on (${keyBefore}), not of the one now on the Study tab (documented as a finding if not)`, { added, newBest: (await popup(page)).newBest });
       await toSetup(page);
       t.check(await ready(page) && (await page.evaluate(() => [document.getElementById('gamePreview').width, document.getElementById('gamePreview').height])).join('x') === size.join('x') && (await text(page, '#gamePhotoName')) === `Painting from later${i}.`, 'Change settings then shows the photo now on the Study tab', await text(page, '#gamePhotoName'));
     }
+    if (wrongKey === 2) t.finding({ title: 'A board replayed with "Same photo" after the Study photo changed files its score as the new photo\'s best', severity: 'medium', steps: '1. Load photo A; Games → Paint by numbers, Start painting. 2. While the game is on, load photo B with Load photo (on a desktop the topbar stays). 3. Lock in portrait, Play again, Same photo (the dialog says it "plays the one just played"); the board is A\'s. 4. Mix something and Lock in portrait. 5. Change settings: the setup shows photo B.', expected: 'The score is kept as photo A\'s best (the board played was A\'s), as the first game\'s was; B has no best until a game on B\'s board.', actual: 'The pop-up says New best! and the score is stored under photo B\'s name (localStorage portrait-value-studio.gameBest gains "B:<size>|medium|<palette>" while A\'s entry stays as it was), so B\'s setup then reports a best from a game on A\'s board, and A\'s best is never raised. Cause: js/game.js 582, a game\'s bestKey is bestKey() at its start, which reads Studio.sourceKey() (332), the Study tab\'s current photo, while startGame(true) (546–547, commit 294e50d) keeps the previous photo\'s board.' });
     if (onNew === 2) t.finding({ title: 'Play again → "Same photo" starts on a photo loaded since the game began, not the one just scored', severity: 'medium', steps: '1. Games → Paint by numbers, My photo, Start painting. 2. While the game is on (on a desktop the topbar stays), load another photo with Load photo on the Study tab. 3. Lock in portrait; press Play again; the dialog asks "Try the same photo again, or load a new one?": press Same photo.', expected: 'The same photo as the portrait just scored (the one shown on the result screen and in its best score), or the dialog saying the photo has changed.', actual: 'A game starts on the photo loaded in step 2 (its board has that photo\'s size and shapes), while the result screen, its best score and the dialog were about the first. Cause: js/game.js, Same photo calls startGame() (now 1618), whose refreshSetup() (528–535) rebuilds the board whenever Studio.result() has changed, unless startGame is told to keep the board (546–547, the keep flag of commit 294e50d).' });
   }
   // Forget mid-game: the game is gone with everything else, no error
