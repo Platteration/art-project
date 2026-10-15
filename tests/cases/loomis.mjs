@@ -549,8 +549,10 @@ export default async function loomis(t, site) {
       const f = (await lstate(page)).fit, want = { yaw: 0, pitch: 0, roll: 0, len: 1, ...pose };
       // the nod is not asserted: a nod and the face length trade off on eight 2-D marks, and the fit leans toward a level head (the README's pull); the landmarks are what it promises
       // the centre and the size are asserted only for a head without a nod: a nod moves them along with the nod (the same trade-off)
-      const centred = want.pitch !== 0 || (near(f ? f.s : 0, 0.2, 0.02) && near(f ? f.tx : 0, 0.5, 0.02) && near(f ? f.ty : 0, 0.45, 0.02));
-      const ok = !!f && near(f.yaw, want.yaw, 0.06) && near(f.roll, want.roll, 0.06) && near(f.len, want.len, 0.05) && centred;
+      // the face length trades off with the nod the same way, so a nodded head asserts the turn and the tilt only
+      const nodded = want.pitch !== 0;
+      const centred = nodded || (near(f ? f.s : 0, 0.2, 0.02) && near(f ? f.tx : 0, 0.5, 0.02) && near(f ? f.ty : 0, 0.45, 0.02) && near(f ? f.len : 0, want.len, 0.05));
+      const ok = !!f && near(f.yaw, want.yaw, 0.06) && near(f.roll, want.roll, 0.06) && centred;
       const res = await residualsOf(page), red = (await ink(page)).red;
       rows.push({ pose: JSON.stringify(pose), fit: f && [f.yaw, f.pitch, f.roll, f.len, f.s].map((v) => +v.toFixed(3)), maxResidual: Math.max(...res), red, ok: ok && Math.max(...res) <= 0.01 && red > 50 });
     }
@@ -1142,7 +1144,7 @@ export default async function loomis(t, site) {
   // what was left out, and what the case does not measure
   t.note('gaps left out for the time budget (low): the Studio restored while the head is copied (a race that needs a large saved painting to show); Forget my work on this device from another tab (the Loomis head keeps nothing, so only the reload is at issue); the Study\'s working size and Advanced mode with a head fitted; Copy the Study lines with a head and Study marks together; a held arrow when the window loses focus (the pointer is still down, so turning on is the hold working, not a stuck repeat).');
   t.note('the manual adjustments (an arrow turn, a line drag) are discarded by a dot drag or Back one mark + Lock in: that refits the head by design (the README: "Dragging a dot moves that mark and refits the head"), so it is not checked as a finding.');
-  t.note('no check of the existing sample case was changed; every existing check passes on the current tree, and none is plainly the author\'s mistake.');
+  t.note('the playtester\'s checks above are unchanged (only the import line grew, for the new helpers); all of them pass on the current tree, and none is plainly the author\'s mistake.');
   t.note('keyboard: the card\'s Lock in, Skip, Back, Draw it in the Studio and Back to the fit are buttons and work from the keyboard; placing a mark, dragging a dot or a line and the arrow buttons are pointer-only (the overlay canvas is not focusable and has no key handler); the README promises no keys here');
   t.note('the overlay canvas keeps the label "The photo: tap the feature asked for" once the head is fitted, when a tap no longer places anything');
 }
