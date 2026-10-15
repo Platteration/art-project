@@ -326,14 +326,22 @@
     function segment(a, b, pressure) {
       const leadColor = state.tool === 'pencil' ? state.pcolor : state.tool === 'sketch' ? state.scolor : null;
       g.globalCompositeOperation = leadColor ? (leadColor === 'white' ? 'screen' : 'multiply') : 'source-over';
-      const d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / spacing()));
+      // a stroke never stamps more dabs than a line across the whole paper would need (a broken position can
+      // never become an endless loop)
+      const d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.min(Math.ceil(d / spacing()), Math.ceil(Math.hypot(paper.width, paper.height) * 2)));
       const dir = Math.atan2(b.y - a.y, b.x - a.x);
       for (let i = 1; i <= n; i++) stamp(a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n, pressure, dir);
       g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
     }
 
     let last = null;
-    const pos = (e) => { const r = paper.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * paper.width, y: (e.clientY - r.top) / r.height * paper.height }; };
+    // where the pointer is on the paper; null once the paper is hidden (another tab opened mid-stroke)
+    const pos = (e) => {
+      const r = paper.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) return null;
+      const p = { x: (e.clientX - r.left) / r.width * paper.width, y: (e.clientY - r.top) / r.height * paper.height };
+      return Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
+    };
     const press = (e) => (e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5);
     let locked = false;          // pencils down: the paper takes no marks (Figure study, when the time is up)
     paper.addEventListener('pointerdown', (e) => {
@@ -345,10 +353,23 @@
       if (state.tool === 'sketch') { useLayer(sketch); state.lastLayer = 'sketch'; showSketch(true); }
       else if (state.tool === 'eraser') useLayer(state.lastLayer === 'sketch' ? sketch : paper);
       else { useLayer(paper); state.lastLayer = 'paint'; }
-      snapshot(); last = pos(e); dragFrom = null; segment(last, last, press(e));
+      const p = pos(e);
+      if (!p) return;
+      snapshot(); last = p; dragFrom = null; segment(last, last, press(e));
     });
-    paper.addEventListener('pointermove', (e) => { if (!last) return; const p = pos(e); segment(last, p, press(e)); last = p; });
-    ['pointerup', 'pointercancel'].forEach((t) => paper.addEventListener(t, () => { if (last) saveSoon(); last = null; dragFrom = null; }));
+    // the stroke ends where the pointer lets go, or where the paper leaves the screen
+    function endStroke(pointerId) {
+      if (last) saveSoon();
+      last = null; dragFrom = null;
+      if (pointerId != null) { try { if (paper.hasPointerCapture(pointerId)) paper.releasePointerCapture(pointerId); } catch (err) { /* already released */ } }
+    }
+    paper.addEventListener('pointermove', (e) => {
+      if (!last) return;
+      const p = pos(e);
+      if (!p) { endStroke(e.pointerId); return; }
+      segment(last, p, press(e)); last = p;
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => paper.addEventListener(t, () => endStroke()));
     paper.addEventListener('contextmenu', (e) => e.preventDefault());
     $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
     let clearArmed = 0;
@@ -431,7 +452,14 @@
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
     let saveTimer = 0, saving = false, saveAgain = false, forgetting = false, saveFailed = false;
-    function saveSoon() { if (!hasDb || forgetting) return; clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = 0; saveNow(); }, 800); }
+    function saveSoon() {
+      // a browser with its database off (Firefox's dom.indexedDB.enabled, some private modes) keeps nothing:
+      // the first change says so, as a failed save does
+      if (!hasDb && o.autosave !== false && !saveFailed && !forgetting) { saveFailed = true; Studio.toast('The painting cannot be saved in this browser (its storage is turned off). It stays for this visit only.', 7000); }
+      if (!hasDb || forgetting) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { saveTimer = 0; saveNow(); }, 800);
+    }
     async function saveNow() {
       if (!hasDb || forgetting) return;
       if (saving) { saveAgain = true; return; }
@@ -849,7 +877,7 @@
     function activate(on) {
       active = on;
       if (o.bodyClass) document.body.classList.toggle(o.bodyClass, active);
-      if (!active) { closeSheets(); return; }
+      if (!active) { closeSheets(); endStroke(); return; }
       window.scrollTo(0, 0);
       followPalette();
       refreshReference();
