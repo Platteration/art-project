@@ -1051,7 +1051,7 @@ gap('degenerate photos', async (t, site) => {
   const nn = await nColors(ph);
   await pickPreset(ph, 'zorn');
   const nrs = await rows(ph);
-  t.check(nn >= 6 && nn <= 24 && nrs.length === nn && nrs.every((r) => BADGES.includes(r.badge)), `noise at Colors 6: ${nn} colors (at most 24), a row and a badge for each`, [nn, nrs.length]);
+  t.check(nn >= 6 && nn <= 24 && nrs.length === nn && nrs.every((r) => BADGES.includes(r.badge)), 'noise at Colors 6: 6 to 24 colors, a row and a badge for each', [nn, nrs.length]);
   t.check((await hscroll(ph)) <= 0, 'noise at Colors 6 on a phone: no horizontal scroll', await hscroll(ph));
   await clean(t, ph, 'noise');
   await ph.context().close();
