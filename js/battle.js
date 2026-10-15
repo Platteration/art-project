@@ -155,6 +155,7 @@
       if (q.mode === 'order') { const s = byL(set); if (s.every((c, i) => !i || c.L - s[i - 1].L >= lv.gap)) colors = set; }
       else { const s = byL(set); const edge = q.dir < 0 ? s[1].L - s[0].L : s[n - 1].L - s[n - 2].L; if (edge >= lv.gap) colors = set; }
     }
+    if (!colors) colors = buildMany(pool, lv, q, n, byL);
     if (!colors) {
       // the palette can't make such a set: take the n most spread colors it has
       const from = pool.slice().sort(() => Math.random() - 0.5).slice(0, 40);
@@ -165,6 +166,28 @@
     if (q.mode === 'pick') { const s = byL(colors); answer = colors.indexOf(q.dir < 0 ? s[0] : s[n - 1]); }
     else answer = byL(colors).map((c) => colors.indexOf(c));
     return { q, n, colors, answer };
+  }
+  // a set built step by step when random draws keep missing (a narrow palette, a wide gap): for an order, each
+  // color the gap above the last, taken from the nearest dozen so the set stays in range; for darkest or
+  // lightest, the extreme the gap beyond all the others. Shuffled, so the answer is not the order shown.
+  function buildMany(pool, lv, q, n, byL) {
+    const sorted = byL(pool), shuffle = (a) => a.sort(() => Math.random() - 0.5);
+    for (let t = 0; t < 200; t++) {
+      if (q.mode === 'order') {
+        const set = [pool[rnd(pool.length)]];
+        while (set.length < n) {
+          const last = set[set.length - 1], up = sorted.filter((c) => c.L - last.L >= lv.gap);
+          if (!up.length) break;
+          set.push(up[rnd(Math.min(up.length, 12))]);
+        }
+        if (set.length === n) return shuffle(set);
+      } else {
+        const extreme = pool[rnd(pool.length)];
+        const others = shuffle(sorted.filter((c) => (q.dir < 0 ? c.L - extreme.L : extreme.L - c.L) >= lv.gap));
+        if (others.length >= n - 1) return shuffle([extreme, ...others.slice(0, n - 1)]);
+      }
+    }
+    return null;
   }
   function makeRound(pool, lv, q, n) { return n === 2 ? makePair(pool, lv, q) : makeMany(pool, lv, q, n); }
 

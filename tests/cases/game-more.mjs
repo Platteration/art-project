@@ -320,7 +320,7 @@ export default async function gameMore(t, site) {
     t.check(s.shown && s.kicker === 'Portrait locked in' && s.pct === '0' && s.grade === 'Keep mixing' && s.stars === 0 && s.starsLabel === '0 out of 5 stars, 0% color match' && s.points === '0', 'Lock in with nothing painted: 0%, no stars, Keep mixing, 0 points', s);
     t.check(s.focus === 'gameAnalyze', 'the pop-up focuses Analyze', s.focus);
     t.check(b['Color accuracy'] === '0% · 0' && /^(5:00|4:5\d) · \+0 \(some numbers unpainted\)$/.test(b['Time left']) && b.Mode === 'Classic' && b.Palette === 'Zorn', 'the breakdown says no bonus because numbers are unpainted', b);
-    t.check(!('sample-study:600x750|medium|zorn' in saved), 'a 0 is not kept as a best (nothing scored is no best)', saved);
+    t.check(saved['sample-study:600x750|medium|zorn'] === 0, 'the first game is kept, at 0, so the next has something to beat', saved);
     t.check(!s.newBest, 'no New best! on a first game with nothing painted (0 points)', s.newBest);
     if (s.newBest) t.finding({ title: '"New best!" flashes on a first game with nothing painted (0 points)', severity: 'low', steps: '1. Open Games → Paint by numbers on a fresh browser. 2. Start painting and press Lock in portrait at once, with no number mixed. 3. Close the score and press Change settings.', expected: 'The README says New best! flashes "when you beat your score": with no score to beat and nothing scored, no New best! (or, if 0 counts as a best, the setup reporting it).', actual: 'The pop-up shows 0% / 0 points with "New best!" flashing and 0 is stored as the best, yet the setup then shows no best line at all (a stored 0 reads as none), so the best celebrated is one the setup never reports; a second 0 is not a New best. Cause: js/game.js 1299–1300, `const was = bestOfKey(bests, game.bestKey); const isBest = !was || points > was`: no best yet counts as beaten whatever the points, 1345 shows the badge from it, and 524–525 show a best only when it is truthy, so a stored 0 is never reported.' });
     await click(page, '#gameAnalyze');
@@ -753,10 +753,13 @@ export default async function gameMore(t, site) {
     const tiny = {}; let oneNumber = null; const seen = {};
     for (const [label, file] of photos) {
       await loadPhoto(page, file, { settle: 400 }); await studyIdle(page);
-      const up = await ready(page);
+      // ready, or refused as too small for a board (Start then stays off for good: no 60 s wait for it)
+      await page.waitForFunction(() => !document.getElementById('gameStart').disabled || /too small for a board/.test(document.getElementById('gamePreviewNote').textContent), null, { timeout: 60000 }).catch(() => null);
+      const up = await page.evaluate(() => !document.getElementById('gameStart').disabled);
       const s = await page.evaluate(() => ({ name: document.getElementById('gamePhotoName').textContent, note: document.getElementById('gamePreviewNote').textContent, hint: document.getElementById('gamePaletteHint').textContent, preview: [document.getElementById('gamePreview').width, document.getElementById('gamePreview').height] }));
       const n = parseInt(s.note); seen[label] = n;
-      t.check(up && s.name === `Painting from ${file.name.replace(/\.[^.]+$/, '')}.` && n >= 1 && HINT.test(s.hint) && +HINT.exec(s.hint)[4] === n, `${label}: the setup is ready, names the photo and counts its numbers`, s);
+      const refusedTiny = /too small for a board/.test(s.note) && /16 × 16|strip/.test(label);
+      t.check(refusedTiny || (up && s.name === `Painting from ${file.name.replace(/\.[^.]+$/, '')}.` && n >= 1 && HINT.test(s.hint) && +HINT.exec(s.hint)[4] === n), `${label}: the setup is ready, names the photo and counts its numbers (or, for a picture too small for a board, says so)`, s);
       if (!up) { if (/16 × 16|strip/.test(label)) tiny[label] = { refused: s.note, start: await page.evaluate(() => document.getElementById('gameStart').disabled) }; continue; }
       await start(page);
       const g = await page.evaluate(() => ({ numbers: document.querySelectorAll('.game-number').length, progress: document.getElementById('gameProgress').textContent, canvas: [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height], css: [Math.round(document.getElementById('gameCanvas').getBoundingClientRect().width), Math.round(document.getElementById('gameCanvas').getBoundingClientRect().height)] }));
@@ -765,7 +768,7 @@ export default async function gameMore(t, site) {
       await tapPaint(page, await firstPaint(page));
       await lockIn(page);
       g.points = await text(page, '#gamePoints'); g.grade = await text(page, '#gameGrade');
-      t.check(g.numbers === n && g.progress === `0 of ${n} numbers painted` && /^\d+$/.test(g.points) && g.grade, `${label}: a game with ${n} number${n === 1 ? '' : 's'} plays and scores`, g);
+      t.check(g.numbers === n && g.progress === `0 of ${n} number${n === 1 ? '' : 's'} painted` && /^\d+$/.test(g.points) && g.grade, `${label}: a game with ${n} number${n === 1 ? '' : 's'} plays and scores`, g);
       if (n === 1) { oneNumber = { label, note: s.note, progress: g.progress, next: g.next, title: g.title }; t.check(g.next === 'Every number has a mix. Lock in when you are ready.' || g.title === 'Number 1', `${label}: Next ▸ with one number stays on it`, [g.next, g.title]); }
       if (label === 'white') t.check(g.points === '1200' || +g.points >= 1190, 'white, painted white: a perfect 1,200', g.points);
       if (/16 × 16|strip/.test(label)) tiny[label] = { canvas: g.canvas, css: g.css };

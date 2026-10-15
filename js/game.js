@@ -487,7 +487,7 @@
     if (board) notePreview();
   }
   // a best is a number of points: a saved value of another kind (a stray write) is no best
-  const bestOfKey = (bests, key) => (Number.isInteger(bests[key]) && bests[key] > 0 && bests[key] <= 1e6 ? bests[key] : null);
+  const bestOfKey = (bests, key) => (Number.isInteger(bests[key]) && bests[key] >= 0 && bests[key] <= 1e6 ? bests[key] : null);
   let boardTooSmall = false;
   function notePreview() {
     const m = mode(), lv = LEVELS[level()];
@@ -1306,8 +1306,10 @@
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
     const was = bestOfKey(bests, game.bestKey);
-    const isBest = points > 0 && (!was || points > was); // nothing scored is no best
-    if (isBest) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
+    // New best! is for a score that beats the one kept (0 points beats nothing); a first game is kept either way,
+    // so the next one has something to beat
+    const isBest = points > 0 && (was == null || points > was);
+    if (isBest || was == null) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
 
     els.play.hidden = true;
     els.result.hidden = false;

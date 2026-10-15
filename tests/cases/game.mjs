@@ -249,7 +249,7 @@ export default async function game(t, site) {
     let r = await result(page);
     t.check(r.kicker === 'Portrait locked in' && r.pct === '0' && r.stars === 0 && r.starsLabel === '0 out of 5 stars, 0% color match' && r.grade === 'Keep mixing', 'nothing painted: 0%, no stars, Keep mixing', r);
     t.check(r.popup && !r.showBar && r.focus === 'gameAnalyze' && !r.analysis && r.analyzeText === 'Analyze', 'nothing painted: the score pops up, Analyze focused', [r.popup, r.focus]);
-    t.check(r.newBest, 'nothing painted: the first score shows New best!', r.newBest);
+    t.check(!r.newBest, 'nothing painted: no New best! for 0 points (the README: it flashes when you beat your score)', r.newBest);
     t.note('A first lock-in with nothing painted (0 points) flashes "New best!": the first score is always a best. Arguably a stale word on a 0; left as is.');
     t.check(same(await bests(page), { [bestKey]: 0 }), 'nothing painted: the best is kept under portrait|level|palette as 0', await bests(page));
     await click(page, '#gameAnalyze');
