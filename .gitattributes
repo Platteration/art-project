@@ -21,3 +21,5 @@ fonts/README.md   export-ignore
 .gitignore        export-ignore
 .gitattributes    export-ignore
 .editorconfig     export-ignore
+
+scripts/          export-ignore
