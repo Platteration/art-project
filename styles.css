@@ -1480,11 +1480,13 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .ps-sheet, .ps-sheet-small { left: 84px; right: auto; top: 14px; bottom: auto; width: 320px; max-height: calc(100% - 28px); }
   .ps-sheet-small { width: 280px; }
 }
-/* phones: the studio fills the screen, so the header and tabs step aside and the strip has a way back */
-@media (max-width: 759px) {
+/* phones (upright, or turned on their side: a short window): the studio fills the screen, so the header and
+   tabs step aside and the strip has a way back (painting.js pin() keeps the same 560 px line) */
+@media (max-width: 759px), (max-height: 559px) {
   .tab-paint .topbar, .tab-paint .tabs, .tab-loomis .topbar, .tab-loomis .tabs, .figure-focus .topbar, .figure-focus .tabs { display: none; }
   .ps-exit { display: grid; }
 }
+@media (min-width: 760px) and (max-height: 559px) { .ps { border: 0; border-radius: 0; } }
 @media (max-width: 480px) { .ps-strip { gap: 2px; padding-inline: 4px; } .ps-ic svg { width: 22px; height: 22px; } .ps-sep { margin: 0; } .ps-ic .ps-sub { right: 0; } }
 @media (prefers-reduced-motion: reduce) { .ps-paint .ps-dot { transition: none; } }
 

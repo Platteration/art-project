@@ -52,7 +52,9 @@
     const devW = portrait ? sw : sh, devH = portrait ? sh : sw;
     if (W > devW + 2) W = devW;
     if (H > devH + 2) H = devH;
-    if (matchMedia('(min-width: 760px)').matches) {
+    // a short window (a phone turned on its side) has no height to spare for the header and tabs: the studio
+    // takes the whole screen there too, as on a phone held upright (styles.css steps the header and tabs aside)
+    if (matchMedia('(min-width: 760px) and (min-height: 560px)').matches) {
       const tabs = document.querySelector('.tabs').getBoundingClientRect();
       const inset = Math.max(0, Math.round(tabs.bottom + 14 - top));
       el.style.left = `${Math.round(tabs.left)}px`; el.style.top = `${Math.round(top + inset)}px`;

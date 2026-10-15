@@ -299,11 +299,20 @@
     Studio.redraw();
     drawTab();
   }
-  $('lock').addEventListener('click', lock);
-  $('skip').addEventListener('click', skip);
-  $('back').addEventListener('click', back);
-  $('undo').addEventListener('click', back);
-  $('reset').addEventListener('click', reset);
+  // a button pressed from the keyboard may go off as it acts (Lock in waits for the next mark, Skip and Back
+  // leave at the end): the focus moves to the card's next live button instead of falling to the page
+  const CARD = ['lock', 'skip', 'back', 'cardStudio', 'refit'];
+  function keepFocus(btn) {
+    const a = document.activeElement;
+    if (a !== btn && a !== document.body && a !== null) return;
+    if (!btn.disabled && !btn.hidden && btn.offsetParent) return;
+    const next = CARD.map((id) => $(id)).find((b) => b && !b.disabled && !b.hidden && b.offsetParent);
+    if (next) next.focus();
+  }
+  [['lock', lock], ['skip', skip], ['back', back], ['undo', back], ['reset', reset]].forEach(([id, fn]) => {
+    const btn = $(id);
+    btn.addEventListener('click', () => { fn(); keepFocus(btn); });
+  });
   $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; Studio.redraw(); drawTab(); } });
   $('show').addEventListener('click', () => { state.shown = !state.shown; render(); });
   // Draw it in the Studio draws the head, so a hidden head is shown again first
@@ -357,7 +366,11 @@
   window.addEventListener('resize', layout);
   window.addEventListener('orientationchange', () => setTimeout(layout, 60));
   if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }
-  window.addEventListener('studio:result', () => { if (active) showPhoto(); });
+  // a new photo begins a new head: marks tapped on the old picture while the new one was being prepared
+  // ("Updating…") are dropped when it arrives (the marks before were cleared as the file was read)
+  let newPhoto = false;
+  window.addEventListener('studio:source', () => { newPhoto = true; });
+  window.addEventListener('studio:result', () => { if (newPhoto) { newPhoto = false; if (state.step || state.pending) reset(); } if (active) showPhoto(); });
 
   const pos = (e) => { const r = overlay.getBoundingClientRect(); return [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))]; };
   // the loupe: the photo magnified around the finger while a mark is placed, so the tap lands exactly
