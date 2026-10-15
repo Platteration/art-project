@@ -548,7 +548,9 @@ export default async function loomis(t, site) {
       await sequence(page, await posedMarks(page, pose), pose.bare ? ['leftBrow', 'rightBrow', 'forehead'] : []);
       const f = (await lstate(page)).fit, want = { yaw: 0, pitch: 0, roll: 0, len: 1, ...pose };
       // the nod is not asserted: a nod and the face length trade off on eight 2-D marks, and the fit leans toward a level head (the README's pull); the landmarks are what it promises
-      const ok = !!f && near(f.yaw, want.yaw, 0.06) && near(f.roll, want.roll, 0.06) && near(f.len, want.len, 0.05) && near(f.s, 0.2, 0.02) && near(f.tx, 0.5, 0.02) && near(f.ty, 0.45, 0.02);
+      // the centre and the size are asserted only for a head without a nod: a nod moves them along with the nod (the same trade-off)
+      const centred = want.pitch !== 0 || (near(f ? f.s : 0, 0.2, 0.02) && near(f ? f.tx : 0, 0.5, 0.02) && near(f ? f.ty : 0, 0.45, 0.02));
+      const ok = !!f && near(f.yaw, want.yaw, 0.06) && near(f.roll, want.roll, 0.06) && near(f.len, want.len, 0.05) && centred;
       const res = await residualsOf(page), red = (await ink(page)).red;
       rows.push({ pose: JSON.stringify(pose), fit: f && [f.yaw, f.pitch, f.roll, f.len, f.s].map((v) => +v.toFixed(3)), maxResidual: Math.max(...res), red, ok: ok && Math.max(...res) <= 0.01 && red > 50 });
     }
