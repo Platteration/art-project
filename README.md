@@ -251,7 +251,7 @@ What the site keeps in the browser, and clears with **Forget my work on this dev
 
 | Where | What |
 | --- | --- |
-| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings and best scores (best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo; only the fifty most recently played are kept), the Figure study class (Relaxed or Timed, the time a pose gets, the poses taken out) and the mixes locked in there, and whether the Studio's one-time saving note was shown |
+| `localStorage`, keys starting `portrait-value-studio.` | Simple or Advanced mode, open drawers, smoothing, lean, block view, canvas size, your palette and ticked paints, saved mixes, game and battle settings, the last painting dealt, and best scores (best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo; only the fifty most recently played are kept), the Figure study class (Relaxed or Timed, the time a pose gets, the poses taken out) and the mixes locked in there, and whether the Studio's one-time saving note was shown |
 | `localStorage`, keys starting `pose-and-light.` | Pose and light: the pose and light where you left off (`pose-and-light.v2`), up to twelve saved poses as joint angles and a viewpoint, no pictures (`pose-and-light.mine.v1`), and the Simple or Advanced choice of the page opened on its own (`pose-and-light.mode`) |
 | IndexedDB database `portrait-value-studio` | The Studio painting: the paper, the underdrawing and the canvas settings, saved a moment after each change |
 

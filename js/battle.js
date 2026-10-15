@@ -447,7 +447,9 @@
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
     const bests = load(BEST_KEY, {}), key = bestKey();
     const isBest = score > 0 && (bestOf(bests, key) == null || score > bestOf(bests, key));
-    if (isBest) { delete bests[key]; bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
+    // every setting played is re-added last, with the best it keeps, so the prune drops the least recently played
+    const kept = isBest ? score : bestOf(bests, key);
+    if (kept != null) { delete bests[key]; bests[key] = kept; pruneBests(bests); save(BEST_KEY, bests); }
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];

@@ -1309,7 +1309,10 @@
     // New best! is for a score that beats the one kept (0 points beats nothing); a first game is kept either way,
     // so the next one has something to beat
     const isBest = points > 0 && (was == null || points > was);
-    if (isBest || was == null) { delete bests[game.bestKey]; bests[game.bestKey] = points; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
+    // every board played is re-added last, with the best it keeps, so the prune drops the least recently played
+    // (a replay that does not beat its best still counts as played)
+    const kept = isBest || was == null ? points : was;
+    delete bests[game.bestKey]; bests[game.bestKey] = kept; pruneBests(bests); save(BEST_KEY, bests);
 
     els.play.hidden = true;
     els.result.hidden = false;

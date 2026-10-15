@@ -1535,7 +1535,7 @@
   function loadCanvasSize() {
     try {
       const saved = JSON.parse(localStorage.getItem(CANVAS_KEY) || 'null');
-      if (saved && +saved.value > 0) els.canvasSize.value = +saved.value;
+      if (saved && +saved.value > 0 && +saved.value < 10000) els.canvasSize.value = +saved.value; // the range the labels use
       if (saved && (saved.sys === 'cm' || saved.sys === 'in')) els.canvasSys.value = saved.sys;
     } catch (err) {
       /* nothing saved, or storage unavailable: start empty */

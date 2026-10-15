@@ -441,6 +441,7 @@
       const at = Date.now();
       try {
         const [paperBlob, sketchBlob] = await Promise.all([toBlob(paper), toBlob(sketch)]);
+        if (forgetting) { saving = false; return; } // Forget landed while the pictures were encoded: write nothing back
         await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: at });
       } catch (e) {
         // said once a visit, since the first visit was told the painting is kept: it is not, this time

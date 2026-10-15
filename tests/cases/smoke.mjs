@@ -236,7 +236,8 @@ export default async function smoke(t, site) {
   {
     const page = await openPage(site);
     const found = await page.evaluate(() => [...document.querySelectorAll('[data-open-file]')].map((b) => ({ tag: b.tagName, name: b.getAttribute('aria-label') || b.textContent.trim() })));
-    t.check(found.length === 3 && found.every((b) => b.tag === 'BUTTON' && b.name), 'three Load a photo buttons beside the header\'s, each a named button', found);
+    // the Loomis strip, the Studio's reference sheet, the game's setup, and the Figure study's copy of the Studio's sheet
+    t.check(found.length === 4 && found.every((b) => b.tag === 'BUTTON' && b.name), 'every Load a photo button beside the header\'s is a named button', found);
     const opens = async (sel) => {
       const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null), (async () => { await page.focus(sel); await page.keyboard.press('Enter'); })()]);
       return !!chooser;
