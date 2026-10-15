@@ -274,6 +274,7 @@
     ['show', 'studio', 'save'].forEach((id) => { $(id).disabled = !state.fit; });
     $('show').setAttribute('aria-pressed', String(state.shown));
     root.classList.toggle('lh-done', d);
+    root.classList.toggle('lh-fitted', fitted); // the stylesheet keeps the fitted card small on a phone
     Studio.redraw();
     drawTab();
   }

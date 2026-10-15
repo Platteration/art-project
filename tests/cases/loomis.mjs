@@ -220,9 +220,10 @@ export default async function loomis(t, site) {
     const noticeLost = noticeBefore === null && noticeAfter !== null && !/saved in this browser/.test(toastNow || '');
     t.check(!noticeLost, 'the Studio\'s one-time "saved in this browser" note is not spent unseen by a first visit through Draw it in the Studio', { noticeBefore, noticeAfter, toast: toastNow });
     if (noticeLost) t.finding({ title: 'The Studio\'s one-time "saved in this browser" note is spent unseen when the Studio is first opened through Draw it in the Studio', severity: 'low', steps: '1. In a fresh browser (no portrait-value-studio.studioNotice key), open the Loomis head and lock in all the marks. 2. Press Draw it in the Studio. 3. Read the toast.', expected: 'The one-time note ("Your painting is saved in this browser as you go…", 7 s) is read, or kept for a visit where it can be: the README promises it to the first Studio visit.', actual: `The note shows for about 150 ms and is replaced by "${toastNow}"; its key is set (${noticeAfter}), so it never shows again. Cause: js/loomis.js line 273 clicks the Studio's Copy the Study lines 150 ms after switching tabs; js/painting.js line 820 shows the note at activation and sets its key, and lines 367 and 379 replace the toast.` });
-    await tab(page, 'loomis'); await click(page, '#lh-show');
+    // Draw it in the Studio shows a hidden head again (it draws what it copies), so back here the lines are up
+    await tab(page, 'loomis');
     c = await card(page); i = await ink(page);
-    t.check(c.pressed === 'true' && i.red > 100, 'show the head again: the lines are back', { pressed: c.pressed, red: i.red });
+    t.check(c.pressed === 'true' && i.red > 100, 'back from Draw it in the Studio the head is shown again: the lines are back', { pressed: c.pressed, red: i.red });
     await clean(t, page, 'desktop hide');
 
     // Save PNG: the photo with the head, at the photo's size

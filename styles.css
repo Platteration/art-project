@@ -1641,6 +1641,9 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .lh-card { position: absolute; left: 84px; top: 14px; width: 300px; margin: 0; }
   .lh .ps-stage { padding: 18px 88px 18px 400px; }
 }
+/* on a phone the card sits above the photo: once the head is fitted its line about the arrows gives
+   the photo back its room (the No head card keeps its line, which says what to do) */
+@media (max-width: 759px) { .lh-fitted .lh-sub { display: none; } }
 
 /* ---- Value battle: one primer-gray board holds the bar, the colors and the answers ---- */
 .vb-about h3 { margin: 0; font: 700 1rem var(--display); }

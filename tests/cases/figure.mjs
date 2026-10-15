@@ -357,7 +357,7 @@ export default async function figure(t, site) {
     // a class of that one pose alone: it has to repeat
     await onlyPoses(page, [mine.id]);
     const one = await setupState(page);
-    t.check(one.inClass.length === 1 && one.mix === '1 of the 31 poses are in the class, in a random order.' && !one.start, 'one pose in the class: Start is on', { mix: one.mix, n: one.inClass.length });
+    t.check(one.inClass.length === 1 && one.mix === '1 of the 31 poses is in the class.' && !one.start, 'one pose in the class: Start is on, the line reads as one pose', { mix: one.mix, n: one.inClass.length });
     t.check(one.mix !== '1 of the 31 poses are in the class, in a random order.', 'the message for one pose reads as one pose', one.mix);
     if (one.mix === '1 of the 31 poses are in the class, in a random order.') t.finding({ title: 'With one pose in the class the setup says "1 of the 31 poses are in the class, in a random order."', severity: 'low', steps: 'Figure study > Take them all out > tap one pose back in. Read the line under Poses.', expected: 'A sentence for one pose: "1 of the 31 poses is in the class." (and no random order to speak of).', actual: '"1 of the 31 poses are in the class, in a random order."', cause: 'js/figure.js:198 uses one template for every count above zero.' });
     await click(page, '#fig-start');
