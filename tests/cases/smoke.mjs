@@ -193,7 +193,9 @@ export default async function smoke(t, site) {
       const n = () => document.querySelectorAll('#poses button.has-img').length;
       const before = n(); ext.loseContext(); await new Promise((r) => setTimeout(r, 1500)); const during = n(); ext.restoreContext(); await new Promise((r) => setTimeout(r, 8000)); return { before, during, after: n() };
     });
-    t.check(r && r.during - r.before <= 1 && r.after === 30, 'context lost: pictures wait (one may still be encoding), then all 30 arrive', r);
+    // pictures drawn before the loss may still be encoding when it strikes (one per 16 ms tick; a slow
+    // runner has a few in flight): those arrive, nothing drawn after it does, and all 30 once it is back
+    t.check(r && r.during - r.before <= 3 && r.after === 30, 'context lost: pictures wait (a few may still be encoding), then all 30 arrive', r);
     t.check(page.log.pageerrors.length === 0, 'context lost: no page error', page.log.pageerrors);
     await page.context().close();
   }

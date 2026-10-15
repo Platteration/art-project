@@ -1091,7 +1091,9 @@
   // [across, down] from 0 to 1, and how much nearer than the middle of the body it is; `tilts` gives the
   // shoulders' and hips' tilt.
   function shoot(entry, w, h, snug) {
-    if (contextLost) return null;            // it would come out black
+    // a lost context would draw black: the event that says so arrives a moment after the loss, so the
+    // context is asked as well
+    if (contextLost || (renderer && renderer.getContext().isContextLost())) return null;
     const W2 = w * 2, H2 = h * 2;
     const keep = copyPose(pose), keepLight = Object.assign({}, light), keepTarget = TARGET.clone();
     const vis = [bulb.visible, beam.visible, stand.visible, outlineMat.visible];
