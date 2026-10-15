@@ -818,6 +818,10 @@
   const TOWARD = [['circle', { cx: 12, cy: 12, r: 8 }], ['circle', { cx: 12, cy: 12, r: 2.8, fill: 'currentColor' }]];
   const AWAY = [['circle', { cx: 12, cy: 12, r: 8 }], ['path', { d: 'M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8' }]];
   let arrows = [];
+  const holds = new Set();                   // the stop() of every arrow held right now (a rebuild lets go first)
+  // the keyboard repeats a key thirty times a second: the pose is remembered once the key rests
+  let keyTimer = 0;
+  const rememberSoon = () => { clearTimeout(keyTimer); keyTimer = setTimeout(remember, 250); };
   function arrowAt(label, run) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -825,12 +829,13 @@
     b.setAttribute('aria-label', label);
     b.title = label;
     let timer = null, wait = null;
-    const stop = () => { clearTimeout(wait); clearInterval(timer); wait = timer = null; if (b.classList.contains('is-held')) { b.classList.remove('is-held'); remember(); } };
+    const stop = () => { holds.delete(stop); clearTimeout(wait); clearInterval(timer); wait = timer = null; if (b.classList.contains('is-held')) { b.classList.remove('is-held'); remember(); } };
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       b.setPointerCapture(e.pointerId);
       $('hint').hidden = true;
       b.classList.add('is-held');
+      holds.add(stop);
       run(1);
       // held: keep going at a steady speed (about 70 degrees a second), however fast the screen draws
       wait = setTimeout(() => {
@@ -841,12 +846,13 @@
     b.addEventListener('pointerup', stop);
     b.addEventListener('pointercancel', stop);
     b.addEventListener('lostpointercapture', stop);
-    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(1); remember(); } });
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(1); rememberSoon(); } });
     $('arrows').appendChild(b);
     return b;
   }
   // one arrow per direction of every way the picked part moves
   function buildArrows() {
+    holds.forEach((stop) => stop());          // an arrow held through a rebuild would keep moving the part
     $('arrows').textContent = '';
     arrows = [];
     if (!picked || simple) return;
@@ -2019,7 +2025,7 @@
     if (!move) return;
     e.preventDefault();
     light.az += move[0]; light.el = clamp(light.el + move[1], -20, 85);
-    lightChanged(false); remember();
+    lightChanged(false); rememberSoon();
   });
 
   $('resetView').addEventListener('click', () => { Object.assign(view, { az: 0, el: 8, dist: 5.2 }); placeCamera(); requestRender(); });
