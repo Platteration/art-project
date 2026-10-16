@@ -116,6 +116,7 @@
   const state = {
     source: null,      // HTMLImageElement or canvas
     baseName: 'sample-study',
+    sourceTitle: '',   // a dealt portrait's name in words (the key above is its id); a photo is named by its file
     isSample: true,    // the built-in sample is showing
     prep: null,        // Study.prepare() output
     result: null,      // Study.process() output
@@ -561,9 +562,10 @@
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
   // note: a sentence about the photo itself (it was reduced), said together with the marks line below
-  function useSource(img, name, baseName, note) {
+  function useSource(img, name, baseName, note, title) {
     state.source = img;
     state.baseName = baseName || 'portrait';
+    state.sourceTitle = title || '';
     window.dispatchEvent(new CustomEvent('studio:source')); // a new reference photo (its studies follow with studio:result)
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
     const marks = [
@@ -2648,7 +2650,7 @@
     // so if that takes a moment), never the blank sheet before it
     const go = () => {
       const r = ps.reference();
-      if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
+      if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id, '', r.title);
       setArt(ps.composite(), 'Studio painting', false);
       els.drawers.check.open = true;
       runSoon(0);
@@ -2777,6 +2779,7 @@
     savePng,
     openDialog,
     sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
+    sourceTitle: () => state.sourceTitle,
     settings,
     tab: () => state.tab,
     addColor,

@@ -103,7 +103,10 @@
       return fallback;
     }
   }
+  // set when Forget my work is pressed here or in another tab: nothing is written back before the page reloads
+  let forgetting = false;
   function save(key, value) {
+    if (forgetting) return;
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* storage unavailable: kept for this visit */ }
   }
   // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
@@ -123,6 +126,8 @@
     if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
     return list;
   }
+  // what a palette's mixes are kept under: My paints keeps its id whatever is ticked, so its paints count too
+  const paletteKey = (p) => `${p.id}:${p.codes.join(',')}`;
 
   const made = new Map();
   function paintFor(code) {
@@ -324,15 +329,15 @@
 
   let board = null;      // the board being set up or played
   let game = null;       // the game in progress or just scored
-  let setupFor = null;   // { from, level } the setup board was built for
+  let setupFor = null;   // { from, level, photo } the setup board was built for
 
   const level = () => (document.querySelector('input[name="gameLevel"]:checked') || {}).value || 'medium';
   const mode = () => els.mode.value;
   // bests are kept per mode; Classic's keys stay as they were
   const subjectKey = () => (subject.kind === 'painting' ? 'painting:' + subject.id : Studio.sourceKey());
   // the board's own picture, not the Study tab's current one: a board replayed after a new photo was loaded
-  // keeps its best where it was played
-  const bestKey = () => `${board && board.subjectKey ? board.subjectKey : subjectKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : els.palette.value}${mode() === 'classic' ? '' : '|' + mode()}`;
+  // keeps its best where it was played; the palette is the one played, not the menu's value
+  const bestKey = () => `${board && board.subjectKey ? board.subjectKey : subjectKey()}|${level()}|${mode() === 'mystery' ? 'mystery' : chosenPalette().id}${mode() === 'classic' ? '' : '|' + mode()}`;
 
   // ---- What to paint: the player's photo or a generated painting, dealt at random ----
 
@@ -354,7 +359,7 @@
     const key = Studio.source() ? Studio.sourceKey() : '';
     els.photoName.textContent = !key ? 'Load a photo to paint from it.'
       : key.startsWith('sample-study:') ? 'Painting from the sample portrait. Load your own photo to paint from it.'
-      : `Painting from ${key.replace(/:\d+x\d+$/, '')}.`;
+      : `Painting from ${Studio.sourceTitle() || key.replace(/:\d+x\d+$/, '')}.`;
     if (painting) els.paintingName.textContent = `You've been dealt a portrait after ${Subjects.painterOf(subject.id)}.`;
   }
 
@@ -371,20 +376,24 @@
 
   /*
    * The palette that mixes this board's colors best: the highest area-weighted match, and of
-   * palettes within a point of it, the one with fewest paints. Worked out once per board.
+   * palettes within a point of it, the one with fewest paints. Worked out once per board, and again
+   * when the choices change (paints ticked or unticked on the Study tab).
    */
   function suggestedPalette(b) {
-    if (!b.suggested) {
+    const choices = paletteChoices();
+    const key = choices.map(paletteKey).join('|');
+    if (!b.suggested || b.suggested.key !== key) {
       const colors = studyColors(b);
-      const rated = paletteChoices().map((p) => ({ p, cov: Mixing.coverage(p.codes.map(paintFor), colors) }));
+      const rated = choices.map((p) => ({ p, cov: Mixing.coverage(p.codes.map(paintFor), colors) }));
       const top = Math.max(...rated.map((r) => r.cov.match));
       const pick = rated.filter((r) => r.cov.match >= top - 1).sort((a, c) => a.p.codes.length - c.p.codes.length || c.cov.match - a.cov.match)[0];
-      b.suggested = { id: pick.p.id, cov: pick.cov };
+      b.suggested = { id: pick.p.id, cov: pick.cov, key };
     }
     return b.suggested;
   }
 
-  // A new board selects its suggested palette; otherwise the palette chosen stays
+  // A new board selects its suggested palette; otherwise the palette chosen stays, or, if it is gone
+  // (My paints unticked below two), the suggested one takes its place
   let paletteFor = null;
   function renderPalettes() {
     const keep = els.palette.value || load(PALETTE_KEY, 'zorn');
@@ -394,31 +403,32 @@
     choices.forEach((p) => els.palette.append(new Option(p.id === sug ? `${p.name} (suggested)` : p.name, p.id)));
     const fresh = board && paletteFor !== board;
     paletteFor = board;
-    els.palette.value = fresh && sug ? sug : choices.some((p) => p.id === keep) ? keep : 'zorn';
+    els.palette.value = fresh && sug ? sug : choices.some((p) => p.id === keep) ? keep : sug || 'zorn';
     showPalette();
   }
 
   /*
    * Each number's target with this palette: the closest recipe the pigment model finds for the
    * study's color, its amounts rounded to quarter parts (what the taps can add), and the color
-   * that recipe makes. Kept per board and palette. Worked out a few numbers per frame; resolves
-   * to the targets, or to null if the board or palette changed first.
+   * that recipe makes. Kept per board and palette (its paints). Worked out a few numbers per frame;
+   * resolves to the targets, or to null if the board or palette changed first.
    */
   function targetsFor(b, p) {
     b.targets = b.targets || {};
     b.mixing = b.mixing || {};
-    if (b.targets[p.id]) return Promise.resolve(b.targets[p.id]);
-    if (b.mixing[p.id]) return b.mixing[p.id];
+    const key = paletteKey(p);
+    if (b.targets[key]) return Promise.resolve(b.targets[key]);
+    if (b.mixing[key]) return b.mixing[key];
     const paints = p.codes.map(paintFor);
     const out = [];
     let k = 0, task = null;
-    const done = (v) => { delete b.mixing[p.id]; return v; };
-    return (b.mixing[p.id] = new Promise((resolve) => {
+    const done = (v) => { delete b.mixing[key]; return v; };
+    return (b.mixing[key] = new Promise((resolve) => {
       next();
       function next() {
-        if (board !== b || chosenPalette().id !== p.id) { resolve(null); return; }
+        if (board !== b || paletteKey(chosenPalette()) !== key) { resolve(null); return; }
         try { step(); } catch (err) { // a mixing error ends this palette's targets as "none", never a Start button stuck off
-          delete b.mixing[p.id];
+          delete b.mixing[key];
           if (window.StudioGuard) StudioGuard.report(err);
           resolve(null);
         }
@@ -441,7 +451,7 @@
           requestAnimationFrame(next);
           return;
         }
-        b.targets[p.id] = out;
+        b.targets[key] = out;
         resolve(out);
       }
     }).then(done));
@@ -471,7 +481,9 @@
 
   function chosenPalette() {
     if (mode() === 'mystery' && mystery) return mystery;
-    return paletteChoices().find((p) => p.id === els.palette.value) || paletteChoices()[0];
+    // a palette gone from the choices (My paints unticked below two) gives way to the suggested one
+    const choices = paletteChoices();
+    return choices.find((p) => p.id === els.palette.value) || (board && choices.find((p) => p.id === suggestedPalette(board).id)) || choices[0];
   }
 
   // What the chosen mode changes in the setup
@@ -515,12 +527,12 @@
         const close = t.filter((x) => x.studyMiss < Mixing.NEAR).length;
         els.paletteHint.textContent = `${lead} ${p.codes.length} paints, which mix ${close} of its ${t.length} colors closely. The reference is mixed from them, so every number can be matched exactly.`;
       };
-      const ready = b.targets && b.targets[p.id];
+      const ready = b.targets && b.targets[paletteKey(p)];
       els.start.disabled = !ready || boardTooSmall;
       if (ready) say(ready);
       else {
         targetsFor(b, p).then((t) => {
-          if (!t || board !== b || chosenPalette().id !== p.id) return;
+          if (!t || board !== b || paletteKey(chosenPalette()) !== paletteKey(p)) return;
           els.start.disabled = boardTooSmall;
           say(t);
         });
@@ -533,9 +545,10 @@
   function refreshSetup() {
     showSubject();
     if (subject.kind === 'photo' && (!Studio.source() || !Studio.result())) return;
-    // a new board whenever the reference (photo, its settings, or the painting) or the level changes
-    if (board && setupFor && setupFor.from === subjectStamp() && setupFor.level === level()) { showPalette(); return; }
-    setupFor = { from: subjectStamp(), level: level() };
+    // a new board whenever the reference (photo, its settings, or the painting) or the level changes; the
+    // same board rebuilds the palette menu, as the paints ticked on the Study tab may have changed
+    if (board && setupFor && setupFor.from === subjectStamp() && setupFor.level === level()) { renderPalettes(); return; }
+    setupFor = { from: subjectStamp(), level: level(), photo: Studio.source() };
     board = buildBoard(level());
     board.subjectKey = subjectKey();
     // a picture under 100 px on a side at the working size makes a board too small to see or tap
@@ -553,6 +566,7 @@
   // keep: play the board just played again, even if the Study tab's photo has changed meanwhile
   async function startGame(keep) {
     if (!keep || !board) refreshSetup();
+    else renderPalettes(); // the paints ticked on the Study tab may have changed since the setup showed
     const p = chosenPalette();
     const targets = await targetsFor(board, p);
     if (!targets) return; // the board or palette changed while it was being mixed
@@ -1629,7 +1643,7 @@
     const painting = subject.kind === 'painting';
     again.same.textContent = painting ? 'Same portrait' : 'Same photo';
     again.next.textContent = painting ? 'New portrait' : 'New photo';
-    const changed = !painting && setupFor && setupFor.from !== subjectStamp(); // a photo loaded on the Study tab mid-game
+    const changed = !painting && setupFor && setupFor.photo !== Studio.source(); // a photo loaded on the Study tab mid-game, not just a setting there
     again.hint.textContent = painting ? 'Try the same portrait again, or take on a new one?' : changed ? 'The photo on the Study tab has changed since this game began. Same photo plays the one just played; New photo loads another.' : 'Try the same photo again, or load a new one?';
     if (again.dialog.showModal) again.dialog.showModal(); else startGame();
     again.same.focus();
@@ -1671,12 +1685,17 @@
   }));
   els.reroll.addEventListener('click', () => setSubject({ kind: 'painting', id: deal() }));
 
+  // Forget my work, here or in another tab (the page reloads soon after): the clock stops and the game ends
+  // unscored, so a portrait that locks in meanwhile writes no best back
+  window.addEventListener('studio:forget', () => { forgetting = true; clearInterval(timer); if (game) game.over = true; });
   // the setup shows the current reference; a game in progress keeps the one it started with
   window.addEventListener('studio:result', () => { if (Studio.tab() === 'game' && !game) refreshSetup(); });
   // loading a photo from the game's setup means painting from it
   // a photo that arrives while the setup shows a dealt painting (Load another photo, a drop or a paste) is
   // what the visitor means to paint: the setup switches to My photo
   window.addEventListener('studio:source', () => { if (Studio.tab() === 'game' && !game && subject.kind !== 'photo') setSubject({ kind: 'photo' }, false); });
+  // paints ticked in another open tab of this site, as the Study tab's list follows them: so does the setup's menu
+  window.addEventListener('storage', (e) => { if (e.key === MINE_KEY && Studio.tab() === 'game' && !game) renderPalettes(); });
   window.addEventListener('studio:tab', (e) => {
     setFocus(e.detail === 'game' && !!game && !game.over);
     if (e.detail !== 'game') return;
