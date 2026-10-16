@@ -21,7 +21,7 @@
 //   limits      the fifty boards (Paint by numbers and Value battle), the twelve poses and what is one past them
 import fs from 'node:fs';
 import path from 'node:path';
-import { openPage, newTab, clean, tab, app, poseFrame, stroke, click, text, visible, sleep, storageGet, makeImage, loadPhoto, DESKTOP } from '../lib.mjs';
+import { openPage, newTab, clean, tab, app, stroke, click, text, sleep, storageGet, makeImage, loadPhoto } from '../lib.mjs';
 
 const P = 'portrait-value-studio.', PL = 'pose-and-light.';
 const ONLY = (process.env.PERSIST_ONLY || '').split(',').filter(Boolean);
@@ -43,7 +43,6 @@ const pressed = (page, sel) => app(page).evaluate((s) => { const e = document.qu
 const checked = (page, sel) => app(page).evaluate((s) => { const e = document.querySelector(s); return e ? !!e.checked : null; }, sel);
 const val = (page, sel) => app(page).evaluate((s) => { const e = document.querySelector(s); return e ? e.value : null; }, sel);
 const toastNow = (page) => app(page).evaluate(() => { const e = document.getElementById('toast'); return e.classList.contains('show') ? e.textContent.trim() : ''; });
-const dropLogged = (page, re) => { page.log.console = page.log.console.filter((m) => !re.test(m)); page.log.pageerrors = page.log.pageerrors.filter((m) => !re.test(m)); };
 // the segment's checks: a thrown error in it is one failed check, not the end of the case
 async function runPool(t, site, n) {
   const queue = jobs.filter((j) => !ONLY.length || ONLY.includes(j.name)).sort((a, b) => b.cost - a.cost);
@@ -145,6 +144,8 @@ seg('visit', 25, async (t, site, pages) => {
   for (const name of ['loomis', 'help', 'game', 'battle', 'figure', 'study']) await tab(page, name, { wait: false }).then(() => sleep(400));
   t.check((await keysOf(page)).length === 0, 'opening the Study, Loomis, How to use, Paint by numbers, Value battle and Figure study tabs stores nothing', await keysOf(page));
   await openStudio(page);
+  const note1 = await toastNow(page);
+  t.check(/Your painting is saved in this browser as you go\./.test(note1), 'the first time the Studio opens it says the painting is saved in this browser as you go', note1);
   t.check(J(await keysOf(page)) === J([P + 'studioNotice']), 'opening the Studio stores one thing: whether its one-time saving note was shown (the README lists it)', await keysOf(page));
   const other = await app(page).evaluate(async () => ({
     session: sessionStorage.length, cookie: document.cookie,
@@ -156,6 +157,8 @@ seg('visit', 25, async (t, site, pages) => {
   t.check(!other.databases || other.databases.every((n) => n === 'portrait-value-studio'), 'the one database is portrait-value-studio, the one the README names', other.databases);
   const rec = await record(page);
   t.check(rec === null, 'a Studio never painted on has no saved painting', rec);
+  await reload(page); await openStudio(page);
+  t.check(!/saved in this browser as you go/.test(await toastNow(page)), 'and it does not say so again on the next visit', await toastNow(page));
   // Pose and light on its own page: opening it, choosing a pose, the mode switch and Save this pose write exactly the three keys the README lists
   const pose = await open(pages, site, { url: 'pose.html' });
   await pose.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
@@ -168,7 +171,7 @@ seg('visit', 25, async (t, site, pages) => {
   t.check(Array.isArray(kept) && kept.length === 1 && !JSON.stringify(kept).includes('data:') && typeof kept[0].p === 'object' && JSON.stringify(kept).length < 4000, 'a saved pose is joint angles and a viewpoint, no picture (the Privacy table)', { n: kept.length, bytes: JSON.stringify(kept).length });
   const readme = fs.readFileSync(path.join(site.root, 'README.md'), 'utf8');
   const claims = /Save this pose\*\* keeps up to 12 of your own, with pictures, in this browser/.test(readme);
-  t.check(!claims, 'the README says the same thing twice about saved poses: joint angles and a viewpoint, no pictures', claims ? 'Pose library: "keeps up to 12 of your own, with pictures, in this browser"' : '');
+  t.check(!claims, 'the README describes a saved pose the same way in both places it does: joint angles and a viewpoint, no pictures', claims ? 'Pose library: "keeps up to 12 of your own, with pictures, in this browser"' : '');
   if (claims) t.finding({
     title: 'The README says saved poses are kept "with pictures"; the Privacy section, and the code, say no pictures',
     severity: 'low',
@@ -392,40 +395,55 @@ seg('studio', 60, async (t, site, pages) => {
   const base = await waitRecord(page, (r) => r.savedAt > Date.now() - 600000 && r.paper);
   const full = await band(page, ...BOTTOM);
   t.check(!!base && full > 100, 'a stroke is saved a moment after it is made', { full, base });
-  const lone = await app(page).evaluate(() => PaintStudio.ready() && true);
-  // -- a stroke followed by a reload, three ways: at once, a moment later and while the save is under way; then well after it
+  // -- a stroke followed by a reload: at once, while the save is under way, and well after it
   let topFull = 0;
   const trials = {};
-  for (const wait of [0, 300, 900, 2500]) {
-    await openStudio(page);
-    const wasTop = await band(page, ...TOP);
-    await line(page, 0.2);
-    if (!topFull) topFull = (await band(page, ...TOP)) - wasTop;
+  async function trial(pg, wait, into) {
+    await openStudio(pg);
+    const wasTop = await band(pg, ...TOP);
+    await line(pg, 0.2);
+    if (!topFull) topFull = (await band(pg, ...TOP)) - wasTop;
     await sleep(wait);
-    await reload(page);
-    await openStudio(page);
-    const b = await band(page, ...BOTTOM), tp = await band(page, ...TOP);
-    trials[wait] = { bottom: b, top: tp };
-    t.check(b > full * 0.9, `a reload ${wait} ms after a stroke leaves the painting saved before it whole`, { full, bottom: b });
-    if (wait === 2500) t.check(tp > topFull * 0.8, 'a stroke followed by a reload 2.5 s later is kept', { topFull, top: tp });
-    else t.check(tp === 0 || tp > topFull * 0.8, `a reload ${wait} ms after a stroke keeps the stroke whole or not at all, never half of it`, { topFull, top: tp });
-    if (wait !== 2500) {
-      // clear the top line for the next trial: paint over by clearing the whole paper and the baseline again is not needed, so the trial only counts what is new
-      await app(page).evaluate(() => { const c = document.getElementById('ps-paper'); const g = c.getContext('2d'); g.clearRect(0, 0, c.width, Math.floor(c.height * 0.5)); });
-      await line(page, 0.8); // (a stroke elsewhere, so the cleared top is saved too)
-      await waitRecord(page, (r) => r.savedAt > Date.now() - 4000);
-    }
+    await reload(pg);
+    await openStudio(pg);
+    into[wait] = { bottom: await band(pg, ...BOTTOM), top: await band(pg, ...TOP) };
+    // a fresh start for the next trial: the top half cleared and saved (by a stroke elsewhere, which also makes the record newer)
+    await app(pg).evaluate(() => { const c = document.getElementById('ps-paper'); c.getContext('2d').clearRect(0, 0, c.width, Math.floor(c.height * 0.5)); });
+    await line(pg, 0.8);
+    const mark = Date.now();
+    await waitRecord(pg, (r) => r.savedAt > mark);
+    return into[wait];
   }
-  t.note(`a stroke followed by a reload: after 0 ms the stroke ${trials[0].top > 0 ? 'was kept' : 'was lost'}, after 300 ms ${trials[300].top > 0 ? 'was kept' : 'was lost'}, after 900 ms ${trials[900].top > 0 ? 'was kept' : 'was lost'}, after 2500 ms ${trials[2500].top > 0 ? 'was kept' : 'was lost'}`);
-  t.check(trials[0].top > 0 && trials[300].top > 0, 'a stroke made less than a second before the page goes (a reload, a closed tab) is still saved: the README says a closed tab loses nothing', trials);
-  if (trials[0].top === 0 && trials[300].top === 0) t.finding({
-    title: 'A stroke made less than about a second before a reload or a closed tab is lost: the save on pagehide never finishes',
+  for (const wait of [0, 900, 2500]) {
+    const r = await trial(page, wait, trials);
+    t.check(r.bottom > full * 0.9, `a reload ${wait} ms after a stroke leaves the painting saved before it whole`, { full, bottom: r.bottom });
+    if (wait === 2500) t.check(r.top > topFull * 0.8, 'a stroke followed by a reload 2.5 s later is kept', { topFull, top: r.top });
+    else t.check(r.top === 0 || r.top > topFull * 0.8, `a reload ${wait} ms after a stroke keeps the stroke whole or not at all, never half of it`, { topFull, top: r.top });
+  }
+  t.note(`a stroke followed by a reload, on this machine: after 0 ms the stroke ${trials[0].top > 0 ? 'was kept' : 'was lost'}, after 900 ms ${trials[900].top > 0 ? 'was kept' : 'was lost'}, after 2500 ms ${trials[2500].top > 0 ? 'was kept' : 'was lost'} (whether the save on pagehide gets done depends on how fast the paper is encoded and the next page arrives)`);
+  // the same on a device that takes a few hundred milliseconds to encode the paper (a phone or an iPad, or a busy computer): the page
+  // is gone before the pictures are
+  const slow = await open(pages, site);
+  await slow.addInitScript(() => { const orig = HTMLCanvasElement.prototype.toBlob; HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) { setTimeout(() => orig.call(this, cb, ...rest), 400); }; });
+  await reload(slow);
+  await openStudio(slow);
+  await line(slow, 0.8);
+  await waitRecord(slow, (r) => r.savedAt > Date.now() - 600000 && r.paper, 30000);
+  const slowTrials = {};
+  for (const wait of [0, 300]) {
+    const r = await trial(slow, wait, slowTrials);
+    t.check(r.bottom > full * 0.9, `on a slow device a reload ${wait} ms after a stroke leaves the painting saved before it whole`, { full, bottom: r.bottom });
+  }
+  t.check(slowTrials[0].top > 0 && slowTrials[300].top > 0, 'a stroke made a moment before the page goes (a reload, a closed tab) is still there next time, on a device that takes 0.4 s to encode the paper: the Help tab says a closed tab loses nothing', { slow: slowTrials, here: trials });
+  if (slowTrials[0].top === 0 && slowTrials[300].top === 0) t.finding({
+    title: 'A stroke made less than about a second before a reload or a closed tab is lost: the save on pagehide cannot finish',
     severity: 'low',
-    steps: '1. Open the Studio (index.html#paint) and paint a stroke across the paper; wait two seconds (it is saved). 2. Paint a second stroke and reload the page (or close the tab) at once, 300 ms after the stroke, or 900 ms after it. 3. Open the Studio again.',
-    expected: 'README, Simple and Advanced: "The Studio keeps your work: the paper, the underdrawing, ... are saved in the browser a moment after each change ... and come back on the next visit"; the Help tab: "Close the tab, come back later, and it is still there." js/painting.js says the page saves what is waiting as it goes (pagehide), "so a closed tab ... loses nothing".',
-    actual: `The second stroke is gone after the reload when the page goes 0 or 300 ms after it${trials[900].top === 0 ? ' or 900 ms after it' : ' (and, on a busy machine, 900 ms after it)'}; the stroke is kept when the page goes 2.5 s after it, and the painting saved before is intact in every case: ${J(trials)}.`,
-    cause: 'js/painting.js saveNowIfDue (about 528) answers pagehide by calling saveNow, but saveNow awaits two canvas.toBlob() encodings and then an IndexedDB write (about 474-480); a page that is unloading does not stay alive for them, so the record is never written. A save already under way (the 800 ms delay has passed, the PNGs are being encoded) is cut off the same way. Taking the pixels synchronously at pagehide (getImageData, put into the record as ImageData) or encoding after every stroke ends would keep it.',
+    steps: '1. Open the Studio (index.html#paint) on a phone, a tablet or a busy computer (here: a browser whose canvas.toBlob takes 0.4 s) and paint a stroke across the paper; wait two seconds (it is saved). 2. Paint a second stroke and reload the page (or close the tab) at once, or 300 ms after the stroke. 3. Open the Studio again.',
+    expected: 'README, Simple and Advanced: "The Studio keeps your work: the paper, the underdrawing, ... are saved in the browser a moment after each change ... and come back on the next visit"; the Help tab: "Close the tab, come back later, and it is still there." js/painting.js says that a change still waiting is saved as the page goes (pagehide).',
+    actual: `The second stroke is gone after the reload at 0 and 300 ms (${J(slowTrials)}); the painting saved before it is whole. In this browser at normal speed: ${J(trials)} (the save is a race with the unload, and on this machine ${trials[0].top > 0 ? 'it was won' : 'it was lost too'}).`,
+    cause: 'js/painting.js saveNowIfDue (about 528) answers pagehide by calling saveNow, but saveNow awaits two canvas.toBlob() encodings and then an IndexedDB write (about 474-480), none of which a page that is unloading is given time for, so the record is never written. A save already under way (the 800 ms delay has passed, the pictures are being encoded) is cut off the same way. Taking the pixels synchronously at pagehide (getImageData, put in the record as ImageData) or encoding after every stroke ends, not 0.8 s later, would keep it.',
   });
+  await clean(t, slow, 'studio: slow encoder');
 
   // -- hiding the page (a phone switching apps) saves at once, and the page stays up to finish it
   await openStudio(page);
@@ -462,6 +480,17 @@ seg('studio', 60, async (t, site, pages) => {
   await waitRecord(page, (r) => r.savedAt > mark);
   await reload(page); await openStudio(page);
   t.check((await band(page, ...BOTTOM)) > 100, 'a paper brought back by Undo is the paper that is saved, and it is back after a reload', await band(page, ...BOTTOM));
+  // Undo after a restore goes back to the painting that came back (not to a blank paper), and that is what is kept
+  await openStudio(page);
+  const restoredInk = await band(page, ...BOTTOM);
+  await line(page, 0.2);
+  t.check((await band(page, ...TOP)) > 100, 'a stroke on a restored painting is drawn');
+  await click(page, '#ps-undo');
+  t.check((await band(page, ...TOP)) === 0 && (await band(page, ...BOTTOM)) > restoredInk * 0.9, 'and Undo takes back that stroke only, not the painting that came back', [await band(page, ...TOP), await band(page, ...BOTTOM), restoredInk]);
+  const undoMark = Date.now();
+  await waitRecord(page, (r) => r.savedAt > undoMark);
+  await reload(page); await openStudio(page);
+  t.check((await band(page, ...TOP)) === 0 && (await band(page, ...BOTTOM)) > restoredInk * 0.9, 'and after a reload the painting is the one Undo left', [await band(page, ...TOP), await band(page, ...BOTTOM)]);
   await clean(t, page, 'studio');
 });
 
