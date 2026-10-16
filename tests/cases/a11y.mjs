@@ -271,9 +271,9 @@ export default async function a11y(t, site) {
         title: 'Clearing the picked colors from the keyboard drops the focus on the page',
         severity: 'low',
         steps: '1. Study tab, open Colors and paints and press Add block colors to picked colors. 2. Open Picked colors, Tab to Clear, press Enter, then Enter again ("Click again to clear"). 3. Press Tab or read where the focus is.',
-        expected: 'The focus stays in the drawer (its header, or the empty note), as it does when a single color is removed with ×: "keep keyboard focus in the list" (js/app.js:1131).',
+        expected: 'The focus stays in the drawer (its header, or the empty note), as it does when a single color is removed with ×: "keep keyboard focus in the list" (js/app.js:1130).',
         actual: `The colors are cleared and every palette button is disabled, Clear with them; document.activeElement is ${label(cleared)}, so the next Tab starts again from the top of the page and a screen reader is told nothing.`,
-        cause: 'js/app.js:1144 (renderPalette) disables Sort, Copy, Save and Clear when the list is empty, including the Clear button that has the focus, and the Clear handler (js/app.js:1203-1216) moves the focus nowhere, unlike the × handler (js/app.js:1129-1134).',
+        cause: 'js/app.js:1144 (renderPalette) disables Sort, Copy, Save and Clear when the list is empty, including the Clear button that has the focus, and the Clear handler (js/app.js:1203-1216) moves the focus nowhere, unlike the × handler (js/app.js:1124-1134).',
       });
     }
 
@@ -394,7 +394,9 @@ export default async function a11y(t, site) {
     checkWalk(t, 'Loomis head, phone', lw, { names: true });
     // the photo takes no focus and no key places a mark: the whole tool waits for a pointer
     const onStage = lw.stops.filter((x) => !x.body && /^lh-(overlay|photo|stage|wrap)$/.test(x.elId));
-    for (const k of ['Enter', ' ', 'ArrowRight']) await page.keyboard.press(k === ' ' ? 'Space' : k).catch(() => null);
+    // the keys a visitor would try on the photo, with the focus on the page (not on ← or Load a photo, which they would press)
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    for (const k of ['Enter', 'Space', 'ArrowRight']) await page.keyboard.press(k);
     const lh = await page.evaluate(() => ({ ask: document.getElementById('lh-ask').textContent, lock: document.getElementById('lh-lock').disabled, overlayTab: document.getElementById('lh-overlay').tabIndex, stops: [...document.querySelectorAll('#lh-root button, #lh-root [tabindex]')].filter((b) => !b.disabled && b.offsetParent).map((b) => b.getAttribute('aria-label') || b.textContent.trim()) }));
     if (!t.check(onStage.length > 0 || !lh.lock, 'Loomis head: a keyboard visitor can place the first mark (the photo takes the focus, or a key places a mark and Lock in comes on)', { ...lh, onStage: onStage.map(label) })) {
       t.finding({

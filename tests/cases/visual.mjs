@@ -411,13 +411,13 @@ const KNOWN = [
     kind: 'clipped', sig: /^div\.game-bar$/, severity: 'medium',
     title: 'Paint by numbers at 320 px: the progress line is squeezed into a column about 8 px wide and runs out above and beside its bar',
     expected: 'The game bar holds its timer, its progress line ("0 of 11 numbers painted") and its buttons inside its border at every phone width (README: "the timer bar, the painting and the palette fill the screen").',
-    cause: 'styles.css:1057 (inside the `max-width: 999px` block that starts at styles.css:1039) sets `.game-bar { flex-wrap: nowrap }`, so the timer, the sound and quit buttons, Lock in portrait and the gaps take all but about 8 px of the 286 px bar, and `.game-progress { flex: 1; min-width: 0 }` (styles.css:835-850, 1059) is left that 8 px; the paragraph then breaks one word per line and its text runs past the bar\'s top and side (screenshot: tests/screens/visual-scratch-gamebar-320.png).',
+    cause: 'styles.css:1057 (inside the `max-width: 999px` block that starts at styles.css:1039) sets `.game-bar { flex-wrap: nowrap }`, so the timer, the sound and quit buttons, Lock in portrait and the gaps take all but about 8 px of the 286 px bar, and `.game-progress` takes that space (`flex: 1` at styles.css:847, `min-width: 0` at styles.css:1059), so it is left about 8 px; the paragraph then breaks one word per line and its text runs past the bar\'s top and side (screenshot: tests/screens/visual-scratch-gamebar-320.png).',
   },
   {
     kind: 'contrast', sig: /^span#vb-score\.vb-score$/, severity: 'medium',
     title: 'Value battle: the round counter ("Round 1") is 3.8:1 on the primer-gray board, under the 4.5:1 for body text',
     expected: 'Body text reaches 4.5:1 against the board (WCAG AA). README: "Everything lives on the board: the streak, round and clock along its top with the quit button".',
-    cause: 'styles.css:1666 `.vb-score { opacity: 0.8 }` fades the score text on the #8c8a86 board (styles.css:1658). The bar\'s #1c1a17 text is 4.9:1 as the comment at styles.css:1660 says, but the 0.8 opacity blends it to #32302d, which is 3.8:1.',
+    cause: 'styles.css:1666 `.vb-score { opacity: 0.8 }` fades the score text on the #8c8a86 board (styles.css:1658). The bar\'s #1c1a17 text is about 5:1 on that board (the comment at styles.css:1660 says 4.9:1), but the 0.8 opacity blends the score to #32302d, which is 3.8:1.',
   },
   {
     kind: 'contrast', sig: /^p#vb-question\.vb-question$/, severity: 'low',
