@@ -17,7 +17,7 @@
 // depends on; and the phone width.
 import fs from 'node:fs';
 import path from 'node:path';
-import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
+import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, axe, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
 
 const EXAMPLE_LABEL = 'Example painting · a made-up attempt at the sample: lifted shadows, warmer skin, and photographed slightly tilted. Line it up below to see the score change. Load your own to replace it.';
 const NO_ART_LABEL = 'Load a photo of your finished painting to score it against the reference.';
@@ -100,12 +100,14 @@ const PATCHES = [
 ];
 const PATCH = 80, STEP = 100, MARGIN = 10;
 const patchAt = (i) => [MARGIN + STEP * (i % 6) + PATCH / 2, MARGIN + STEP * Math.floor(i / 6) + PATCH / 2]; // its centre, in the painting's pixels
+// (patches: true for PATCHES, or a list of [name, rgb] laid out the same way)
 async function ownPixels(page, { patches = false, name } = {}) {
+  const list = patches === true ? PATCHES : patches || null;
   const dataUrl = await page.evaluate(([patches, P, S, M]) => {
     const o = document.getElementById('cv-orig'); const c = document.createElement('canvas'); c.width = o.width; c.height = o.height; const g = c.getContext('2d'); g.drawImage(o, 0, 0);
     if (patches) patches.forEach((p, i) => { g.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`; g.fillRect(M + S * (i % 6), M + S * Math.floor(i / 6), P, P); });
     return c.toDataURL('image/png');
-  }, [patches ? PATCHES.map((p) => p[1]) : null, PATCH, STEP, MARGIN]);
+  }, [list ? list.map((p) => p[1]) : null, PATCH, STEP, MARGIN]);
   const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
   return { name: name || (patches ? 'patches.png' : 'same.png'), mimeType: m[1], buffer: Buffer.from(m[2], 'base64') };
 }
@@ -122,7 +124,187 @@ function checkScorecard(t, s, label) {
   t.check(s.list.filter((l) => l.cls === 'fix').every((li, i) => li.num === String(i + 1)), `${label}: the differences are numbered 1 to ${s.list.length}`, s.list.map((l) => l.num));
 }
 
+// ---- helpers for the checks added from the coverage list ----------------------------------------------------
+
+const LINE_RED = '#e5322d'; // the Lines tool's first color (index.html, lcRed)
+const UNIT_YELLOW = [255, 210, 31]; // the unit measure's label (app.js UNIT_COLOR)
+// one entry of What to fix first, read into its numbers
+const FIX_PARTS = /^(\d{1,3})% match · (Shadow|Middle|Light) shape · (\d+\.\d)% of picture · ΔE (\d+\.\d) · (#[0-9A-F]{6}) → (#[0-9A-F]{6})$/;
+const fixesOf = (s) => s.list.filter((l) => l.cls === 'fix').map((li) => { const m = FIX_PARTS.exec(li.meta || '') || []; return { num: li.num, note: li.note || '', pct: +m[1], zone: m[2], share: +m[3], dE: +m[4], ref: m[5], art: m[6], swatches: li.swatches }; });
+// the README's per-shape score, 100 − 2.5 × ΔE (never below 0): the page shows ΔE to 0.1 (± 0.125 once scaled)
+// and the percentage rounded (± 0.5)
+const pctFits = (pct, dE) => Number.isFinite(pct) && Number.isFinite(dE) && Math.abs(pct - Math.max(0, 100 - 2.5 * dE)) <= 0.63;
+const cssHex = (rgb) => '#' + rgb.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+const chipHexes = (chip) => (chip.match(/rgb\(\d+, \d+, \d+\)/g) || []).map((c) => cssHex(c.match(/\d+/g).map(Number)));
+// does the overlay over a view hold a pixel of this color within `reach` px of the point (fractions of the
+// image)? (as study-tools.mjs reads it)
+const overlayHas = (page, id, fx, fy, color, reach = 4, tol = 28) => page.evaluate(([id, fx, fy, color, reach, tol]) => {
+  const o = document.getElementById(id).nextElementSibling; if (!o.width) return false;
+  const g = o.getContext('2d'); const cx = Math.round(fx * o.width), cy = Math.round(fy * o.height);
+  const want = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  const x0 = Math.max(0, cx - reach), y0 = Math.max(0, cy - reach);
+  const d = g.getImageData(x0, y0, Math.min(o.width - x0, 2 * reach + 1), Math.min(o.height - y0, 2 * reach + 1)).data;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200 && Math.abs(d[i] - want[0]) <= tol && Math.abs(d[i + 1] - want[1]) <= tol && Math.abs(d[i + 2] - want[2]) <= tol) return true;
+  return false;
+}, [id, fx, fy, color, reach, tol]);
+const toolCount = (page, tool) => page.evaluate((t) => +(document.querySelector(`[data-tool="${t}"]`).dataset.count || 0), tool);
+async function download(page, act, timeout = 8000) {
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout }).catch(() => null), act()]);
+  if (!dl) return null;
+  const p = await dl.path().catch(() => null);
+  return { name: dl.suggestedFilename(), buf: p ? fs.readFileSync(p) : Buffer.alloc(0) };
+}
+// a downloaded PNG decoded in the page (from its bytes: no request): its size, pixels at points, how many pixels
+// have an exact color, and whether a color lies near a point (fractions)
+const pngRead = (page, buf, spec) => page.evaluate(async ([b64, spec]) => {
+  const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const bmp = await createImageBitmap(new Blob([u], { type: 'image/png' }));
+  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
+  const W = c.width, d = g.getImageData(0, 0, W, c.height).data;
+  const at = (spec.at || []).map(([x, y]) => [d[(y * W + x) * 4], d[(y * W + x) * 4 + 1], d[(y * W + x) * 4 + 2]]);
+  const count = (spec.count || []).map((rgb) => { let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] === rgb[0] && d[i + 1] === rgb[1] && d[i + 2] === rgb[2]) n++; return n; });
+  const near = (spec.near || []).map(([fx, fy, hex, reach]) => {
+    const want = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); const cx = Math.round(fx * W), cy = Math.round(fy * c.height);
+    for (let y = Math.max(0, cy - reach); y <= Math.min(c.height - 1, cy + reach); y++) for (let x = Math.max(0, cx - reach); x <= Math.min(W - 1, cx + reach); x++) { const i = (y * W + x) * 4; if (Math.abs(d[i] - want[0]) <= 28 && Math.abs(d[i + 1] - want[1]) <= 28 && Math.abs(d[i + 2] - want[2]) <= 28) return true; }
+    return false;
+  });
+  return { w: W, h: c.height, at, count, near };
+}, [buf.toString('base64'), spec]);
+// the boxes (canvas px) of clusters of one exact color on a canvas, with the boxes inside another box dropped (a
+// white label's ring holds its digits); `fill` is the share of its box the cluster covers
+const clusters = (page, id, rgb, reach = 2) => page.evaluate(([id, rgb, reach]) => {
+  const c = document.getElementById(id); const W = c.width, H = c.height; const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+  const on = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) on[i] = d[i * 4] === rgb[0] && d[i * 4 + 1] === rgb[1] && d[i * 4 + 2] === rgb[2] ? 1 : 0;
+  const seen = new Uint8Array(W * H); const boxes = [];
+  for (let i = 0; i < W * H; i++) {
+    if (!on[i] || seen[i]) continue;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1, n = 0; const st = [i]; seen[i] = 1;
+    while (st.length) {
+      const j = st.pop(); const x = j % W, y = (j / W) | 0; n++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (let dy = -reach; dy <= reach; dy++) for (let dx = -reach; dx <= reach; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const k = yy * W + xx; if (on[k] && !seen[k]) { seen[k] = 1; st.push(k); } }
+    }
+    boxes.push({ x0, y0, x1, y1, n, fill: n / ((x1 - x0 + 1) * (y1 - y0 + 1)) });
+  }
+  return { W, H, boxes: boxes.filter((b) => !boxes.some((o) => o !== b && o.x0 <= b.x0 && o.y0 <= b.y0 && o.x1 >= b.x1 && o.y1 >= b.y1)) };
+}, [id, rgb, reach]);
+// the reference's own pixels with one known change, drawn in the page (spec.kind):
+//   'lab'    every pixel moved in CIELAB: dL added to L*, a* and b* times `chroma`, and `warm` units toward 50° in
+//            a*b* (the page's warm direction)
+//   'shift'  drawn dx px to the right, magenta behind;  'turn'  turned `deg` and enlarged `f` about the centre, on
+//            mid gray;  'zone'  the reference's lightest or darkest value zone (read off the Dark, middle, light
+//            panel) painted one flat color;  'pad'  magenta bars `pad` px wide either side;  'squash'  drawn into w × h
+const VARIANT = (spec) => {
+  const o = document.getElementById('cv-orig'); const W = o.width, H = o.height;
+  const c = document.createElement('canvas'); const g = c.getContext('2d', { willReadFrequently: true }); const info = {};
+  g.imageSmoothingQuality = 'high';
+  if (spec.kind === 'pad') { c.width = W + 2 * spec.pad; c.height = H; g.fillStyle = '#ff00ff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(o, spec.pad, 0); }
+  else if (spec.kind === 'squash') { c.width = spec.w; c.height = spec.h; g.drawImage(o, 0, 0, spec.w, spec.h); }
+  else {
+    c.width = W; c.height = H;
+    g.fillStyle = spec.kind === 'shift' ? '#ff00ff' : '#7f7f7f'; g.fillRect(0, 0, W, H);
+    g.save();
+    if (spec.kind === 'shift') g.drawImage(o, spec.dx, 0);
+    else if (spec.kind === 'turn') { g.translate(W / 2, H / 2); g.rotate(((spec.deg || 0) * Math.PI) / 180); g.scale(spec.f || 1, spec.f || 1); g.drawImage(o, -W / 2, -H / 2); }
+    else g.drawImage(o, 0, 0);
+    g.restore();
+    const img = g.getImageData(0, 0, W, H), d = img.data;
+    if (spec.kind === 'lab') {
+      const K = 24389 / 27, E = 216 / 24389, inv = (f) => (f * f * f > E ? f * f * f : (116 * f - 16) / K);
+      const enc = (v) => { v = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return Math.max(0, Math.min(255, Math.round(v * 255))); };
+      const wa = Math.cos((50 * Math.PI) / 180), wb = Math.sin((50 * Math.PI) / 180), k = spec.chroma === undefined ? 1 : spec.chroma;
+      for (let p = 0; p < d.length; p += 4) {
+        const [L, a, b] = window.Study.rgbToLab(d[p], d[p + 1], d[p + 2]);
+        const L2 = Math.max(0, Math.min(100, L + (spec.dL || 0))), a2 = a * k + (spec.warm || 0) * wa, b2 = b * k + (spec.warm || 0) * wb;
+        const fy = (L2 + 16) / 116, fx = fy + a2 / 500, fz = fy - b2 / 200;
+        const X = 0.95047 * inv(fx), Y = L2 > K * E ? fy * fy * fy : L2 / K, Z = 1.08883 * inv(fz);
+        d[p] = enc(3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z); d[p + 1] = enc(-0.969266 * X + 1.8760108 * Y + 0.041556 * Z); d[p + 2] = enc(0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z);
+      }
+      g.putImageData(img, 0, 0);
+    } else if (spec.kind === 'zone') {
+      const v = document.getElementById('cv-value').getContext('2d').getImageData(0, 0, W, H).data;
+      let lo = 255, hi = 0; for (let p = 0; p < v.length; p += 4) { if (v[p] < lo) lo = v[p]; if (v[p] > hi) hi = v[p]; }
+      const want = spec.zone === 'light' ? hi : lo; let n = 0;
+      for (let p = 0; p < d.length; p += 4) if (v[p] === want) { d[p] = spec.rgb[0]; d[p + 1] = spec.rgb[1]; d[p + 2] = spec.rgb[2]; n++; }
+      g.putImageData(img, 0, 0); info.share = n / (W * H);
+    }
+  }
+  return { url: c.toDataURL('image/png'), info };
+};
+async function variant(page, name, spec) {
+  const r = await page.evaluate(VARIANT, spec);
+  const m = /^data:([^;]+);base64,(.*)$/.exec(r.url);
+  return { file: { name, mimeType: m[1], buffer: Buffer.from(m[2], 'base64') }, info: r.info };
+}
+// spots at the edges of the one gain limit that can bind (blue's: see the note where they are used), just inside
+// and just outside, each a white tinted the way lamps and daylight tint one (green within 10% of red^0.6 × blue^0.4,
+// as js/app.js tintedByLight reads it), computed with the page's own neutralGains; then plain spots for the moves
+const EDGES = [
+  ['cool white needing blue ×0.53 (just inside: no channel halved)', [162, 192, 255], 'accept'],
+  ['cool white needing blue ×0.49 (blue halved)', [147, 186, 255], 'refuse'],
+  ['warm white needing blue ×2.96 (just inside: blue at most tripled)', [255, 197, 127], 'accept'],
+  ['warm white needing blue ×3.05 (past tripled)', [254, 195, 124], 'refuse'],
+  ['warm-tinted white', [231, 215, 184], 'accept'],
+  ['cool-tinted white', [184, 209, 231], 'accept'],
+  ['skin', [224, 172, 140], 'refuse'],
+];
+// when the Studio last wrote its painting into the browser's database (0: never)
+const studioSavedAt = (page) => page.evaluate(() => new Promise((res) => {
+  const r = indexedDB.open('portrait-value-studio');
+  r.onsuccess = () => { try { const q = r.result.transaction('studio').objectStore('studio').get('painting'); q.onsuccess = () => { res(q.result ? q.result.savedAt || 0 : 0); r.result.close(); }; q.onerror = () => res(0); } catch (e) { res(0); } };
+  r.onerror = () => res(0);
+}));
+// a slow device's database: every indexedDB.open answers 1.5 s late (an init script: the page's own code is untouched)
+const SLOW_DB = () => {
+  const real = IDBFactory.prototype.open;
+  IDBFactory.prototype.open = function open(...args) {
+    const req = { result: null, error: null, onsuccess: null, onerror: null, onupgradeneeded: null }; const self = this;
+    setTimeout(() => {
+      const r = real.apply(self, args);
+      r.onupgradeneeded = (e) => { req.result = r.result; if (req.onupgradeneeded) req.onupgradeneeded(e); };
+      r.onsuccess = (e) => { req.result = r.result; if (req.onsuccess) req.onsuccess(e); };
+      r.onerror = (e) => { req.error = r.error; if (req.onerror) req.onerror(e); };
+    }, 1500);
+    return req;
+  };
+};
+// a phone with a touch screen: a context of its own (openPage has no touch option), recording what openPage records
+async function openTouchPage(site, url) {
+  const context = await site.browser.newContext({ viewport: PHONE, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  const log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
+  page.log = log;
+  page.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
+  page.on('console', (m) => { const x = m.text(); if (/GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i.test(x)) return; if (m.type() === 'error') log.console.push(x.slice(0, 300)); });
+  page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) log.offsite.push(u); });
+  page.on('requestfailed', (r) => { const u = r.url(); const why = (r.failure() || {}).errorText || ''; if (u.startsWith('blob:') || why === 'net::ERR_ABORTED') return; log.failed.push(u + ' ' + why); });
+  await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)} ${(e.sourceFile || '').split('/').pop()}:${e.lineNumber}`); }); });
+  await page.goto(site.base + url, { waitUntil: 'load' });
+  await sleep(300);
+  return page;
+}
+async function tapOn(page, selector, fx, fy) { const b = await box(page, selector); await page.touchscreen.tap(b.x + b.width * fx, b.y + b.height * fy); }
+// a finger put down, moved dx css px sideways (the canvases scroll only up and down: pan-y) and lifted
+async function touchDrag(page, cdp, selector, fx, fy, dx) {
+  const b = await box(page, selector); const x = b.x + b.width * fx, y = b.y + b.height * fy;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let i = 1; i <= 3; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + (dx * i) / 3, y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await busyHidden(page); await sleep(250);
+}
+// a JPEG as a phone writes one: 800 × 600 stored, a red square in its stored top-left corner, and an Exif
+// Orientation of 6 (turn 90° clockwise to show it), so the upright photo is 600 × 800 with the mark top right
+async function exifJpeg(page, name = 'phone.jpg') {
+  const url = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 800; c.height = 600; const g = c.getContext('2d'); g.fillStyle = '#808080'; g.fillRect(0, 0, 800, 600); g.fillStyle = '#d01010'; g.fillRect(0, 0, 160, 160); return c.toDataURL('image/jpeg', 0.95); });
+  const jpg = Buffer.from(url.split(',')[1], 'base64');
+  const tiff = Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0]); // big-endian, one entry: Orientation (SHORT) = 6
+  const body = Buffer.concat([Buffer.from('Exif\0\0', 'binary'), tiff]);
+  const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 255]), body]);
+  return { name, mimeType: 'image/jpeg', buffer: Buffer.concat([jpg.subarray(0, 2), app1, jpg.subarray(2)]) };
+}
+
 export default async function checkPainting(t, site) {
+  let exampleBadge = null; // the example's badge on the #check route, for the Palette block view below
   // ---- the #check route with the built-in example: the drawer, its badge, the list, the map, the sliders, the picks ----
   {
     const page = await openPage(site, { url: '#check' });
@@ -134,6 +316,17 @@ export default async function checkPainting(t, site) {
     t.check(same(s.art, [600, 750]) && same(s.diff, [600, 750]) && same(s.art, s.orig), 'the painting and the accuracy map are the reference\'s size (600 × 750)', { art: s.art, diff: s.diff, orig: s.orig });
     checkScorecard(t, s, 'the example');
     t.check(s.list.length === 5, 'the example has five biggest differences', s.list.length);
+    // What to fix first, read for what it says: the example is "lifted shadows, warmer skin", the reference's color
+    // comes first, each match is 100 − 2.5 × its ΔE, and the list runs from the shape that costs most (share × ΔE)
+    {
+      const fx = fixesOf(s);
+      t.check(fx.some((f) => /^Too light/.test(f.note)) && fx.some((f) => /too warm/i.test(f.note)) && fx.filter((f) => f.zone === 'Shadow').every((f) => !/^Too dark/.test(f.note)), 'the example\'s list says what it is: shapes too light and too warm, no shadow called too dark', fx.map((f) => `${f.zone}: ${f.note}`));
+      t.check(fx.every((f) => f.swatches[0] === `Reference ${f.ref}` && f.swatches[1] === `Yours ${f.art}`), 'each difference shows the reference\'s color first and yours second, the two its numbers name (#ref → #yours)', fx.map((f) => [f.swatches, f.ref, f.art]));
+      t.check(fx.every((f) => pctFits(f.pct, f.dE)), 'each difference\'s match is 100 − 2.5 × its ΔE', fx.map((f) => [f.pct, f.dE]));
+      const costs = fx.map((f) => ({ hi: (f.share + 0.05) * (f.dE + 0.05), lo: (f.share - 0.05) * (f.dE - 0.05), shown: +(f.share * f.dE).toFixed(1) }));
+      t.check(costs.every((c, i) => i === 0 || costs[i - 1].hi >= c.lo), 'the differences run from the one that costs most (share × ΔE) down', costs.map((c) => c.shown));
+    }
+    exampleBadge = s.badge;
     t.check(s.alignState === '' && !s.alignOpen && s.wbPick === NOT_PICKING && !s.wbUndo && s.fit === 'crop', 'nothing moved or fixed yet: no note on the panel, Fix color cast idle, no Remove color fix, Crop to match', { alignState: s.alignState, alignOpen: s.alignOpen, wbPick: s.wbPick, wbUndo: s.wbUndo, fit: s.fit });
     const example = { color: s.color, value: s.value, shapes: +s.shapes.slice(0, -1) };
     // README names against the page's words (the spec is the expectation)
@@ -156,12 +349,33 @@ export default async function checkPainting(t, site) {
     t.check(hints.simple && hints.hintShown && /^Color score: how close your colors are to the reference, shape by shape\. Light and dark score: .* Shapes in the right place: .*$/.test(hints.hint), 'Simple mode: the scoring hint says what the numbers mean in plain words', hints.hint);
     t.check(!hints.more && !hints.formulaShown && hints.summary === 'Show the details' && /100 − 2\.5 × ΔE/.test(hints.formula) && /100 − 5 × \|ΔL\*\|/.test(hints.formula) && /CIEDE2000/.test(hints.formula), 'the formulas sit behind Show the details, closed', { more: hints.more, summary: hints.summary, formula: hints.formula.slice(0, 80) });
     t.check(/100% is a perfect match/.test(hints.mapHint) && /white labels are the biggest differences/.test(hints.mapHint) && /Hover or tap a shape/.test(hints.mapHint), 'the map explains its percentages, white labels and hover', hints.mapHint);
+    // the drawer's own how-tos (the photo advice, the Fix color cast how-to) and the guide's steps for this drawer
+    // name what the page shows
+    const howto = await page.evaluate(() => ({
+      drawer: document.querySelector('#drawer-check .drawer-body > .hint').textContent.replace(/\s+/g, ' ').trim(), wb: document.getElementById('wbStatus').textContent.replace(/\s+/g, ' ').trim(), wbPick: document.getElementById('wbPick').textContent.trim(),
+      guide: [...document.querySelectorAll('#help-check li strong')].map((e) => e.textContent.trim()),
+      controls: [...document.querySelectorAll('#drawer-check label, #drawer-check button, #drawer-check summary, #checkSection .score-label, #checkSection dt, #checkSection h3')].map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
+    }));
+    t.check(/straight on/.test(howto.drawer) && /framed like the reference/.test(howto.drawer) && /Studio tab/.test(howto.drawer), 'the drawer says how to photograph the painting as the README does (straight on, framed like the reference), and offers the Studio painting', howto.drawer);
+    t.check(howto.wb.includes(howto.wbPick) && /white or gray/.test(howto.wb) && /paper/.test(howto.wb), 'the align panel says how to fix a color cast, naming the button by its own words and the paper as the spot', howto.wb);
+    const unnamed = howto.guide.filter((g) => !howto.controls.some((c) => c.toLowerCase().startsWith(g.toLowerCase())));
+    t.check(howto.guide.length >= 6 && unnamed.length === 0, 'the guide\'s steps for How close did I get? name the drawer\'s controls as the page labels them', { guide: howto.guide, unnamed });
     await page.locator('#checkBody details.more > summary').scrollIntoViewIfNeeded(); await page.locator('#checkBody details.more > summary').click(); await sleep(150);
     t.check(await page.evaluate(() => { const d = document.querySelector('#checkBody details.more'); const h = d.querySelector('.hint'); return d.open && (typeof h.checkVisibility === 'function' ? h.checkVisibility() : h.getBoundingClientRect().height > 0); }), 'Show the details opens and shows the formulas');
     await page.evaluate(() => document.querySelector('[data-mode="advanced"]').click()); await busyHidden(page); await sleep(100);
     const adv = await page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), hintShown: getComputedStyle(document.querySelector('#checkBody .scorecard > .hint')).display !== 'none', badge: document.getElementById('checkState').textContent.trim() }));
     t.check(!adv.simple && adv.hintShown && adv.badge === s.badge, 'Advanced: the drawer still shows its hint and keeps the score', adv);
     t.note('Advanced mode shows the same plain-words scoring hint as Simple (the hint has no mode class); the README only promises it for Simple.');
+    // Outline shapes (Advanced) with the drawer open: the borders are drawn, the scores and the map's labels stay
+    {
+      const outline = (on) => page.evaluate((on) => { const o = document.getElementById('outlines'); o.checked = on; o.dispatchEvent(new Event('change', { bubbles: true })); }, on);
+      t.check(await afterResult(page, () => outline(true)), 'Outline shapes on with the drawer open reruns');
+      const o = await state(page);
+      const ringOn = await countExact(page, 'cv-diff', LABEL_INK);
+      const lo = await hoverAt(page, '#cv-diff', 0.5, 0.45); await page.mouse.move(5, 5);
+      t.check(o.badge === s.badge && ringOn > 500 && lo.shown && /^\d{1,3}% match$/.test(lo.hex), 'Outline shapes on: the same scores, the map keeps its white labels and its hover', { badge: o.badge, before: s.badge, ring: ringOn, loupe: lo.hex });
+      await afterResult(page, () => outline(false));
+    }
     await page.evaluate(() => document.querySelector('[data-mode="simple"]').click()); await busyHidden(page); await sleep(100);
 
     // the accuracy map: white numbered labels for the biggest differences (white pills ringed and lettered in
