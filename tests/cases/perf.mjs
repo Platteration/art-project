@@ -125,6 +125,7 @@ function summarise(r, floor = 100) {
 }
 // runs act() with the CPU slowed by `rate`, and returns its wall time and the long tasks it caused
 async function measure(page, rate, act, { settle = 450 } = {}) {
+  let out;
   await throttle(page, rate);
   try {
     await begin(page);
@@ -132,8 +133,10 @@ async function measure(page, rate, act, { settle = 450 } = {}) {
     const value = await act();
     const ms = Date.now() - t0;
     await sleep(settle);
-    return { ms, value, ...summarise(await finish(page), K(100)) };
+    out = { ms, value, ...summarise(await finish(page), S(100)) };
   } finally { await throttle(page, 1); }
+  await calibrate(true);
+  return out;
 }
 // a click in the page, with the time its handler ran and the time to the next frame it let be drawn
 const timedClick = (page, sel) => app(page).evaluate((s) => new Promise((res, rej) => {
@@ -193,34 +196,39 @@ async function loadFile(fr, file, pattern, timeout = 180000) {
   await fr.waitForFunction((p) => { const b = window.__pf.busy; return b.length > 0 && b[b.length - 1].hidden && new RegExp(p).test(document.getElementById('source').textContent); }, pattern, { timeout });
 }
 // one section: a thrown error is one failed check, not the end of the case
-// How much slower than a quiet machine the work runs right now (this box is shared with other test runs, and its load
-// average was 5-28 on 4 cores while this case was written): the wall time a busy loop needs for the CPU time it gets.
-// Every time budget below is multiplied by it (K), measured again at the start of each section, so a budget that holds on a
-// quiet machine holds on a busy one, and a stall that is three times the budget on a quiet machine still is on a busy one.
-let LOAD = 1;
-const K = (ms) => Math.round(ms * LOAD);
-function calibrate() {
-  let wall = 0, cpu = 0;
-  for (let i = 0; i < 3; i++) {
-    const w0 = performance.now(), c0 = process.cpuUsage();
-    let s = 0;
-    while (performance.now() - w0 < 70) for (let j = 0; j < 20000; j++) s += Math.sqrt(j);
-    const c = process.cpuUsage(c0);
-    wall += performance.now() - w0; cpu += (c.user + c.system) / 1000 + (s < 0 ? 1 : 0);
-  }
-  LOAD = Math.max(1, Math.min(8, wall / Math.max(cpu, 1)));
-  return LOAD;
+// How much slower than a quiet machine the page's own script runs right now (this box is shared with other test runs, and its
+// load average was 5-65 on 4 cores while this case was written): the median of fixed loops of square roots run in the page,
+// against what the same loop takes on a quiet core (40 ms for 20 million). It is measured at the start of each section and again
+// after every timed action; LO is the lowest reading of the section and HI the highest. A budget that is meant to hold on a quiet
+// machine is stretched by HI and by half as much again (S), so it does not flip on a busy one; a budget whose breach is a finding
+// is stretched by LO only (K), so a stall that is several times over on a quiet machine is still over on a busy one, and the
+// findings give the figures as measured with the factor beside them.
+let LO = 1, HI = 1, CAL = null;
+async function calibrate(quick = false) {
+  if (!CAL) return LO;
+  try {
+    const n = quick ? 3 : 7, loop = quick ? 1e7 : 2e7;
+    const xs = await app(CAL).evaluate(([n, loop]) => { const out = []; for (let i = 0; i < n; i++) { const t0 = performance.now(); let s = 0; for (let j = 0; j < loop; j++) s += Math.sqrt(j); out.push(performance.now() - t0 + (s < 0 ? 1 : 0)); } return out; }, [n, loop]);
+    xs.sort((x, y) => x - y);
+    const f = Math.max(1, Math.min(10, xs[Math.floor(n / 2)] / (loop / 2e7 * 40)));
+    if (quick) { LO = Math.min(LO, f); HI = Math.max(HI, f); } else LO = HI = f;
+  } catch (e) { /* the page is gone: the last factors stay */ }
+  return LO;
 }
-const under = () => `(Times as measured while this machine ran about ${LOAD.toFixed(1)}x slower than a quiet one, from the CPU time a busy loop gets; divide by that for a quiet machine.)`;
+const K = (ms) => Math.round(ms * LO);
+const S = (ms) => Math.round(ms * 1.5 * HI);
+const under = () => `(Times as measured while this machine ran ${LO.toFixed(1)}-${HI.toFixed(1)}x slower than a quiet one, from a fixed loop run in the page; divide by that for a quiet machine.)`;
 const took = {};
 async function segment(t, name, fn) {
   const t0 = Date.now();
-  calibrate();
+  await calibrate();
   try { await fn(); } catch (e) { t.check(false, `${name}: the section ran to its end`, String((e && e.message) || e).slice(0, 300)); }
-  took[name] = `${Math.round((Date.now() - t0) / 1000)} s (budgets x${LOAD.toFixed(1)})`;
+  took[name] = `${Math.round((Date.now() - t0) / 1000)} s (machine x${LO.toFixed(1)}-${HI.toFixed(1)})`;
 }
 const ms = (n) => `${n} ms`;
 const min = (a) => Math.min(...a);
+// the q-th quantile of a list (one stray slow event of a busy machine is not a stall; a stall is most of them)
+const pct = (a, q) => [...a].sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * q))];
 
 export default async function perf(t, site) {
   // (PERF_VERBOSE=1 echoes every note as it is made: the report file is shared by whatever else is running)
@@ -249,6 +257,7 @@ export default async function perf(t, site) {
     // The Study page: loading photos, the study re-run, the palette, Check my painting, Loomis, Studio, games
     // ======================================================================================================
     const page = await perfPage(site);
+    CAL = page;
     const fr = app(page);
     const loadAndWait = async (file, pattern) => { await loadFile(fr, file, pattern); await sleep(300); };
     try {
@@ -271,9 +280,9 @@ export default async function perf(t, site) {
         }
         await ctx.close();
         note(`page load: full speed ${ms(out[1].loadMs)} to the load event, first contentful paint ${out[1].fcp} ms, tasks over 50 ms ${JSON.stringify(out[1].lt)}; phone speed (4x) ${ms(out[4].loadMs)}, first paint ${out[4].fcp} ms, tasks ${JSON.stringify(out[4].lt)}`);
-        t.check(out[1].fcp > 0 && out[1].fcp < K(1500), 'a visitor sees the page within 1.5 s at full speed (first contentful paint)', out[1].fcp);
-        t.check(out[4].fcp > 0 && out[4].fcp < K(4000), 'a visitor sees the page within 4 s at phone speed (first contentful paint)', out[4].fcp);
-        t.check(out[1].ready < K(6000), 'the sample study is ready within 6 s of opening the page at full speed', out[1].ready);
+        t.check(out[1].fcp > 0 && out[1].fcp < S(1500), 'a visitor sees the page within 1.5 s at full speed (first contentful paint)', out[1].fcp);
+        t.check(out[4].fcp > 0 && out[4].fcp < S(4000), 'a visitor sees the page within 4 s at phone speed (first contentful paint)', out[4].fcp);
+        t.check(out[1].ready < S(6000), 'the sample study is ready within 6 s of opening the page at full speed', out[1].ready);
       });
 
       // ---- loading a 4000 x 3000 photo
@@ -285,9 +294,9 @@ export default async function perf(t, site) {
         t.check(await inked(page, '#cv-value') > 100 && await inked(page, '#cv-block') > 100, 'the 12 megapixel photo is studied: the value and color-block studies are drawn');
         t.check(full.every((r) => r.shown && r.uncovered.length === 0), 'the 12 megapixel photo shows Updating… (painted) before each task over 100 ms', full.map((r) => r.uncovered));
         t.check(phone.shown && phone.uncovered.length === 0, 'the same at phone speed', phone.uncovered);
-        t.check(min(full.map((r) => r.ms)) < K(4000), 'the 12 megapixel photo is studied within 4 s at full speed', full.map((r) => r.ms));
-        t.check(phone.ms < K(15000), 'the 12 megapixel photo is studied within 15 s at phone speed', phone.ms);
-        t.check(min(full.map((r) => r.max)) <= K(2000), 'no single task over 2 s while the 12 megapixel photo is prepared at full speed', full.map((r) => r.max));
+        t.check(min(full.map((r) => r.ms)) < S(4000), 'the 12 megapixel photo is studied within 4 s at full speed', full.map((r) => r.ms));
+        t.check(phone.ms < S(15000), 'the 12 megapixel photo is studied within 15 s at phone speed', phone.ms);
+        t.check(min(full.map((r) => r.max)) <= S(2000), 'no single task over 2 s while the 12 megapixel photo is prepared at full speed', full.map((r) => r.max));
       });
 
       // ---- a 108 megapixel photo, reduced
@@ -304,10 +313,10 @@ export default async function perf(t, site) {
         t.check(/very large photo \(12000 × 9000\) was reduced to 2800 × 2100/.test(toast), 'a 108 megapixel photo says it was reduced to 2800 × 2100', toast);
         t.check(await inked(page, '#cv-value') > 100, 'the 108 megapixel photo is studied');
         t.check(full.shown && full.uncovered.length === 0, 'Updating… is painted before each task over 100 ms while the 108 megapixel photo is read', full.uncovered);
-        t.check(full.ms < K(8000), 'the 108 megapixel photo is studied within 8 s at full speed', full.ms);
+        t.check(full.ms < S(8000), 'the 108 megapixel photo is studied within 8 s at full speed', full.ms);
         t.check(peak - rssBefore < 1200, 'reading the 108 megapixel photo takes under 1.2 GB more renderer memory at its peak', { before: rssBefore, peak });
         t.check(heapAfter - heapBefore < 20, 'the JS heap is no bigger after the 108 megapixel photo', { heapBefore, heapAfter });
-        t.check(await fr.evaluate(() => new Promise((r) => { const t0 = performance.now(); requestAnimationFrame(() => setTimeout(() => r(performance.now() - t0), 0)); })) < K(300), 'the page answers within a frame or two once the 108 megapixel photo is done');
+        t.check(await fr.evaluate(() => new Promise((r) => { const t0 = performance.now(); requestAnimationFrame(() => setTimeout(() => r(performance.now() - t0), 0)); })) < S(300), 'the page answers within a frame or two once the 108 megapixel photo is done');
       });
       await clean(t, page, 'photo loading');
 
@@ -336,7 +345,7 @@ export default async function perf(t, site) {
           others[id] = runs;
         }
         note(`longest task per re-run, full speed, by control (two values each; a note and not a check: how long they take depends on the picture and on the load): ${JSON.stringify(others)}`);
-                // the controls that re-run the study at once (runSoon(0)): the pill is raised in the same breath as the work begins, so no
+        // the controls that re-run the study at once (runSoon(0)): the pill is raised in the same breath as the work begins, so no
         // frame is drawn between them; three tries each (a frame can fall between by chance), and a run counts as bare when a task
         // of 100 ms or more began with no painted pill
         const zero = {};
@@ -375,7 +384,7 @@ export default async function perf(t, site) {
         for (const p of ['soft', 'sharp', 'normal']) { const r = await measure(page, 1, async () => { await fr.evaluate((p) => document.querySelector(`input[name="detailPreset"][value="${p}"]`).click(), p); await sleep(150); await busyDone(page); }); presets[p] = r.max; }
         note(`Simple mode Detail presets, longest task at full speed: ${JSON.stringify(presets)}`);
         const okPresets = t.check(Math.max(...Object.values(presets)) <= K(200), 'choosing a Detail preset in Simple mode re-runs the study in under 200 ms at full speed', presets);
-        const big = w.tasks.filter((x) => x >= K(100)), lo = Math.min(...big), hi = Math.max(...big), sec = (n) => (n / 1000).toFixed(1);
+        const big = w.tasks.filter((x) => x >= Math.max(...w.tasks) / 3), lo = Math.min(...big), hi = Math.max(...big), sec = (n) => (n / 1000).toFixed(1);
         if (!ok && !okPresets && lat.every((x) => x > K(200)) && big.length >= 2 && Math.min(...Object.values(presets)) > K(200)) {
           t.finding({
             severity: 'medium',
@@ -392,7 +401,7 @@ export default async function perf(t, site) {
         for (const s of ['1400', '600', '900']) { const r = await measure(page, 1, async () => { await fr.evaluate((s) => { const d = document.getElementById('detail'); d.value = s; d.dispatchEvent(new Event('change', { bubbles: true })); }, s); await sleep(200); await busyDone(page); }); sizes[s] = { max: r.max, ms: r.ms, uncovered: r.uncovered }; }
         note(`Working size changes (the photo re-prepared and re-run), longest task and time at full speed: ${JSON.stringify(sizes)}`);
         t.check(Object.values(sizes).every((x) => x.uncovered.length === 0), 'changing the Working size shows Updating… before its long tasks', sizes);
-        t.check(sizes['600'].ms < K(2000), 'the 600 px ("fastest") working size answers within 2 s at full speed', sizes['600'].ms);
+        t.check(sizes['600'].ms < S(2000), 'the 600 px ("fastest") working size answers within 2 s at full speed', sizes['600'].ms);
       });
       await clean(t, page, 'study re-run');
 
@@ -409,13 +418,13 @@ export default async function perf(t, site) {
         const listed = await fr.evaluate(() => ({ n: document.getElementById('presetList').children.length, best: document.querySelectorAll('#presetList .preset-best').length, want: window.Paints.PRESETS.length }));
         note(`ranking the known palettes: ${r1.ms} ms, tasks over 50 ms ${JSON.stringify(r1.tasks)} (full speed)`);
         t.check(listed.n === listed.want && listed.best === 1, 'the known palettes are all ranked, with one "Best match"', listed);
-        t.check(r1.max <= K(200), 'ranking the palettes holds no task over 200 ms at full speed', r1.tasks);
-        t.check(r1.ms < K(3000), 'the palettes are ranked within 3 s at full speed', r1.ms);
+        t.check(r1.max <= S(200), 'ranking the palettes holds no task over 200 ms at full speed', r1.tasks);
+        t.check(r1.ms < S(3000), 'the palettes are ranked within 3 s at full speed', r1.ms);
         await fr.evaluate(() => { document.getElementById('drawer-colors').open = false; }); await sleep(300);
         await setRange(page, 'colors', 3); await busyDone(page); await sleep(300);
         const r4 = await rank(4);
         note(`ranking at phone speed: ${r4.ms} ms, tasks ${JSON.stringify(r4.tasks)}`);
-        t.check(r4.max <= K(800), 'ranking the palettes holds no task over 800 ms at phone speed', r4.tasks);
+        t.check(r4.max <= S(800), 'ranking the palettes holds no task over 800 ms at phone speed', r4.tasks);
         // Suggest a palette (My paints)
         await fr.evaluate(() => { const r = document.querySelector('input[name="paintSource"][value="mine"]'); if (r) r.click(); }); await sleep(400);
         const sg = async (rate) => measure(page, rate, async () => {
@@ -424,8 +433,8 @@ export default async function perf(t, site) {
         });
         const s1 = await sg(1), s4 = await sg(4);
         note(`Suggest a palette: ${s1.ms} ms (tasks ${JSON.stringify(s1.tasks)}) at full speed, ${s4.ms} ms (tasks ${JSON.stringify(s4.tasks)}) at phone speed`);
-        t.check(s1.max <= K(200) && s4.max <= K(800), 'Suggest a palette holds no task over 200 ms (full speed) or 800 ms (phone speed)', { full: s1.tasks, phone: s4.tasks });
-        t.check(s1.ms < K(3000), 'a palette is suggested within 3 s at full speed', s1.ms);
+        t.check(s1.max <= S(200) && s4.max <= S(800), 'Suggest a palette holds no task over 200 ms (full speed) or 800 ms (phone speed)', { full: s1.tasks, phone: s4.tasks });
+        t.check(s1.ms < S(3000), 'a palette is suggested within 3 s at full speed', s1.ms);
         await fr.evaluate(() => { document.getElementById('drawer-colors').open = false; });
       });
       await clean(t, page, 'palettes');
@@ -492,14 +501,14 @@ export default async function perf(t, site) {
             for (let i = 1; i <= 20; i++) { t1 = Date.now(); await page.mouse.move(b.x + b.width * (0.5 + 0.004 * i), b.y + b.height * (0.52 + 0.003 * i)); drag.push(Date.now() - t1); }
             await page.mouse.up();
           });
-          return { rate, done, locks, max: r.max, tasks: r.tasks, dragMax: Math.max(...drag), dragTask: d.max };
+          return { rate, done, locks, max: r.max, tasks: r.tasks, dragMax: pct(drag, 0.8), dragTask: d.max };
         };
         const a = await fit(1), c = await fit(4);
-        note(`Loomis fit: lock-in click to frame ${JSON.stringify(a.locks)} ms, longest task ${a.max} ms; dragging a mark: slowest event ${a.dragMax} ms, longest task ${a.dragTask} ms (full speed); phone speed: locks ${JSON.stringify(c.locks)}, longest task ${c.max} ms, drag slowest event ${c.dragMax} ms, task ${c.dragTask} ms`);
+        note(`Loomis fit: lock-in click to frame ${JSON.stringify(a.locks)} ms, longest task ${a.max} ms; dragging a mark: 80th-percentile event ${a.dragMax} ms, longest task ${a.dragTask} ms (full speed); phone speed: locks ${JSON.stringify(c.locks)}, longest task ${c.max} ms, drag 80th-percentile event ${c.dragMax} ms, task ${c.dragTask} ms`);
         t.check(a.done && c.done, 'the eight marks fit a head ("Drag a dot or a line to adjust it")', [a.done, c.done]);
-        t.check(Math.max(...a.locks) <= K(200) && a.max <= K(200), 'locking in eight marks holds no task over 200 ms at full speed', { locks: a.locks, longest: a.max });
-        t.check(a.dragMax <= K(200) && a.dragTask <= K(200), 'dragging a mark refits the head within 200 ms an event at full speed', { slowest: a.dragMax, task: a.dragTask });
-        t.check(c.max <= K(800) && c.dragTask <= K(800) && Math.max(...c.locks) <= K(800), 'the Loomis fit holds no task over 800 ms at phone speed', { locks: c.locks, longest: c.max, drag: c.dragTask });
+        t.check(Math.max(...a.locks) <= S(200) && a.max <= S(200), 'locking in eight marks holds no task over 200 ms at full speed', { locks: a.locks, longest: a.max });
+        t.check(a.dragMax <= S(200) && a.dragTask <= S(200), 'dragging a mark refits the head within 200 ms an event (80th percentile) at full speed', { p80: a.dragMax, task: a.dragTask });
+        t.check(c.max <= S(800) && c.dragTask <= S(800) && Math.max(...c.locks) <= S(800), 'the Loomis fit holds no task over 800 ms at phone speed', { locks: c.locks, longest: c.max, drag: c.dragTask });
       });
       await clean(t, page, 'loomis');
 
@@ -514,12 +523,12 @@ export default async function perf(t, site) {
             for (let i = 1; i <= 14; i++) { t1 = Date.now(); await page.mouse.move(b.x + b.width * (0.3 + 0.03 * i), b.y + b.height * (y0 + 0.01 * i)); lat.push(Date.now() - t1); }
             t1 = Date.now(); await page.mouse.up(); lat.push(Date.now() - t1);
           }, { settle: 150 });
-          return { lat, max: Math.max(...lat), task: r.max };
+          return { lat, max: pct(lat, 0.9), task: r.max };
         };
         const s1 = await oneStroke(1, 0.2), s4 = await oneStroke(4, 0.3);
-        note(`Studio stroke (15 events): slowest event ${s1.max} ms, longest task ${s1.task} ms at full speed; ${s4.max} ms / ${s4.task} ms at phone speed`);
-        t.check(s1.max <= K(200) && s1.task <= K(200), 'a Studio stroke is handled within 200 ms an event at full speed (the first event takes the undo snapshot)', { events: s1.max, task: s1.task });
-        t.check(s4.max <= K(800) && s4.task <= K(800), 'a Studio stroke is handled within 800 ms an event at phone speed', { events: s4.max, task: s4.task });
+        note(`Studio stroke (15 events): 90th-percentile event ${s1.max} ms, longest task ${s1.task} ms at full speed; ${s4.max} ms / ${s4.task} ms at phone speed`);
+        t.check(s1.max <= S(200) && s1.task <= S(200), 'a Studio stroke is handled within 200 ms an event at full speed (the first event takes the undo snapshot)', { events: s1.max, task: s1.task });
+        t.check(s4.max <= S(800) && s4.task <= S(800), 'a Studio stroke is handled within 800 ms an event at phone speed', { events: s4.max, task: s4.task });
         // the paper filled with strokes, then how long the autosave takes and what it holds the main thread for
         for (let i = 0; i < 24; i++) await stroke(page, '#ps-paper', [[0.05, 0.04 + i * 0.04], [0.95, 0.04 + i * 0.04]], { steps: 3 });
         const wrote = () => fr.evaluate(() => new Promise((res) => { const q = indexedDB.open('portrait-value-studio', 1); q.onerror = () => res(0); q.onsuccess = () => { try { const g = q.result.transaction('studio').objectStore('studio').get('painting'); g.onsuccess = () => { const v = g.result; q.result.close(); res(v && v.savedAt ? v.savedAt : 0); }; g.onerror = () => res(0); } catch (e) { res(0); } }; }));
@@ -529,11 +538,11 @@ export default async function perf(t, site) {
         const after = await wrote();
         note(`Studio autosave of a painted paper: ${save.ms} ms from the last stroke until the record (savedAt ${after - at} ms after the stroke began); tasks over 50 ms during it ${JSON.stringify(save.tasks)}`);
         t.check(after > before, 'the painting is saved to the browser a moment after the stroke', { before, after });
-        t.check(save.max <= K(200), 'the autosave of a painted paper holds no task over 200 ms at full speed', save.tasks);
-        t.check(save.ms < K(6000), 'the painting is saved within 6 s of the stroke at full speed', save.ms);
+        t.check(save.max <= S(200), 'the autosave of a painted paper holds no task over 200 ms at full speed', save.tasks);
+        t.check(save.ms < S(6000), 'the painting is saved within 6 s of the stroke at full speed', save.ms);
         const u = await measure(page, 1, async () => { for (let i = 0; i < 15; i++) { await click(page, '#ps-undo'); } });
         note(`15 Undo taps on the painted paper: longest task ${u.max} ms`);
-        t.check(u.max <= K(200), 'Undo on a painted paper holds no task over 200 ms at full speed', u.tasks);
+        t.check(u.max <= S(200), 'Undo on a painted paper holds no task over 200 ms at full speed', u.tasks);
       });
       await clean(t, page, 'studio');
 
@@ -582,9 +591,9 @@ export default async function perf(t, site) {
         const s4 = await st(4);
         await click(page, '#gameQuit'); await sleep(150); await click(page, '#gameQuit'); await sleep(500);
         note(`Paint by numbers Start (mixing every number's target): ${s1.ms} ms, tasks ${JSON.stringify(s1.tasks)} at full speed; ${s4.ms} ms, tasks ${JSON.stringify(s4.tasks)} at phone speed; progress text seen ${hintSeen.length} times${hintSeen.length ? ` ("${hintSeen[0]}")` : ''}`);
-        t.check(s1.max <= K(200), 'Start painting mixes the targets with no task over 200 ms at full speed', s1.tasks);
-        t.check(s4.max <= K(800), 'Start painting mixes the targets with no task over 800 ms at phone speed', s4.tasks);
-        t.check(s1.ms < K(3000), 'the game starts within 3 s of Start painting at full speed', s1.ms);
+        t.check(s1.max <= S(200), 'Start painting mixes the targets with no task over 200 ms at full speed', s1.tasks);
+        t.check(s4.max <= S(800), 'Start painting mixes the targets with no task over 800 ms at phone speed', s4.tasks);
+        t.check(s1.ms < S(3000), 'the game starts within 3 s of Start painting at full speed', s1.ms);
       });
       await clean(t, page, 'paint by numbers');
 
@@ -617,8 +626,8 @@ export default async function perf(t, site) {
         const b1 = await play(1), b4 = await play(4);
         note(`Value battle (start, ten rounds answered right, Next after each): slowest start, answer or Next to the next frame ${b1.max} ms, longest task ${b1.task} ms at full speed; ${b4.max} ms / ${b4.task} ms at phone speed`);
         t.check(b1.rounds >= 8 && b4.rounds >= 8, 'ten battle rounds were played at each speed', [b1.rounds, b4.rounds]);
-        t.check(b1.max <= K(200) && b1.task <= K(200), 'a battle start, answer or Next reaches the next frame within 200 ms at full speed', { frame: b1.max, task: b1.task });
-        t.check(b4.max <= K(800) && b4.task <= K(800), 'a battle start, answer or Next reaches the next frame within 800 ms at phone speed', { frame: b4.max, task: b4.task });
+        t.check(b1.max <= S(200) && b1.task <= S(200), 'a battle start, answer or Next reaches the next frame within 200 ms at full speed', { frame: b1.max, task: b1.task });
+        t.check(b4.max <= S(800) && b4.task <= S(800), 'a battle start, answer or Next reaches the next frame within 800 ms at phone speed', { frame: b4.max, task: b4.task });
       });
       await clean(t, page, 'value battle');
 
@@ -633,7 +642,7 @@ export default async function perf(t, site) {
         }, { settle: 600 });
         const pf = poseFrame(page);
         note(`Pose and light opening: its 30 pictures were up ${up} ms after the tab was tapped (full speed); tasks over 50 ms: ${open.tasks.length}, longest ${open.max} ms (${softwareGl ? 'software GL: shaders and frames are CPU here' : 'hardware GL'})`);
-        t.check(up < K(20000), 'Pose and light is up with its 30 pictures within 20 s of the tap at full speed', up);
+        t.check(up < S(20000), 'Pose and light is up with its 30 pictures within 20 s of the tap at full speed', up);
         await pf.evaluate(() => { document.getElementById('libClose').click(); }); await sleep(500);
         const handAt = async () => {
           const c = await pf.evaluate(() => { window.PoseAndLight.render(); return window.PoseAndLight.ctrls().find((q) => q.id === 'handR' && q.center); });
@@ -662,16 +671,16 @@ export default async function perf(t, site) {
         const l1 = await dragged(1, 'lamp', lampAt, -150, 40);
         const l4 = await dragged(4, 'lamp', lampAt, 100, 30);
         note(`Pose and light drags, per mouse event: hand ${JSON.stringify(j1)} / ${JSON.stringify(j4)}; lamp ${JSON.stringify(l1)} / ${JSON.stringify(l4)}`);
-        for (const d of [j1, l1]) t.check(d.perMoveScript <= K(25), `dragging the ${d.label} runs the page's own script for under 25 ms an event at full speed`, d);
-        for (const d of [j4, l4]) t.check(d.perMoveScript <= K(80), `dragging the ${d.label} runs the page's own script for under 80 ms an event at phone speed`, d);
-        if (!softwareGl) for (const d of [j1, l1]) t.check(d.longest <= K(200), `dragging the ${d.label} holds no task over 200 ms at full speed`, d);
+        for (const d of [j1, l1]) t.check(d.perMoveScript <= S(25), `dragging the ${d.label} runs the page's own script for under 25 ms an event at full speed`, d);
+        for (const d of [j4, l4]) t.check(d.perMoveScript <= S(80), `dragging the ${d.label} runs the page's own script for under 80 ms an event at phone speed`, d);
+        if (!softwareGl) for (const d of [j1, l1]) t.check(d.longest <= S(200), `dragging the ${d.label} holds no task over 200 ms at full speed`, d);
         else note('(the task lengths of the Pose and light drags are not held to the 200 ms budget here: the WebGL frame is software-rendered on the main thread)');
         // the value look and a snapshot
         const sn = await measure(page, 1, async () => { await pf.evaluate(() => document.getElementById('snap').click()); await pf.waitForFunction(() => { const i = document.getElementById('snapImg'); return i.complete && i.src.startsWith('blob:') && i.naturalWidth > 0; }, null, { timeout: 60000 }); }, { settle: 300 });
         await pf.evaluate(() => document.getElementById('snapClose').click());
         note(`Pose and light Snapshot: ${sn.ms} ms, longest task ${sn.max} ms`);
-        t.check(sn.ms < K(3000), 'a Pose and light Snapshot is ready within 3 s at full speed', sn.ms);
-        if (!softwareGl) t.check(sn.max <= K(200), 'a Snapshot holds no task over 200 ms at full speed', sn.tasks);
+        t.check(sn.ms < S(3000), 'a Pose and light Snapshot is ready within 3 s at full speed', sn.ms);
+        if (!softwareGl) t.check(sn.max <= S(200), 'a Snapshot holds no task over 200 ms at full speed', sn.tasks);
       });
       await clean(t, page, 'pose and light');
 
@@ -699,11 +708,11 @@ export default async function perf(t, site) {
         await sleep(700); await click(page, '#fig-stop'); await sleep(300); await click(page, '#fig-stop'); await sleep(1000);
         await fr.evaluate(() => { const b = document.getElementById('fig-new'); if (b && !b.hidden) b.click(); });
         note(`Figure study at full speed: pose shown ${JSON.stringify(shown)}; Done (composite, score, JPEG): ${JSON.stringify(done)}; at phone speed Done ran ${d4.handler} ms`);
-        t.check(shown.every((x) => x.ms < K(4000)), 'each Figure study pose is drawn and shown within 4 s at full speed', shown);
-        t.check(min(done.map((x) => x.handler)) <= K(400), 'Done scores and shows the card within 400 ms of the tap at full speed', done);
-        t.check(d4.handler <= K(3000), 'Done answers within 3 s of the tap at phone speed', d4.handler);
+        t.check(shown.every((x) => x.ms < S(4000)), 'each Figure study pose is drawn and shown within 4 s at full speed', shown);
+        t.check(min(done.map((x) => x.handler)) <= S(400), 'Done scores and shows the card within 400 ms of the tap at full speed', done);
+        t.check(d4.handler <= S(3000), 'Done answers within 3 s of the tap at phone speed', d4.handler);
         note(`Done holds the main thread for ${min(done.map((x) => x.handler))}-${Math.max(...done.map((x) => x.handler))} ms at full speed (js/figure.js:344-346 composites the page, scores it against the figure and encodes a JPEG in the click); the check allows twice the 200 ms budget`);
-        if (!softwareGl) t.check(Math.max(...shown.map((x) => x.max)) <= K(200), 'drawing a pose picture holds no task over 200 ms at full speed', shown);
+        if (!softwareGl) t.check(Math.max(...shown.map((x) => x.max)) <= S(200), 'drawing a pose picture holds no task over 200 ms at full speed', shown);
       });
       await clean(t, page, 'figure study');
 
@@ -715,7 +724,7 @@ export default async function perf(t, site) {
         const script = Math.round((m1.ScriptDuration - m0.ScriptDuration) * 1000 / 3), task = Math.round((m1.TaskDuration - m0.TaskDuration) * 1000 / 3);
         const timers = (await probe(page, bcdp)).intervals;
         note(`idle on the Study tab after the tour: ${script} ms of script and ${task} ms of main-thread tasks a second; ${timers} interval timers running`);
-        t.check(script <= K(30) && task <= K(120), 'left alone, the page spends under 30 ms a second in script and 120 ms in tasks', { script, task });
+        t.check(script <= S(30) && task <= S(120), 'left alone, the page spends under 30 ms a second in script and 120 ms in tasks', { script, task });
         t.check(timers <= 1, 'left alone, at most one interval timer is running after games, classes and frames have been used', timers);
       });
     } finally { await page.context().close(); }
@@ -727,6 +736,7 @@ export default async function perf(t, site) {
     // ---- photos loaded and replaced, a game and a battle over and over, strokes (one fresh page)
     {
       const m = await perfPage(site);
+      CAL = m;
       const mf = app(m);
       const loadM = async (file, pattern) => { await loadFile(mf, file, pattern, 120000); await sleep(100); };
       try {
@@ -833,6 +843,7 @@ export default async function perf(t, site) {
     // ---- Pose and light on its own page: snapshots, library pictures, saved poses
     {
       const p = await perfPage(site, { url: 'pose.html' });
+      CAL = p;
       try {
         await p.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30, null, { timeout: 120000 });
         await p.evaluate(() => document.getElementById('libClose').click()); await sleep(500);

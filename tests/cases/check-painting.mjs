@@ -26,6 +26,10 @@
 // labels (their numbers, kept inside the picture and apart, on the example, moved, and on a reference of slivers);
 // Rotate's and Size's keyboard steps and a half-faded reference; Save PNG inside another site's sandboxed frame;
 // Forget, and a second tab, with a painting in the drawer.
+// The third pass (ROUND3 at the end): the map and its labels at every working size; paintings much larger, smaller
+// and of another shape; the photo itself as the painting at every working size and setting; another subject; Move,
+// Size and Rotate at their ends against the hatching; a cut-out painting, files in one instant, the drawer's
+// contrast, the red gain limit and the heap.
 import fs from 'node:fs';
 import path from 'node:path';
 import { openPage, newTab, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, axe, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
@@ -1488,4 +1492,402 @@ export default async function checkPainting(t, site) {
     await clean(t, a, 'forget: tab A'); await clean(t, b, 'forget: tab B');
     await a.context().close();
   }
+
+  // ---- the third pass (ROUND3, below): one segment per gap the second pass left ----
+  for (const [, fn] of ROUND3) await fn(t, site);
 }
+
+// ======================================================================================================================
+// ROUND3: the third pass. The accuracy map and its labels at every working size; paintings much larger, smaller and of
+// another shape than the reference; the photo itself as the painting, at every working size and setting; a painting of
+// another subject; Move, Size and Rotate at their ends undoing the change they are for, and the panel's "left out"
+// against the hatching; and what the second pass left out (a see-through painting against one on mid gray, two files in
+// the same instant, the drawer's own contrast, the red gain limit, the heap). Each block is a segment: a throw in it is
+// one failed check, and every page it opened is closed.
+// ======================================================================================================================
+export const ROUND3 = []; // (exported so a scratch script can run one block alone)
+const round3 = (name, fn) => ROUND3.push([name, async (t, site) => {
+  const t0 = Date.now(), pages = [];
+  const open = async (opts) => { const p = await openPage(site, opts); pages.push(p); return p; };
+  try { await fn(t, site, open); } catch (e) { t.check(false, `${name}: ran to its end`, String((e && e.stack) || e).split('\n').slice(0, 3).join(' | ').slice(0, 400)); }
+  for (const p of pages) await p.context().close().catch(() => null);
+  t.note(`${name}: ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+}]);
+// the reference as the Study holds it (#cv-orig) changed in one way, as a PNG (spec.kind):
+//   'scale'  drawn into w × h;  'fit'  drawn whole into the middle of a w × h canvas of mid gray;  'flat'  one color
+//   (spec.rgb) and nothing else;  'xform'  moved dx, dy px, turned deg and scaled f about its centre, on mid gray;
+//   'invert'  every channel turned over;  'flip'  upside down
+const VARIANT3 = (spec) => {
+  const o = document.getElementById('cv-orig'); const W = o.width, H = o.height;
+  const c = document.createElement('canvas'); c.width = spec.w || W; c.height = spec.h || H;
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+  g.fillStyle = spec.rgb ? `rgb(${spec.rgb.join(',')})` : '#7f7f7f'; g.fillRect(0, 0, c.width, c.height);
+  if (spec.kind === 'scale') g.drawImage(o, 0, 0, c.width, c.height);
+  else if (spec.kind === 'fit') { const k = Math.min(c.width / W, c.height / H); g.drawImage(o, (c.width - W * k) / 2, (c.height - H * k) / 2, W * k, H * k); }
+  else if (spec.kind === 'xform') { g.translate(W / 2 + (spec.dx || 0), H / 2 + (spec.dy || 0)); g.rotate(((spec.deg || 0) * Math.PI) / 180); g.scale(spec.f || 1, spec.f || 1); g.drawImage(o, -W / 2, -H / 2); }
+  else if (spec.kind === 'invert') { g.drawImage(o, 0, 0); const d = g.getImageData(0, 0, W, H); for (let i = 0; i < d.data.length; i += 4) { d.data[i] = 255 - d.data[i]; d.data[i + 1] = 255 - d.data[i + 1]; d.data[i + 2] = 255 - d.data[i + 2]; } g.putImageData(d, 0, 0); }
+  else if (spec.kind === 'flip') { g.translate(0, H); g.scale(1, -1); g.drawImage(o, 0, 0); }
+  return c.toDataURL('image/png');
+};
+const variant3 = async (page, name, spec) => ({ name, mimeType: 'image/png', buffer: Buffer.from((await page.evaluate(VARIANT3, spec)).split(',')[1], 'base64') });
+// a portrait drawing with fine seeded grain (as a camera's photo has), of any size, the same on every run
+const grainy = (page, w, h, type, name) => page.evaluate(([w, h, type]) => {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, h); grad.addColorStop(0, '#8a9aa6'); grad.addColorStop(1, '#3b4a52'); g.fillStyle = grad; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#c98f6a'; g.beginPath(); g.ellipse(w * 0.5, h * 0.42, w * 0.22, h * 0.25, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#6b3f2a'; g.beginPath(); g.ellipse(w * 0.5, h * 0.25, w * 0.24, h * 0.12, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#2e2420'; g.fillRect(w * 0.4, h * 0.4, w * 0.05, h * 0.02); g.fillRect(w * 0.55, h * 0.4, w * 0.05, h * 0.02);
+  g.fillStyle = '#1f2a33'; g.fillRect(w * 0.2, h * 0.68, w * 0.6, h * 0.32);
+  const d = g.getImageData(0, 0, w, h); let x = 12345;
+  for (let i = 0; i < d.data.length; i += 4) { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; const n = ((x >>> 24) % 21) - 10; d.data[i] += n; d.data[i + 1] += n; d.data[i + 2] += n; }
+  g.putImageData(d, 0, 0);
+  return c.toDataURL(type, 0.92);
+}, [w, h, type]).then((url) => ({ name, mimeType: type, buffer: Buffer.from(url.split(',')[1], 'base64') }));
+const setDetail = (page, v) => afterResult(page, () => page.evaluate((v) => { const e = document.getElementById('detail'); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); }, v), { timeout: 180000 });
+const setFit = (page, v) => afterResult(page, () => page.evaluate((v) => { const e = document.getElementById('artFit'); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); }, v));
+const scores = (s) => [s.color, s.value, s.shapes];
+const perfect = (s) => s.color === 100 && s.value === 100 && s.shapes === '100%' && s.list.length === 1 && s.list[0].cls === 'fix-none';
+// the share of the accuracy map drawn as the not-covered hatching (its two grays, in their diagonal pattern)
+const hatchShare = (page) => page.evaluate(() => { const c = document.getElementById('cv-diff'); const W = c.width, H = c.height; const d = c.getContext('2d').getImageData(0, 0, W, H).data; let n = 0; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4, v = ((x + y) % 10) < 3 ? 105 : 78; if (d[i] === v && d[i + 1] === v && d[i + 2] === v) n++; } return (100 * n) / (W * H); });
+const leftOf = (note) => +((/(\d+)% of picture left out/.exec(note || '') || [0, 0])[1]);
+const resetAlign3 = async (page) => { await click(page, '#alignReset'); await busyHidden(page); await sleep(60); };
+// Move, Move down, Size and Rotate set together (one rerun of the check, as a quick visitor's hands give)
+const setAll = async (page, a) => { await page.evaluate((a) => ['alignX', 'alignY', 'alignScale', 'alignRot'].forEach((id, i) => { const e = document.getElementById(id); e.value = a[i]; e.dispatchEvent(new Event('input', { bubbles: true })); }), a); await busyHidden(page); await sleep(60); };
+
+// ---- the accuracy map and its labels at Working size 600, 900 and 1400, on a reference big enough for each ----
+round3('the accuracy map at every working size', async (t, site, open) => {
+  const page = await open({ url: '#check', storage: { 'portrait-value-studio.mode': 'advanced' } });
+  await countResults(page); await busyHidden(page);
+  await page.evaluate(PILL_LOG);
+  t.check(await afterResult(page, async () => page.setInputFiles('#file', await grainy(page, 1600, 2000, 'image/jpeg', 'big-ref.jpg')), { timeout: 120000 }), 'a 1600 × 2000 reference loads with the drawer open');
+  // the painting: the reference a whole value step lighter and warmer, so five shapes are off
+  t.check(await loadArt(page, (await variant(page, 'lighter-warmer.png', { kind: 'lab', dL: 10, warm: 8 })).file), 'the reference made lighter and warmer loads as the painting');
+  const WANT = { 600: [480, 600], 900: [720, 900], 1400: [1120, 1400] };
+  const onScreen = {};
+  for (const ws of ['600', '1400', '900']) {
+    t.check(await setDetail(page, ws), `Working size ${ws} with the drawer open reruns`);
+    const s = await state(page);
+    const r = await page.evaluate(() => { const c = document.getElementById('cv-diff'); return { list: window.__pills.slice(), W: c.width, H: c.height, cssW: c.getBoundingClientRect().width, shapes: window.Study.shapeCount(window.Studio.result()) }; });
+    t.check(same(s.orig, WANT[ws]) && same(s.art, WANT[ws]) && same(s.diff, WANT[ws]), `Working size ${ws}: the reference, the painting and the map are ${WANT[ws].join(' × ')}`, { orig: s.orig, art: s.art, diff: s.diff });
+    checkScorecard(t, s, `Working size ${ws}`);
+    const fx = fixesOf(s);
+    const white = r.list.filter((p) => /^\d · \d{1,3}%$/.test(p.text));
+    const long = Math.max(r.W, r.H), lo = Math.round(long / 60), hi = Math.round(long / 26);
+    t.check(fx.length === 5 && same(white.map((p) => p.text), fx.map((f, i) => `${i + 1} · ${f.pct}%`)), `Working size ${ws}: the white labels read 1 to 5 with each entry's match, as the list numbers them`, { labels: white.map((p) => p.text), list: fx.map((f) => f.pct) });
+    t.check(r.list.length >= 6 && r.list.length <= r.shapes && r.list.every((p) => pillInside(p, r.W, r.H) && p.font >= lo && p.font <= hi) && pillsOverlapping(r.list).length === 0, `Working size ${ws}: every label inside the picture, none on another, no more labels than shapes, each between ${lo} and ${hi} px`, { labels: r.list.length, shapes: r.shapes, overlapping: pillsOverlapping(r.list), off: r.list.filter((p) => !pillInside(p, r.W, r.H) || p.font < lo || p.font > hi).map((p) => [p.text, p.font]) });
+    onScreen[ws] = +(Math.max(...r.list.map((p) => p.font)) * (r.cssW / r.W)).toFixed(1);
+    // the first white label sits on the shape it names: hovered at its centre, the loupe reads entry 1's match
+    const one = white[0];
+    if (one) {
+      const l = await hoverAt(page, '#cv-diff', (one.x + one.w / 2) / r.W, (one.y + one.h / 2) / r.H);
+      await page.mouse.move(5, 5);
+      t.check(l.shown && l.hex === `${fx[0].pct}% match`, `Working size ${ws}: hovered at label 1, the loupe reads entry 1's match (${fx[0].pct}%)`, l);
+    }
+    // the uncovered part, said and drawn alike at this size
+    await openAlign(page);
+    await setRange(page, 'alignX', 20);
+    const moved = await state(page), hatch = await hatchShare(page);
+    t.check(moved.alignState === 'moved, 20% of picture left out' && Math.abs(hatch - 20) <= 0.5, `Working size ${ws}: Move at +20% says 20% is left out, and 20% of the map is hatched`, { note: moved.alignState, hatched: +hatch.toFixed(2) });
+    await resetAlign3(page);
+  }
+  const sizes = Object.values(onScreen);
+  t.check(sizes.length === 3 && Math.max(...sizes) / Math.min(...sizes) <= 1.25, 'the biggest label is about the same size on the screen at every working size (the map is shown at one width)', onScreen);
+  await clean(t, page, 'the accuracy map at every working size');
+});
+
+// ---- paintings much larger, much smaller and of another shape than the reference ----
+round3('paintings larger, smaller and of another shape', async (t, site, open) => {
+  const page = await open({ url: '#check' });
+  await countResults(page); await busyHidden(page);
+  for (const [label, w, h, min] of [['four times as big', 2400, 3000, [97, 95, 97]], ['a fifth of the size', 120, 150, [97, 95, 97]], ['a tenth of the size', 60, 75, [95, 93, 93]], ['the smallest accepted', 16, 20, [85, 75, 75]]]) {
+    const name = `ref-${w}x${h}.png`;
+    t.check(await loadArt(page, await variant3(page, name, { kind: 'scale', w, h })), `the reference drawn ${w} × ${h} (${label}) loads as the painting`);
+    const s = await state(page);
+    t.check(s.label === `${name} · ${w} × ${h} px` && same(s.art, [600, 750]) && same(s.diff, [600, 750]), `${w} × ${h}: the label gives the photo's own size, and it is scored at the reference's (600 × 750)`, { label: s.label, art: s.art, diff: s.diff });
+    t.check(s.color >= min[0] && s.value >= min[1] && +s.shapes.slice(0, -1) >= min[2], `${w} × ${h}: the reference's own picture, ${label}, still scores at least ${min[0]} / ${min[1]} / ${min[2]}%`, scores(s));
+    checkScorecard(t, s, `${w} × ${h}`);
+  }
+  await resetToast(page);
+  const before = await state(page);
+  await page.setInputFiles('#artFile', await variant3(page, 'ref-15x19.png', { kind: 'scale', w: 15, h: 19 }));
+  const told = await waitToast(page, TOO_SMALL);
+  const after = await state(page);
+  t.check(told && after.label === before.label && after.badge === before.badge, 'one pixel under (15 × 19) is refused as too small to check, and the 16 × 20 painting stays scored', { toast: after.toast, label: after.label, badge: [before.badge, after.badge] });
+  // another shape: the reference in the middle of a landscape photo, and of a tall one, the rest mid gray
+  for (const [w, h, minCrop] of [[1200, 600, 97], [600, 1500, 100]]) {
+    t.check(await loadArt(page, await variant3(page, `fit-${w}x${h}.png`, { kind: 'fit', w, h })), `the reference in the middle of a ${w} × ${h} photo loads`);
+    const crop = await state(page);
+    await setFit(page, 'stretch');
+    const stretch = await state(page);
+    await setFit(page, 'crop');
+    t.check(crop.color >= minCrop && crop.value >= minCrop - 2 && +crop.shapes.slice(0, -1) >= minCrop && stretch.color < 70 && stretch.grade !== gradeFor(100), `a ${w > h ? 'landscape' : 'tall'} ${w} × ${h} photo with the painting in its middle: Crop to match finds it (${minCrop === 100 ? '100' : `at least ${minCrop}`}), Stretch to match squeezes the gray in and scores it far off`, { crop: scores(crop), stretch: scores(stretch), grade: stretch.grade });
+  }
+  await clean(t, page, 'paintings larger, smaller and of another shape');
+});
+
+// ---- the photo itself loaded as the painting: 100 at every working size and every setting ----
+round3('the photo itself as the painting', async (t, site, open) => {
+  const page = await open({ url: '#check', storage: { 'portrait-value-studio.mode': 'advanced' } });
+  await countResults(page); await busyHidden(page);
+  const off = [];
+  for (const [w, h, type, sizes] of [[1600, 2000, 'image/jpeg', ['900', '600', '1400']], [777, 1031, 'image/png', ['900']], [3000, 2000, 'image/jpeg', ['900', '1400']]]) {
+    const file = await grainy(page, w, h, type, `photo-${w}x${h}.${type === 'image/png' ? 'png' : 'jpg'}`);
+    t.check(await afterResult(page, () => page.setInputFiles('#file', file), { timeout: 120000 }) && await loadArt(page, file), `a ${w} × ${h} ${type === 'image/png' ? 'PNG' : 'JPEG'} loads as the reference and, the same file, as the painting`);
+    const got = {};
+    for (const ws of sizes) {
+      await setDetail(page, ws);
+      const s = await state(page);
+      got[ws] = { scores: scores(s), list: s.list.map((l) => l.cls), size: s.orig };
+      if (!perfect(s)) {
+        await setFit(page, 'stretch');
+        const st = await state(page);
+        const px = await page.evaluate(() => { const get = (id) => { const c = document.getElementById(id); return c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }; const a = get('cv-orig'), b = get('cv-art'); let n = 0, mx = 0; for (let i = 0; i < a.length; i += 4) { const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])); if (d) n++; if (d > mx) mx = d; } return { differ: +((100 * n) / (a.length / 4)).toFixed(1), max: mx }; });
+        await setFit(page, 'crop');
+        const px2 = await page.evaluate(() => { const get = (id) => { const c = document.getElementById(id); return c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }; const a = get('cv-orig'), b = get('cv-art'); let n = 0, mx = 0; for (let i = 0; i < a.length; i += 4) { const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])); if (d) n++; if (d > mx) mx = d; } return { differ: +((100 * n) / (a.length / 4)).toFixed(1), max: mx }; });
+        off.push({ file: `${w} × ${h}`, ws, size: s.orig, crop: scores(s), stretch: scores(st), stretchPerfect: perfect(st), cropPixels: px2, stretchPixels: px });
+      }
+    }
+    t.check(Object.values(got).every((g) => same(g.scores, [100, 100, '100%']) && same(g.list, ['fix-none'])), `the ${w} × ${h} photo scored against itself: 100, 100 and 100%, no shape off, at Working size ${sizes.join(', ')}`, got);
+    if (sizes[sizes.length - 1] !== '900') await setDetail(page, '900');
+  }
+  // the same file at every setting the Study has (each changed in turn, the earlier ones kept)
+  const file = await grainy(page, 1000, 1333, 'image/jpeg', 'photo-1000x1333.jpg');
+  await afterResult(page, () => page.setInputFiles('#file', file), { timeout: 120000 }); await loadArt(page, file);
+  const SETTINGS = [
+    ['Colors in each value 1', () => { const e = document.getElementById('colors'); e.value = 1; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Colors in each value 6', () => { const e = document.getElementById('colors'); e.value = 6; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Simplify 0', () => { const e = document.getElementById('simplify'); e.value = 0; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Simplify 10', () => { const e = document.getElementById('simplify'); e.value = 10; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Smoothing Soft', () => { const e = document.getElementById('smoothSoft'); e.checked = true; e.dispatchEvent(new Event('change', { bubbles: true })); }],
+    ['Merge small shapes 0', () => { const e = document.getElementById('merge'); e.value = 0; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Merge small shapes 10', () => { const e = document.getElementById('merge'); e.value = 10; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['shadow split at L* 10', () => { const e = document.getElementById('t1'); e.value = 10; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['light split at L* 90', () => { const e = document.getElementById('t2'); e.value = 90; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Gray values: Photo average', () => { const e = document.getElementById('grayAvg'); e.checked = true; e.dispatchEvent(new Event('change', { bubbles: true })); }],
+    ['outlines on', () => { const e = document.getElementById('outlines'); e.checked = true; e.dispatchEvent(new Event('change', { bubbles: true })); }],
+    ['Lean toward lighter tones Off', () => { const e = document.getElementById('lean'); e.value = 0; e.dispatchEvent(new Event('input', { bubbles: true })); }],
+    ['Auto split', () => document.getElementById('autoSplit').click()],
+  ];
+  const bySetting = [];
+  for (const [label, fn] of SETTINGS) {
+    await afterResult(page, () => page.evaluate(fn));
+    const s = await state(page);
+    bySetting.push({ label, scores: scores(s), list: s.list.map((l) => l.cls) });
+    if (!perfect(s)) { await setFit(page, 'stretch'); const st = await state(page); await setFit(page, 'crop'); off.push({ file: '1000 × 1333', ws: '900', setting: label, size: s.orig, crop: scores(s), stretch: scores(st), stretchPerfect: perfect(st) }); }
+  }
+  t.check(bySetting.every((b) => same(b.scores, [100, 100, '100%']) && same(b.list, ['fix-none'])), 'a 1000 × 1333 photo scored against itself: 100, 100 and 100% with no shape off at every setting, each changed in turn', bySetting);
+  if (off.length) {
+    const o = off.find((x) => x.stretchPerfect) || off[0];
+    t.finding({
+      title: `The photo itself, loaded as the painting, does not score 100: ${o.crop[0]} / ${o.crop[1]} with Crop to match (${o.file} photo, Working size ${o.ws}${o.setting ? ', ' + o.setting : ''}), 100 with Stretch to match`,
+      severity: 'low',
+      steps: `1. Advanced mode. Load a ${o.file} photo with some grain (any camera photo; the case draws a portrait with ±10 levels of seeded noise and saves it as a JPEG) as the reference${o.ws !== '900' ? `, and set Working size to ${o.ws}` : ''}${o.setting ? `, then ${o.setting}` : ''}. 2. Open How close did I get? and load the very same file as the painting (Crop to match, the default). 3. Read the scores; then switch to Stretch to match.`,
+      expected: 'The reference compared with itself scores 100 on every score and lists no shape (README: "It is cropped (or stretched) to match the reference and broken into color blocks with the same settings"; the case\'s own check of the reference\'s pixels scores 100 at every setting).',
+      actual: off.map((x) => `${x.file}${x.setting ? ' after ' + x.setting : ''} at ${x.ws} (studied at ${x.size.join(' × ')}): Crop ${x.crop.join(' / ')}, Stretch ${x.stretch.join(' / ')}${x.cropPixels ? ` (Crop leaves ${x.cropPixels.differ}% of the pixels different from the reference's, by up to ${x.cropPixels.max} levels; Stretch ${x.stretchPixels.differ}%)` : ''}`).join('; ') + '.',
+      cause: 'js/app.js 2338-2342 (alignArt, Crop to match) computes the crop from the reference\'s rounded working size: processing.js 75-77 makes the reference Math.round(sw × scale) × Math.round(sh × scale) (3000 × 2000 at 1400 becomes 1400 × 933), and the crop then takes a source rectangle of 3000 × 1999.3 px offset by 0.36 px, so the painting is resampled a fraction of a pixel off the reference. The grain shifts, and each shape\'s "most prominent color" is the fullest bin of about 4 L* (processing.js dominantColors, 576), so a slight shift moves some shapes a whole bin. Stretch draws the whole photo as prepare() does and scores 100.',
+    });
+  }
+  await clean(t, page, 'the photo itself as the painting');
+});
+
+// ---- a painting of another subject, turned over, upside down, and flat colors ----
+round3('a painting of another subject', async (t, site, open) => {
+  const page = await open({ url: '#check' });
+  await countResults(page); await busyHidden(page);
+  const example = await state(page);
+  const ex = { color: example.color, shapes: +example.shapes.slice(0, -1) };
+  const tries = [
+    ['another portrait', async () => makeImage(page, { width: 600, height: 800, name: 'another.png' })],
+    ['the reference upside down', async () => variant3(page, 'upside-down.png', { kind: 'flip' })],
+    ['the reference\'s negative', async () => variant3(page, 'negative.png', { kind: 'invert' })],
+  ];
+  const seen = {};
+  for (const [label, make] of tries) {
+    t.check(await loadArt(page, await make()), `${label} loads as the painting`);
+    const s = await state(page);
+    seen[label] = s;
+    t.check(s.color < ex.color - 10 && +s.shapes.slice(0, -1) < ex.shapes && ['Several shapes are off', 'Far from the reference'].includes(s.grade) && s.list.length === 5 && s.list.every((l) => l.cls === 'fix'), `${label}: scores well under the example (${ex.color}, ${ex.shapes}%), graded at best "Several shapes are off", five shapes to fix`, { scores: scores(s), grade: s.grade, list: s.list.length });
+    checkScorecard(t, s, label);
+  }
+  const neg = seen['the reference\'s negative'];
+  t.check(neg.value < 50 && +neg.shapes.slice(0, -1) < 50, 'the negative (lights where the darks are): the light and dark score and Shapes in the right place both under 50', scores(neg));
+  // flat paintings: Shapes in the right place is the share of the reference's mass that flat value falls in
+  const masses = await page.evaluate(() => {
+    const r = Studio.result(); const c = [0, 0, 0]; for (let i = 0; i < r.zone.length; i++) c[r.zone[i]]++;
+    const t1 = +document.getElementById('t1').value, t2 = +document.getElementById('t2').value, want = (t1 + t2) / 2;
+    let mid = 0; for (let v = 0; v < 256; v++) if (Math.abs(Study.lightnessOf(v, v, v) - want) < Math.abs(Study.lightnessOf(mid, mid, mid) - want)) mid = v;
+    return { share: c.map((v) => (100 * v) / r.zone.length), mid, t1, t2 };
+  });
+  for (const [label, rgb, zone, word] of [['white', [255, 255, 255], 2, /^Too light/], ['black', [0, 0, 0], 0, /^Too dark/], [`a middle gray (#${masses.mid.toString(16).padStart(2, '0').repeat(3)})`, [masses.mid, masses.mid, masses.mid], 1, null]]) {
+    t.check(await loadArt(page, await variant3(page, `flat-${rgb[0]}.png`, { kind: 'flat', rgb })), `a flat ${label} painting loads`);
+    const s = await state(page);
+    const want = Math.round(masses.share[zone]);
+    t.check(Math.abs(+s.shapes.slice(0, -1) - want) <= 1 && s.color < ex.color && s.grade === 'Far from the reference', `a flat ${label} painting: Shapes in the right place is the share of the reference's ${['shadow', 'middle', 'light'][zone]} mass (${want}%), and it is far from the reference`, { shapes: s.shapes, want, masses: masses.share.map((v) => +v.toFixed(1)), scores: scores(s), grade: s.grade });
+    if (word) t.check(fixesOf(s).length === 5 && fixesOf(s).every((f) => word.test(f.note)), `a flat ${label} painting: every shape to fix is called ${word.source.slice(1).toLowerCase()}`, fixesOf(s).map((f) => f.note));
+  }
+  await clean(t, page, 'a painting of another subject');
+});
+
+// ---- Move, Size and Rotate at their ends: each undoes the change it is for, and the panel's "left out" is the hatching ----
+round3('alignment at its extremes', async (t, site, open) => {
+  const page = await open({ url: '#check' });
+  await countResults(page); await busyHidden(page);
+  await openAlign(page);
+  const CASES = [
+    ['moved 20% right and down', { kind: 'xform', dx: 120, dy: 150 }, [-20, -20, 100, 0], [100, 100, 100], 36],
+    ['moved 20% left and up', { kind: 'xform', dx: -120, dy: -150 }, [20, 20, 100, 0], [100, 100, 100], 36],
+    ['turned 15°', { kind: 'xform', deg: 15 }, [0, 0, 100, -15], [99, 98, 98], 11],
+    ['turned −15°', { kind: 'xform', deg: -15 }, [0, 0, 100, 15], [99, 98, 98], 11],
+    ['shrunk to 80%', { kind: 'xform', f: 0.8 }, [0, 0, 125, 0], [98, 96, 98], 0],
+    ['enlarged to 125%', { kind: 'xform', f: 1.25 }, [0, 0, 80, 0], [97, 95, 97], 36],
+  ];
+  for (const [label, spec, a, min, left] of CASES) {
+    t.check(await loadArt(page, await variant3(page, `${label.replace(/\W+/g, '-')}.png`, spec)), `the reference ${label} loads`);
+    const before = await state(page);
+    await setAll(page, a);
+    const s = await state(page), hatch = await hatchShare(page);
+    const note = left ? `moved, ${left}% of picture left out` : 'moved';
+    t.check(s.color >= min[0] && s.value >= min[1] && +s.shapes.slice(0, -1) >= min[2] && s.color > before.color, `the reference ${label}, lined up with ${['Move', 'Move', 'Size', 'Rotate'][a[3] ? 3 : a[2] !== 100 ? 2 : 0]} at its end (${a.join(', ')}): about 100 on what is still covered (at least ${min.join(' / ')})`, { before: scores(before), after: scores(s) });
+    t.check(s.alignState === note && Math.abs(hatch - left) <= 1, `the reference ${label}, lined up: the panel says "${note}" and ${left}% of the map is hatched`, { note: s.alignState, hatched: +hatch.toFixed(2) });
+  }
+  // the panel's share against the hatching, everywhere the sliders reach (on the reference's own pixels)
+  t.check(await loadArt(page, await variant3(page, 'same.png', { kind: 'scale' })), 'the reference\'s own pixels load as the painting');
+  const combos = [[20, 0, 100, 0], [20, 20, 100, 0], [0, 0, 80, 0], [0, 0, 100, 15], [0, 0, 125, 15], [0, 0, 125, -15], [20, 20, 80, 15], [-20, -20, 80, -15], [-20, 20, 125, -15], [0.2, 0, 100, 0], [0, 0, 99.5, 0], [2, 0, 100, 0]];
+  const read = [];
+  for (const a of combos) {
+    await setAll(page, a);
+    const s = await state(page);
+    read.push({ a, note: s.alignState, said: leftOf(s.alignState), hatched: +(await hatchShare(page)).toFixed(2) });
+  }
+  await resetAlign3(page);
+  t.check(read.every((r) => Math.abs(r.said - r.hatched) <= 1 && (r.hatched < 0.5 || r.said >= 1) && /^moved/.test(r.note)), 'at every reach of Move, Size and Rotate the panel\'s "N% of picture left out" is the share the map hatches (within a point), and names any part of half a percent or more', read);
+  // all four at an end, then a new painting: Move, Size and Rotate start over
+  await setAll(page, [-20, 20, 80, -15]);
+  const ends = await state(page);
+  t.check(await loadArt(page, await variant3(page, 'negative.png', { kind: 'invert' })), 'a new painting loads with all four sliders at an end');
+  const fresh = await state(page);
+  t.check(/^moved, \d+% of picture left out$/.test(ends.alignState) && same(fresh.outs.alignX, ['0', '0%']) && same(fresh.outs.alignY, ['0', '0%']) && same(fresh.outs.alignScale, ['100', '100%']) && same(fresh.outs.alignRot, ['0', '0°']) && fresh.alignState === '', 'a new painting puts Move, Size and Rotate back (0%, 100%, 0°) and clears the panel\'s note', { before: ends.alignState, outs: fresh.outs, note: fresh.alignState });
+  await clean(t, page, 'alignment at its extremes');
+});
+
+// ---- what the second pass left: a see-through painting, two files in one instant, the drawer's contrast, the red gain
+// limit, the heap ----
+const CONTRAST = (sels) => {
+  const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const parse = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+  const lum = (rgb) => 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+  // the background the text sits on: every background color up the tree, laid over each other until one is opaque
+  const bgOf = (el) => { const layers = []; for (let e = el; e; e = e.parentElement) { const c = parse(getComputedStyle(e).backgroundColor); if (c.length >= 3 && (c.length < 4 || c[3] > 0)) { layers.push(c); if (c.length < 4 || c[3] >= 1) break; } } let out = [255, 255, 255]; for (let i = layers.length - 1; i >= 0; i--) { const c = layers[i], a = c.length < 4 ? 1 : c[3]; out = out.map((v, k) => v * (1 - a) + c[k] * a); } return out; };
+  return sels.flatMap((sel) => [...document.querySelectorAll(sel)].filter((e) => e.textContent.trim() && e.getClientRects().length).slice(0, 3).map((e) => {
+    const cs = getComputedStyle(e), fg = parse(cs.color), bg = bgOf(e), a = fg.length > 3 ? fg[3] : 1, f = fg.slice(0, 3).map((v, k) => v * a + bg[k] * (1 - a));
+    const L1 = lum(f), L2 = lum(bg), size = parseFloat(cs.fontSize), large = size >= 24 || (+cs.fontWeight >= 700 && size >= 18.66);
+    return { sel, text: e.textContent.trim().slice(0, 24), ratio: +((Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05)).toFixed(2), need: large ? 3 : 4.5, fg: f.map(Math.round), bg: bg.map(Math.round) };
+  }));
+};
+round3('what the second pass left', async (t, site, open) => {
+  const page = await open({ url: '#check' });
+  await countResults(page); await busyHidden(page);
+  // a cut-out painting reads its see-through part as the mid gray it sits on, exactly as a painting on that gray does
+  const disc = (onGray) => page.evaluate((onGray) => { const c = document.createElement('canvas'); c.width = 600; c.height = 750; const g = c.getContext('2d'); if (onGray) { g.fillStyle = '#7f7f7f'; g.fillRect(0, 0, 600, 750); } g.fillStyle = 'rgb(200,60,60)'; g.beginPath(); g.arc(300, 375, 180, 0, Math.PI * 2); g.fill(); return c.toDataURL('image/png'); }, onGray).then((u) => ({ name: onGray ? 'disc-on-gray.png' : 'disc-cut-out.png', mimeType: 'image/png', buffer: Buffer.from(u.split(',')[1], 'base64') }));
+  const read = async () => { const s = await state(page); return { badge: s.badge, shapes: s.shapes, list: s.list.map((l) => `${l.note} ${l.meta}`), corner: await px(page, 'cv-art', 5, 5) }; };
+  await loadArt(page, await disc(false)); const cut = await read();
+  await loadArt(page, await disc(true)); const gray = await read();
+  t.check(same({ ...cut, corner: null }, { ...gray, corner: null }) && cut.corner.every((v) => Math.abs(v - 127) <= 1), 'a cut-out painting (a red disc on nothing) scores and lists exactly as the same disc on mid gray: its see-through part reads #7F7F7F, not black', { cut: [cut.badge, cut.shapes, cut.corner], gray: [gray.badge, gray.shapes, gray.corner], same: same(cut.list, gray.list) });
+  await clean(t, page, 'a cut-out painting');
+  // two paintings chosen in the same instant: the second is the one shown and scored, the first never appears
+  const A = await makeImage(page, { width: 600, height: 750, type: 'image/jpeg', name: 'first.jpg' });
+  const B = await variant3(page, 'second.png', { kind: 'invert' });
+  await loadArt(page, A); const alone = { A: (await state(page)).badge };
+  await loadArt(page, B); alone.B = (await state(page)).badge;
+  await loadArt(page, await disc(true));
+  const startBadge = (await state(page)).badge;
+  const watch = () => page.evaluate(() => { window.__seen = []; const g = (id) => document.getElementById(id); const rec = () => window.__seen.push({ busy: !g('busy').hidden, src: g('source').textContent.split(' · ')[0], art: g('artSource').textContent.split(' · ')[0], badge: g('checkState').textContent }); window.__watch = new MutationObserver(rec); ['checkState', 'artSource', 'busy', 'source'].forEach((id) => window.__watch.observe(g(id), { childList: true, subtree: true, characterData: true, attributes: true })); });
+  const both = (files) => page.evaluate((files) => {
+    for (const f of files) {
+      const bin = atob(f.b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      const dt = new DataTransfer(); dt.items.add(new File([u], f.name, { type: f.type }));
+      const input = document.getElementById(f.input); input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, files.map(([input, f]) => ({ input, name: f.name, type: f.mimeType, b64: f.buffer.toString('base64') })));
+  await watch();
+  await afterResult(page, () => both([['artFile', A], ['artFile', B]]));
+  await page.waitForFunction(() => /^second\.png/.test(document.getElementById('artSource').textContent) && /^Color \d+/.test(document.getElementById('checkState').textContent) && document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
+  let seen = await page.evaluate(() => { window.__watch.disconnect(); return window.__seen; });
+  const end = await state(page);
+  t.check(end.label.startsWith('second.png') && end.badge === alone.B && !seen.some((x) => x.art === 'first.jpg') && seen.filter((x) => !x.busy).every((x) => (x.art === 'second.png' && x.badge === alone.B) || (x.art === 'disc-on-gray.png' && x.badge === startBadge)), 'two paintings chosen in the same instant: the second is shown and scored as it is alone, the first never appears, and no score is shown beside the wrong painting', { end: [end.label.slice(0, 20), end.badge], alone, seen });
+  // a reference and a painting chosen in the same instant: each moment the page rests shows a pair with its own score
+  const R1 = await makeImage(page, { width: 600, height: 750, name: 'ref-one.png' });
+  await afterResult(page, () => page.setInputFiles('#file', R1));
+  const P1 = await variant3(page, 'art-one.png', { kind: 'flip' }), R2 = await variant3(page, 'ref-two.png', { kind: 'invert' }), P2 = await variant3(page, 'art-two.png', { kind: 'xform', deg: 4, f: 1.05 });
+  const clean4 = {};
+  await loadArt(page, P1); clean4['ref-one.png|art-one.png'] = (await state(page)).badge;
+  await loadArt(page, P2); clean4['ref-one.png|art-two.png'] = (await state(page)).badge;
+  await afterResult(page, () => page.setInputFiles('#file', R2)); clean4['ref-two.png|art-two.png'] = (await state(page)).badge;
+  await loadArt(page, P1); clean4['ref-two.png|art-one.png'] = (await state(page)).badge;
+  await afterResult(page, () => page.setInputFiles('#file', R1)); // back to ref-one with art-one
+  await watch();
+  await afterResult(page, () => both([['file', R2], ['artFile', P2]]), { more: 1 });
+  await page.waitForFunction(() => /^ref-two\.png/.test(document.getElementById('source').textContent) && /^art-two\.png/.test(document.getElementById('artSource').textContent) && /^Color \d+/.test(document.getElementById('checkState').textContent) && document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
+  await sleep(300);
+  seen = await page.evaluate(() => { window.__watch.disconnect(); return window.__seen; });
+  const fin = await page.evaluate(() => ({ src: document.getElementById('source').textContent.split(' · ')[0], art: document.getElementById('artSource').textContent.split(' · ')[0], badge: document.getElementById('checkState').textContent }));
+  const wrong = seen.filter((x) => !x.busy && /^Color/.test(x.badge) && clean4[`${x.src}|${x.art}`] !== x.badge);
+  t.check(fin.src === 'ref-two.png' && fin.art === 'art-two.png' && fin.badge === clean4['ref-two.png|art-two.png'] && wrong.length === 0, 'a reference and a painting chosen in the same instant: it ends on the new pair with the score that pair gets loaded one after the other, and whenever the page is at rest its badge is the score of the pair it shows', { fin, clean: clean4, wrong, seen: seen.filter((x) => !x.busy) });
+  await clean(t, page, 'files in the same instant');
+  // the drawer's own words against their backgrounds (a luminance ratio, as WCAG reckons it), light and dark
+  await afterResult(page, async () => page.setInputFiles('#file', await makeImage(page, { width: 600, height: 750, name: 'ref-three.png' })));
+  await loadArt(page, await variant3(page, 'art-three.png', { kind: 'flip' }));
+  await openAlign(page); await setRange(page, 'alignX', 5);
+  const SELS = ['#alignState', '#scoreGrade', '#scoreColor', '#scoreValue', '#scoreShapes', '#checkState', '#artSource', '#fixList .fix-num', '#fixList .fix-text strong', '#fixList .fix-text small', '#checkBody .score-label', '#checkBody dt', '#checkPanels figcaption', '#checkPanels .hint', '#wbStatus', '#wbPick', '#alignXOut', '#onionOut', '#drawer-check .drawer-body > .hint'];
+  for (const scheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState === 'running' && typeof CSSTransition !== 'undefined' && a instanceof CSSTransition), null, { timeout: 3000 }).catch(() => null);
+    const r = await page.evaluate(CONTRAST, SELS);
+    const low = r.filter((x) => x.ratio < x.need);
+    t.check(r.length >= 20 && low.length === 0, `${scheme}: every word of the drawer (the scores, the grade, the panel's note, the list, the captions and hints) stands out from its background by 4.5 : 1 or more (3 : 1 for large type)`, { measured: r.length, lowest: r.reduce((m, x) => (x.ratio < m.ratio ? x : m), r[0]), low });
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await resetAlign3(page);
+  await clean(t, page, 'contrast');
+  // the red gain limit ("red or green at most doubled") at its edge: near-grays (C* under 12) whose fix needs red ×1.91
+  // and ×2.03; the other limits no spot reaches that the page takes as a tinted white or a gray (counted below)
+  await afterResult(page, async () => page.setInputFiles('#file', await makeImage(page, { width: 600, height: 750, name: 'ref-four.png' })));
+  const RED = [['a near-gray needing red ×1.91 (just inside)', [69, 100, 103], 'accept'], ['a near-gray needing red ×2.03 (past doubled)', [61, 92, 96], 'refuse']];
+  t.check(await loadArt(page, await ownPixels(page, { patches: RED, name: 'red-limit.png' })), 'a painting with two near-gray patches at the red limit loads');
+  const gains = await page.evaluate((rs) => rs.map(([, c]) => ({ gains: Study.neutralGains(...c).map((v) => +v.toFixed(3)), chroma: +Study.chromaOf(...c).toFixed(1) })), RED);
+  await openAlign(page);
+  for (let i = 0; i < RED.length; i++) {
+    const [label, , want] = RED[i];
+    await resetToast(page);
+    if (!(await state(page)).picking) await click(page, '#wbPick');
+    await clickAt(page, '#cv-art', patchAt(i)[0] / 600, patchAt(i)[1] / 750);
+    const s = await state(page);
+    const ok = want === 'accept' ? FIXED.test(s.toast) && s.wbUndo && !s.picking : REFUSED.test(s.toast) && s.picking;
+    t.check(ok, `Fix color cast on ${label}: ${want === 'accept' ? 'the cast is removed' : 'refused as too colorful, and picking stays on'}`, { toast: s.toast, wbUndo: s.wbUndo, picking: s.picking, ...gains[i] });
+    if (s.picking) { await page.keyboard.press('Escape'); await sleep(60); }
+    if (s.wbUndo) { await click(page, '#wbUndo'); await busyHidden(page); }
+  }
+  const reach = await page.evaluate(() => {
+    const tinted = ([r, g, b]) => Math.abs(Math.log(g) - 0.6 * Math.log(r) - 0.4 * Math.log(b)) <= Math.log(1.1); // js/app.js tintedByLight
+    const ext = { red: [9, 0], green: [9, 0] };
+    for (let R = 0; R < 256; R += 5) for (let G = 0; G < 256; G += 5) for (let B = 0; B < 256; B += 5) {
+      const k = Study.neutralGains(R, G, B); if (!k || k[2] < 0.5 || k[2] > 3) continue;
+      if (Study.chromaOf(R, G, B) > 12 && !tinted(k)) continue;
+      ext.red = [Math.min(ext.red[0], k[0]), Math.max(ext.red[1], k[0])]; ext.green = [Math.min(ext.green[0], k[1]), Math.max(ext.green[1], k[1])];
+    }
+    return { red: ext.red.map((v) => +v.toFixed(2)), green: ext.green.map((v) => +v.toFixed(2)) };
+  });
+  t.note(`The gain limits a pick can meet: among every spot the page takes as a gray or a tinted white with blue's gain inside ×0.5-×3 (a grid of every fifth level), red needs ×${reach.red[0]} to ×${reach.red[1]} and green ×${reach.green[0]} to ×${reach.green[1]}. So "red at most doubled" binds (checked above at ×1.91 and ×2.03), while "green at most doubled" and "no channel halved" for red and green cannot be reached by any spot that is not refused for its color first.`);
+  await clean(t, page, 'the red gain limit');
+  // the heap after paintings loaded one after another (garbage collected before each reading)
+  const cdp = await page.context().newCDPSession(page);
+  const heap = async () => { await cdp.send('HeapProfiler.collectGarbage'); await sleep(200); await cdp.send('HeapProfiler.collectGarbage'); const u = await cdp.send('Runtime.getHeapUsage'); return Math.round(u.usedSize / 1048576); };
+  const art = await makeImage(page, { width: 1200, height: 1500, type: 'image/jpeg', name: 'heap.jpg' });
+  await loadArt(page, art); await loadArt(page, art);
+  const h2 = await heap();
+  for (let i = 0; i < 4; i++) await loadArt(page, art);
+  const h6 = await heap();
+  t.check(h6 - h2 <= 25, 'four more paintings loaded one after another leave the script heap where two left it (within 25 MB, after garbage collection)', { afterTwo: h2, afterSix: h6 });
+  t.note(`Script heap after 2 paintings ${h2} MB, after 6 ${h6} MB (1200 × 1500 JPEG each, reference 600 × 750; the pictures' pixels live outside the script heap, which soak.mjs measures).`);
+  await clean(t, page, 'the heap');
+});

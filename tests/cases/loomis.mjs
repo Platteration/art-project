@@ -13,7 +13,7 @@
 // hidden and mid-sequence; the drag extremes; the narrow widths; a pixel ratio of 2; a sandboxed save; the words and
 // labels; keyboard focus; dark theme; the model's numbers; drags cut short; a dropped or pasted photo; small and wide photos.
 import fs from 'node:fs';
-import { openPage, clean, tab, DESKTOP, PHONE, makeImage, loadPhoto, textFile, brokenImage, svgImage, click, text, visible, hscroll, screenshot, sleep, storageGet, PROTO_NAMES, dropFiles, pasteFile, axe, app } from '../lib.mjs';
+import { openPage, clean, tab, DESKTOP, PHONE, makeImage, loadPhoto, textFile, brokenImage, svgImage, click, text, visible, hscroll, screenshot, sleep, storageGet, PROTO_NAMES, dropFiles, pasteFile, axe, app, stroke } from '../lib.mjs';
 
 const DEG = Math.PI / 180;
 const ORDER = ['leftEye', 'rightEye', 'leftBrow', 'rightBrow', 'nose', 'mouth', 'chin', 'forehead'];
@@ -1149,4 +1149,279 @@ export default async function loomis(t, site) {
   t.note('the playtester\'s checks above are unchanged (only the import line grew, for the new helpers); all of them pass on the current tree, and none is plainly the author\'s mistake.');
   t.note('keyboard: the card\'s Lock in, Skip, Back, Draw it in the Studio and Back to the fit are buttons and work from the keyboard; placing a mark, dragging a dot or a line and the arrow buttons are pointer-only (the overlay canvas is not focusable and has no key handler); the README promises no keys here');
   t.note('the overlay canvas keeps the label "The photo: tap the feature asked for" once the head is fitted, when a tap no longer places anything');
+  await round2(t, site);
+}
+
+// ================= round 2: the head drawn into the Studio, the head through the Study's working size and mode and on the Check
+// panels, the Studio's restore racing the copy, the arrows and drags at their limits, and a head begun on the Study tab's pictures =================
+// Each block is its own function (a scratch run can drive one alone); round2 runs them in order.
+const studioUp = (page) => Promise.race([page.evaluate(() => (window.PaintStudio ? PaintStudio.ready() : null)), sleep(20000)]).catch(() => null);
+// the ink of a canvas near the middle of each segment (picture fractions), mapped onto the canvas by { ox, oy, w, h } in its pixels
+const midInk = (page, sel, segs, map) => page.evaluate(([sel, segs, map]) => {
+  const c = document.querySelector(sel); const W = c.width, H = c.height; const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+  const m = map || { ox: 0, oy: 0, w: W, h: H };
+  const near = (x, y, r) => { for (let yy = Math.max(0, Math.round(y) - r); yy <= Math.min(H - 1, Math.round(y) + r); yy++) for (let xx = Math.max(0, Math.round(x) - r); xx <= Math.min(W - 1, Math.round(x) + r); xx++) if (d[(yy * W + xx) * 4 + 3] > 8) return true; return false; };
+  let hit = 0; const miss = [];
+  segs.forEach((sg, i) => { const x = m.ox + ((sg[0] + sg[2]) / 2) * m.w, y = m.oy + ((sg[1] + sg[3]) / 2) * m.h; if (near(x, y, 4)) hit++; else if (miss.length < 5) miss.push(i); });
+  return { n: segs.length, hit, miss };
+}, [sel, segs, map || null]);
+// where the Studio puts a Study picture on its paper: as large as fits, centred (js/painting.js 396-397)
+const paperMap = (page) => page.evaluate(() => { const p = Studio.prep(), c = document.getElementById('ps-sketch'); const k = Math.min(c.width / p.w, c.height / p.h); const w = p.w * k, h = p.h * k; return { ox: (c.width - w) / 2, oy: (c.height - h) / 2, w, h, W: c.width, H: c.height }; });
+// the ink of the underdrawing outside a box (pixels), to find anything drawn where the head is not
+const inkOutside = (page, sel, box) => page.evaluate(([sel, b]) => { const c = document.querySelector(sel); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) if (d[(y * c.width + x) * 4 + 3] > 8 && (x < b[0] || x > b[2] || y < b[1] || y > b[3])) n++; return n; }, [sel, box]);
+const ringOnSketch = (page, fit) => page.evaluate(([f]) => { const p = Studio.prep(), c = document.getElementById('ps-sketch'); const k = Math.min(c.width / p.w, c.height / p.h); const w = p.w * k, h = p.h * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const cx = ox + f.tx * w, cy = oy + f.ty * w, R = f.s * w; let hit = 0, n = 0; for (let a = 0; a < 360; a += 5) { const th = (a * Math.PI) / 180; let on = false; for (let r = R - 5; r <= R + 5 && !on; r++) { const x = Math.round(cx + r * Math.cos(th)), y = Math.round(cy + r * Math.sin(th)); if (x >= 0 && y >= 0 && x < c.width && y < c.height && d[(y * c.width + x) * 4 + 3] > 8) on = true; } n++; if (on) hit++; } return +(hit / n).toFixed(3); }, [fit]);
+const POSE = { s: 0.19, tx: 0.47, ty: 0.5, yaw: 0.45, pitch: -0.15, roll: 0.1, len: 1.05 };
+
+export async function headInTheStudio(t, site) {
+  await guard(t, 'round 2: Draw it in the Studio puts the head where the fit puts it', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis'); await studioUp(page);
+    await sequence(page, await posedMarks(page, POSE));
+    const fit = (await lstate(page)).fit;
+    const segs = await page.evaluate(() => Loomis.segments());
+    const onScreen = await midInk(page, '#lh-overlay', segs);
+    t.check(segs.length > 100 && onScreen.hit >= onScreen.n * 0.97, 'the lines the head is drawn with on the Loomis tab are the lines the Studio will copy: the ink is at the middle of each of the segments', onScreen);
+    await tab(page, 'study');
+    const onStudy = await midInk(page, '#cv-orig + canvas', segs);
+    t.check(onStudy.hit >= onStudy.n * 0.97, 'and the same lines are inked over the Study tab\'s photo', onStudy);
+    await tab(page, 'loomis');
+    armToast(page); await click(page, '#lh-cardStudio');
+    const said = await toastMatch(page, /underdrawing/, 8000);
+    await sleep(400);
+    const map = await paperMap(page);
+    const inks = await midInk(page, '#ps-sketch', segs, map);
+    const ring = await ringOnSketch(page, fit);
+    // the box round every segment, a few pixels out: the underdrawing holds nothing beyond it
+    const xs = segs.flatMap((sg) => [map.ox + sg[0] * map.w, map.ox + sg[2] * map.w]), ys = segs.flatMap((sg) => [map.oy + sg[1] * map.h, map.oy + sg[3] * map.h]);
+    const outside = await inkOutside(page, '#ps-sketch', [Math.min(...xs) - 14, Math.min(...ys) - 14, Math.max(...xs) + 14, Math.max(...ys) + 14]);
+    t.check(!!said && inks.hit >= inks.n * 0.97 && ring >= 0.95, 'Draw it in the Studio puts every near-side line and the ball on the underdrawing where the fit has them, fitted to the paper as large as it goes and centred', { said, inks, ring, map });
+    t.check(outside === 0, 'and nothing else: no ink on the underdrawing beyond the head', { outside });
+    // the copy is one step
+    const before = await sketchInk(page);
+    await page.keyboard.press('Control+z');
+    const after = await sketchInk(page);
+    t.check(before > 200 && after === 0 && (await page.evaluate(() => document.getElementById('ps-undo').disabled)), 'Ctrl+Z in the Studio takes the whole head back off the underdrawing in one step', { before, after });
+    await clean(t, page, 'round 2: the head in the Studio');
+    await page.context().close();
+  });
+
+  // the head with the Study tab's own grid and a line: Draw it in the Studio copies everything the Study shows (the Studio's "Copy the
+  // Study lines" is what the button presses), so the Loomis tab's button also brings a grid and lines that tab does not show
+  await guard(t, 'round 2: Draw it in the Studio with a grid and a line on the Study tab', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis'); await studioUp(page);
+    await sequence(page, await posedMarks(page, POSE));
+    await tab(page, 'study');
+    await click(page, '#gridBtn'); await click(page, '.tool-btn[data-tool="line"]');
+    await stroke(page, '#cv-orig', [[0.2, 0.2], [0.8, 0.6]]);
+    const marks = await page.evaluate(() => ({ all: Studio.marks().length, head: Loomis.segments().length }));
+    await tab(page, 'loomis');
+    // the top fifth of the picture, above the head (its crown is at 0.31): a grid line would be inked there, the head is not
+    const shownOnLoomis = await page.evaluate(() => { const c = document.getElementById('lh-overlay'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const x = Math.round(c.width / 3); let n = 0; const y0 = Math.round(c.height * 0.02), y1 = Math.round(c.height * 0.2); for (let y = y0; y < y1; y++) for (let dx = -2; dx <= 2; dx++) if (d[(y * c.width + x + dx) * 4 + 3] > 40) n++; return +(n / (y1 - y0) / 5).toFixed(2); });
+    await click(page, '#lh-cardStudio'); await toastMatch(page, /underdrawing/, 8000); await sleep(400);
+    const read = await page.evaluate(() => { const p = Studio.prep(), c = document.getElementById('ps-sketch'); const k = Math.min(c.width / p.w, c.height / p.h); const w = p.w * k, h = p.h * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const band = (fx) => { const x = Math.round(ox + fx * w); let n = 0; const y0 = Math.round(oy + h * 0.02), y1 = Math.round(oy + h * 0.2); for (let y = y0; y < y1; y++) for (let dx = -2; dx <= 2; dx++) if (d[(y * c.width + x + dx) * 4 + 3] > 8) n++; return +(n / (y1 - y0) / 5).toFixed(2); }; return { thirds: [1 / 3, 2 / 3].map(band), edge: band(0.01) }; });
+    t.check(marks.all === marks.head + 5 && shownOnLoomis < 0.2, 'the Study tab holds a 3 × 3 grid and a line besides the head, and the Loomis tab shows only the head (no grid line a third of the way across)', { marks, shownOnLoomis });
+    const headOnly = read.thirds.every((v) => v < 0.3);
+    t.check(headOnly, 'Draw it in the Studio from the Loomis tab draws the head alone, not the Study tab\'s grid and line that the Loomis tab does not show', read);
+    if (!headOnly) t.finding({ title: 'Draw it in the Studio on the Loomis tab also copies the Study tab\'s grid, lines, measures and plumb lines, which that tab does not show', severity: 'low',
+      steps: '1. On the Study tab turn the grid on (3 × 3) and draw a line. 2. On the Loomis head tab mark a face and fit the head. 3. Press Draw it in the Studio.',
+      expected: 'README: "Draw it in the Studio puts the construction on the Studio\'s underdrawing in pencil": the head the visitor has just fitted, on the tab that shows only the head.',
+      actual: `The underdrawing holds the head and also the grid (ink along ${Math.round(read.thirds[0] * 100)}% and ${Math.round(read.thirds[1] * 100)}% of the vertical thirds above the head, where the head has none) and the line; the toast says "The Study lines are on the underdrawing, in pencil". The Loomis tab itself shows ${Math.round(shownOnLoomis * 100)}% of ink along the first third there.`,
+      cause: 'js/loomis.js line 319 (toStudio) presses the Studio\'s Copy the Study lines (#ps-sketchFromStudy) after 150 ms, and js/painting.js 392-401 copies Studio.marks() whole; js/app.js 2763-2769 returns the grid, plumb lines, lines and measures together with Loomis.segments(). There is no way to ask for the head alone.' });
+    await clean(t, page, 'round 2: the head with the Study marks');
+    await page.context().close();
+  });
+}
+
+// ---- the Study's working size and mode with a head fitted, and the head on the Check my painting panels ---------------------
+export async function headThroughTheStudyTab(t, site) {
+  await guard(t, 'round 2: working size and Simple / Advanced with a head fitted', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await posedMarks(page, POSE));
+    const fit0 = (await lstate(page)).fit, pts0 = JSON.stringify((await lstate(page)).points);
+    await tab(page, 'study');
+    await click(page, '[data-mode="advanced"]');
+    await page.evaluate(() => { document.getElementById('drawer-values').open = true; });
+    const rows = [];
+    for (const size of ['600', '1400', '900']) {
+      await page.evaluate(() => { window.__r0 = Studio.result(); });
+      await app(page).selectOption('#detail', size);
+      await page.waitForFunction(() => window.Studio && Studio.result() && Studio.result() !== window.__r0 && document.getElementById('busy').hidden, null, { timeout: 60000 }).catch(() => null);
+      const prep = await page.evaluate(() => { const p = Studio.prep(); return [p.w, p.h]; });
+      const study = await headStats(page, "document.getElementById('cv-orig').nextElementSibling", fit0);
+      const study2 = await headStats(page, "document.getElementById('cv-block').nextElementSibling", fit0);
+      await tab(page, 'loomis');
+      const s = await lstate(page), over = await headStats(page, "document.getElementById('lh-overlay')", s.fit);
+      rows.push({ size, prep, aspect: +s.aspect.toFixed(4), want: +(prep[1] / prep[0]).toFixed(4), study: study.rim, blocks: study2.rim, loomis: over.rim, fitSame: JSON.stringify(s.fit) === JSON.stringify(fit0), marksSame: JSON.stringify(s.points) === pts0, photo: await page.evaluate(() => [document.getElementById('lh-photo').width, document.getElementById('lh-photo').height]) });
+      await tab(page, 'study');
+    }
+    const bad = rows.filter((r) => !(r.study >= 0.9 && r.blocks >= 0.9 && r.loomis >= 0.9 && r.fitSame && r.marksSame && Math.abs(r.aspect - r.want) < 0.002 && r.photo[0] === r.prep[0] && r.photo[1] === r.prep[1]));
+    t.check(bad.length === 0, 'with a head fitted, changing the Study\'s Working size to 600, 1400 and 900 px redraws the head on the Study photo, the blocks and the Loomis tab in the same place, with the marks and the fit unchanged and the Loomis photo at the new size', bad.length ? bad : rows.map((r) => `${r.size}: ${r.prep.join('×')}`));
+    await click(page, '[data-mode="simple"]');
+    await tab(page, 'loomis');
+    const s = await lstate(page);
+    t.check(JSON.stringify(s.fit) === JSON.stringify(fit0) && (await ink(page)).red > 50, 'switching to Simple and back to the Loomis tab leaves the fitted head as it was', { same: JSON.stringify(s.fit) === JSON.stringify(fit0) });
+    await clean(t, page, 'round 2: working size with a head');
+    await page.context().close();
+  });
+
+  await guard(t, 'round 2: the head over the Check my painting panels', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await posedMarks(page, POSE));
+    const fit = (await lstate(page)).fit;
+    await tab(page, 'study');
+    await click(page, '.tool-btn[data-tool="line"]');
+    await stroke(page, '#cv-orig', [[0.2, 0.2], [0.8, 0.6]]);
+    await page.evaluate(() => { document.getElementById('drawer-check').open = true; });
+    await page.waitForFunction(() => ['cv-art', 'cv-artblock', 'cv-diff', 'cv-refblock'].every((id) => { const c = document.getElementById(id); return c && c.width > 0; }), null, { timeout: 60000 }).catch(() => null);
+    await sleep(800);
+    const rows = [];
+    for (const id of ['cv-refblock', 'cv-art', 'cv-artblock', 'cv-diff']) {
+      const present = await page.evaluate((id) => { const c = document.getElementById(id); const o = c && c.nextElementSibling; return !!o && o.width > 0; }, id);
+      if (!present) { rows.push({ id, present }); continue; }
+      const st = await headStats(page, `document.getElementById('${id}').nextElementSibling`, fit);
+      rows.push({ id, present, rim: st.rim, yellow: st.yellow });
+    }
+    t.check(rows.every((r) => r.present && r.rim >= 0.85), 'the head lies over the reference blocks, the painting, its blocks and the accuracy map on the Check my painting results, as the lines and measures do', rows);
+    await clean(t, page, 'round 2: the head over the Check panels');
+    await page.context().close();
+  });
+
+  // a head begun but not fitted: the marks and the ring show on the Study tab's pictures (noted, the README promises nothing either way)
+  await guard(t, 'round 2: marks of a head not yet fitted, on the Study tab', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const marks = await marksFor(page);
+    await mark(page, marks.leftEye[0], marks.leftEye[1]); await mark(page, marks.rightEye[0], marks.rightEye[1]);
+    await tap(page, 0.5, 0.5);
+    await tab(page, 'study');
+    const white = await page.evaluate(() => { const c = document.getElementById('cv-orig').nextElementSibling; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let w = 0, y = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 200) continue; if (d[i] > 245 && d[i + 1] > 245 && d[i + 2] > 245) w++; else if (d[i] > 220 && d[i + 1] > 180 && d[i + 2] < 80) y++; } return { white: w, yellow: y }; });
+    const png = await (async () => { const dl = await download(page, '[data-save="orig"]'); return pngOf(page, dl); })();
+    t.note(`two marks locked and a ring pending on the Loomis tab, then the Study tab: ${white.white} white pixels (the dots) and ${white.yellow} yellow (the ring) lie over the Study photo${white.white + white.yellow > 0 ? '' : ' (none)'}; its saved PNG holds ${png ? png.red + png.cyan : '?'} red/cyan head pixels (a head is burned into a PNG only once it is fitted)`);
+    await page.evaluate(() => { const d = document.getElementById('saveDialog'); if (d && d.open) d.close(); }).catch(() => null);
+    await clean(t, page, 'round 2: marks on the Study tab');
+    await page.context().close();
+  });
+}
+
+// ---- the Studio's restore racing the copy of the head ----------------------------------------------------------------------
+export async function studioRestoreRacingTheCopy(t, site) {
+  await guard(t, 'round 2: the saved painting is still being read back when Draw it in the Studio copies the head', async () => {
+    const page = await openPage(site, { viewport: DESKTOP, url: '#paint' }); await studioUp(page);
+    // a saved painting: a paint stroke and an underdrawing stroke, left to be saved
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="chisel"]');
+    await stroke(page, '#ps-paper', [[0.1, 0.1], [0.4, 0.15]]);
+    await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]');
+    await stroke(page, '#ps-paper', [[0.1, 0.9], [0.4, 0.93]]);
+    const savedAfter = Date.now();
+    const savedAt = async () => page.evaluate(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('portrait-value-studio', 1); r.onupgradeneeded = () => r.result.createObjectStore('studio'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); try { const v = await new Promise((res, rej) => { const g = db.transaction('studio').objectStore('studio').get('painting'); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); }); return v ? v.savedAt : 0; } finally { db.close(); } }).catch(() => 0);
+    for (let k = 0; k < 60 && !((await savedAt()) > savedAfter); k++) await sleep(250);
+    const had = await page.evaluate(() => { const px = (id, fx, fy, fw, fh) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.round(c.width * fw), Math.round(c.height * fh)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; }; return { paint: px('ps-paper', 0.05, 0.05, 0.4, 0.15), sketch: px('ps-sketch', 0.05, 0.85, 0.4, 0.1) }; });
+    // the next visit, with the database slow to answer (6 s, once)
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('slowOnce')) return;
+      sessionStorage.setItem('slowOnce', '1');
+      const open = IDBFactory.prototype.open; let first = true;
+      IDBFactory.prototype.open = function (...a) {
+        const r = open.apply(this, a);
+        if (!first) return r;
+        first = false; let h = null;
+        Object.defineProperty(r, 'onsuccess', { configurable: true, get: () => h, set: (f) => { h = f; } });
+        r.addEventListener('success', (e) => setTimeout(() => h && h.call(r, e), 6000));
+        return r;
+      };
+    });
+    await page.reload({ waitUntil: 'load' });
+    await tab(page, 'loomis');
+    await page.evaluate(() => {
+      Loomis.reset();
+      const prep = Studio.prep(), a = prep.h / prep.w, f = { s: 0.2, tx: 0.5, ty: 0.45, yaw: 0, pitch: 0, roll: 0, len: 1 };
+      Loomis.STEPS.forEach((st) => { const p = Loomis.project(st.model, f, st.face); Loomis.place(p[0], p[1] / a); document.getElementById('lh-lock').click(); });
+    });
+    const pending = await page.evaluate(async () => { let done = false; PaintStudio.ready().then(() => { done = true; }); await 0; await 0; return !done; });
+    await click(page, '#lh-cardStudio');
+    await studioUp(page); await sleep(1500);
+    const now = await page.evaluate(() => { const px = (id, fx, fy, fw, fh) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.round(c.width * fw), Math.round(c.height * fh)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; }; return { paint: px('ps-paper', 0.05, 0.05, 0.4, 0.15), sketch: px('ps-sketch', 0.05, 0.85, 0.4, 0.1), tab: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id).join(), toast: document.getElementById('toast').textContent }; });
+    const fit = (await lstate(page)).fit;
+    const ring = await ringOnSketch(page, fit);
+    if (!pending) t.note('the slow database did not hold the restore back this run; the check below is not meaningful');
+    t.check(had.paint > 500 && had.sketch > 100 && now.paint === had.paint && now.sketch >= had.sketch && ring >= 0.9, 'a head copied while the saved painting is still being read back lands on top of the painting that comes back: the paint, the saved underdrawing and the whole head are all there', { pending, had, now, ring });
+    await sleep(1500);
+    await page.reload({ waitUntil: 'load' }); await studioUp(page);
+    const next = await page.evaluate(() => { const px = (id, fx, fy, fw, fh) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.round(c.width * fw), Math.round(c.height * fh)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; }; return { paint: px('ps-paper', 0.05, 0.05, 0.4, 0.15), sketch: px('ps-sketch', 0.05, 0.85, 0.4, 0.1) }; });
+    const ring2 = await ringOnSketch(page, fit);
+    t.check(next.paint === had.paint && next.sketch >= had.sketch && ring2 >= 0.9, 'and the next visit finds all three, saved after the restore', { next, ring2 });
+    await clean(t, page, 'round 2: restore racing the copy');
+    await page.context().close();
+  });
+}
+
+// ---- the arrows and drags at their limits: every value stops at its end and the head is still drawn and still adjustable ----------
+export async function arrowsAtTheirLimits(t, site) {
+  await guard(t, 'round 2: the turn, nod, tilt and length at their limits', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await marksFor(page));
+    const auto = (await lstate(page)).auto;
+    const holdUntil = async (glyph, cond, arg) => { const { x, y } = await handleAt(page, glyph); await page.mouse.move(x, y); await page.mouse.down(); await page.waitForFunction(cond, arg, { timeout: 30000 }).catch(() => null); await sleep(400); await page.mouse.up(); };
+    const rows = [];
+    const probe = async (label, glyph, key, sign, limit) => {
+      await holdUntil(glyph, ([k, sg, lim]) => { const v = Loomis.state.fit[k]; return sg < 0 ? v <= lim + 1e-9 : v >= lim - 1e-9; }, [key, sign, limit]);
+      const f = (await lstate(page)).fit, hs = await handlesOf(page), box = await ovBox(page);
+      const finite = Object.values(f).every(Number.isFinite);
+      const apart = hs.every((a, i) => hs.every((b, j) => i === j || Math.hypot(a.x - b.x, a.y - b.y) > 20));
+      const onPicture = hs.every((h) => h.x >= 0 && h.y >= 0 && h.x <= box.W && h.y <= box.H);
+      rows.push({ label, value: +f[key].toFixed(4), limit, atLimit: near(f[key], limit, 1e-6), finite, apart, onPicture, red: (await ink(page)).red });
+    };
+    await probe('nod up', 'up', 'pitch', -1, -0.9);
+    await probe('nod down', 'down', 'pitch', 1, 0.9);
+    await click(page, '#lh-refit');
+    await probe('tilt counter-clockwise', 'ccw', 'roll', -1, -1.2);
+    await probe('tilt clockwise', 'cw', 'roll', 1, 1.2);
+    await click(page, '#lh-refit');
+    const bad = rows.filter((r) => !(r.atLimit && r.finite && r.apart && r.onPicture && r.red > 50));
+    t.check(bad.length === 0, 'held to the end, the nod stops at 0.9 rad either way and the tilt at 1.2 rad, the head is still drawn and the six arrows are still apart and on the picture', bad.length ? bad : rows);
+    // the length: pull the chin line far down and far up, again and again
+    const lens = [];
+    for (const dy of [90, 90, 90, -90, -90, -90, -90, -90, -90]) { const r = await dragPiece(page, 'chin', 0, dy); lens.push(r ? +r.after.len.toFixed(4) : null); }
+    t.check(lens.every((v) => v !== null && v >= 0.75 - 1e-9 && v <= 1.3 + 1e-9) && Math.max(...lens) > 1.2 && Math.min(...lens) < 0.85, 'dragged far down and up, the chin line takes the face length to the ends of its range (0.75 to 1.3) and no further', lens);
+    t.check((await ink(page)).red > 50 && (await handlesOf(page)).length === 6, 'and the head is still drawn with its six arrows');
+    await click(page, '#lh-refit');
+    t.check(changed((await lstate(page)).fit, auto).length === 0, 'Back to the fit returns the head from every extreme');
+    await clean(t, page, 'round 2: limits');
+    await page.context().close();
+  });
+}
+
+// ---- the two PNGs of one head agree ---------------------------------------------------------------------------------------
+export async function headPngsAgree(t, site) {
+  await guard(t, 'round 2: the Loomis PNG and the Study PNG of one head', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    await sequence(page, await posedMarks(page, POSE));
+    const closeDialog = () => page.evaluate(() => { const d = document.getElementById('saveDialog'); if (d && d.open) d.close(); }).catch(() => null);
+    const a = await decodePng(page, await download(page, '#lh-save'));
+    const sa = await headStats(page, 'window.__png', (await lstate(page)).fit);
+    await closeDialog();
+    await tab(page, 'study');
+    const b = await decodePng(page, await download(page, '[data-save="orig"]'));
+    const sb = await headStats(page, 'window.__png', (await lstate(page)).fit);
+    await closeDialog();
+    const close = (x, y) => Math.abs(x - y) <= Math.max(30, 0.03 * Math.max(x, y));
+    t.check(!!a && !!b && a.w === b.w && a.h === b.h && close(sa.red, sb.red) && close(sa.cyan, sb.cyan) && close(sa.yellow, sb.yellow) && close(sa.white, sb.white) && sa.rim >= 0.9 && sb.rim >= 0.9, 'the head in the Loomis tab\'s saved PNG and in the Study photo\'s saved PNG is the same drawing: the same size, the same amount of each of its colours, the ball\'s rim and centre line in place in both', { loomis: sa, study: sb, sizes: [a && [a.w, a.h], b && [b.w, b.h]] });
+    await clean(t, page, 'round 2: the two PNGs');
+    await page.context().close();
+  });
+}
+
+export async function round2(t, site) {
+  await headInTheStudio(t, site);
+  await headThroughTheStudyTab(t, site);
+  await headPngsAgree(t, site);
+  await studioRestoreRacingTheCopy(t, site);
+  await arrowsAtTheirLimits(t, site);
+  t.note('round 2, left out: a held arrow when the window loses focus (a lost pointer-up cannot be made in this harness: a mouse held with the pointer captured gets its up wherever it is let go); Forget my work on this device from another tab (js/guard.js 166-171 tells the other tab with a storage event, which drops its pending autosave and reloads; multitab.mjs covers that for the Studio).');
+  t.note('round 2: the head is the same drawing wherever it shows (the Loomis overlay, the Study photo and blocks, the Check my painting panels, the underdrawing, and both saved PNGs): the Studio\'s copy draws only the near-side lines (the far side, faint and dashed on screen, is not copied); the marks of a head begun but not fitted show as white dots and a yellow ring over the Study tab\'s pictures but not in their saved PNGs.');
 }
