@@ -1107,6 +1107,7 @@ async function roundTwo(t, site, counts) {
   // A fresh board selects its suggested palette, which with all 77 ticked can be My paints itself (it rates best by more
   // than a point): then the setup mixes its targets before Start comes back. Otherwise My paints is chosen from the menu
   await step(t, site, 'seventy-seven paints', async (open) => {
+    const RATE_MS = 60000, MIX_MS = 360000;   // the menu and Start, as the step waits for them (measured below)
     const probe = await open({ url: '#game' });
     const codes = await probe.evaluate(() => Paints.LIBRARY.map((p) => p.code));
     await probe.context().close();
