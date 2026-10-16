@@ -411,7 +411,7 @@ const KNOWN = [
     kind: 'clipped', sig: /^div\.game-bar$/, severity: 'medium',
     title: 'Paint by numbers at 320 px: the progress line is squeezed into a column about 8 px wide and runs out above and beside its bar',
     expected: 'The game bar holds its timer, its progress line ("0 of 11 numbers painted") and its buttons inside its border at every phone width (README: "the timer bar, the painting and the palette fill the screen").',
-    cause: 'styles.css:1057 (inside the `max-width: 999px` block that starts at styles.css:1039) sets `.game-bar { flex-wrap: nowrap }`, so the timer, the sound and quit buttons, Lock in portrait and the gaps take all but about 8 px of the 286 px bar, and `.game-progress` takes that space (`flex: 1` at styles.css:847, `min-width: 0` at styles.css:1059), so it is left about 8 px; the paragraph then breaks one word per line and its text runs past the bar\'s top and side (screenshot: tests/screens/visual-scratch-gamebar-320.png).',
+    cause: 'styles.css:1057 (inside the `max-width: 999px` block that starts at styles.css:1039) sets `.game-bar { flex-wrap: nowrap }`, so the timer, the sound and quit buttons, Lock in portrait and the gaps take all but about 8 px of the 286 px bar, and `.game-progress` takes that space (`flex: 1` at styles.css:847, `min-width: 0` at styles.css:1059), so it is left about 8 px; the paragraph then breaks into a few short lines and its text runs past the bar\'s top and side (screenshot: tests/screens/visual-game-painting-light-layout-320x568.png).',
   },
   {
     kind: 'contrast', sig: /^span#vb-score\.vb-score$/, severity: 'medium',
