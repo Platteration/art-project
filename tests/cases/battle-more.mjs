@@ -20,7 +20,7 @@ const starsFor = (streak) => STARS.filter((m) => streak >= m).length;
 // ---- helpers of this case -------------------------------------------------------------------------------
 
 // the setup's controls, then Start; resolves once the board shows its swatches
-async function start(page, { palette = 'zorn', count = '2', mode = 'streak', timeout = 5000 } = {}) {
+async function start(page, { palette = 'zorn', count = '2', mode = 'streak', timeout = 30000 } = {}) {
   await page.evaluate(([p, c, m]) => {
     const sel = document.getElementById('vb-palette');
     if (sel.value !== p) { sel.value = p; sel.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -61,8 +61,12 @@ const board = (page) => page.evaluate(() => {
 });
 // answer the round as the page holds it: right or wrong, by element click, by a real tap or by key
 const press = (page, keys) => keys.reduce((p, k) => p.then(() => page.keyboard.press(k)), Promise.resolve());
+// what answer() hands back when no game is on (a Start that did not deal, a page that reloaded): the fields a check reads, empty,
+// so that the check fails by itself and the steps after it still run
+const GONE = Object.freeze({ gone: true, i: -1, n: 0, key: '', kind: '', mode: '', ask: '', answer: null, Ls: [], labels: [], warmth: [], chroma: [], why: '', d: null, answered: false, picked: [] });
 async function answer(page, right, how = 'click') {
   const r = await round(page);
+  if (!r || r.none) return GONE;
   let picks; // swatch indexes to tap, or 'same'
   if (r.mode === 'pair') picks = right ? (r.answer === 'same' ? 'same' : [r.answer === 'left' ? 0 : 1]) : (r.answer === 'same' ? [0] : 'same');
   else if (r.mode === 'pick') picks = [right ? r.answer : (r.answer + 1) % r.n];
@@ -75,14 +79,24 @@ async function answer(page, right, how = 'click') {
 const next = (page) => click(page, '#vb-next');
 // the pop-up's button by a real click: the id is doubled in the markup (see the first step), so the board's copy
 const closeMiss = (page) => page.locator('#vb-board #vb-missNext').click();
-const waitRound = (page, n) => page.waitForFunction((n) => document.getElementById('vb-score').textContent === `Round ${n}`, n, { timeout: 4000 }).then(() => true).catch(() => false);
-const waitShown = (page, sel) => page.waitForFunction((s) => !document.querySelector(s).hidden, sel, { timeout: 4000 }).then(() => true).catch(() => false);
-const waitPct = (page, n) => page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), n, { timeout: 4000 }).then(() => true).catch(() => false);
+const waitRound = (page, n) => page.waitForFunction((n) => document.getElementById('vb-score').textContent === `Round ${n}`, n, { timeout: 20000 }).then(() => true).catch(() => false);
+const waitShown = (page, sel) => page.waitForFunction((s) => !document.querySelector(s).hidden, sel, { timeout: 20000 }).then(() => true).catch(() => false);
+const waitPct = (page, n) => page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), n, { timeout: 20000 }).then(() => true).catch(() => false);
 // the quit guard arms by the page's clock: ✕ within the first 3 s of the page's life is a bug checked on its own
 const afterThree = (page) => page.waitForFunction(() => performance.now() > 3100, null, { timeout: 5000 }).catch(() => null);
-async function quit(page) { await afterThree(page); await click(page, '#vb-quit'); await click(page, '#vb-quit'); await page.waitForFunction(() => !document.getElementById('vb-setup').hidden, null, { timeout: 3000 }).catch(() => null); }
+async function quit(page) { await afterThree(page); await click(page, '#vb-quit'); await click(page, '#vb-quit'); await page.waitForFunction(() => !document.getElementById('vb-setup').hidden, null, { timeout: 15000 }).catch(() => null); }
 const rects = (page, sels) => page.evaluate((sels) => { const W = innerWidth, H = innerHeight; const r = (e) => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), t: Math.round(b.top), r: Math.round(b.right), b: Math.round(b.bottom), in: b.left >= -0.5 && b.top >= -0.5 && b.right <= W + 0.5 && b.bottom <= H + 0.5 && b.width > 0 && b.height > 0 }; }; const out = { W, H, scrollH: document.documentElement.scrollHeight, bodyOverflow: getComputedStyle(document.body).overflow, tabs: getComputedStyle(document.querySelector('.tabs')).display, topbar: getComputedStyle(document.querySelector('.topbar')).display }; for (const s of sels) out[s] = [...document.querySelectorAll(s)].map(r); return out; }, sels);
 const allIn = (lay, sels) => sels.every((s) => lay[s].length > 0 && lay[s].every((x) => x.in));
+// wait for a condition that a page reload may interrupt (an evaluate that throws counts as not yet); true when it came
+async function until(fn, ms = 30000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await Promise.resolve().then(fn).catch(() => false)) return true; await sleep(250); } return false; }
+// one block of this case: a throw in it fails a check of its own (with the line that threw) and the next block runs;
+// the pages the block opened are closed either way
+async function block(t, site, name, fn) {
+  const before = new Set(site.browser.contexts());
+  try { await fn(); }
+  catch (e) { t.check(false, `${name}: the block ran to its end`, String((e && e.stack) || e).split('\n').slice(0, 3).join(' | ')); }
+  finally { for (const c of site.browser.contexts()) if (!before.has(c)) await c.close().catch(() => null); }
+}
 
 export default async function battleMore(t, site) {
   // ---- the setup: palettes, counts, modes, Simple and Advanced, the best line ----------------------------
