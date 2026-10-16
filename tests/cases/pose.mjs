@@ -14,7 +14,9 @@
 // mode messages, an arrow held through a tab switch, the reference pictures' framing and tilts, a lost context
 // in the render frame, a finger (tap, drag, pinch, swipe), two Pose and light pages and Forget my work, and
 // WebGL turned off.
-import { openPage, newTab, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot, axe } from '../lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { openPage, newTab, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot, axe, ROOT } from '../lib.mjs';
 
 // the page is up: started, with all 30 pictures drawn
 const up = (fr, timeout = 30000) => fr.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30, null, { timeout }).catch(() => null);
@@ -1455,4 +1457,75 @@ export default async function pose(t, site) {
     await page.context().close();
     lap('site data blocked, twice the pixels, dark');
   }
+
+  // ---- README "Pose and light": three.js r128 self-hosted with its licence beside it; the rig's colours (right red, left blue,
+  //      the body amber); "Copy to the other side mirrors it" on a whole leg; a Start over pressed with a hand's drag still down ----
+  {
+    const page = await openPage(site, { url: 'pose.html' });
+    const fr = page.mainFrame();
+    await up(fr);
+    const lib = await fr.evaluate(() => ({ revision: window.THREE && window.THREE.REVISION, src: [...document.scripts].map((s) => s.getAttribute('src')).filter(Boolean) }));
+    const licence = (() => { try { return /MIT License/.test(fs.readFileSync(path.join(ROOT, 'js', 'vendor', 'LICENSE-three.txt'), 'utf8')); } catch (e) { return false; } })();
+    t.check(lib.revision === '128' && lib.src.includes('js/vendor/three.min.js') && licence, 'three.js is r128, self-hosted at js/vendor/three.min.js, with its MIT licence beside it', { revision: lib.revision, licence, src: lib.src });
+    await fr.evaluate(() => document.querySelector('[data-mode="advanced"]').click());
+    const cols = await fr.evaluate(() => { const c = {}; document.querySelectorAll('#rig path.over:not(.back)').forEach((p) => { const k = p.style.stroke || 'none'; c[k] = (c[k] || 0) + 1; }); return c; });
+    t.check(cols['rgb(255, 93, 82)'] === 4 && cols['rgb(89, 176, 255)'] === 4 && cols['rgb(255, 179, 64)'] === 2 && Object.keys(cols).length === 3, 'the rig in Advanced: the right side\'s four controls red, the left side\'s four blue, the chest ring and the hips amber', cols);
+    // Copy to the other side on a whole leg (the thigh picked, so its shin and foot go with it), on Kneel
+    await pick(fr, 'kneel');
+    await fr.evaluate(() => window.PoseAndLight.pick('hipR'));
+    const mirrorShown = await fr.evaluate(() => !document.getElementById('mirror').hidden);
+    await fr.evaluate(() => document.getElementById('mirror').click());
+    const cp = await fr.evaluate(() => {
+      const api = window.PoseAndLight, P = api.pose, same = (a, b) => ['x', 'y', 'z'].every((k) => Math.abs((a[k] || 0) - (b[k] || 0)) < 1e-6);
+      const m = (j) => ({ x: P[j + 'R'].x, y: -P[j + 'R'].y, z: -P[j + 'R'].z });
+      return { hip: same(P.hipL, m('hip')), knee: same(P.kneeL, m('knee')), ankle: same(P.ankleL, m('ankle')), kneeY: [+api.worldPos('kneeR').y.toFixed(3), +api.worldPos('kneeL').y.toFixed(3)] };
+    });
+    const sc = await scan(fr);
+    t.check(mirrorShown && cp.hip && cp.knee && cp.ankle && sane(sc, 0.02), 'Copy to the other side on a whole leg (Kneel, the right thigh picked): the left thigh, shin and foot take the right\'s, mirrored, and the figure stays on the floor', { mirrorShown, cp, sc });
+    // a Start over pressed by keyboard while a hand is dragged with the mouse still down: the start screen opens and the pointer
+    // that is still down moves nothing (the figure stays as Start over left it)
+    await pick(fr, 'stand');
+    const box = await fr.locator('#view').boundingBox();
+    const h = await ctrl(fr, 'handR');
+    await page.mouse.move(box.x + h.center.x, box.y + h.center.y); await page.mouse.down();
+    await page.mouse.move(box.x + h.center.x - 50, box.y + h.center.y - 80, { steps: 2 });
+    await fr.evaluate(() => document.getElementById('resetAll').focus());
+    await page.keyboard.press('Enter');
+    const atStart = await poseJson(fr);
+    const libUp = await fr.evaluate(() => !document.getElementById('library').hidden);
+    await page.mouse.move(box.x + h.center.x - 120, box.y + h.center.y - 150, { steps: 3 });
+    await page.mouse.move(box.x + h.center.x - 200, box.y + h.center.y - 20, { steps: 3 });
+    const afterMove = await poseJson(fr);
+    const dragging = await fr.evaluate(() => document.getElementById('view').classList.contains('is-dragging'));
+    await page.mouse.up();
+    t.check(libUp && afterMove === atStart && !dragging, 'Start over pressed by keyboard in the middle of a hand drag (the mouse still down): the start screen opens and the pointer moves nothing', { libUp, moved: afterMove !== atStart, dragging });
+    await clean(t, page, 'three.js, the rig colours, a whole leg, Start over mid-drag');
+    await page.context().close();
+    lap('three.js, colours, whole leg, Start over');
+  }
+
+  // ---- a saved state with 20,000 extra keys, and a saved pose whose id is 'continue' (the id Where you left off uses) ----
+  {
+    const seedPage = await openPage(site, { url: 'pose.html' });
+    const seedFr = seedPage.mainFrame();
+    await up(seedFr);
+    await pick(seedFr, 'walk');
+    const seed = await seedFr.evaluate(() => ({ v2: localStorage.getItem('pose-and-light.v2'), p: JSON.parse(JSON.stringify(window.PoseAndLight.pose)) }));
+    await seedPage.context().close();
+    const v2 = JSON.parse(seed.v2 || 'null') || {};
+    for (let i = 0; i < 20000; i++) v2['junk' + i] = i;
+    const page = await openPage(site, { url: 'pose.html', storage: { 'pose-and-light.v2': v2, 'pose-and-light.mine.v1': [{ id: 'continue', name: 'Odd id', p: seed.p }] } });
+    const fr = page.mainFrame();
+    const started = await fr.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30, null, { timeout: 40000 }).then(() => true).catch(() => false);
+    const st = await fr.evaluate(() => ({ imgs: document.querySelectorAll('#poses button.has-img').length, mine: document.querySelectorAll('#mine .pose-btn').length, cont: !document.getElementById('continueWrap').hidden, lib: !document.getElementById('library').hidden }));
+    t.check(started && st.imgs === 30 && st.mine === 1 && st.cont && st.lib, 'a saved state with 20,000 extra keys still starts: 30 pictures, the saved pose and Where you left off on the start screen', { started, ...st });
+    await fr.evaluate(() => document.querySelector('#mine .pose-btn').click());
+    const after = await fr.evaluate(() => ({ lib: !document.getElementById('library').hidden }));
+    const sc = await scan(fr);
+    t.check(!after.lib && sane(sc, 0.45), 'the saved pose whose id is continue picks: the sheet closes and the figure is sane', { after, sc });
+    await clean(t, page, 'hostile saved state: 20,000 keys, an id of continue');
+    await page.context().close();
+    lap('20,000 keys, id continue');
+  }
+  t.note('Round 2, the gaps the last round left open. Driven now: a whole leg copied on Kneel; Start over pressed by keyboard in the middle of a hand drag (a probe also pressed Undo and opened Poses in the middle of a hand or knee drag, and the figure stayed where the drag left it after each, with the pointer still down); the rig colours; three.js r128 with its licence; a saved state with 20,000 extra keys and a saved pose whose id is continue. Left out with reasons: 36 (pose.html?render=1 and ?embed=1 opened at the top): render mode needs a frame (js/pose.js:17, window.parent !== window), so a top-level ?render=1 is the page itself, by design; embed is the app\'s own frame, and the README describes it framed; 37 (sixty renders at different sizes): not run, each render target is up to 2400 × 3000 in SwiftShader memory on a machine shared with other runs; the leak the code suggests (shotTargets is never disposed, js/pose.js:1081 and 1145) is read in code only, not measured here; 10 at phone width, 25 (Tab order after the sheet closes) and 35 (the standalone mode switch during a held arrow): not run for the time budget; 39 (two saves in one millisecond): replaced by two quick taps, pinned above. Also noted: a saved pose whose id is a library pose\'s (stand, or continue) is marked on the figure as well (the Pose and light case\'s note above; ids the page makes itself never collide).');
 }
