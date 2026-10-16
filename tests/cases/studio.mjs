@@ -1084,6 +1084,9 @@ export async function gaps(t, site) {
       const s = { wrap: await box(page, '#ps-paperWrap'), st: await box(page, '#ps-stage'), ink: await alphaInk(page, '#ps-paper'), zoom: await text(page, '#ps-zoomOut') };
       t.check(s.ink === ink && s.zoom === '400%' && corner(s.wrap, s.st), `gap: resized to ${vp.width} × ${vp.height} at 4× panned to the bottom-right: the painting is intact and that corner is still on screen`, s);
     }
+    // the reference dragged to that corner is kept on the stage through the resizes, over the paper's corner: hidden
+    // first, so the stroke reaches the paper
+    await click(page, '#ps-refBtn'); await click(page, '#ps-refSheet [data-ref-show="0"]'); await click(page, '#ps-refBtn');
     const before = await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12);
     await stroke(page, '#ps-paper', [[0.92, 0.92], [0.97, 0.95]]);
     t.check((await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12)) > before + 50, 'gap: after the resizes a stroke at 4× lands under the pointer', { before, after: await inkIn(page, '#ps-paper', 0.88, 0.88, 0.12, 0.12) });
