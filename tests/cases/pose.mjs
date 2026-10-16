@@ -63,6 +63,84 @@ async function settledHeight(page) {
   return h;
 }
 
+// ---- for the checks added from the coverage review ------------------------------------------------
+// where a joint lands on the stage, in the canvas's CSS pixels
+const screenOf = (fr, joint) => fr.evaluate((j) => { const api = window.PoseAndLight, v = document.getElementById('view'); const p = api.worldPos(j).project(api.camera); return { x: (p.x + 1) / 2 * v.clientWidth, y: (1 - p.y) / 2 * v.clientHeight }; }, joint);
+// a point on a part (canvas pixels), as near its middle as can be, that no rig control takes: a tap there picks
+// the part, and a drag there moves it once it is picked
+const spotOn = (fr, joint) => fr.evaluate((joint) => {
+  const api = window.PoseAndLight, T = window.THREE, v = document.getElementById('view'), r = v.getBoundingClientRect();
+  api.render();
+  const ray = new T.Raycaster(), box = new T.Box3();
+  api.parts.filter((m) => m.userData.joint === joint).forEach((m) => box.expandByObject(m));
+  const c = box.getCenter(new T.Vector3()).project(api.camera), cx = (c.x + 1) / 2 * v.clientWidth, cy = (1 - c.y) / 2 * v.clientHeight;
+  for (let rad = 0; rad < 60; rad += 3) {
+    for (let k = 0; k < 16; k++) {
+      const x = cx + rad * Math.cos(k * Math.PI / 8), y = cy + rad * Math.sin(k * Math.PI / 8);
+      ray.setFromCamera(new T.Vector2(x / v.clientWidth * 2 - 1, -(y / v.clientHeight) * 2 + 1), api.camera);
+      const h = ray.intersectObjects(api.parts, false)[0];
+      if (h && h.object.userData.joint === joint && !api.ctrlAt({ clientX: r.left + x, clientY: r.top + y })) return { x, y };
+      if (rad === 0) break;
+    }
+  }
+  return null;
+}, joint);
+// a foot: its heading on the floor and how far its sole tilts (degrees), its ankle, and the ball of the foot
+const footOf = (fr, s) => fr.evaluate((s) => { const api = window.PoseAndLight, T = window.THREE, q = api.worldQuat('ankle' + s), a = api.worldPos('ankle' + s); const f = new T.Vector3(0, 0, 1).applyQuaternion(q), u = new T.Vector3(0, 1, 0).applyQuaternion(q); return { heading: +(Math.atan2(f.x, f.z) / Math.PI * 180).toFixed(1), tilt: +(Math.acos(Math.min(1, u.y)) / Math.PI * 180).toFixed(1), ankle: a.toArray(), ball: new T.Vector3(0, -0.04, 0.158).applyQuaternion(q).add(a).toArray(), q: q.toArray() }; }, s);
+const turnBetween = (fr, q0, q1) => fr.evaluate(([a, b]) => new window.THREE.Quaternion(...a).angleTo(new window.THREE.Quaternion(...b)), [q0, q1]);
+// a mouse drag from a point on the canvas by an offset, in a few steps (each step waits for a frame here)
+async function dragBy(page, fr, from, dx, dy, steps = 3) {
+  const b = await fr.locator('#view').boundingBox();
+  await page.mouse.move(b.x + from.x, b.y + from.y); await page.mouse.down();
+  await page.mouse.move(b.x + from.x + dx, b.y + from.y + dy, { steps }); await page.mouse.up();
+}
+// a picked part's arrow (its label starts so) pressed n times by keyboard, as a visitor tabbing to it would
+async function pressArrow(page, fr, label, n) {
+  const found = await fr.evaluate((l) => { window.PoseAndLight.render(); const b = [...document.querySelectorAll('#arrows button')].find((x) => x.getAttribute('aria-label').startsWith(l)); if (!b) return false; b.focus(); return true; }, label);
+  for (let i = 0; found && i < n; i++) await page.keyboard.press('Enter');
+  return found;
+}
+// the stage's background, as tapBackground finds it (canvas pixels)
+const backgroundSpot = (fr) => fr.evaluate(() => {
+  const v = document.getElementById('view'), w = v.clientWidth, h = v.clientHeight;
+  const busy = [{ x: +document.getElementById('lampHandle').dataset.x, y: +document.getElementById('lampHandle').dataset.y }];
+  document.querySelectorAll('#arrows button').forEach((a) => { const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(a.style.transform); if (m) busy.push({ x: +m[1], y: +m[2] }); });
+  window.PoseAndLight.ctrls().forEach((c) => { if (c.center) busy.push(c.center); });
+  const room = (p) => Math.min(...busy.map((q) => Math.hypot(q.x - p[0], q.y - p[1])));
+  const at = [[8, 8], [w - 8, 8], [8, h - 8], [8, h / 2], [w / 2, 8]].sort((p, q) => room(q) - room(p))[0];
+  return { x: at[0], y: at[1] };
+});
+// pictures as 32 × 40 gray samples, to tell one from another (Blob pictures are this page's own: readable)
+const looks = (fr, selector) => fr.evaluate((sel) => {
+  const c = document.createElement('canvas'); c.width = 32; c.height = 40; const g = c.getContext('2d', { willReadFrequently: true });
+  return [...document.querySelectorAll(sel)].map((img) => {
+    g.clearRect(0, 0, 32, 40); g.drawImage(img, 0, 0, 32, 40);
+    const d = g.getImageData(0, 0, 32, 40).data, gray = [];
+    let wood = 0;
+    for (let i = 0; i < d.length; i += 4) { gray.push(Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2])); if (d[i] - d[i + 2] > 30 && d[i] > 60) wood++; }
+    const btn = img.closest('.pose-btn');
+    return { id: btn && btn.dataset.id, gray, wood };
+  });
+}, selector);
+const differs = (a, b) => a.gray.filter((v, i) => Math.abs(v - b.gray[i]) > 24).length / a.gray.length;
+// the README's library, group by group
+const LIBRARY = [['Standing', ['Stand', 'Weight on one leg', 'Wave', 'Reach', 'Think', 'Hands on hips', 'Point']], ['Moving and sport', ['Walk', 'Run', 'Lunge', 'Jump', 'Throw', 'Kick', 'Box']], ['Low to the floor', ['Crouch', 'Kneel', 'Sit']], ['Dance', ['Arabesque', 'Attitude', 'À la seconde', 'Passé', 'Penché', 'Cambré', 'Grand jeté', 'Révérence', 'Flamenco', 'Jazz', 'Floor reach', 'Spiral', 'Hip-hop']]];
+// a page in a context of its own (for options openPage does not take), recorded as openPage records
+async function openOwn(site, contextOpts, url, init) {
+  const context = await site.browser.newContext(contextOpts);
+  if (init) await context.addInitScript(init);
+  const page = await context.newPage();
+  const log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
+  page.log = log;
+  page.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
+  page.on('console', (m) => { const x = m.text(); if (/GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i.test(x)) return; if (m.type() === 'error') log.console.push(x.slice(0, 300)); });
+  page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) log.offsite.push(u); });
+  page.on('requestfailed', (r) => { const u = r.url(); const why = (r.failure() || {}).errorText || ''; if (u.startsWith('blob:') || why === 'net::ERR_ABORTED') return; log.failed.push(u + ' ' + why); });
+  await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)} ${(e.sourceFile || '').split('/').pop()}:${e.lineNumber}`); }); });
+  await page.goto(site.base + url, { waitUntil: 'load' });
+  return page;
+}
+
 export default async function pose(t, site) {
   const started = Date.now();
   const lap = (what) => t.note(`${what}: ${((Date.now() - started) / 1000).toFixed(0)} s in`);
@@ -70,17 +148,41 @@ export default async function pose(t, site) {
   {
     const page = await openPage(site, { url: 'pose.html' });
     const fr = page.mainFrame();
+    // before the pictures are drawn: a button shows its pose's name; drawing them leaves the figure as it was
+    await fr.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses .pose-btn').length === 30, null, { timeout: 30000 }).catch(() => null);
+    const early = await fr.evaluate(() => { const b = [...document.querySelectorAll('#poses .pose-btn')].reverse().find((x) => !x.classList.contains('has-img')); if (!b) return null; const n = b.querySelector('.pose-name'), r = n.getBoundingClientRect(), cs = getComputedStyle(n); return { id: b.dataset.id, name: n.textContent, label: b.getAttribute('aria-label'), shown: cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0 && r.width > 0 && r.height > 0 }; });
+    const sceneNow = () => fr.evaluate(() => { const api = window.PoseAndLight; return JSON.stringify({ pose: api.pose, light: api.light, stand: api.stand.visible, lamp: api.lamp.position.toArray(), target: api.TARGET.toArray(), shown: api.scene.children.filter((o) => o.type === 'Group' || o.type === 'Line').map((o) => o.visible) }); });
+    const sceneBefore = await sceneNow();
     await up(fr);
+    if (early) t.check(early.shown && early.name === early.label, 'a library button whose picture is not drawn yet shows its pose\'s name', early);
+    else t.note('every library picture was drawn before the page could be read: the name shown until a picture arrives was not seen');
+    t.check((await sceneNow()) === sceneBefore, 'drawing the 30 pictures off screen leaves the figure, the light, the stand and the lamp as they were', (await sceneNow()).slice(0, 200));
     const s0 = await fr.evaluate(() => ({ imgs: document.querySelectorAll('#poses button.has-img').length, blob: [...document.querySelectorAll('#poses img')].every((i) => i.src.startsWith('blob:')), title: document.getElementById('libTitle').textContent, note: document.getElementById('libNote').textContent, start: document.getElementById('library').classList.contains('is-start'), close: getComputedStyle(document.getElementById('libClose')).display, cont: document.getElementById('continueWrap').hidden, mine: document.getElementById('mineWrap').hidden, inert: document.querySelector('.rail').hasAttribute('inert') && document.getElementById('view').hasAttribute('inert'), focus: document.activeElement.dataset.id, hint: document.getElementById('hint').hidden, simple: document.documentElement.classList.contains('simple'), expanded: document.getElementById('posesBtn').getAttribute('aria-expanded') }));
     t.check(s0.imgs === 30 && s0.blob, 'standalone: 30 poses with Blob pictures', s0);
     t.check(s0.start && s0.title === 'Choose a pose to start' && /Pick a pose to begin/.test(s0.note) && s0.close === 'none' && s0.cont && s0.mine && s0.inert && s0.expanded === 'true', 'standalone: opens on the start screen with no close button, the page behind it waiting, nothing from last time', s0);
     t.check(s0.focus === 'stand' && s0.simple, 'standalone: focus on the first pose, Simple to start', s0);
+    // the library's four groups, the poses in each as the README lists them, each button named alike everywhere
+    const groups = await fr.evaluate(() => [...document.querySelectorAll('#poses .lib-group')].map((g) => [g.querySelector('h3').textContent, [...g.querySelectorAll('.pose-btn')].map((b) => ({ label: b.getAttribute('aria-label'), title: b.title, name: b.querySelector('.pose-name').textContent }))]));
+    t.check(JSON.stringify(groups.map(([h, bs]) => [h, bs.map((b) => b.label)])) === JSON.stringify(LIBRARY) && groups.every(([, bs]) => bs.every((b) => b.title === b.label && b.name === b.label)), 'the library: Standing, Moving and sport, Low to the floor and Dance, each with the poses the README lists in its order, each button\'s name, label and title alike', groups.map(([h, bs]) => h + ': ' + bs.map((b) => b.label).join(', ')));
+    // each picture is a picture of its own pose: thirty different pictures, each of a figure, Jump and Crouch unlike Stand
+    {
+      const pics = await looks(fr, '#poses .pose-btn img');
+      const byId = Object.fromEntries(pics.map((p) => [p.id, p]));
+      const distinct = new Set(pics.map((p) => p.gray.map((v) => v >> 4).join())).size;
+      const flat = pics.filter((p) => new Set(p.gray.map((v) => v >> 4)).size <= 2 || p.wood < 20).map((p) => p.id);
+      const unlike = { jump: byId.jump && byId.stand && +differs(byId.jump, byId.stand).toFixed(3), crouch: byId.crouch && byId.stand && +differs(byId.crouch, byId.stand).toFixed(3) };
+      t.check(pics.length === 30 && distinct >= 25 && flat.length === 0 && unlike.jump > 0.1 && unlike.crouch > 0.1, 'the 30 pictures are pictures of their own poses: at least 25 different ones, none blank, each with the wooden figure in it, Jump and Crouch unlike Stand', { n: pics.length, distinct, flat, unlike });
+    }
     await page.keyboard.press('Escape');
     t.check(await fr.evaluate(() => !document.getElementById('library').hidden), 'the start screen does not close on Escape');
     await page.keyboard.press('Enter');
     const s1 = await fr.evaluate(() => ({ hidden: document.getElementById('library').hidden, hint: document.getElementById('hint').hidden, focus: document.activeElement.id, expanded: document.getElementById('posesBtn').getAttribute('aria-expanded'), inert: document.querySelector('.rail').hasAttribute('inert'), undo: document.getElementById('undo').disabled }));
     t.check(s1.hidden && !s1.hint && s1.focus === 'posesBtn' && s1.expanded === 'false' && !s1.inert, 'Enter on the focused pose picks it: the sheet closes, the tips show, focus goes to Poses', s1);
-    const ids = await fr.evaluate(() => window.PoseAndLight.POSES.map((p) => p.id));
+    const pills = await fr.evaluate(() => [...document.querySelectorAll('#hint span')].filter((s) => getComputedStyle(s).display !== 'none').map((s) => s.textContent));
+    t.check(pills.join(' | ') === 'Drag a colored control to pose | Tap a part to pick it | Drag the lamp to move the light | Drag the background to walk around', 'the tips on the stage in Simple: drag a control, tap a part to pick it, drag the lamp, drag the background', pills);
+    await tapBackground(page, fr);
+    t.check(await fr.evaluate(() => document.getElementById('hint').hidden), 'the first touch on the stage puts the tips away');
+    const ids =await fr.evaluate(() => window.PoseAndLight.POSES.map((p) => p.id));
     t.check(ids.length === 30, 'the library holds 30 poses', ids.length);
     const broken = [];
     for (const id of ids) {
