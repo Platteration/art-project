@@ -1499,7 +1499,7 @@ export async function reloadMidStroke(t, site) {
   // letting go on the new page draws nothing and throws nothing
   await guard(t, 'round 2: reload in the middle of a stroke', async () => {
     const page = await openPage(site, { url: '#paint' }); await studioReady(page);
-    const since = Date.now(); await stroke(page, '#ps-paper', PATH_A); await waitSaved(page, since);
+    const since = Date.now(); await stroke(page, '#ps-paper', PATH_A); await waitSaved(page, since, 30000);
     const a0 = await inkIn(page, '#ps-paper', ...BOXA);
     const [hx, hy] = await holdStroke(page, [[0.6, 0.5], [0.85, 0.65]]);
     const during = await inkIn(page, '#ps-paper', 0.55, 0.45, 0.35, 0.25);
@@ -1529,7 +1529,7 @@ export async function reloadMidStroke(t, site) {
     const page = await openPage(site, { url: '#paint' });
     // what the page does as it goes: the log is kept in sessionStorage, which a reload keeps
     await page.addInitScript(() => {
-      const log = (m) => { try { const a = JSON.parse(sessionStorage.getItem('__flush') || '[]'); a.push(`${m}@${Math.round(performance.now())}`); sessionStorage.setItem('__flush', JSON.stringify(a)); } catch (e) { /* no log */ } };
+      const log = (m) => { try { const a = JSON.parse(sessionStorage.getItem('__flush') || '[]'); a.push(`${m}@${Date.now()}`); sessionStorage.setItem('__flush', JSON.stringify(a)); } catch (e) { /* no log */ } };
       window.__flushLog = log;
       window.addEventListener('pagehide', () => log('pagehide'));
       const tb = HTMLCanvasElement.prototype.toBlob; HTMLCanvasElement.prototype.toBlob = function (cb, ...r) { log('toBlob'); return tb.call(this, (b) => { log('toBlob-done'); cb(b); }, ...r); };
@@ -1537,20 +1537,30 @@ export async function reloadMidStroke(t, site) {
     });
     await page.reload({ waitUntil: 'load' }); await studioReady(page);
     const rows = [];
+    // a trial counts only if the page was told to go (pagehide) less than 0.7 s after the stroke ended, so the 0.8 s autosave had not
+    // run: on a loaded machine the reload can be slow to start, and the trial is made again with a fresh stroke
+    const stamp = (log, name, after) => log.filter((e) => e.startsWith(name + '@')).map((e) => +e.split('@')[1]).filter((v) => v >= after).sort((a, b) => a - b)[0];
     for (const [i, wait] of [[0, 0], [1, 300], [2, 600]]) {
-      await page.evaluate(() => sessionStorage.removeItem('__flush'));
-      const y = 0.1 + i * 0.2;
-      await stroke(page, '#ps-paper', [[0.1, y], [0.5, y + 0.03]]);
-      await page.evaluate(() => window.__flushLog('stroke-end'));
-      if (wait) await sleep(wait);
-      await page.evaluate(() => window.__flushLog('reload-asked'));
-      await page.reload({ waitUntil: 'load' }); await studioReady(page);
-      rows.push({ wait, back: await inkIn(page, '#ps-paper', 0.05, y - 0.03, 0.5, 0.12), earlier: i ? await inkIn(page, '#ps-paper', 0.05, 0.07, 0.5, 0.12) : null, flush: await page.evaluate(() => (JSON.parse(sessionStorage.getItem('__flush') || '[]')).join(' ')) });
+      let row = null;
+      for (let attempt = 0; attempt < 4 && !row; attempt++) {
+        const y = 0.08 + (i * 4 + attempt) * 0.055;
+        await page.evaluate(() => sessionStorage.removeItem('__flush'));
+        await stroke(page, '#ps-paper', [[0.1, y], [0.5, y + 0.02]]);
+        await page.evaluate(() => window.__flushLog('stroke-end'));
+        if (wait) await sleep(wait);
+        await page.reload({ waitUntil: 'load' }); await studioReady(page);
+        const log = await page.evaluate(() => JSON.parse(sessionStorage.getItem('__flush') || '[]'));
+        const ended = stamp(log, 'stroke-end', 0), gone = stamp(log, 'pagehide', ended || 0);
+        const gap = ended && gone ? gone - ended : null;
+        const back = await inkIn(page, '#ps-paper', 0.05, y - 0.02, 0.5, 0.07);
+        if (gap !== null && gap < 700) row = { wait, gap, back, flush: log.map((e) => e.replace(/@(\d+)/, (m, v) => ended ? '@+' + (v - ended) : m)).join(' ') };
+        else t.note(`a reload trial (wait ${wait} ms) took ${gap} ms to reach pagehide, too late to test the page going within the autosave delay: made again`);
+      }
+      if (row) rows.push(row);
     }
-    t.note(`what the page did around each reload (the stroke ending, the reload being asked for, pagehide, each toBlob and its callback, the IndexedDB put; times in ms of the page's life): ${rows.map((r) => `[${r.flush}]`).join(' ')}`);
     // the earlier strokes were each lost or kept on their own; the last trial's stroke is the one asked about
     const lost = rows.filter((r) => r.back === 0);
-    t.check(lost.length === 0, 'a stroke finished 0, 0.3 and 0.6 s before a reload is in the painting after it', rows);
+    t.check(rows.length === 3 && lost.length === 0, 'a stroke finished 0, 0.3 and 0.6 s before a reload is in the painting after it', rows);
     if (lost.length) t.finding({ title: 'A stroke made less than a second before a reload or a closed tab is lost: the save that is meant to run as the page goes never finishes', severity: 'medium',
       steps: '1. Open the Studio (index.html#paint) and draw one stroke. 2. Reload the page (or close the tab) at once, or within 0.6 s. 3. Open the Studio again.',
       expected: 'README: the Studio\'s paper and underdrawing "are saved in the browser a moment after each change ... and come back on the next visit"; js/painting.js line 530 says "a change still waiting is saved as the page goes (pagehide)". A stroke drawn just before leaving is in the painting that comes back.',
