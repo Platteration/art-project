@@ -14,7 +14,7 @@
 // mode messages, an arrow held through a tab switch, the reference pictures' framing and tilts, a lost context
 // in the render frame, a finger (tap, drag, pinch, swipe), two Pose and light pages and Forget my work, and
 // WebGL turned off.
-import { openPage, newTab, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot } from '../lib.mjs';
+import { openPage, newTab, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot, axe } from '../lib.mjs';
 
 // the page is up: started, with all 30 pictures drawn
 const up = (fr, timeout = 30000) => fr.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30, null, { timeout }).catch(() => null);
@@ -667,7 +667,7 @@ export default async function pose(t, site) {
       await fr.evaluate(() => document.querySelector('#lights .btn[data-id="under"]').click());
       const below = await named();
       const belowOk = t.check(below.name === 'From below' && below.pressed === 'under' && /spooky/.test(below.lesson), 'From below with the lamp at 4.6 m: the light is named From below, its chip pressed, its lesson shown', below);
-      if (!belowOk) t.finding({ title: 'From below with the lamp far away reads "Your own": its chip is not pressed and its lesson not shown', severity: 'medium', steps: 'pose.html, Advanced, Light settings → Distance 4.6 m (anything past about 4.2 m), then press From below', expected: 'The light is named From below, its chip stays pressed and its lesson shows, as for every other preset at any distance', actual: `The lamp goes as low as it can at that distance (${below.el}° up rather than -14°), and the panel names it "${below.name}", no chip pressed, with the lesson "${below.lesson.slice(0, 60)}…"`, cause: 'js/pose.js:1029 reachable() raises the height to the lowest the lamp can reach at that distance, and js/pose.js:1033 names a preset only within 6° of its own height (-14°), so the preset just pressed is not found' });
+      if (!belowOk) t.finding({ title: 'From below with the lamp far away reads "Your own": its chip is not pressed and its lesson not shown', severity: 'medium', steps: 'pose.html, Advanced, Light settings → Distance 4.6 m (the far end of its slider), then press From below', expected: 'The light is named From below, its chip stays pressed and its lesson shows, as for every other preset at any distance', actual: `The lamp goes as low as it can at that distance (${below.el}° up rather than -14°), and the panel names it "${below.name}", no chip pressed, with the lesson "${below.lesson.slice(0, 60)}…"`, cause: 'js/pose.js:1029 reachable() raises the height to the lowest the lamp can reach at that distance, and js/pose.js:1033 names a preset only within 6° of its own height (-14°), so the preset just pressed is not found' });
       await fr.evaluate(() => { document.getElementById('undo').click(); document.getElementById('undo').click(); });
       const undone = await fr.evaluate(() => ({ dist: window.PoseAndLight.light.dist, slider: document.getElementById('lDist').value, out: document.getElementById('lDistOut').textContent }));
       t.check(undone.dist === 2.6 && undone.slider === '2.6' && undone.out === '2.6 m', 'Undo after the Distance slider: the light, the slider and its readout are back at 2.6 m', undone);
@@ -1358,7 +1358,7 @@ export default async function pose(t, site) {
     await A.evaluate(() => { document.getElementById('posesBtn').click(); document.querySelector('#poses .pose-btn[data-id="sit"]').click(); document.getElementById('savePose').click(); });
     const afterA = await ids();
     const both = t.check(afterB.length === 2 && afterA.length === 3 && afterB.every((id) => afterA.includes(id)), 'Pose and light open twice (the app\'s tab and pose.html): a pose saved in one does not drop the pose saved in the other', { afterB, afterA });
-    if (!both) t.finding({ title: 'With Pose and light open twice, saving a pose in one throws away the pose saved in the other', severity: 'high', steps: '(1) In the app\'s Pose and light tab pick Walk and press Save this pose. (2) Open pose.html in another tab of the same browser (Your poses lists Walk); pick Run and press Save this pose. (3) Back in the app\'s tab pick Sit and press Save this pose. Reload either page and open Poses', expected: 'Your poses holds Walk, Run and Sit: each Save said "Saved in the pose library"', actual: `Your poses holds ${afterA.length}: Run, saved in the second page, is gone from the store (ids after step 2: ${afterB.join(', ')}; after step 3: ${afterA.join(', ')}). Removing a pose in one page and saving in the other brings the removed one back the same way`, cause: 'js/pose.js:1288-1292 reads the saved poses once, when the page opens, and keepMine() (js/pose.js:1296) writes that list back whole on every save or removal; nothing reads the store again when another page has changed it (the only storage listener, js/pose.js:747, is for Forget)' });
+    if (!both) t.finding({ title: 'With Pose and light open twice, saving a pose in one throws away the pose saved in the other', severity: 'high', steps: '(1) In the app\'s Pose and light tab pick Walk and press Save this pose. (2) Open pose.html in another tab of the same browser (Your poses lists Walk); pick Run and press Save this pose. (3) Back in the app\'s tab pick Sit and press Save this pose. Reload either page and open Poses', expected: 'Your poses holds Walk, Run and Sit: each Save said "Saved in the pose library"', actual: `Your poses holds ${afterA.length}: Run, saved in the second page, is gone from the store (ids after step 2: ${afterB.join(', ')}; after step 3: ${afterA.join(', ')}).`, cause: 'js/pose.js:1288-1292 reads the saved poses once, when the page opens, and keepMine() (js/pose.js:1296) writes that list back whole on every save or removal; nothing reads the store again when another page has changed it (the only storage listener, js/pose.js:747, is for Forget)' });
     // Forget my work on this device, pressed in the app's Help: both pages start over with nothing kept
     await tab(page, 'help', { wait: false });
     const reloads = Promise.all([page.waitForNavigation({ timeout: 15000 }).then(() => true, () => false), B.waitForNavigation({ timeout: 15000 }).then(() => true, () => false)]);
@@ -1408,5 +1408,48 @@ export default async function pose(t, site) {
     await clean(t, own, 'WebGL off: pose.html on its own');
     await page.context().close();
     lap('WebGL off');
+  }
+
+  // ---- pose.html with site data blocked (localStorage throws), on a phone drawing at twice its pixels, in dark
+  //      mode; axe-core on the start screen, with a part's arrows up, and on the snapshot (the app's axe run never
+  //      enters the frame) ----------------------------------------------------------------------------------------
+  {
+    const page = await openPage(site, { url: 'pose.html', viewport: PHONE, dark: true, bypassCSP: true });
+    await page.context().addInitScript(() => { Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } }); });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: PHONE.width, height: PHONE.height, deviceScaleFactor: 2, mobile: false });
+    await page.reload({ waitUntil: 'load' });
+    const fr = page.mainFrame();
+    await up(fr);
+    const opened = await fr.evaluate(() => { let blocked = false; try { window.localStorage; } catch (e) { blocked = true; } const v = document.getElementById('view'); return { blocked, started: !!window.__poseStarted, imgs: document.querySelectorAll('#poses .pose-btn.has-img').length, simple: document.documentElement.classList.contains('simple'), start: document.getElementById('library').classList.contains('is-start'), cont: document.getElementById('continueWrap').hidden, w: v.width, cw: v.clientWidth, dpr: window.devicePixelRatio, ground: getComputedStyle(document.body).backgroundColor }; });
+    t.check(opened.blocked && opened.started && opened.imgs === 30 && opened.simple && opened.start && opened.cont, 'site data blocked: pose.html starts all the same, its 30 pictures drawn, Simple, the start screen with nothing from last time', opened);
+    t.check(opened.dpr === 2 && opened.w === opened.cw * 2 && opened.ground === 'rgb(21, 32, 25)', 'a phone at twice its pixels, in dark mode: the stage drawn at twice its size, the page on its dark ground', opened);
+    const serious = (v) => v.filter((x) => x.impact === 'serious' || x.impact === 'critical');
+    const axeStart = serious(await axe(page));
+    // Tab past the last pose of the start screen goes to the browser, not to a control behind the sheet
+    await fr.evaluate(() => { const b = [...document.querySelectorAll('#library .pose-btn')]; b[b.length - 1].focus(); });
+    await page.keyboard.press('Tab');
+    const past = await fr.evaluate(() => { const a = document.activeElement; return { tag: a.tagName, id: a.id, behind: !!a.closest('.rail, .stage-bar') || a.id === 'view' || a.id === 'lampHandle' }; });
+    t.check(axeStart.length === 0 && !past.behind, 'the start screen: no serious axe-core violation, and Tab past its last pose does not reach the controls behind it', { axeStart, past });
+    await pick(fr, 'stand');
+    await fr.evaluate(() => document.getElementById('savePose').click());
+    const saved = await fr.evaluate(() => ({ btn: document.getElementById('savePose').textContent, note: (document.getElementById('posesBtn').click(), document.getElementById('libNote').textContent), mine: document.querySelectorAll('#mine .pose-btn').length }));
+    await fr.evaluate(() => document.getElementById('libClose').click());
+    t.check(saved.mine === 1 && /visit only/.test(saved.btn), 'site data blocked: Save this pose keeps the pose for the visit, and says so', saved);
+    const says = t.check(!/full/i.test(saved.btn + ' ' + saved.note) && !/Remove a saved pose/.test(saved.note), 'site data blocked: the page does not blame a full storage or ask for a saved pose to be removed', saved);
+    if (!says) t.finding({ title: 'With site data blocked, Save this pose says the storage is full and asks for a pose to be removed', severity: 'low', steps: 'Open pose.html in a browser that blocks site data for it (localStorage throws SecurityError on access: cookies and site data blocked), pick a pose, press Save this pose, open Poses', expected: 'The page says the pose is kept for this visit only because this browser does not let the site keep it', actual: `The button says "${saved.btn}" and the library "${saved.note}": removing a saved pose cannot help, nothing is stored at all`, cause: 'js/pose.js:1296: keepMine() takes any failed write for a full storage, and js/pose.js:1348 says so on the button' });
+    await fr.evaluate(() => { document.querySelector('[data-mode="advanced"]').click(); window.PoseAndLight.pick('shoulderR'); window.PoseAndLight.render(); });
+    const adv = await fr.evaluate(() => { const s = document.getElementById('stage').getBoundingClientRect(); return { mode: window.PoseAndLight.mode(), arrows: [...document.querySelectorAll('#arrows button')].filter((b) => { const r = b.getBoundingClientRect(); return r.left >= s.left && r.right <= s.right && r.top >= s.top && r.bottom <= s.bottom; }).length }; });
+    const axeAdv = serious(await axe(page));
+    t.check(adv.mode === 'advanced' && adv.arrows === 6 && axeAdv.length === 0, 'site data blocked, Advanced: the switch works, a part\'s six arrows on the stage, no serious axe-core violation', { adv, axeAdv });
+    await fr.evaluate(() => document.getElementById('snap').click());
+    await fr.waitForFunction(() => document.getElementById('snapImg').naturalWidth > 0, null, { timeout: 8000 }).catch(() => null);
+    const snap = await fr.evaluate(() => ({ w: document.getElementById('snapImg').naturalWidth, stage: document.getElementById('view').width, shown: document.getElementById('snapImg').getBoundingClientRect().width, window: window.innerWidth }));
+    const axeSnap = await fr.evaluate(() => window.axe.run(document.getElementById('snapDialog'), { resultTypes: ['violations'] }).then((r) => r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)));
+    t.check(snap.w === snap.stage && snap.shown <= snap.window && axeSnap.length === 0, 'Snapshot at twice the pixels: the picture as large as the stage is drawn, shown within the window, its dialog with no serious axe-core violation', { snap, axeSnap });
+    await fr.evaluate(() => document.getElementById('snapClose').click());
+    await clean(t, page, 'site data blocked, twice the pixels, dark');
+    await page.context().close();
+    lap('site data blocked, twice the pixels, dark');
   }
 }

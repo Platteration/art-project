@@ -12,8 +12,20 @@
 // reference drag; orderings (a tab switch, a new photo and a reload mid-game, double taps); bests kept per
 // portrait, level, palette and mode and pruned to fifty; hostile saved state for every game key and myPaints;
 // and tiny, flat and transparent pictures. Both widths.
+// The second half (sections 8 to 32, below the default function, each on pages of its own): a first game at 0;
+// My paints changed on the Study between two setups, unticked or ticked while a score is on screen; the fifty
+// bests pruned by play; every star band and grade word, the share card (share sheet, fallback, its pixels) and
+// the Analysis's pictures; Value first scored against the reference's own values; the clock running out in the
+// value stage, in Copy mix and inside a peek; storage that cannot be written or read; the Analysis's words
+// checked against its chips; the phone on its side and the phone's value stage, copy bar and Analysis; Forget in
+// another tab; My paints with two whites, no white and every paint; the generated portraits' promises and a board
+// from the rare ones; a portrait dealt in the Studio checked into the game; the Mystery hand across deals, levels
+// and Play again; chime, vibration and holds; Spot on through a paste; what a game writes and where focus goes;
+// taps in the value stage and Memory's look, a photo pasted or dropped on a painting's setup, the file picker;
+// reduced motion, axe in both themes; a Study setting changed mid-game; the suggested palette's rule; a very
+// large photo and odd file names.
 import fs from 'node:fs';
-import { openPage, newTab, clean, tab, DESKTOP, PHONE, click, text, visible, hscroll, sleep, makeImage, loadPhoto, dropFiles, pasteFile, textFile, storageGet, storageKeys, screenshot } from '../lib.mjs';
+import { openPage, newTab, clean, tab, DESKTOP, PHONE, click, text, visible, hscroll, sleep, makeImage, loadPhoto, dropFiles, pasteFile, textFile, storageGet, storageKeys, screenshot, axe } from '../lib.mjs';
 
 const K = (s) => 'portrait-value-studio.' + s;
 const PRESETS = ['zorn', 'zorn-blue', 'primary', 'cmy', 'split', 'reilly', 'schmid', 'rembrandt', 'sorolla', 'monet'];
@@ -178,7 +190,8 @@ export default async function game(t, site) {
     const hard = await setup(page);
     const hardN = numbersOf(hard.note);
     t.check(hard.note === `${hardN} numbers to mix, 8:00 on the clock.` && hardN >= 3, 'Hard: 8:00 on the clock', hard.note);
-    t.note(`numbers on the sample portrait: Easy ${easyN}, Medium ${mediumN}, Hard ${hardN} (shape counts are not reachable from the page; only the numbers are checked)`);
+    t.note(`numbers on the sample portrait: Easy ${easyN}, Medium ${mediumN}, Hard ${hardN} (shape counts are not reachable from the page: the outlines fuse and erase small shapes, so a count of the shapes drawn on the preview is not Study.shapeCount; only the numbers are checked)`);
+    t.check(Math.abs(easyN - 8) <= 3 && Math.abs(mediumN - 9) <= 3 && Math.abs(hardN - 12) <= 3 && hardN >= mediumN, 'the sample has about the numbers the README gives (8, 9 and 12 on Easy, Medium and Hard), and Hard has no fewer than Medium', [easyN, mediumN, hardN]);
     await setLevel(page, 'medium'); await ready(page);
 
     // modes
@@ -890,6 +903,35 @@ export default async function game(t, site) {
     }
     await page.context().close();
   }
+
+  // ================================================================================================
+  // 8-32. The second half: the sections below this function, each on pages of its own
+  // ================================================================================================
+  await firstGameAtZero(t, site);
+  await staleMyPaints(t, site);
+  await myPaintsWhileScored(t, site);
+  await prunedByPlay(t, site);
+  await scoreBands(t, site);
+  await valueScoring(t, site);
+  await timesUp(t, site);
+  await noStorage(t, site);
+  await analysisWords(t, site);
+  await phoneLayouts(t, site);
+  await forgetOtherTab(t, site);
+  await mineExtremes(t, site);
+  await generatedPortraits(t, site);
+  await dealtThroughStudio(t, site);
+  await mysteryHands(t, site);
+  await gameFeel(t, site);
+  await spotThroughPaste(t, site);
+  await afterTheGame(t, site);
+  await otherInputs(t, site);
+  await motionAndTheme(t, site);
+  await studySettingMidGame(t, site);
+  await suggestedRule(t, site);
+  await manyPaints(t, site);
+  await bigAndOddPhotos(t, site);
+  await starRounding(t, site);
 }
 
 
@@ -1288,9 +1330,10 @@ async function timesUp(t, site) {
   // Memory: a peek taken with little time left, the clock running out inside it
   await setMode(page, 'memory'); await ready(page);
   await click(page, '#gameStart'); await playing(page);
-  await page.clock.fastForward(10500); await sleep(300);
+  await page.clock.fastForward(10500); await timerReads(page, /^[45]:\d\d$/);
   const secs = async () => { const [m, sec] = (await play(page)).timer.split(':').map(Number); return m * 60 + sec; };
-  await page.clock.fastForward(Math.max(0, ((await secs()) - 11.8) * 1000)); await sleep(100);
+  const lookOver = (await play(page)).timer;
+  await page.clock.fastForward(Math.max(0, ((await secs()) - 11.8) * 1000)); await timerMoved(page, lookOver);
   await click(page, '#gameRefToggle'); await sleep(100);
   p = await play(page);
   if (p.toggle !== 'Peeking…') t.note('Memory: the peek taken with about 12 seconds left was refused on this run (' + p.toast + '; the real clock moved on between the steps), so the clock-out-inside-a-peek order was not played.');
@@ -1585,7 +1628,6 @@ async function generatedPortraits(t, site) {
     if (!id) { t.note(`no portrait of the kind "${what}" among the 3,000 ids tried`); continue; }
     await page.evaluate((id) => { Subjects.random = () => id; }, id);
     await click(page, '#gameReroll'); await ready(page);
-    const s = await setup(page);
     const levels = n < 2 ? ['medium', 'easy', 'hard'] : ['medium'];
     for (const lv of levels) {
       if (lv !== 'medium') { await setLevel(page, lv); await ready(page); }
@@ -1593,7 +1635,6 @@ async function generatedPortraits(t, site) {
       t.check(sl.painting === JSON.stringify(id) && PAINTERS.test(sl.paintingName) && numbersOf(sl.note) >= 3 && !sl.start && sl.preview[0] > 0, `${what} (${id}) at ${lv}: a board with at least three numbers, named, Start enabled`, [sl.painting, sl.note, sl.paintingName]);
     }
     if (n < 2) { await setLevel(page, 'medium'); await ready(page); }
-    void s;
     n++;
   }
   await click(page, '#gameStart'); await playing(page);
@@ -1986,4 +2027,256 @@ async function otherInputs(t, site) {
   t.check(s.shown && s.photoName === 'Painting from dropped-b.' && !s.start && /image|photo|picture/i.test(refusal || ''), 'a text file chosen in the picker is refused with a word, and the setup keeps the photo', [s.shown, s.photoName, refusal]);
   await clean(t, q, 'other inputs: paste, drop and the picker');
   await q.context().close();
+}
+
+// ================================================================================================
+// 27. Reduced motion (the score at once, Compare at the middle, the scroll), and axe on the play screen and the score, light and dark
+// ================================================================================================
+async function motionAndTheme(t, site) {
+  {
+    const page = await openPage(site, { url: '#game', reducedMotion: true });
+    await ready(page); await setPalette(page, 'zorn'); await ready(page);
+    await click(page, '#gameStart'); await playing(page);
+    const recipes = await recipesOfBoard(page);
+    await playAgain(page); await mixAll(page, recipes.slice(0, 5));
+    // lock in and read in the same breath: nothing counts up
+    const now = await page.evaluate(() => { document.getElementById('gameLock').click(); const m = /(\d+)% color match/.exec(document.getElementById('gameStars').getAttribute('aria-label')); return [document.getElementById('gamePct').textContent, m && m[1]]; });
+    t.check(now[1] && +now[1] > 0 && now[0] === now[1], 'reduced motion: the percentage is there at once, not counted up', now);
+    await click(page, '#gamePopupClose');
+    const cut = await page.evaluate(() => { document.getElementById('gameCompare').click(); return [document.getElementById('gameFinalHandle').getAttribute('aria-valuenow'), document.getElementById('gameFinalWrap').style.getPropertyValue('--cut')]; });
+    await sleep(500);
+    const cut2 = await page.evaluate(() => document.getElementById('gameFinalHandle').getAttribute('aria-valuenow'));
+    t.check(cut[0] === '50' && cut[1] === '50%' && cut2 === '50', 'reduced motion: Compare with target rests at the middle at once, with no sweep in from the edge', [cut, cut2]);
+    await click(page, '#gameShowScore');
+    const scrolled = await page.evaluate(() => { document.getElementById('gameAnalyze').click(); return document.getElementById('gameAnalysis').getBoundingClientRect().top; });
+    t.check(scrolled < 120, 'reduced motion: Analyze takes the view to the details at once, with no smooth scroll', scrolled);
+    // Next ▸ still shows where the number is (the gold flash, slower)
+    await playAgain(page);
+    await pickNumber(page, 0);
+    const flash = await page.evaluate(async () => {
+      const c = document.getElementById('gameCanvas'), g = c.getContext('2d');
+      const gold = () => { const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 64) if (d[i] === 217 && d[i + 1] === 164 && d[i + 2] === 65) n++; return n; };
+      document.querySelector('.game-next').click();
+      let max = 0; const t0 = performance.now();
+      while (performance.now() - t0 < 1500) { max = Math.max(max, gold()); await new Promise((r) => setTimeout(r, 25)); }
+      return max;
+    });
+    t.check(flash > 0, 'reduced motion: Next ▸ still flashes the number’s shapes gold', flash);
+    await clean(t, page, 'reduced motion');
+    await page.context().close();
+  }
+  for (const dark of [true, false]) {
+    const name = dark ? 'dark' : 'light';
+    const page = await openPage(site, { url: '#game', dark, bypassCSP: true });
+    await ready(page); await setPalette(page, 'zorn'); await ready(page);
+    await click(page, '#gameStart'); await playing(page);
+    const recipes = await recipesOfBoard(page);
+    await playAgain(page);
+    await mixAll(page, recipes.slice(0, 6)); await pickNumber(page, 7);
+    const bad = [];
+    const run = async (label) => { for (const v of await axe(page)) { if (v.impact === 'critical' || v.impact === 'serious') bad.push(`${name} ${label}: ${v.id} (${v.impact}) ${v.help} ×${v.count} e.g. ${v.nodes[0]}`); else t.note(`axe ${name} ${label}: ${v.id} (${v.impact}) ${v.help} ×${v.count} e.g. ${v.nodes[0]}`); } };
+    await run('play screen with mixed numbers');
+    await lockIn(page); await run('score');
+    await click(page, '#gamePopupClose'); await click(page, '#gameCompare'); await run('score closed, comparing');
+    await click(page, '#gameShowScore'); await click(page, '#gameAnalyze'); await sleep(300); await run('analysis');
+    const ok = t.check(bad.length === 0, `axe, ${name} mode: no serious or critical issue on the play screen, the score, the comparison or the analysis`, bad.slice(0, 4));
+    if (!ok) t.finding({
+      title: `Paint by numbers fails axe (${name} mode) on the play screen or the score`,
+      severity: 'low',
+      steps: `1. Switch the system to ${name} mode. 2. Open Paint by numbers, Start painting, mix a few numbers, run axe-core on the page (tests/lib.mjs axe()), then Lock in portrait and run it on the score, the comparison and the analysis.`,
+      expected: 'No serious or critical issue, as the smoke case holds every tab’s setup to.',
+      actual: bad.slice(0, 4).join('; '),
+    });
+    await page.context().close();
+  }
+}
+
+// ================================================================================================
+// 28. A Study setting changed on the Study tab while a game is on
+// ================================================================================================
+async function studySettingMidGame(t, site) {
+  const page = await openPage(site, { url: '#game', storage: { [K('mode')]: 'advanced', [K('drawers')]: '["values"]' } });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  const N = (await play(page)).numbers;
+  await setAmount(page, 2); await tapPaint(page, 'TW', 2);
+  // Merge small shapes down to 0 (the board a new game would have changes), on the Study tab
+  await tab(page, 'study');
+  await page.evaluate(() => { const r = document.getElementById('merge'); r.value = 0; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+  await sleep(800);
+  await tab(page, 'game');
+  let p = await play(page);
+  const dims = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height]);
+  t.check(p.numbers === N && p.parts === 'TW 2' && same(dims, [600, 750]) && !(await page.evaluate(() => document.getElementById('gamePlay').hidden)), 'a Study setting changed mid-game: the game keeps its board, its numbers and its mix', [p.numbers, N, p.parts, dims]);
+  await lockIn(page);
+  await click(page, '#gamePopup [data-game="again"]'); await sleep(200);
+  const hint = await page.evaluate(() => document.getElementById('againHint').textContent);
+  const worded = t.check(!/The photo on the Study tab has changed/.test(hint), 'Play again after only a setting changed does not say the photo has changed', hint);
+  if (!worded) t.finding({
+    title: 'Play again says the photo on the Study tab has changed when only a Study setting did',
+    severity: 'low',
+    steps: '1. Start painting on the sample portrait. 2. On the Study tab (Advanced) move Merge small shapes. 3. Back on Paint by numbers, Lock in portrait and press Play again.',
+    expected: 'The usual question ("Try the same photo again, or load a new one?"), or words about the settings having changed.',
+    actual: `The dialog says "${hint}" although the photo is the same one.`,
+    cause: 'js/game.js 1632-1633 compares setupFor.from with subjectStamp(), which for a photo is Studio.result(), a new object whenever the Study works again, for a setting as for a photo.',
+  });
+  await click(page, '#againSame'); await playing(page);
+  p = await play(page);
+  t.check(p.numbers === N && p.timer === '5:00', 'and Same photo plays the board just played', [p.numbers, N, p.timer]);
+  await clean(t, page, 'a Study setting changed mid-game');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 29. The suggested palette is the one the README describes
+// ================================================================================================
+async function suggestedRule(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page);
+  // the rule, worked out in the page from the Study's own color groups (at Medium the board has the study's: 3 colors per value)
+  const rule = () => page.evaluate(() => {
+    const colors = Studio.result().blockColors.map((c) => ({ rgb: { r: c.r, g: c.g, b: c.b }, weight: c.share }));
+    const made = (c) => Mixing.makePaint(Object.assign({ strength: 'normal' }, Paints.byCode(c)));
+    const rated = Paints.PRESETS.map((p) => ({ id: p.id, n: p.paints.length, match: Mixing.coverage(p.paints.map(made), colors).match, reds: p.paints.filter((c) => Paints.byCode(c).category === 'red').length }));
+    const top = Math.max(...rated.map((r) => r.match));
+    const near = rated.filter((r) => r.match >= top - 1).sort((a, b) => a.n - b.n || b.match - a.match);
+    const sel = document.getElementById('gamePalette');
+    return { colors: colors.length, numbers: +(/^(\d+) number/.exec(document.getElementById('gamePreviewNote').textContent) || [])[1], pick: near[0].id, tied: near.map((r) => r.id), marked: [...sel.options].filter((o) => / \(suggested\)$/.test(o.textContent)).map((o) => o.value), chosen: sel.value, reds: Object.fromEntries(rated.map((r) => [r.id, r.reds])) };
+  });
+  const checkRule = async (name) => {
+    const r = await rule();
+    if (r.colors !== r.numbers) { t.note(`suggested palette, ${name}: the Study has ${r.colors} colors and the board ${r.numbers} numbers, so the rule was not worked out on this picture`); return r; }
+    t.check(same(r.marked, [r.pick]) && r.chosen === r.pick, `${name}: the palette marked suggested and chosen is the best match, or of those within a point the one with fewest paints`, r);
+    return r;
+  };
+  const sample = await checkRule('the sample portrait');
+  await tab(page, 'study');
+  const red = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 300; c.height = 400; const g = c.getContext('2d'); g.fillStyle = 'rgb(200,30,30)'; g.fillRect(0, 0, 300, 400); return c.toDataURL('image/png').split(',')[1]; });
+  await loadPhoto(page, { name: 'red.png', mimeType: 'image/png', buffer: Buffer.from(red, 'base64') }, { settle: 500 });
+  await tab(page, 'game'); await ready(page);
+  const flat = await checkRule('a flat red picture');
+  t.check(flat.reds[flat.marked[0]] > 0 && flat.marked[0] !== sample.marked[0], 'a flat red picture is given a palette that holds a red, and not the sample’s', [flat.marked, sample.marked, flat.reds]);
+  await tab(page, 'study');
+  await loadPhoto(page, await makeImage(page, { width: 500, height: 640, type: 'image/jpeg', name: 'p.jpg' }), { settle: 500 });
+  await tab(page, 'game'); await ready(page);
+  await checkRule('a drawn portrait');
+  await clean(t, page, 'the suggested palette');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 30. Every paint ticked: Start waits for the targets and says how far along it is, and the visitor can leave for a quicker palette
+// ================================================================================================
+async function manyPaints(t, site) {
+  const probe = await openPage(site, { url: '#game' });
+  const all = await probe.evaluate(() => Paints.LIBRARY.map((p) => p.code));
+  await probe.context().close();
+  const page = await openPage(site, { url: '#game', storage: { [MINE]: all } });
+  const t0 = Date.now();
+  const said = await page.waitForFunction(() => /Mixing the reference from these paints: \d+ of \d+ colors/.test(document.getElementById('gamePaletteHint').textContent), null, { timeout: 30000 }).then(() => true).catch(() => false);
+  const s = await setup(page);
+  t.check(said && s.start && s.options.some((o) => o[0] === 'mine' && o[1].startsWith(`My paints (${all.length})`)), `${all.length} paints ticked: Start waits and the hint says how many of the colors are mixed so far`, [said, s.start, s.hint]);
+  // the page is not held: another palette can be chosen at once, and plays
+  await setPalette(page, 'zorn'); await ready(page);
+  const z = await setup(page);
+  t.check(!z.start && z.palette === 'zorn' && z.dots.length === 4 && / 4 paints, which mix /.test(z.hint), 'a quicker palette chosen while the 77-paint one is being mixed is ready on its own', [z.palette, z.hint]);
+  await click(page, '#gameStart'); await playing(page);
+  await tapPaint(page, 'TW', 2);
+  await lockIn(page);
+  t.check((await result(page)).popup, 'and the game plays', await result(page));
+  t.note(`All ${all.length} paints ticked: the first look at the palette (its hint) took ${((Date.now() - t0) / 1000).toFixed(0)} s here including switching to Zorn; mixing the reference from the 77 paints was measured at about a minute on this loaded machine (about 3-6 s a color, the page staying responsive), and is not waited for in this case.`);
+  await clean(t, page, 'every paint ticked');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 31. A very large photo's best is kept under its reduced size; a file name that looks like a size; a long name on a phone
+// ================================================================================================
+async function bigAndOddPhotos(t, site) {
+  const page = await openPage(site, { url: '#study' });
+  const huge = await makeImage(page, { width: 6000, height: 4500, type: 'image/jpeg', name: 'huge.jpg', draw: 'flat' });
+  await loadPhoto(page, huge, { settle: 500 });
+  const note = await text(page, '#toast');
+  const sk = await page.evaluate(() => Studio.sourceKey());
+  t.check(/reduced to 2800 × 2100/.test(note || '') && sk === 'huge:2800x2100', 'a 27-megapixel photo is reduced to 2800 × 2100 and keyed by that size', [note, sk]);
+  await tab(page, 'game'); await ready(page);
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  const key = Object.keys(await bests(page))[0] || '';
+  t.check(/^huge:2800x2100\|medium\|[a-z-]+$/.test(key), 'its best is kept under the file name and the reduced size', key);
+  await toSetup(page);
+  t.check((await setup(page)).photoName === 'Painting from huge.', 'the photo pane names it by its file name', (await setup(page)).photoName);
+  // a name that ends like a size keeps its own text in the pane (only the size the game appends is cut off)
+  await tab(page, 'study');
+  await loadPhoto(page, await makeImage(page, { width: 400, height: 500, type: 'image/jpeg', name: 'face:600x750.jpg' }), { settle: 500 });
+  await tab(page, 'game'); await ready(page);
+  const odd = await setup(page);
+  t.check(odd.photoName === 'Painting from face:600x750.', 'a file named face:600x750 is shown as face:600x750', odd.photoName);
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  t.check(Object.keys(await bests(page)).some((k) => k.startsWith('face:600x750:400x500|medium|')), 'and kept under face:600x750:400x500', Object.keys(await bests(page)));
+  await clean(t, page, 'a very large photo and an odd name');
+  await page.context().close();
+  // a 200-character name on a phone wraps inside the card
+  const ph = await openPage(site, { url: '#study', viewport: PHONE });
+  const long = 'a'.repeat(120) + '-' + 'b'.repeat(78) + '.jpg';
+  await loadPhoto(ph, await makeImage(ph, { width: 400, height: 500, type: 'image/jpeg', name: long }), { settle: 500 });
+  await tab(ph, 'game'); await ready(ph);
+  const width = await ph.evaluate(() => { const e = document.getElementById('gamePhotoName'); const c = e.closest('.game-card'); const r = c.getBoundingClientRect(); return { right: Math.round(r.right), vw: innerWidth, text: e.textContent.length }; });
+  t.check((await hscroll(ph)) <= 0 && width.right <= width.vw + 1 && width.text > 190, 'a 200-character file name wraps in the setup on a phone: no horizontal scroll', [await hscroll(ph), width]);
+  await clean(t, ph, 'a long file name on a phone');
+  await ph.context().close();
+}
+
+// ================================================================================================
+// 32. A match shown as a threshold earns that threshold's stars (88, 65 and 30 percent)
+// ================================================================================================
+async function starRounding(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  const recipes = await recipesOfBoard(page);
+  const codes = (await play(page)).paints;
+  // for each number, a mix of the same paints that lands a hair under the goal match (goal - 0.45 to goal - 0.05): with every number
+  // there, the whole portrait is, whatever the areas, and it is shown rounded up to the goal
+  const nearMix = (recipe, goal) => page.evaluate(([codes, recipe, goal]) => {
+    const paints = codes.map((c) => Mixing.makePaint(Object.assign({ strength: 'normal' }, Paints.byCode(c))));
+    const base = codes.map((c) => Math.round((recipe[c] || 0) * 4));
+    const target = Mixing.mix(paints, base.map((q) => q / 4)).lab;
+    const lo = goal - 0.45, hi = goal - 0.05, found = [];
+    const walk = (i, cur) => {
+      if (i === codes.length) {
+        const total = cur.reduce((a, b) => a + b, 0);
+        if (total < 1 || total > 240) return;
+        const m = Mixing.mix(paints, cur.map((q) => q / 4));
+        const match = Math.max(0, 100 - 2.5 * Study.deltaE2000(m.lab[0], m.lab[1], m.lab[2], target[0], target[1], target[2]));
+        if (match >= lo && match <= hi) found.push([Math.abs(match - (goal - 0.25)), cur.slice()]);
+        return;
+      }
+      for (const d of [-2, -1, 0, 1, 2, 3, 4]) { const v = base[i] + d; if (v >= 0) { cur.push(v); walk(i + 1, cur); cur.pop(); } }
+    };
+    walk(0, []);
+    found.sort((a, b) => a[0] - b[0]);
+    return found.length ? Object.fromEntries(codes.map((c, i) => [c, found[0][1][i] / 4]).filter(([, v]) => v > 0)) : null;
+  }, [codes, recipe, goal]);
+  for (const goal of [88, 65, 30]) {
+    const mixes = [];
+    for (const [n, mix] of recipes) mixes.push([n, await nearMix(recipeOf(mix), goal)]);
+    if (mixes.some(([, m]) => !m)) { t.note(`stars at ${goal}%: no mix just under ${goal} was found for number(s) ${mixes.filter(([, m]) => !m).map(([n]) => n).join(', ')}, so that threshold was not played`); continue; }
+    await playAgain(page);
+    for (const [n, m] of mixes) { await pickNumber(page, n - 1); await mixExact(page, m); }
+    await lockIn(page);
+    const r = await result(page);
+    const want = STAR_MINS.filter((m) => goal >= m).length;
+    const ok = t.check(r.pct === String(goal) && r.stars === want && r.starsLabel === `${want} out of 5 stars, ${goal}% color match` && r.grade === GRADE_WORDS[want], `a match shown as ${goal}% earns ${want} star${want > 1 ? 's' : ''} (the README: from ${goal}%)`, [r.pct, r.stars, r.starsLabel, r.grade]);
+    if (!ok && r.pct === String(goal)) t.finding({
+      title: `A color match shown as ${goal}% earns the stars of the band below`,
+      severity: 'low',
+      steps: `1. Play Paint by numbers on the sample portrait at Zorn. 2. Mix every number to a color a hair short of its target, so the portrait scores between ${goal - 0.5} and ${goal}% (every number at about ${goal - 0.25}% match). 3. Lock in portrait.`,
+      expected: `The card reads ${goal}% and shows ${want} star${want > 1 ? 's' : ''} ("${GRADE_WORDS[want]}"), as the README says: ${want} from ${goal}%.`,
+      actual: `The card reads ${r.pct}% with ${r.stars} star${r.stars === 1 ? '' : 's'} and "${r.grade}" (label "${r.starsLabel}").`,
+      cause: 'js/game.js 1354-1360 (showScore): the percentage shown is Math.round(accuracy) but the stars are starsFor(accuracy) on the unrounded value (1276), so 87.5 to 87.99 reads 88% with four stars.',
+    });
+  }
+  await clean(t, page, 'stars at the thresholds');
+  await page.context().close();
 }
