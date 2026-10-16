@@ -1769,6 +1769,11 @@ export async function savedPngs(t, site) {
     // every ground with every texture: the texture darkens the ground by a share, unevenly; with none the ground is even
     const GROUNDS = ['raw', 'gray', 'wash'], WEAVES = ['off', 'linen', 'paper'];
     await wipe(page);
+    // Chromium drops a page's 11th download without a word when it comes within a second of the first (Blink's
+    // LocalFrame::ShouldThrottleDownload: ten in a burst). Nobody saves eleven pictures in a second, but a fast runner
+    // (CI) makes the four saves above and the first six below in under one, and there wash/off, the 11th, never came.
+    // Past that second the count starts again, so the nine saves below are spread past it.
+    await sleep(1100);
     const grid = {};
     for (const g of GROUNDS) {
       await click(page, `#ps-root [data-ground="${g}"]`);
@@ -1784,7 +1789,7 @@ export async function savedPngs(t, site) {
       if (!base || base.sd > 1.5 || base.alpha < 254.5) bad.push(`${g}/off is not an even, opaque ground: ${JSON.stringify(base)}`);
       for (const w of ['linen', 'paper']) {
         const cell = grid[`${g}/${w}`] && grid[`${g}/${w}`].boxes[1];
-        if (!cell || !base) { bad.push(`${g}/${w}: no picture`); continue; }
+        if (!cell || !base) { bad.push(`${g}/${w}: ${cell ? `no ${g}/off picture to compare it with` : 'no picture'}`); continue; }
         const ratios = cell.mean.map((v, i) => v / base.mean[i]);
         if (!(ratios.every((r) => r >= 0.8 && r <= 0.995) && cell.sd >= 1.0 && cell.alpha >= 254.5)) bad.push(`${g}/${w}: ratios ${ratios.map((r) => r.toFixed(3))}, spread ${cell.sd}`);
       }
