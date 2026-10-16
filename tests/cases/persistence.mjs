@@ -340,8 +340,8 @@ seg('older', 55, async (t, site, pages) => {
   t.check(mixes.length === 9, 'the Studio shows its eight starting mixes and the one saved mix, whose white (W) is no paint now', mixes);
   t.note(`a saved mix of "W 2 · YO 1" is shown as "${mixes[mixes.length - 1]}": a paint code the library no longer has is dropped from the mix, so the mix is another color (the mix is kept, not the white)`);
   await clean(t, page, 'older: every tab');
-  // Pose and light: the first light, a saved pose with no viewpoint
-  const pose = await open(pages, site, { url: 'pose.html' });
+  // Pose and light: the first light, a saved pose with no viewpoint (in a tab of the same browser, which holds the same keys)
+  const pose = await newTab(site, page, { url: 'pose.html' });
   await pose.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
   const pl = await pose.evaluate(() => ({ cont: !document.getElementById('continueWrap').hidden, light: { ...PoseAndLight.light }, sho: PoseAndLight.pose.shoulderL, mine: [...document.querySelectorAll('#mine .pose-item')].length, hip: PoseAndLight.pose.height }));
   t.check(pl.cont && pl.light.az === 100 && pl.light.el === 20 && pl.light.dist === 2.6 && pl.light.soft === 3 && pl.light.fill === 40, 'Pose and light: a light saved with az and el only keeps those and starts the rest at their defaults', pl.light);
