@@ -1389,6 +1389,8 @@
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
     els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${pct}% color match`);
+    // what the focus on Analyze reads of the card: the stars and the match, the word, New best! only while it shows (a hidden element named here is read all the same)
+    els.popup.setAttribute('aria-describedby', isBest ? 'gameStars gameGrade gameNewBest' : 'gameStars gameGrade');
     els.stars.querySelectorAll('.game-star').forEach((st, i) => {
       st.classList.toggle('is-on', i < stars);
       st.style.setProperty('--i', i);

@@ -320,10 +320,13 @@
     });
     els.answer.textContent = ''; els.answer.classList.remove('is-right', 'is-wrong');
     root.dataset.mode = r.q.mode;
-    els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen'); });
+    els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen', 'is-pulse'); });   // a pulse left on the button would play again each time the round shows it
     els.undo.hidden = true;
     els.next.hidden = true;
     root.classList.remove('vb-answered');
+    // Next ▸ (or the miss's button) just went, and the old colors with it: the new round's first color takes the focus, and the group's
+    // name (the question) is read with it. Only from the page or the board: a menu opened while the clock runs keeps its focus, and so does ✕.
+    if (document.activeElement !== els.quit && onBoard(document.activeElement)) swatch(0).focus({ preventScroll: true });
   }
   const swatch = (i) => els.swatches.querySelector(`.vb-swatch[data-index="${i}"]`);
   // a tap on a swatch: the answer itself for a pair or a pick, the next in line for an order
@@ -352,7 +355,9 @@
     click(2);
     game.picked = [];
     els.swatches.querySelectorAll('.vb-swatch').forEach((b) => { b.classList.remove('is-picked'); b.querySelector('.vb-badge').hidden = true; });
+    const held = document.activeElement === els.undo;
     els.undo.hidden = true;
+    if (held) swatch(0).focus({ preventScroll: true });   // the button hides itself with the focus on it: the first color takes it, not the page
   });
   const same = (a, b) => Array.isArray(a) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b;
   // why the answer is what it is, in a sentence the student can check against the swatches
@@ -450,7 +455,7 @@
       else if (e.key === 'ArrowRight') tapSwatch(1);
       else if (e.key === '=' || e.key === 'ArrowDown') choose('same');
     } else if (/^[1-4]$/.test(e.key) && +e.key <= r.n) tapSwatch(+e.key - 1);
-    if (e.key === 'Enter' && game.answered) els.next.click();
+    if (e.key === 'Enter' && game.answered && e.target !== els.quit) { e.preventDefault(); els.next.click(); }   // the new round's first color has the focus now: this Enter must not press it too; on ✕ it quits as before
   });
 
   // ---- The score, the way Paint by numbers shows one ----------------------------------------------
@@ -479,6 +484,8 @@
     els.newBest.hidden = !isBest;
     els.newBest.textContent = written ? 'New best!' : 'New best! (this visit only)';   // a best the browser would not keep says so
     els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${score} ${onClock ? 'right' : 'in a row'}`);
+    // the pop-up's description is what the focus on Play again reads; New best! is in it only while shown (a hidden element named here is read all the same)
+    els.popup.setAttribute('aria-describedby', isBest ? 'vb-stars vb-grade vb-newBest' : 'vb-stars vb-grade');
     const pct = score;
     els.stars.querySelectorAll('.game-star').forEach((st, i) => { st.classList.toggle('is-on', i < stars); st.style.setProperty('--i', i); });
     els.popup.hidden = false;

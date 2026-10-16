@@ -827,7 +827,7 @@
                 <span class="game-final-tag tag-yours" aria-hidden="true">Yours</span>
                 <span class="game-final-tag tag-target" aria-hidden="true">Target</span>
               </div>
-              <div class="game-popup" id="gamePopup" role="group" aria-labelledby="gameKicker">
+              <div class="game-popup" id="gamePopup" role="group" aria-labelledby="gameKicker" aria-describedby="gameStars gameGrade">
                 <button type="button" class="game-popup-close" id="gamePopupClose" aria-label="Hide the score to see your portrait">×</button>
                 <p class="game-kicker" id="gameKicker">Portrait locked in</p>
                 <p class="game-pct"><span id="gamePct">0</span><span class="game-pct-sign">%</span></p>
@@ -928,7 +928,7 @@
             </div>
             <div class="vb-stage">
               <p class="vb-question" id="vb-question">Which color is darker in value?</p>
-              <div class="vb-swatches" id="vb-swatches" data-count="2"></div>
+              <div class="vb-swatches" id="vb-swatches" role="group" aria-labelledby="vb-question" data-count="2"></div>
               <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
               <div class="vb-controls" id="vb-choices">
                 <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
@@ -936,7 +936,7 @@
                 <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
               </div>
             </div>
-            <div class="game-popup vb-miss" id="vb-miss" role="group" aria-labelledby="vb-missKicker" hidden>
+            <div class="game-popup vb-miss" id="vb-miss" role="group" aria-labelledby="vb-missKicker" aria-describedby="vb-missWhy" hidden>
               <p class="game-kicker" id="vb-missKicker">Not quite</p>
               <p class="vb-miss-why" id="vb-missWhy"></p>
               <div class="vb-chips" id="vb-missChips"></div>
@@ -944,7 +944,7 @@
                 <button type="button" class="btn btn-primary" id="vb-missNext">See the score</button>
               </div>
             </div>
-            <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" hidden>
+            <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" aria-describedby="vb-stars vb-grade" hidden>
               <p class="game-kicker" id="vb-kicker">Streak over</p>
               <p class="game-pct"><span id="vb-pct">0</span></p>
               <p class="game-pct-label" id="vb-pctLabel">in a row</p>
