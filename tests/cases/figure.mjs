@@ -236,6 +236,30 @@ async function analyzerScenarios(id) {
   out.bars = run(draw({ extra: (g) => { g.lineWidth = 8; g.beginPath(); g.moveTo(80, 200); g.lineTo(80, 1000); g.moveTo(820, 200); g.lineTo(820, 1000); g.stroke(); } }));
   out.cast = castN ? run(draw({ extra: fillWith(castCells) })) : null;
   out.castFull = castN ? run(draw({ extra: fillWith(fig.cast) })) : null;
+  // the figure drawn two fifths narrower: taller and thinner for its height than the pose (the Your drawing note)
+  out.thin = run(draw({ sx: 0.6 }));
+  // one arm drawn along a quarter, and along three quarters, of its length: the README's "no marks near half its length" rule
+  const armPart = (frac) => (g, { k, ox, oy }) => {
+    const pts = ['shoulderL', 'elbowL', 'wristL', 'handL'].map((n) => [ox + s.joints[n][0] * s.w * k, oy + s.joints[n][1] * s.h * k]);
+    const seg = []; for (let i = 1; i < pts.length; i++) seg.push(Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    let want = frac * seg.reduce((a, b) => a + b, 0);
+    g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length && want > 0; i++) { const f = Math.min(1, want / seg[i - 1]); g.lineTo(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f); want -= seg[i - 1]; }
+    g.stroke();
+  };
+  out.arm25 = run(draw({ parts: ALL.filter((p) => p !== 'armL'), extra: armPart(0.25) }));
+  out.arm75 = run(draw({ parts: ALL.filter((p) => p !== 'armL'), extra: armPart(0.75) }));
+  // the wooden figure's outline alone (the cells on its edge, a line one cell thick): what someone who outlines the body draws
+  if (fig) {
+    const ol = new Uint8Array(fig.w * fig.h);
+    for (let y = 0; y < fig.h; y++) for (let x = 0; x < fig.w; x++) {
+      const i = y * fig.w + x;
+      if (fig.d[i] !== 0) continue;
+      if ((x > 0 && fig.d[i - 1] > 0) || (x < fig.w - 1 && fig.d[i + 1] > 0) || (y > 0 && fig.d[i - fig.w] > 0) || (y < fig.h - 1 && fig.d[i + fig.w] > 0)) ol[i] = 1;
+    }
+    out.outline = run(draw({ parts: [], extra: fillWith(ol) }));
+    out.outlineCells = ol.reduce((a, b) => a + b, 0);
+  }
   return out;
 }
 // Runs in the page: the line of action's three words from points that bow no way, one way and both ways; the gesture's
@@ -1154,12 +1178,14 @@ async function wordingBlock(t, page) {
     const stars = [];
     for (let i = 0; i < kinds.length; i++) {
       if (i) await nextPose(page, i + 1);
-      if (kinds[i] === 'scribble') await scribble(page); else if (!(await drawForStars(page, 1))) t.note('wording: no part of the gesture drawn alone earned exactly one star on this run');
+      if (kinds[i] === 'scribble') await scribble(page);
+      else if (kinds[i] === 'corner') await stroke(page, '#fs-paper', [[0.05, 0.04], [0.3, 0.13]], { steps: 6 }); // a line off the figure, in the sheet's corner: marked, and no star
+      else if (!(await drawForStars(page, 1))) t.note('wording: no part of the gesture drawn alone earned exactly one star on this run');
       stars.push((await finishPose(page)).on);
       await guardOver(page);
     }
     await click(page, '#fig-stop');
-    return { stars, lede: await text(page, '#fig-reviewLede') };
+    return { stars, lede: await text(page, '#fig-reviewLede'), ratings: await page.evaluate(() => [...document.querySelectorAll('#fig-cards .fig-rating')].map((x) => x.textContent)) };
   };
   const b = await classOf(['scribble', 'one']);
   if (b.stars.join() === '0,1') t.check(b.lede === lede(b.stars) && /, ½ star on average\./.test(b.lede), 'wording: a scribble (no star) and a one-star drawing average half a star, read "½ star on average" (singular)', b);
@@ -1173,6 +1199,10 @@ async function wordingBlock(t, page) {
   await click(page, '[data-fig-gesture="1"]');
   const labels = await page.evaluate(() => [...document.querySelectorAll('#fig-cards canvas')].map((x) => x.getAttribute('aria-label')));
   t.check(labels.length === 2 && labels.every((l) => /, with the gesture over it$/.test(l)), 'wording: Gestures shown puts the gesture back on those pictures and in their labels', labels);
+  // one drawing that earns no star at all (README: the stars are the games' thresholds, so 0 stars below 30%): the lede's singular
+  // sentence with 0 stars, and the card's word for it, on a class of one
+  const z = await classOf(['corner']);
+  t.check(z.stars.join() === '0' && z.lede === lede(z.stars) && /^1 drawing from a relaxed class, 0 stars on average\./.test(z.lede) && /0 out of 5 stars, \d+% · Keep drawing$/.test(z.ratings[0] || ''), 'wording: one drawing with no star reads "1 drawing from a relaxed class, 0 stars on average", and its card reads 0 out of 5 stars, Keep drawing', z);
   await clean(t, page, 'review wording');
 }
 // the games' sound switch off: the clock running out is silent

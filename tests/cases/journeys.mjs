@@ -604,9 +604,13 @@ async function modeAtEveryStep(t, site, pages) {
   let s = await shows(page);
   let shown = await presetsShown();
   const idOf = (name) => page.evaluate((n) => (Paints.PRESETS.find((p) => p.name === n) || {}).id || null, name);
+  // the palette marked Best match among those shown (README: "the best of them for the study marked Best match and used until you choose one")
+  const bestShown = () => page.evaluate(() => [...document.querySelectorAll('#presetList li')].filter((li) => li.offsetParent && [...li.querySelectorAll('.preset-best, .preset-best-simple')].some((b) => b.offsetParent)).map((li) => li.dataset.preset));
   t.check(s.mode === 'simple' && shown.length === 3 && shown.includes(await idOf(s.palette)) && s.valuesState === 'Normal detail', `${L} Simple: three palettes, the one in use among them, the Detail preset in the header`, { shown, palette: s.palette, header: s.valuesState });
+  t.check(J(await bestShown()) === J([await idOf(s.palette)]), `${L} Simple: the palette in use is the one marked Best match`, { marked: await bestShown(), palette: s.palette });
   await mode('advanced');
   s = await shows(page); shown = await presetsShown();
+  t.check(J(await bestShown()) === J([await idOf(s.palette)]), `${L} Advanced: the palette in use is the one marked Best match`, { marked: await bestShown(), palette: s.palette });
   t.check(shown.length === 10 && /^Splits at V /.test(s.valuesState) && s.blockLabel === s.palette.replace(/\s*\(.*\)$/, ''), `${L} Advanced: ten palettes, the splits in the header, the blocks' switch names the palette in use (${s.palette})`, { shown: shown.length, header: s.valuesState, label: s.blockLabel });
   const advPalette = s.palette;
   await mode('simple');
