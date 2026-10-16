@@ -761,6 +761,7 @@
   // The outline: each picked mesh gets a copy pushed out along its normals by a few pixels and
   // drawn from behind, so only a rim shows around the part. It writes alpha 0, which the gray and
   // three-value views read as "keep this yellow".
+  const OUTLINE_RGB = '1.0, 0.824, 0.247';         // the picked part's yellow, which the looks keep
   const outlineMat = new T.ShaderMaterial({
     uniforms: { px: { value: 4.5 }, size: { value: new T.Vector2(800, 600) } },
     side: T.BackSide,
@@ -774,7 +775,7 @@
         if (len > 1e-5) clip.xy += dir / len * px * 2.0 / size * clip.w;
         gl_Position = clip;
       }`,
-    fragmentShader: 'void main() { gl_FragColor = vec4(1.0, 0.824, 0.247, 0.0); }',
+    fragmentShader: `void main() { gl_FragColor = vec4(${OUTLINE_RGB}, 0.0); }`,
   });
   let outlines = [];
   let picked = null;
@@ -1458,8 +1459,9 @@
           vec3 c = s.rgb;
           float L = lstar(dot(vec3(toLin(c.r), toLin(c.g), toLin(c.b)), vec3(0.2126, 0.7152, 0.0722)));
           if (mode == 2) L = L < t1 ? 20.0 : (L < t2 ? 50.0 : 85.0);
-          // the picked part's outline (written with alpha 0) stays yellow
-          gl_FragColor = vec4(mix(c, vec3(toSrgb(yOf(L))), s.a), 1.0);
+          // the picked part's outline (written with alpha 0) stays yellow; its soft edge blends that yellow with the
+          // gray, never with the color under it, so no trace of the figure's own color is left in a gray look
+          gl_FragColor = vec4(mix(vec3(${OUTLINE_RGB}), vec3(toSrgb(yOf(L))), s.a), 1.0);
         }`,
     }),
   };
