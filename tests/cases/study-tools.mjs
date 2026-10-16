@@ -8,7 +8,7 @@
 // hostile saved state for the two keys the tools read, the tools under a touch on a 390 px phone, and
 // keyboard-only operation.
 import fs from 'node:fs';
-import { openPage, clean, tab, PHONE, makeImage, loadPhoto, pasteFile, textFile, brokenImage, svgImage, storageGet, click, text, visible, hscroll, sleep } from '../lib.mjs';
+import { openPage, clean, tab, PHONE, DESKTOP, makeImage, loadPhoto, pasteFile, textFile, brokenImage, svgImage, storageGet, click, text, visible, hscroll, sleep, app, newTab, axe } from '../lib.mjs';
 
 const PALETTE_KEY = 'portrait-value-studio.palette';
 const CANVAS_KEY = 'portrait-value-studio.canvasUnit';
@@ -80,6 +80,63 @@ const expectText = (t, got, want, title) => t.check(got === want, title, { got, 
 // the canvas length is typed as a visitor would (Playwright's fill refuses letters in a number field)
 async function setSize(page, value) { await page.focus('#canvasSize'); await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); if (value !== '') await page.keyboard.type(value); await page.keyboard.press('Tab'); await sleep(30); }
 const toastSaid = (page, re, timeout = 1500) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout }).then(() => true).catch(() => false);
+
+// ---- helpers of the coverage additions (the blocks after the keyboard one) ------------------------------------
+const setRange = (page, id, v) => app(page).evaluate(([i, val]) => { const e = document.getElementById(i); e.value = val; e.dispatchEvent(new Event('input', { bubbles: true })); }, [id, v]);
+// the page has finished its work (the busy line is hidden), then a moment for the paint
+const settled = (page, timeout = 60000) => app(page).waitForFunction(() => document.getElementById('busy').hidden, null, { timeout }).then(() => true).catch(() => false).then(async (ok) => { await sleep(120); return ok; });
+// the Check my painting drawer has its score (the example is scored when the #check route opens)
+const scored = (page) => app(page).waitForFunction(() => { const b = document.getElementById('checkBody'); return !!b && !b.hidden && document.getElementById('busy').hidden; }, null, { timeout: 60000 }).then(() => true).catch(() => false).then(async (ok) => { await sleep(150); return ok; });
+const inView = (page, sel) => app(page).evaluate((s) => document.querySelector(s).scrollIntoView({ block: 'center' }), sel).then(() => sleep(150));
+// the label pills drawn on each overlay ('ov:<view id>') and on the accuracy map (its canvas id), read off the 2D
+// context's own calls: a recorder only, every call goes on to the real method
+async function recordPills(page) {
+  await app(page).evaluate(() => {
+    if (window.__pillRec) return;
+    const rec = (window.__pillRec = {});
+    const P = CanvasRenderingContext2D.prototype;
+    const keyOf = (g) => { const c = g.canvas; return c.classList.contains('overlay') ? 'ov:' + (c.previousElementSibling ? c.previousElementSibling.id : '') : c.id; };
+    const clearRect = P.clearRect, roundRect = P.roundRect, fill = P.fill, fillText = P.fillText;
+    P.clearRect = function (...a) { if (this.canvas) rec[keyOf(this)] = []; return clearRect.apply(this, a); };
+    P.roundRect = function (x, y, w, h, ...rest) { if (this.canvas) { const k = keyOf(this); (rec[k] = rec[k] || []).push({ x, y, w, h, fill: null, ink: null, text: null }); } return roundRect.call(this, x, y, w, h, ...rest); };
+    P.fill = function (...a) { const l = this.canvas && rec[keyOf(this)]; const last = l && l[l.length - 1]; if (last && last.fill === null) last.fill = this.fillStyle; return fill.apply(this, a); };
+    P.fillText = function (s, ...a) { const l = this.canvas && rec[keyOf(this)]; const last = l && l[l.length - 1]; if (last && last.fill !== null && last.text === null) { last.text = String(s); last.ink = this.fillStyle; } return fillText.call(this, s, ...a); };
+  });
+}
+const pillsOf = (page, key) => app(page).evaluate((k) => ((window.__pillRec && window.__pillRec[k]) || []).map((p) => ({ x: p.x, y: p.y, w: p.w, h: p.h, fill: p.fill, ink: p.ink, text: p.text })), key);
+// the drawing size of a view's canvas, or of its overlay
+const sizeOf = (page, id, overlay = false) => app(page).evaluate(([i, o]) => { const c = document.getElementById(i); const e = o ? c.nextElementSibling : c; return { w: e.width, h: e.height }; }, [id, overlay]);
+// the pixel of an overlay at a point given as fractions of the image
+const ovPixel = (page, id, fx, fy) => app(page).evaluate(([i, x, y]) => { const o = document.getElementById(i).nextElementSibling; const px = Math.min(o.width - 1, Math.floor(x * o.width)), py = Math.min(o.height - 1, Math.floor(y * o.height)); return [...o.getContext('2d').getImageData(px, py, 1, 1).data]; }, [id, fx, fy]);
+// how many pixels of an overlay inside a box (fractions) are the dark label ink (opaque enough, near 20, 21, 24)
+const darkInside = (page, id, bx) => app(page).evaluate(([i, b]) => { const o = document.getElementById(i).nextElementSibling; const x0 = Math.floor(b.x * o.width), y0 = Math.floor(b.y * o.height); const d = o.getContext('2d').getImageData(x0, y0, Math.max(1, Math.ceil(b.w * o.width)), Math.max(1, Math.ceil(b.h * o.height))).data; let n = 0; for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 190 && d[k] < 40 && d[k + 1] < 40 && d[k + 2] < 40) n++; return n; }, [id, bx]);
+const DARK_FILL = 'rgba(20, 21, 24, 0.78)';
+const RGB = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+const RED = RGB(COLORS.lcRed), YELLOW = RGB(UNIT_COLOR), WHITE = [255, 255, 255];
+const near = (px, rgb, tol = 30) => !!px && Math.abs(px[0] - rgb[0]) <= tol && Math.abs(px[1] - rgb[1]) <= tol && Math.abs(px[2] - rgb[2]) <= tol;
+const hexOf = (px) => '#' + px.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+// the nearest distance from a box to a segment, sampled along the segment (both in the same units)
+const distBoxSeg = (bx, [x1, y1, x2, y2]) => { let best = Infinity; for (let i = 0; i <= 60; i++) { const x = x1 + (x2 - x1) * i / 60, y = y1 + (y2 - y1) * i / 60; const dx = Math.max(bx.x - x, 0, x - (bx.x + bx.w)), dy = Math.max(bx.y - y, 0, y - (bx.y + bx.h)); best = Math.min(best, Math.hypot(dx, dy)); } return best; };
+// a saved PNG read in the page: pixels at points (fractions), white counts down columns (fraction x), the share of
+// white inside rectangles (fractions), and the picture's size
+async function pngRead(page, buf, { points = [], columns = [], rects = [] } = {}) {
+  return app(page).evaluate(async ([b64, pts, cols, rs]) => {
+    const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))], { type: 'image/png' }));
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    URL.revokeObjectURL(url);
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    const all = g.getImageData(0, 0, c.width, c.height).data;
+    const at = (fx, fy) => { const x = Math.min(c.width - 1, Math.floor(fx * c.width)), y = Math.min(c.height - 1, Math.floor(fy * c.height)); const k = (y * c.width + x) * 4; return [all[k], all[k + 1], all[k + 2], all[k + 3]]; };
+    const white = (k) => all[k] > 220 && all[k + 1] > 220 && all[k + 2] > 220;
+    const column = (fx) => { const x = Math.min(c.width - 1, Math.floor(fx * c.width)); let n = 0; for (let y = 0; y < c.height; y++) if (white((y * c.width + x) * 4)) n++; return n; };
+    const share = ([fx, fy, fw, fh]) => { const x0 = Math.floor(fx * c.width), y0 = Math.floor(fy * c.height), x1 = Math.min(c.width, Math.ceil((fx + fw) * c.width)), y1 = Math.min(c.height, Math.ceil((fy + fh) * c.height)); let n = 0, m = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { m++; if (white((y * c.width + x) * 4)) n++; } return m ? n / m : 0; };
+    return { size: [c.width, c.height], px: pts.map(([fx, fy]) => at(fx, fy)), cols: cols.map(column), rects: rs.map(share) };
+  }, [buf.toString('base64'), points, columns, rects]);
+}
 
 export default async function studyTools(t, site) {
   // ---- magnifier and picked colors ------------------------------------------------------------------------

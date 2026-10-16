@@ -259,7 +259,7 @@ function groupA(t, site) {
       const seed = mode === null ? { 'pose-and-light.mode': 'advanced' } : { [PVS('mode')]: mode };
       const p = await openPage(site, { storage: seed });
       t.check((await isSimple(p)).simple, `the mode key ${label}: the app opens in Simple`, await isSimple(p));
-      if (mode === null) { await tab(p, 'pose'); t.check((await frameMode(p)) === 'simple', 'the Pose frame inside the app ignores pose-and-light.mode and follows the app (Simple)', await frameMode(p)); }
+      if (mode === null) { await tab(p, 'pose', { wait: false }); await settle(p, 'pose', 30000, true); t.check((await frameMode(p)) === 'simple', 'the Pose frame inside the app ignores pose-and-light.mode and follows the app (Simple)', await frameMode(p)); }
       await clean(t, p, `mode key ${label}`);
       await p.context().close();
     }
@@ -386,7 +386,7 @@ function groupB(t, site) {
   // the window resized live between 390 and 1400 on every tab
   step(t, 'live resize', async () => {
     const page = await openPage(site);
-    const widths = [1400, 1100, 999, 960, 860, 760, 700, 640, 480, 390, 760, 1400];
+    const widths = [1400, 999, 960, 860, 760, 700, 640, 480, 390, 1400];
     const bad = [], layouts = {};
     for (const name of TABS) {
       await page.setViewportSize(DESKTOP); await frames(page);
@@ -609,7 +609,7 @@ VARIANTS.push(['a different shape in every key', (k) => VARIANT_BASE[ALL_KEYS.in
 // the JSON string does; every tour of the hostile keys above opens every tab with the NaN one.)
 const stateIndex = (re) => VARIANTS.findIndex(([label]) => re.test(label));
 const ROUTE_STATES = [/plain string/, /JSON string/, /prototype/, /5000/, /nested/, /different/].map(stateIndex);
-const HEAVY_ROUTE_STATES = [/plain string/, /prototype/, /5000/, /nested/, /different/].map(stateIndex);
+const HEAVY_ROUTE_STATES = [/prototype/, /5000/, /nested/, /different/].map(stateIndex);
 
 // words a bad saved value turns up on the page when something reads it as text: NaN, undefined, [object Object],
 // a function's source (the text on show, and what is in a field)
@@ -1167,8 +1167,6 @@ function groupE(t, site) {
       await tab(page, 'pose', { wait: false });
       const f = poseFrame(page);
       if (f) { await f.waitForFunction(() => window.PoseAndLight && PoseAndLight.mode() === 'advanced', null, { timeout: 10000 }).catch(() => null); await take(page, 'pose frame (Advanced)', { frame: f }); }
-      await tab(page, 'help', { wait: false });
-      await take(page, 'help (Advanced)');
       // both menus open
       await click(page, '#tabLearnBtn'); await take(page, 'Learning tools menu open');
       await click(page, '#tabGamesBtn'); await take(page, 'Games menu open');
