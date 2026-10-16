@@ -105,12 +105,16 @@
   }
   // set when Forget my work is pressed here or in another tab: nothing is written back before the page reloads
   let forgetting = false;
+  // false when the write is refused (storage full or blocked) or Forget my work is under way
   function save(key, value) {
-    if (forgetting) return;
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (err) { /* storage unavailable: kept for this visit */ }
+    if (forgetting) return false;
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (err) { return false; }
   }
   // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
   function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
+  // a best the browser would not keep still stands for this visit
+  const visit = {};
+  const loadBests = () => Object.assign(load(BEST_KEY, {}), visit);
 
   const toHex = (c) => Studio.toHex({ r: c[0], g: c[1], b: c[2] });
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -547,7 +551,7 @@
         });
       }
     }
-    const best = bestOfKey(load(BEST_KEY, {}), bestKey());
+    const best = bestOfKey(loadBests(), bestKey());
     els.best.textContent = best ? `Your best on this portrait at this level in ${MODES[mode()].name} mode: ${best} points` : '';
   }
 
@@ -1334,7 +1338,7 @@
     const colorPts = Math.round(pct * (valueMode ? 9 : 10));
     const valuePts = valueMode ? Math.round(valueAcc) : 0;
     const points = colorPts + valuePts + bonus;
-    const bests = load(BEST_KEY, {});
+    const bests = loadBests();
     const was = bestOfKey(bests, game.bestKey);
     // New best! is for a score that beats the one kept (0 points beats nothing); a first game is kept either way,
     // so the next one has something to beat
@@ -1342,7 +1346,8 @@
     // every board played is re-added last, with the best it keeps, so the prune drops the least recently played
     // (a replay that does not beat its best still counts as played)
     const kept = isBest || was == null ? points : was;
-    delete bests[game.bestKey]; bests[game.bestKey] = kept; pruneBests(bests); save(BEST_KEY, bests);
+    delete bests[game.bestKey]; bests[game.bestKey] = kept; pruneBests(bests); const bestKept = save(BEST_KEY, bests);
+    if (bestKept) delete visit[game.bestKey]; else visit[game.bestKey] = kept;   // a best that has been kept since needs no stand-in
 
     els.play.hidden = true;
     els.result.hidden = false;
@@ -1355,7 +1360,7 @@
     setCompare(false);
     const stars = starsFor(pct);
     game.result = { pct, stars, points, grade: GRADES[stars] };
-    showScore(pct, isBest, timedOut);
+    showScore(pct, isBest, timedOut, bestKept);
     els.points.textContent = points;
     els.breakdown.replaceChildren();
     [
@@ -1383,11 +1388,12 @@
   // The arcade card over the portrait: the match counts up, then the stars pop in one by one
   let countUp = 0;
   // pct is the whole-percent match lockIn rounded once, so the card's number and its stars cannot disagree
-  function showScore(pct, isBest, timedOut) {
+  function showScore(pct, isBest, timedOut, bestKept) {
     const stars = starsFor(pct);
     els.kicker.textContent = timedOut ? 'Time’s up!' : 'Portrait locked in';
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
+    els.newBest.textContent = bestKept ? 'New best!' : 'New best! (this visit only)';   // a best the browser would not keep says so
     els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${pct}% color match`);
     // what the focus on Analyze reads of the card: the stars and the match, the word, New best! only while it shows (a hidden element named here is read all the same)
     els.popup.setAttribute('aria-describedby', isBest ? 'gameStars gameGrade gameNewBest' : 'gameStars gameGrade');
@@ -1702,7 +1708,8 @@
   const savedLevel = Object.prototype.hasOwnProperty.call(LEVELS, load(LEVEL_KEY, 'medium')) ? load(LEVEL_KEY, 'medium') : 'medium'; // an own level only
   document.querySelectorAll('input[name="gameLevel"]').forEach((r) => {
     r.checked = r.value === savedLevel;
-    r.addEventListener('change', () => { if (Studio.tab() === 'game') refreshSetup(); });
+    // the level is kept when it is chosen, as the Mode and the amount are, not only when a game starts
+    r.addEventListener('change', () => { save(LEVEL_KEY, level()); if (Studio.tab() === 'game') refreshSetup(); });
   });
   els.palette.addEventListener('change', showPalette);
   document.querySelectorAll('input[name="gameSubject"]').forEach((r) => r.addEventListener('change', () => {
