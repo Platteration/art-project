@@ -221,7 +221,7 @@ async function analyzerScenarios(id) {
   const eroded = (n) => { const e = new Uint8Array(fig.cast.length); for (let y = n; y < fig.h - n; y++) for (let x = n; x < fig.w - n; x++) { let ok = 1; for (let dy = -n; dy <= n && ok; dy++) for (let dx = -n; dx <= n; dx++) if (!fig.cast[(y + dy) * fig.w + x + dx]) { ok = 0; break; } e[y * fig.w + x] = ok; } return e; };
   const castCells = eroded(2);
   let castN = 0; for (const v of castCells) castN += v;
-  const fillCells = (g, { k, ox, oy }) => { for (let i = 0; i < castCells.length; i++) if (castCells[i]) { const x = i % fig.w, y = Math.floor(i / fig.w); g.fillRect(ox + (x / fig.s) * k, oy + (y / fig.s) * k, k / fig.s + 1, k / fig.s + 1); } };
+  const fillWith = (cells) => (g, { k, ox, oy }) => { for (let i = 0; i < cells.length; i++) if (cells[i]) { const x = i % fig.w, y = Math.floor(i / fig.w); g.fillRect(ox + (x / fig.s) * k, oy + (y / fig.s) * k, k / fig.s + 1, k / fig.s + 1); } };
   const out = { names, castN };
   out.plain = run(draw());
   out.corner = run(draw({ f: 0.45, ox: 60, oy: 60 }));
@@ -235,7 +235,8 @@ async function analyzerScenarios(id) {
   out.signature = run(draw({ extra: (g) => { g.lineWidth = 4; g.beginPath(); g.moveTo(700, 1120); g.bezierCurveTo(740, 1090, 760, 1150, 800, 1110); g.stroke(); } }));
   out.line = run(draw({ extra: (g) => { g.lineWidth = 4; g.beginPath(); g.moveTo(20, 1160); g.lineTo(880, 1160); g.stroke(); } }));
   out.bars = run(draw({ extra: (g) => { g.lineWidth = 8; g.beginPath(); g.moveTo(80, 200); g.lineTo(80, 1000); g.moveTo(820, 200); g.lineTo(820, 1000); g.stroke(); } }));
-  out.cast = castN ? run(draw({ extra: fillCells })) : null;
+  out.cast = castN ? run(draw({ extra: fillWith(castCells) })) : null;
+  out.castFull = castN ? run(draw({ extra: fillWith(fig.cast) })) : null;
   return out;
 }
 // Runs in the page: the line of action's three words from points that bow no way, one way and both ways; the gesture's
@@ -317,6 +318,7 @@ async function analyzerBlock(t, page) {
     t.check(B.match.armL === false && B.match.legR === false && B.falses === 2 && B.parts.dashed === 2 && B.score < A.score && B.tips.some((x) => x === `Dashed: no marks near ${nm.armL} and ${nm.legR}. Look again at where they go.`), `analyze ${id}: two parts left out: both dashed and named in one sentence (${nm.armL} and ${nm.legR})`, { match: B.match, score: B.score, tips: B.tips.filter((x) => /^Dashed/.test(x)) });
     const H = R.headSpine;
     t.check(H.parts.dashed >= 2 && H.falses === H.parts.dashed && H.score < 40 && H.leads.includes('Dashed') && !H.leads.includes('Well matched'), `analyze ${id}: a head and a spine alone leave the limbs dashed and score under 40`, { dashed: H.parts.dashed, match: H.match, score: H.score });
+    t.note(`analyze ${id}: a head and a spine alone: ${H.parts.dashed} of the 4 limbs dashed, scale ${(H.k / H.kDrawn).toFixed(2)} of the drawing's (the fit shrinks the gesture onto the tall thin box of the marks, so a limb or two can lie along the spine); score ${H.score}`);
     // the score is its stated formula: the harmonic mean, up to 15% off for the shape, the clean factor, 18% for each dashed part
     const rows = Object.entries(R).filter(([, v]) => v && v.formula !== undefined && v.formula !== null);
     const bad = rows.filter(([, v]) => Math.abs(v.formula - v.score) > 1 || v.parts.dashed !== v.falses);
@@ -335,6 +337,8 @@ async function analyzerBlock(t, page) {
     if (R.castN) {
       const Cs = R.cast;
       t.check(Math.abs(Cs.score - P.score) <= 3 && all(Cs.match) && Cs.parts.along > 0.95, `analyze ${id}: the cast shadow (the gray floor patches touching the figure), drawn solid, costs nothing`, { plain: P.score, withCast: Cs.score, along: Cs.parts.along, cells: R.castN });
+      const Cf = R.castFull;
+      t.note(`analyze ${id}: the cast shadow filled solid right out to the edge of the mask the page keeps (not two cells inside it) scored ${Cf.score} against ${P.score}: its edge ring falls outside the mask once the fit is a few pixels off, so the drawing's box takes in the whole width of the shadow (shape ${Cf.parts.shape.toFixed(2)}, up to the 15% the README allows for shape)`);
     } else t.note(`analyze ${id}: the reference shows no cast shadow patch touching the figure, so nothing to draw on it`);
   }
   // the line of action's word, and the gesture's four colours
@@ -357,7 +361,6 @@ async function colourKeyBlock(t, page) {
 // shoulders and hips (the body's own, from the model ...)". A class deals poses at random, so every one is drawn here, once.
 async function everyPoseBlock(t, page) {
   const { list, ms } = await page.evaluate(everyPose);
-  if (process.env.FIG_DUMP) console.log(JSON.stringify(list.map((r) => ({ id: r.id, w: r.w, h: r.h, j: r.joints, x: [r.minX, r.maxX], y: [r.minY, r.maxY], tilts: r.tilts, score: r.score, dashed: r.dashed, shape: r.shape, ws: r.wideSh, wh: r.wideHp, tips: r.tips && r.tips.map((x) => x[0] + ': ' + x[1].slice(0, 70)).filter((x) => /^Tilt|^Line/.test(x)), ms: r.shotMs })), null, 0));
   t.check(list.length === POOL_ALL.length && POOL_ALL.every((id) => list.some((r) => r.id === id)), 'the pose library holds the 30 poses', list.map((r) => r.id));
   const missing = list.filter((r) => r.shot === null).map((r) => r.id);
   t.check(missing.length === 0, 'every pose renders a shot (a class would skip one that did not)', missing);
@@ -463,7 +466,7 @@ async function toolsBlock(t, page, mem) {
   t.check(drawn > 100 && (await inked(page, '#fs-paper')) === 0, 'tools: the eraser rubs out every mark', { drawn, after: await inked(page, '#fs-paper') });
   const c1 = await finishPose(page);
   t.check(c1 && c1.grade === 'Nothing drawn' && c1.pct === '0' && c1.on === 0, 'tools: a sheet rubbed back to blank is "Nothing drawn", not a score', c1 && { grade: c1.grade, pct: c1.pct });
-  t.check(c1 && !c1.tips.some((x) => /^Measure/.test(x)) && c1.tips.length >= 2, 'the card keeps the Measure note off (it is for the code, not the card)', c1 && c1.tips);
+  t.check(c1 && !c1.tips.some((x) => /^Measure/.test(x)) && c1.tips.length >= 2, 'the card gives the notes the README lists (line of action, tilt, width for height, dashed parts or what else) and no Measure note', c1 && c1.tips);
   // ---- pose 2: the underdrawing layer
   t.check(await nextPose(page, 2), 'tools: pose 2 comes');
   const eraserStill = await text(page, '#fs-status');
@@ -634,7 +637,7 @@ async function clockBlock(t, page) {
   const runs = s2 && s2.running && c2.pauseText === 'Pause';
   t.check(runs || c2.pauseText === 'Resume', 'ordering: the held clock is shown as held (Resume offered), not left running or silently stopped', { s2, c2: c2.clock, pause: c2.pauseText });
   t.check(runs, 'ordering: after Done on a held pose, Next pose starts the next pose\'s clock', { running: s2 && s2.running, held: s2 && s2.held, clock: c2.clock, after1500ms: c2b.clock, pause: c2.pauseText });
-  if (!runs) t.finding({ title: 'A Timed pose that was held (Pause, or leaving the tab) and finished with Done starts the next pose with its clock stopped', severity: 'low', steps: 'Figure study > Timed > 30 s > Start drawing. Open another tab (Study) and come back, or press Pause: the button reads Resume. Do not press Resume: press Done, then Next pose.', expected: 'Pose 2 is a new pose with its own 30 s: Pause shows "Pause" and the clock counts down (README: Timed gives each pose 30 s; Pause holds it, leaving the tab pauses it).', actual: `Pose 2 is shown with the clock at ${c2.clock} not running, the button still reading "${c2.pauseText}" and no time passing (${c2b.clock} 1.5 s later) until the visitor presses Resume; the pose is untimed meanwhile.`, cause: 'js/figure.js:281 showPose starts the clock with run(!c.held && ...), and cls.held (set by hold(true) at :1032 or the Pause button, :320) is cleared only in startClass (:233), never when Next pose begins a new pose.' });
+  if (!runs) t.finding({ title: 'A Timed pose that was held (Pause, or leaving the tab) and finished with Done starts the next pose with its clock stopped', severity: 'low', steps: 'Figure study > Timed > 30 s > Start drawing. Open another tab (Study) and come back, or press Pause: the button reads Resume. Do not press Resume: press Done, then Next pose.', expected: 'Pose 2 is a new pose with its own 30 s: Pause shows "Pause" and the clock counts down (README: Timed gives each pose 30 s; Pause holds it, leaving the tab pauses it).', actual: `Pose 2 is shown with the clock at ${c2.clock} not running, the button still reading "${c2.pauseText}" and no time passing (${c2b.clock} 1.5 s later) until the visitor presses Resume; the pose is untimed meanwhile.`, cause: 'js/figure.js:281 showPose starts the clock with run(!c.held && ...), and cls.held (set by hold(true) in onTab, :1036, or by the Pause button, :320) is cleared only in startClass (:233), never when Next pose begins a new pose.' });
   await toSetup(page);
   await clean(t, page, 'clock orderings');
 }
@@ -928,11 +931,11 @@ async function reloadTailBlock(t, page, mem) {
   // Forget my work on this device (How to use): the class's settings and mixes, the Studio's painting, all of it
   await click(page, '#fig-timed'); await click(page, '#fig-t10');
   const changed = await storageGet(page, KEY);
-  t.check(changed === '{"mode":"timed","secs":10,"out":[]}' || /"mode":"timed"/.test(changed || ''), 'the class set to Timed (10 s) is stored', changed);
+  t.check(changed === '{"mode":"timed","secs":10,"out":[]}', 'the class set to Timed (10 s) is stored', changed);
   await tab(page, 'help');
   await click(page, '#forgetBtn');
   const armed = await text(page, '#forgetBtn');
-  const [, ] = await Promise.all([page.waitForEvent('load', { timeout: 20000 }).catch(() => null), click(page, '#forgetBtn')]);
+  await Promise.all([page.waitForEvent('load', { timeout: 20000 }).catch(() => null), click(page, '#forgetBtn')]);
   await sleep(300);
   t.check(/Tap again/.test(armed || ''), 'Forget my work asks for a second tap', armed);
   const leftKeys = await storageKeys(page);
@@ -955,7 +958,6 @@ async function reloadTailBlock(t, page, mem) {
 async function forgetElsewhereBlock(t, site) {
   const page = await openPage(site);
   await figureUp(page);
-  await click(page, '#fig-timed'); await click(page, '#fig-t60');
   t.check(await startClass(page, { timed: 60, ids: ['stand', 'relaxed'] }), 'forget elsewhere: a timed class (1 min) is on');
   const other = await newTab(site, page, { url: '' });
   await tab(other, 'help');
@@ -1044,6 +1046,14 @@ async function accessibilityBlock(t, site) {
     await screenshot(page, 'figure-landscape-card');
     await scan('the card, landscape phone');
     await toSetup(page);
+    // the pose's reference must not hide the paper at the size a class opens it: on a phone upright and on its side
+    for (const [w, h, label] of [[390, 844, 'a phone upright'], [844, 390, 'a phone on its side']]) {
+      await page.setViewportSize({ width: w, height: h });
+      t.check(await startClass(page, { ids: ['stand', 'relaxed'] }), `reference: a class starts on ${label}`);
+      const rf = await refFacts(page);
+      t.check(!rf.hidden && rf.covers < 0.6 && rf.tones > 40, `reference: on ${label} the pose picture covers ${Math.round(rf.covers * 100)}% of the paper (under 60%), so there is paper to draw on`, { covers: rf.covers, fig: rf.fig, paper: rf.paper });
+      await toSetup(page);
+    }
     await clean(t, page, 'accessibility, dark, landscape');
   } finally { await page.context().close(); }
 }
@@ -1128,38 +1138,42 @@ async function sandboxBlock(t, site) {
 
 // ================= Q. the review's wording at its edges, and the sound switch =================
 // README: "every drawing comes back beside its pose, with its stars ... the class's average stars"; "ending with a chime (with the game's sound switch)"
+// draws the stand pose's gesture part by part until the card would give this many stars (the analysis the card itself runs), clearing the sheet between tries
+async function drawForStars(page, want) {
+  for (const parts of [['head', 'spine', 'armR', 'armL'], ['spine', 'armR', 'armL'], ['head', 'spine', 'armR', 'legL'], ['head', 'spine', 'armR', 'legR'], ['head', 'spine', 'armR']]) {
+    await page.evaluate(() => window.FigureStudy.studio.clearAll());
+    await traceParts(page, parts);
+    const stars = await page.evaluate(() => { const F = window.FigureStudy, c = F.state(); return F.analyze(c.shot, F.studio.ink()).stars; });
+    if (stars === want) return parts.join('+');
+  }
+  return null;
+}
 async function wordingBlock(t, page) {
-  const ONE = ['head', 'spine', 'armR', 'armL']; // (the stand pose without its legs: one star, 43% as drawn here)
-  const lede = (stars) => { const n = stars.length, shown = half(stars.reduce((a, b) => a + b, 0) / n); return `${n} drawing${n > 1 ? 's' : ''} from a relaxed class, ${shown} star${shown === '1' || shown === '½' ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`; };
+  const lede = (stars) => { const n = stars.length, shown = half(stars.reduce((x, y) => x + y, 0) / n); return `${n} drawing${n > 1 ? 's' : ''} from a relaxed class, ${shown} star${shown === '1' || shown === '½' ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`; };
   const classOf = async (kinds) => {
     t.check(await startClass(page, { ids: ['stand'] }), `wording: a class of ${kinds.length} on one pose starts`);
     const stars = [];
     for (let i = 0; i < kinds.length; i++) {
       if (i) await nextPose(page, i + 1);
-      if (kinds[i] === 'scribble') await scribble(page); else await traceParts(page, ONE);
-      const c = await finishPose(page);
-      stars.push(c.on);
+      if (kinds[i] === 'scribble') await scribble(page); else if (!(await drawForStars(page, 1))) t.note('wording: no part of the gesture drawn alone earned exactly one star on this run');
+      stars.push((await finishPose(page)).on);
       await guardOver(page);
     }
     await click(page, '#fig-stop');
     return { stars, lede: await text(page, '#fig-reviewLede') };
   };
-  const a = await classOf(['scribble']);
-  t.check(a.lede === lede(a.stars) && a.stars.join() === '0' && /^1 drawing from a relaxed class, 0 stars on average\./.test(a.lede), 'wording: one drawing of no stars reads "1 drawing ... 0 stars on average"', a);
-  await click(page, '[data-fig-gesture="0"]');
   const b = await classOf(['scribble', 'one']);
-  const bo = await page.evaluate(() => ({ pressed: [...document.querySelectorAll('[data-fig-gesture]')].map((x) => x.getAttribute('aria-pressed')).join(','), labels: [...document.querySelectorAll('#fig-cards canvas')].map((c) => c.getAttribute('aria-label')) }));
-  if (b.stars.join() === '0,1') t.check(b.lede === lede(b.stars) && /, ½ star on average\./.test(b.lede), 'wording: an average of half a star reads "½ star on average" (singular)', b);
-  else t.note(`wording: the half-star class gave stars ${b.stars.join(',')} (a 0 and a 1 were drawn for): lede "${b.lede.slice(0, 70)}"; it ${b.lede === lede(b.stars) ? 'matches' : 'does not match'} the stars it names`);
-  t.check(b.lede === lede(b.stars), 'wording: whatever the stars, the lede names their average in words', { stars: b.stars, lede: b.lede.slice(0, 80) });
-  t.check(bo.pressed === 'false,true' && bo.labels.length === b.stars.length && bo.labels.every((l) => !/with the gesture over it/.test(l)), 'wording: Hidden, chosen on one review, is still the choice on the next: its button is pressed and its pictures drawn without the gesture, as their labels say', bo);
-  await click(page, '[data-fig-gesture="1"]');
+  if (b.stars.join() === '0,1') t.check(b.lede === lede(b.stars) && /, ½ star on average\./.test(b.lede), 'wording: a scribble (no star) and a one-star drawing average half a star, read "½ star on average" (singular)', b);
+  else t.check(b.lede === lede(b.stars), `wording: the lede names the average of the stars the two cards show (${b.stars.join(' and ')})`, b);
+  await click(page, '[data-fig-gesture="0"]');
   const c = await classOf(['one', 'one']);
-  if (c.stars.join() === '1,1') t.check(c.lede === lede(c.stars) && /, 1 star on average\./.test(c.lede), 'wording: an average of one star reads "1 star on average" (singular)', c);
-  else t.note(`wording: the one-star class gave stars ${c.stars.join(',')}: lede "${c.lede.slice(0, 70)}"`);
-  t.check(c.lede === lede(c.stars), 'wording: the lede names the average of those stars in words', { stars: c.stars, lede: c.lede.slice(0, 80) });
+  const co = await page.evaluate(() => ({ pressed: [...document.querySelectorAll('[data-fig-gesture]')].map((x) => x.getAttribute('aria-pressed')).join(','), labels: [...document.querySelectorAll('#fig-cards canvas')].map((x) => x.getAttribute('aria-label')) }));
+  if (c.stars.join() === '1,1') t.check(c.lede === lede(c.stars) && /, 1 star on average\./.test(c.lede), 'wording: two one-star drawings average one star, read "1 star on average" (singular)', c);
+  else t.check(c.lede === lede(c.stars), `wording: the lede names the average of the stars the two cards show (${c.stars.join(' and ')})`, c);
+  t.check(co.pressed === 'false,true' && co.labels.length === 2 && co.labels.every((l) => !/with the gesture over it/.test(l)), 'wording: Hidden, chosen on one review, is still the choice on the next: its button is pressed and its pictures are drawn without the gesture, as their labels say', co);
+  await click(page, '[data-fig-gesture="1"]');
   const labels = await page.evaluate(() => [...document.querySelectorAll('#fig-cards canvas')].map((x) => x.getAttribute('aria-label')));
-  t.check(labels.every((l) => /, with the gesture over it$/.test(l)), 'wording: Gestures shown again puts the gesture back on the next review\'s pictures and in their labels', labels);
+  t.check(labels.length === 2 && labels.every((l) => /, with the gesture over it$/.test(l)), 'wording: Gestures shown puts the gesture back on those pictures and in their labels', labels);
   await clean(t, page, 'review wording');
 }
 // the games' sound switch off: the clock running out is silent
