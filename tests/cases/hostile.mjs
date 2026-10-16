@@ -19,6 +19,7 @@
 //   database   a corrupt painting in IndexedDB of kinds the other cases do not write
 //   fields     the paint search and the canvas length, typed hostile
 // HOSTILE_ONLY=names,formats runs some segments only.
+import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { openPage, newTab, clean, tab, app, poseFrame, renderFrame, textFile, svgImage, sleep, click, stroke, hscroll, PHONE } from '../lib.mjs';
 
@@ -195,6 +196,7 @@ export default async function hostile(t, site) {
     const fr = app(page);
     await fr.evaluate(() => { document.addEventListener('change', (e) => { if (e.target && e.target.id === 'file') window.__fname = e.target.files[0] ? e.target.files[0].name : null; }, true); });
     const png = await quad(page, 160, 200);
+    const sampleKey = await fr.evaluate(() => window.Studio.sourceKey());
     const bad = { text: [], children: [], ran: [], dims: [], redrawn: [] };
     const seenNames = [];
     for (const [what, name] of NAMES) {
@@ -245,17 +247,19 @@ export default async function hostile(t, site) {
     const g1 = await fr.evaluate(() => { const e = document.getElementById('gamePhotoName'); return { text: e.textContent, kids: e.children.length, pwn: window.__pwn }; });
     t.check(g1.text === 'Painting from <img src=x onerror=window.__pwn=1>.' && !g1.kids && g1.pwn === undefined, 'names: Paint by numbers says "Painting from" the name as text', g1);
     await tab(page, 'study');
-    await feed(page, { ...png, name: 'sample-study.png' });
+    await feed(page, await quad(page, 600, 750, 'image/png', 'sample-study.png'));
+    const clashKey = await fr.evaluate(() => window.Studio.sourceKey());
     await tab(page, 'game');
     const g2 = await fr.evaluate(() => document.getElementById('gamePhotoName').textContent);
-    const sampleish = /sample portrait/i.test(g2);
-    t.check(!sampleish, 'names: a photo of the visitor\'s own called sample-study.png is not described as the sample portrait', g2);
+    const sampleish = /sample portrait/i.test(g2) || clashKey === sampleKey;
+    t.check(!/sample portrait/i.test(g2), 'names: a photo of the visitor\'s own called sample-study.png is not described as the sample portrait', g2);
+    t.check(clashKey !== sampleKey, 'names: a 600 × 750 photo called sample-study.png does not take the sample\'s key (and so its best scores)', { sampleKey, clashKey });
     if (sampleish) t.finding({
       title: 'A photo called sample-study.png (or sample-study.jpg) is described as "the sample portrait" in Paint by numbers, and shares the sample\'s best scores',
       severity: 'low',
       steps: 'Study the photo: Load photo, choose any picture saved as sample-study.png (a visitor who saved the sample, or any file by that name). Open Games, then Paint by numbers, and read the line under "My photo".',
       expected: 'The line names the visitor\'s photo ("Painting from sample-study."), as it does for any other file; the README says best scores for your own photos are keyed by the photo\'s file name and size, so a photo is not mistaken for the sample.',
-      actual: `The setup reads "${g2}". The best score for that photo is also kept under the sample's key ("sample-study:WxH") when it has the sample's 600 x 750 size.`,
+      actual: `The setup reads "${g2}". The photo's key is "${clashKey}" and the sample's is "${sampleKey}": ${clashKey === sampleKey ? 'the same, so the two share one best score for each level and palette' : 'different (the sizes differ)'}.`,
       cause: 'js/game.js:361 tells the sample by key.startsWith(\'sample-study:\'), and js/app.js:118/568 make that key from the file name (state.baseName = the name without its extension) as well as for the built-in sample, so a file called sample-study takes the sample\'s words (and, at 600 x 750, its best score key, app.js:2782). The sample is told apart by state.isSample elsewhere (app.js:600), which game.js does not use.',
     });
     await clean(t, page, 'names: drop, paste and Paint by numbers');
@@ -269,6 +273,13 @@ export default async function hostile(t, site) {
     const wide = await hscroll(ph);
     t.check(wide <= 0, 'names: a 200-character name in Check my painting does not widen the page on a phone', wide);
     if (wide > 0) t.finding({ title: 'A long unbroken file name makes Check my painting scroll sideways on a phone', severity: 'low', steps: 'On a 390 px wide window open the address #check, load a painting called "b" x 200 + ".png" through "Load a photo of your painting".', expected: 'The name wraps or is cut short with an ellipsis; the page does not scroll sideways.', actual: `the page is ${wide}px wider than the window`, cause: 'js/app.js:2305 puts the name in a <strong> inside #artSource with no overflow-wrap; styles.css gives that line no break rule' });
+    // the toast that names a dropped file: 200 characters with no space to break at
+    await resetToast(ph);
+    await dropItems(ph, [fileItem(textFile('a-note.txt')), fileItem({ ...png, name: 'c'.repeat(200) + '.png' })]);
+    await sleep(700);
+    const ts = await app(ph).evaluate(() => { const e = document.getElementById('toast'), b = e.getBoundingClientRect(); return { shown: e.classList.contains('show'), text: e.textContent.slice(0, 40), scrollW: e.scrollWidth, clientW: e.clientWidth, right: Math.round(b.right), vw: innerWidth }; });
+    t.check(ts.shown && ts.scrollW <= ts.clientW + 1 && ts.right <= ts.vw, 'names: the toast that names a dropped file with a 200-character name stays inside its box and the screen on a phone', ts);
+    if (ts.scrollW > ts.clientW + 1) t.finding({ title: 'The toast "Of the 2 files dropped, only <name> was taken." runs out of its box and off the screen when the name is long', severity: 'low', steps: 'On a 390 px wide window drop two files at once, one a text file and one a picture called "c" x 200 + ".png".', expected: 'The message wraps inside the toast (as the label under the photo does), so its end ("was taken.") can be read.', actual: `the toast box is ${ts.clientW}px wide and its text is ${ts.scrollW}px wide: the name spills past the box and the window's edge`, cause: 'styles.css .toast has no overflow-wrap or word-break, and js/app.js:653 puts pick.name straight into the sentence' });
     await clean(t, ph, 'names: Check my painting on a phone');
   });
 
@@ -504,6 +515,38 @@ export default async function hostile(t, site) {
     t.check(!crashed && rb.how === 'opened' && rb.label.endsWith('2800 × 2100 px') && /^A very large photo \(12000 × 9000\) was reduced to 2800 × 2100 for speed\.$/.test(rb.toast), 'sizes: a 12000 × 9000 photo is reduced to 2800 × 2100 and said so, and the tab does not crash', { crashed, how: rb.how, label: rb.label.slice(-16), toast: rb.toast });
     t.check(!crashed && (await busyDown(big, 20000)) && (await usable(big)), 'sizes: the page is usable after the 108-megapixel photo');
     await clean(t, big, 'sizes: 12000 × 9000');
+  });
+
+  // ====================================================================================================================
+  // metadata: README Privacy, "Saved PNGs are drawn from the canvas and carry no camera metadata"
+  // ====================================================================================================================
+  await seg.run('metadata', async (open) => {
+    const page = await open();
+    const base = await quad(page, 96, 64, 'image/jpeg', 'base.jpg');
+    const NEEDLES = ['SECRET-EXIF-MAKE', 'SECRET-GPS-LAT', 'SECRET-COMMENT', 'SECRET-XMP', 'SECRET-IPTC'];
+    const seg1 = (marker, body) => { const h = Buffer.from([0xff, marker, 0, 0]); h.writeUInt16BE(body.length + 2, 2); return Buffer.concat([h, body]); };
+    const exifBody = Buffer.concat([Buffer.from('Exif\0\0MM\0*\0\0\0\b\0\0\0\0\0\0', 'binary'), Buffer.from('Make=SECRET-EXIF-MAKE GPSLatitude=SECRET-GPS-LAT')]);
+    const xmpBody = Buffer.from('http://ns.adobe.com/xap/1.0/\0<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description>SECRET-XMP</rdf:Description></rdf:RDF></x:xmpmeta>', 'binary');
+    const iptcBody = Buffer.from('Photoshop 3.0\0' + '8BIM\x04\x04\0\0\0\0\0\x10SECRET-IPTC', 'binary');
+    const jpg = Buffer.concat([base.buffer.subarray(0, 2), seg1(0xe1, exifBody), seg1(0xe1, xmpBody), seg1(0xed, iptcBody), seg1(0xfe, Buffer.from('SECRET-COMMENT')), base.buffer.subarray(2)]);
+    t.check(NEEDLES.every((n) => jpg.includes(n)), 'metadata: the test picture carries an Exif make and GPS text, XMP, IPTC and a comment', NEEDLES.filter((n) => !jpg.includes(n)));
+    const r = await feed(page, { name: 'camera.jpg', mimeType: 'image/jpeg', buffer: jpg });
+    t.check(r.how === 'opened' && r.label.endsWith('96 × 64 px'), 'metadata: a JPEG with Exif, XMP, IPTC and a comment opens', r);
+    const leaks = [], chunks = {};
+    for (const [id, suffix] of [['orig', 'original'], ['value', 'three-value'], ['block', 'color-blocks']]) {
+      const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }).catch(() => null), click(page, `[data-save="${id}"]`)]);
+      if (!dl) { leaks.push(`${id}: no download`); continue; }
+      const buf = fs.readFileSync(await dl.path());
+      const types = []; let at = 8;
+      while (at + 8 <= buf.length) { const len = buf.readUInt32BE(at); types.push(buf.toString('latin1', at + 4, at + 8)); at += 12 + len; }
+      chunks[id] = [...new Set(types)].join(',');
+      const found = NEEDLES.filter((n) => buf.includes(n));
+      const bad = types.filter((c) => /^(tEXt|iTXt|zTXt|eXIf|iCCP|tIME)$/.test(c));
+      if (found.length || bad.length || dl.suggestedFilename() !== `camera-${suffix}.png`) leaks.push(`${id}: ${found.join('+')} ${bad.join('+')} ${dl.suggestedFilename()}`);
+    }
+    t.check(!leaks.length, 'metadata: the saved PNGs of the photo, the three-value study and the color blocks hold none of the picture\'s Exif, GPS, XMP, IPTC or comment text and no text, Exif, profile or time chunk', leaks);
+    t.note(`metadata: chunks in the saved PNGs: ${JSON.stringify(chunks)}`);
+    await clean(t, page, 'metadata: saved PNGs');
   });
 
   // ====================================================================================================================
@@ -745,6 +788,15 @@ export default async function hostile(t, site) {
     const leaked = await ep.evaluate(() => window.__heard);
     t.check(leaked.length === 0, 'foreign: a page of another origin that frames pose.html?render=1 and asks for its list and a picture hears nothing (replies go to the Pose page\'s own origin)', leaked);
     await clean(t, ep, 'foreign: a foreign page framing the drawing mode');
+    // and one that frames it as the app does (?embed=1): the page starts, as embedded, and the framing page hears nothing of its height
+    const ee = await open({ url: 'pose.html?embed=1', sandbox: SB });
+    await ee.evaluate(() => { window.__heard = []; window.addEventListener('message', (e) => window.__heard.push(e.data && e.data.type)); });
+    await ee.app.waitForFunction(() => window.__poseStarted, null, { timeout: 30000 }).catch(() => null);
+    await sleep(2500);
+    const em = await ee.app.evaluate(() => ({ embed: document.documentElement.classList.contains('embed'), failed: !document.getElementById('fail').hidden, library: !document.getElementById('library').hidden }));
+    const heard2 = await ee.evaluate(() => window.__heard);
+    t.check(em.embed && !em.failed && em.library && heard2.length === 0, 'foreign: a page of another origin that frames pose.html?embed=1 gets the embedded Pose page, and hears nothing of its height (it is told to the page\'s own origin)', { em, heard2 });
+    await clean(t, ee, 'foreign: a foreign page framing the embedded Pose page');
   });
 
   // ====================================================================================================================
