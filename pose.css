@@ -102,6 +102,9 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .seg input:checked + label { background: var(--ink); color: var(--ground); }
 .seg input:focus-visible + label, :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+/* Pick a part: the parts by name, the keyboard's way to pick what a tap picks */
+.pick-part { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+.pick-part select { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; }
 .lesson { margin: 0; font-size: 0.85rem; color: var(--muted); }
 /* dropdowns: the sliders and options stay folded away until wanted */
 .more { border: 1px solid var(--line); border-radius: var(--r); background: var(--ground); }
@@ -151,7 +154,8 @@ dialog p { margin: 8px 0 12px; color: var(--muted); }
   .tool { grid-template-columns: minmax(0, 1fr); }
   .stage { height: 64vh; min-height: 340px; }
 }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* reduced motion: the folding sections' arrow turns at once, as the app's drawers' does */
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } .more > summary::after { transition: none; } }
 /* inside Portrait Value Studio: no header of its own, and a stage sized from the app's window */
 .embed body { margin: 0; }
 .embed .top { display: none; }

@@ -154,6 +154,12 @@ async function keyOn(page, selector, key = 'Enter', frame = null) {
   await page.keyboard.press(key);
 }
 const focusIs = (page, selector, frame = null) => (frame || app(page)).evaluate((s) => { const e = document.querySelector(s); return !!e && document.activeElement === e; }, selector);
+// press Tab (or Shift+Tab) until the focus is on an element the selector matches, at most max times: whether it got there
+async function pressTo(page, selector, { key = 'Tab', max = 30, frame = null } = {}) {
+  const on = () => (frame || app(page)).evaluate((s) => !!document.activeElement && document.activeElement.matches(s), selector);
+  for (let i = 0; i < max; i++) { if (await on()) return true; await page.keyboard.press(key); }
+  return on();
+}
 const attr = (page, selector, name, frame = null) => (frame || app(page)).evaluate(([s, n]) => { const e = document.querySelector(s); return e ? e.getAttribute(n) : null; }, [selector, name]);
 const shown = (page, selector, frame = null) => (frame || app(page)).evaluate((s) => { const e = document.querySelector(s); return !!e && !e.hidden && (e.checkVisibility ? e.checkVisibility() : true); }, selector);
 const waitFor = (page, fn, arg, timeout = 15000) => page.waitForFunction(fn, arg, { timeout }).then(() => true).catch(() => false);
@@ -420,6 +426,52 @@ export default async function a11y(t, site) {
         cause: 'js/loomis.js:406 places marks from pointerdown on the overlay canvas only; index.html:411 gives #lh-overlay no tabindex and no key handler exists in js/loomis.js (its only keyboard code is keepFocus, js/loomis.js:303-311). Lock in stays disabled until a pointer has marked the feature (js/loomis.js:288: disabled = !state.pending).',
       });
     }
+    // the photo from the keyboard (README: "the arrow keys move a crosshair over it (two pixels a press, twenty with Shift,
+    // with the loupe), and Enter or Space taps where it is"): Tab reaches it, the keys move the crosshair, Enter places the
+    // mark there (the loupe goes, as on a pointer's release), and Lock in comes on and, pressed from the keyboard, takes it
+    const lhNow = () => page.evaluate(() => ({ pending: Loomis.state.pending && { ...Loomis.state.pending }, step: Loomis.state.step, eye: Loomis.state.points.leftEye || null, lock: !document.getElementById('lh-lock').disabled, loupe: !document.getElementById('lh-loupe').hidden, focus: document.activeElement && document.activeElement.id, fv: document.getElementById('lh-overlay').matches(':focus-visible') }));
+    const near = (p, x, y) => !!p && Math.abs(p.x - x) < 1e-4 && Math.abs(p.y - y) < 1e-4;
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    // (a key is pressed only where it was meant to land: on whatever else had the focus it could leave the tab)
+    const reached = await pressTo(page, '#lh-overlay', { max: 40 });
+    const wrapPx = await page.evaluate(() => { const w = document.getElementById('lh-wrap'); return { w: w.clientWidth, h: w.clientHeight }; });
+    if (reached) {
+      for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Shift+ArrowDown');
+    }
+    const aimed = await lhNow();
+    if (reached) await page.keyboard.press('Enter');
+    const marked = await lhNow();
+    const at = { x: 0.5 + 6 / wrapPx.w, y: 0.5 + 20 / wrapPx.h };
+    t.check(reached && aimed.fv && aimed.loupe && !aimed.pending && near(marked.pending, at.x, at.y) && marked.step === 0 && marked.lock && !marked.loupe,
+      'Loomis head: Tab reaches the photo (:focus-visible), the arrow keys move its crosshair from the middle with the loupe, and Enter places the mark there: Lock in comes on and the loupe goes', { reached, aimed, marked, expected: at });
+    const toLock = marked.lock && (await pressTo(page, '#lh-lock', { key: 'Shift+Tab', max: 8 }));
+    if (toLock) await page.keyboard.press('Enter');
+    const locked = await lhNow();
+    t.check(toLock && locked.step === 1 && near(locked.eye, at.x, at.y) && !locked.pending, 'Loomis head: Lock in, reached by Shift+Tab and pressed with Enter, takes the mark placed from the keyboard (the left eye) and asks for the next', { toLock, locked });
+    // Enter acts where the crosshair is drawn: back on the photo it starts in the middle (nothing pending), a tap takes it
+    // to the tap (so Enter leaves the tapped mark where it is), and Start over puts it back in the middle (Start over is
+    // clicked by script here, so the photo keeps the focus through it, as it does when a new photo resets the head)
+    const backOn = locked.step === 1 && (await pressTo(page, '#lh-overlay', { max: 8 }));
+    const aims = { backOn };
+    if (backOn) {
+      await page.keyboard.press('Enter');
+      aims.fresh = await lhNow();
+      const box = await page.evaluate(() => { const r = document.getElementById('lh-overlay').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+      await page.mouse.click(box.x + 0.3 * box.w, box.y + 0.3 * box.h);
+      aims.tapped = await lhNow();
+      aims.tapKept = aims.tapped.focus === 'lh-overlay';
+      if (aims.tapKept || (await pressTo(page, '#lh-overlay', { max: 40 }))) await page.keyboard.press('Enter');
+      aims.afterTap = await lhNow();
+      for (let i = 0; i < 2; i++) await page.keyboard.press('Shift+ArrowLeft');
+      await click(page, '#lh-reset');
+      if ((await lhNow()).focus === 'lh-overlay') await page.keyboard.press('Enter');
+      aims.afterReset = await lhNow();
+    }
+    const { fresh, tapped, afterTap, afterReset } = aims, tap = tapped && tapped.pending;
+    t.check(backOn && near(fresh.pending, 0.5, 0.5) && !!tap && Math.abs(tap.x - 0.3) < 0.02 && Math.abs(tap.y - 0.3) < 0.02
+      && near(afterTap.pending, tap.x, tap.y) && afterReset.focus === 'lh-overlay' && afterReset.step === 0 && near(afterReset.pending, 0.5, 0.5),
+      'Loomis head: Enter acts where the crosshair is: in the middle when the photo takes the focus with nothing pending, on the tapped point after a tap, and in the middle again after Start over', aims);
     await page.evaluate(() => document.activeElement && document.activeElement.blur());
     await keyOn(page, '#lh-exit', 'Enter');
     await waitFor(page, () => !document.getElementById('tab-study').hidden, null, 5000);
@@ -727,6 +779,13 @@ export default async function a11y(t, site) {
     let into = await focusNow(page), tabs = 0;
     while (!(into.inFrame && (await inLibrary())) && tabs < 6) { await page.keyboard.press('Tab'); tabs++; into = await focusNow(page); }
     t.check(into.inFrame && (await inLibrary()), 'Pose and light: the focus reaches the library\'s poses in the frame (the rest waits behind it) by the next Tab stops after the sections', { focus: label(into), tabs });
+    // the frame is one part of the app's page: Shift+Tab from the start sheet's first pose goes back to the app around it
+    // (pose.html on its own keeps the Tab inside the sheet, below), and Tab comes back to the poses
+    await page.keyboard.press('Shift+Tab');
+    const outOfFrame = await focusNow(page);
+    await page.keyboard.press('Tab');
+    const backIn = (await focusNow(page)).inFrame && (await inLibrary());
+    t.check(!outOfFrame.body && !outOfFrame.inFrame && backIn, 'Pose and light in the app: Shift+Tab from the start sheet\'s first pose goes to the app around the frame, and Tab comes back to the poses', { out: label(outOfFrame), backIn });
     await page.keyboard.press('Enter');
     await waitFor(f, () => document.getElementById('library').hidden, null, 5000);
     const pickedP = { libHidden: await f.evaluate(() => document.getElementById('library').hidden), focus: await focusIs(page, '#posesBtn', f), expanded: await attr(page, '#posesBtn', 'aria-expanded', f) };
@@ -765,6 +824,23 @@ export default async function a11y(t, site) {
         cause: 'js/pose.js:822 (pick) is reached only from the canvas\'s pointer handlers (js/pose.js:2109, 2178-2181); pose.html:28 gives the canvas no tabindex, pose.html:31 hides the rig controls from assistive tech, and js/pose.js:907 (buildArrows) builds the arrow buttons only for a picked part.',
       });
     }
+    // the Pick a part list (README: "chosen by name under Pick a part in the Pose card (the keyboard's way to pick one)"):
+    // ArrowDown on the closed list picks the first part, its arrows show, Shift+Tab reaches one, and Enter and Space on it
+    // move the figure (window.PoseAndLight.pose)
+    if (await f.evaluate(() => !!document.getElementById('partPick'))) await keyOn(page, '#partPick', 'ArrowDown', f);
+    const listed = await f.evaluate(() => ({ list: !!document.getElementById('partPick'), picked: PoseAndLight.picked(), value: document.getElementById('partPick') && document.getElementById('partPick').value, name: document.getElementById('partName').textContent, arrows: PoseAndLight.arrows().filter((a) => !a.hidden).length }));
+    const toArrow = listed.arrows > 0 && (await pressTo(page, '#arrows button', { key: 'Shift+Tab', max: 12, frame: f }));
+    const moves = { toArrow };
+    if (toArrow) {
+      moves.arrow = await f.evaluate(() => document.activeElement.getAttribute('aria-label'));
+      for (const key of ['Enter', 'Space']) {
+        const before = await f.evaluate(() => JSON.stringify(PoseAndLight.pose));
+        await page.keyboard.press(key);
+        moves[key] = await f.evaluate((b) => JSON.stringify(PoseAndLight.pose) !== b, before);
+      }
+    }
+    t.check(listed.list && !!listed.picked && listed.picked === listed.value && listed.name !== 'Nothing picked' && listed.arrows > 0 && toArrow && moves.Enter && moves.Space,
+      'Pose and light (Advanced): a part chosen in the Pick a part list from the keyboard is picked and shows its arrows; Shift+Tab reaches an arrow, and Enter and Space on it move the figure', { ...listed, ...moves });
     await keyOn(page, '[data-mode="simple"]', 'Enter');
     await clean(t, page, 'Pose and light in the app');
 
@@ -787,6 +863,15 @@ export default async function a11y(t, site) {
         cause: 'js/pose.js:1492 (behindSheet) makes the canvas, hint, picked note, rig, arrows, lamp, stage bar and rail inert while the sheet is open, but not the page header (.top) that pose.html shows on its own (pose.css:157 hides it only when embedded).',
       });
     }
+    // ... and the Tab goes round inside it, never off the page: Shift+Tab from its first pose is on its last, and Tab from
+    // there is back on the first
+    const ends = () => { const b = [...document.querySelectorAll('#library .pose-btn')].filter((x) => x.getClientRects().length); const a = document.activeElement; return { first: a === b[0], last: a === b[b.length - 1], inSheet: !!a && !!a.closest('#library'), on: a ? a.getAttribute('aria-label') || a.tagName : null, poses: b.length }; };
+    await sp.evaluate(() => document.querySelector('#poses .pose-btn').focus());
+    await sp.keyboard.press('Shift+Tab');
+    const wrapBack = await sp.evaluate(ends);
+    await sp.keyboard.press('Tab');
+    const wrapOn = await sp.evaluate(ends);
+    t.check(wrapBack.last && wrapOn.first, 'pose.html: the Tab goes round inside the start sheet: Shift+Tab from its first pose is on its last, and Tab from there is back on its first (never off the page)', { wrapBack, wrapOn });
     await sp.evaluate(() => document.querySelector('#poses .pose-btn').focus());
     await sp.keyboard.press('Enter');
     await waitFor(sp, () => document.getElementById('library').hidden, null, 5000);

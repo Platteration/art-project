@@ -1152,8 +1152,8 @@ export default async function loomis(t, site) {
   t.note('gaps left out for the time budget (low): the Studio restored while the head is copied (a race that needs a large saved painting to show); Forget my work on this device from another tab; the Study\'s working size and Advanced mode with a head fitted; Copy the Study lines with a head and Study marks together, and the head on the Check my painting panels; a held arrow when the window loses focus (a lost pointer-up cannot be simulated here).');
   t.note('the manual adjustments (an arrow turn, a line drag) are discarded by a dot drag or Back one mark + Lock in: that refits the head by design (the README: "Dragging a dot moves that mark and refits the head"), so it is not checked as a finding.');
   t.note('the playtester\'s checks above are unchanged (only the import line grew, for the new helpers); all of them pass on the current tree, and none is plainly the author\'s mistake.');
-  t.note('keyboard: the card\'s Lock in, Skip, Back, Draw it in the Studio and Back to the fit are buttons and work from the keyboard; placing a mark, dragging a dot or a line and the arrow buttons are pointer-only (the overlay canvas is not focusable and has no key handler); the README promises no keys here');
-  t.note('the overlay canvas keeps the label "The photo: tap the feature asked for" once the head is fitted, when a tap no longer places anything');
+  t.note('keyboard: the card\'s Lock in, Skip, Back, Draw it in the Studio and Back to the fit are buttons and work from the keyboard; the photo (the overlay canvas) takes the focus, its arrow keys move a crosshair and Enter or Space taps there, placing the mark or, once the head is fitted, pressing the arrow button under it, as the README says (the a11y case places a mark and locks it in from the keyboard); dragging a dot or a line is pointer-only');
+  t.note('the overlay canvas keeps the label "The photo: tap the feature asked for, or move the crosshair with the arrow keys …" once the head is fitted, when a tap or Enter no longer places a mark');
   await round2(t, site);
 }
 

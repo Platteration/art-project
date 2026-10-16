@@ -185,8 +185,9 @@
     delete state.points[current().key];
     refit();
   }
-  // a fresh start (Start over, a new photo) shows the head again: hiding it was about the fit before
-  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; state.shown = true; render(); }
+  // a fresh start (Start over, a new photo) shows the head again: hiding it was about the fit before (and the
+  // keyboard's crosshair goes back to the middle)
+  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; state.shown = true; aim = { x: 0.5, y: 0.5 }; render(); }
   function refit() { state.fit = fitHead(); state.auto = state.fit && { ...state.fit }; render(); }
 
   // ---- Adjusting the fitted head on the canvas: arrows turn, nod and tilt it; its lines drag -----
@@ -333,6 +334,7 @@
   // ---- The photo on the stage, and the marks made on it ----------------------------------------
   const photo = $('photo'), overlay = $('overlay'), wrap = $('wrap');
   let active = false;
+  let aim = null;   // the keyboard's crosshair on the photo, in picture fractions (see "The photo from the keyboard")
   function showPhoto() {
     const prep = Studio.prep();
     if (!prep) return;
@@ -361,6 +363,7 @@
     g.clearRect(0, 0, overlay.width, overlay.height);
     draw(g, overlay.width, overlay.height, dpr * 1.15);
     drawHandles(g, overlay.width, dpr * 1.15);
+    if (aim && overlay.matches(':focus-visible')) drawAim(g, overlay.width, overlay.height, dpr * 1.15);
   }
   function layout() { if (!active) return; PaintStudio.pin(root); fit(); }
   window.addEventListener('resize', layout);
@@ -407,6 +410,7 @@
     if (e.button > 0) return;
     e.preventDefault(); overlay.setPointerCapture(e.pointerId);
     const [x, y] = pos(e), dpr = window.devicePixelRatio || 1, px = x * overlay.width, py = y * overlay.height;
+    aim = { x, y };                            // the keyboard's crosshair goes where the pointer is, so Enter acts there
     const hit = done() ? hitTest(px, py, overlay.width) : null;
     if (hit && hit.kind === 'handle') {
       // a tap nudges; holding keeps nudging
@@ -425,6 +429,7 @@
   overlay.addEventListener('pointermove', (e) => {
     if (!drag_) return;
     const [x, y] = pos(e), px = x * overlay.width, py = y * overlay.height, W = overlay.width;
+    aim = { x, y };
     if (drag_.kind === 'place') { drag(x, y); showLoupe(x, y); return; }
     if (drag_.kind === 'mark') { if (state.moving) { state.points[state.moving] = { x, y }; refit(); } showLoupe(x, y); return; }
     if (drag_.kind === 'handle') return;
@@ -438,6 +443,33 @@
   });
   ['pointerup', 'pointercancel'].forEach((t) => overlay.addEventListener(t, () => { clearTimeout(holdTimer); drag_ = null; release(); hideLoupe(); }));
   overlay.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---- The photo from the keyboard: it takes the focus, the arrow keys move a crosshair over it (Shift for
+  // bigger steps, with the loupe), and Enter or Space taps there: it places the pending mark, so Lock in comes
+  // on, or once the head is fitted presses the arrow button under it. The crosshair shows only while the focus
+  // came from the keyboard, so a pointer sees nothing new. It is always where Enter acts: it starts on the
+  // pending mark (else the middle) each time the photo takes the focus, and a tap or a drag takes it along.
+  const AIM_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  overlay.addEventListener('focus', () => { aim = state.pending ? { ...state.pending } : { x: 0.5, y: 0.5 }; drawTab(); });
+  overlay.addEventListener('blur', () => { hideLoupe(); drawTab(); });
+  overlay.addEventListener('keydown', (e) => {
+    if (!aim || e.altKey || e.ctrlKey || e.metaKey) return;
+    const d = AIM_KEYS[e.key];
+    if (d) {
+      e.preventDefault();
+      const px = e.shiftKey ? 20 : 2; // CSS pixels a press moves it
+      aim = { x: Math.max(0, Math.min(1, aim.x + (d[0] * px) / (wrap.clientWidth || 1))), y: Math.max(0, Math.min(1, aim.y + (d[1] * px) / (wrap.clientHeight || 1))) };
+      showLoupe(aim.x, aim.y);
+      drawTab();
+      return;
+    }
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    hideLoupe();                               // as a pointer's release does
+    if (!done()) { place(aim.x, aim.y); return; }
+    const hit = hitTest(aim.x * overlay.width, aim.y * overlay.height, overlay.width);
+    if (hit && hit.kind === 'handle') nudge(hit.handle.key, hit.handle.d);
+  });
 
   // ---- Drawing the head: on this tab's overlay, on the Study pictures and into saved PNGs ---------
   const COLORS = { side: '#e5322d', sideLine: '#e5322d', brow: '#1ec8ec', hair: '#e5322d', centre: '#1ec8ec', face: '#1ec8ec', eyes: '#ffd21f', nose: '#ffd21f', mouth: '#ffd21f', chin: '#ffd21f', jaw: '#e5322d' };
@@ -511,6 +543,16 @@
         g.lineTo(ex + Math.cos(dir + 2.5) * a * 0.55, ey + Math.sin(dir + 2.5) * a * 0.55); g.lineTo(ex + Math.cos(dir - 2.5) * a * 0.55, ey + Math.sin(dir - 2.5) * a * 0.55); g.closePath(); g.fill();
       }
     });
+    g.restore();
+  }
+  // the keyboard's crosshair, where Enter or Space taps
+  function drawAim(g, W, H, unit) {
+    const x = aim.x * W, y = aim.y * H, a = 11 * unit, gap = 3 * unit;
+    g.save(); g.lineCap = 'round';
+    g.beginPath();
+    [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dx, dy]) => { g.moveTo(x + dx * gap, y + dy * gap); g.lineTo(x + dx * a, y + dy * a); });
+    g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 3.5 * unit; g.stroke();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 1.6 * unit; g.stroke();
     g.restore();
   }
   // the near-side lines as straight segments in picture fractions, for the Studio's underdrawing

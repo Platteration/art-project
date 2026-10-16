@@ -841,12 +841,20 @@
     $('partDepth').hidden = true;
     $('partButtons').hidden = !picked;
     $('picked').hidden = !picked;
+    $('partPick').value = picked || '';
     if (!picked) { $('partName').textContent = 'Nothing picked'; return; }
     const spec = SPEC[picked];
     $('partName').textContent = spec.name;
     $('picked').textContent = spec.name;
     $('mirror').hidden = !/[RL]$/.test(picked);
   }
+  // Pick a part, in the Pose card: every part by name, head to feet, so a keyboard picks what a tap picks (its
+  // arrows, which take Enter and Space, then move it); Nothing picked lets go, as a tap on the background does.
+  // (The list is SPEC's parts in that order, the arms before the legs and right before left: a part added to SPEC
+  // goes in it too.)
+  [['', 'Nothing picked'], ...['neck', 'waist', 'root', 'shoulderR', 'elbowR', 'wristR', 'shoulderL', 'elbowL', 'wristL', 'hipR', 'kneeR', 'ankleR', 'hipL', 'kneeL', 'ankleL'].map((n) => [n, SPEC[n].name])]
+    .forEach(([value, text]) => $('partPick').add(new Option(text, value)));
+  $('partPick').addEventListener('change', () => pick($('partPick').value || null));
 
   // Where each part's end is (its arrows sit there) and where it turns from.
   const TIP = {
@@ -1489,7 +1497,8 @@
   // after Start over) to choose a pose to start from: then it has no close button and the rest of the
   // page waits until a pose is picked. Picking a pose closes it.
   const sheet = $('library');
-  const behindSheet = () => [canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
+  // (the page's own header too, with its Simple / Advanced switch: the sheet is modal, so nothing behind it takes the focus)
+  const behindSheet = () => [document.querySelector('.top'), canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
   function openLibrary(start) {
     letGo();                                   // a pose picked here must not be posed on by a pointer still down
     sheetStart = !!start;
@@ -1526,6 +1535,15 @@
   $('posesBtn').addEventListener('click', () => openLibrary(false));
   $('libClose').addEventListener('click', closeLibrary);
   sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheetStart) { e.preventDefault(); closeLibrary(); } });
+  // the sheet is modal, so Tab and Shift+Tab go round inside it (its last button to its first, and back) rather than
+  // off the page; inside the app the frame is one part of the app's page, so there they go on to the app around it
+  sheet.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey || EMBEDDED) return;
+    const stops = [...sheet.querySelectorAll('button')].filter((b) => !b.disabled && b.getClientRects().length);
+    if (!stops.length || document.activeElement !== (e.shiftKey ? stops[0] : stops[stops.length - 1])) return;
+    e.preventDefault();
+    (e.shiftKey ? stops[stops.length - 1] : stops[0]).focus();
+  });
   // the pose from last time, as the first choice on the start screen
   function offerContinue() {
     $('continue').textContent = '';
