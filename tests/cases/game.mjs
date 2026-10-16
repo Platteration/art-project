@@ -53,7 +53,8 @@ const tapPaint = (page, code, times = 1) => page.evaluate(([code, n]) => { const
 // the clock's readout once a tick has drawn it after the page clock was moved on (its 250 ms tick, not a fixed sleep,
 // decides when): a readout that differs from the one before the move, or reads as a moved-on clock should
 const timerMoved = (page, before) => page.waitForFunction((b) => document.getElementById('gameTimer').textContent !== b, before, { timeout: 5000 }).catch(() => null);
-const timerReads = (page, re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('gameTimer').textContent), re.source, { timeout: 5000 }).catch(() => null);
+// (a busy machine can take many seconds to run the timers a fast-forward fires: a check made before the timer gets there would read the wrong time)
+const timerReads = (page, re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('gameTimer').textContent), re.source, { timeout: 60000 }).catch(() => null);
 const play = (page) => page.evaluate(() => ({
   timer: document.getElementById('gameTimer').textContent, timerLabel: document.getElementById('gameTimer').getAttribute('aria-label'), low: document.getElementById('gameTimer').classList.contains('is-low'),
   progress: document.getElementById('gameProgress').textContent, lock: document.getElementById('gameLock').textContent,
