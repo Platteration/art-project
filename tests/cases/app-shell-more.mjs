@@ -41,8 +41,8 @@ const APP_FAILED = 'Something went wrong in the app. If a control stops respondi
 
 // ---- helpers of this case -------------------------------------------------------------------------------
 
-const shownPanels = (page) => page.evaluate(() => [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id));
-const notesOf = (page) => page.evaluate(() => {
+const shownPanels = (page) => app(page).evaluate(() => [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id));
+const notesOf = (page) => app(page).evaluate(() => {
   const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : 'missing'; };
   return { cls: document.documentElement.className.trim(), nojs: d('.nojs-note'), part: d('.partfail-note'), old: d('.oldbrowser-note'), tabs: d('.tabs'), help: d('#tab-help'), study: d('#tab-study'), actions: d('.topbar-actions'), steps: d('.help-steps .btn'), forget: d('#forgetBtn'), forgetShown: !!(document.getElementById('forgetBtn').getClientRects().length),
     hidden: [...document.querySelectorAll('[data-tab]')].filter((e) => e.hidden).map((e) => e.dataset.tab).sort(), groups: [...document.querySelectorAll('.tab-group')].filter((g) => g.hidden).map((g) => g.dataset.group),
@@ -51,13 +51,13 @@ const notesOf = (page) => page.evaluate(() => {
 const active = (page) => page.evaluate(() => { const a = document.activeElement; if (!a || a === document.body) return 'body'; return a.id || a.getAttribute('data-mode') || a.tagName.toLowerCase(); });
 const menuOf = (page, id) => page.evaluate((id) => { const m = document.getElementById(id); const b = document.querySelector(`[aria-controls="${id}"]`); return { hidden: m.hidden, expanded: b.getAttribute('aria-expanded') }; }, id);
 const luminance = (fr) => fr.evaluate(() => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(getComputedStyle(document.body).backgroundColor); return m ? +((0.2126 * m[1] + 0.7152 * m[2] + 0.0722 * m[3]) / 255).toFixed(2) : -1; });
-const toastOf = (page) => page.evaluate(() => { const e = document.getElementById('toast'); const b = e.querySelector('button'); return { show: e.classList.contains('show'), text: e.textContent.trim(), button: b ? b.textContent : null, disabled: !!(b && b.disabled) }; });
-const isSimple = (page) => page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), pressed: [...document.querySelectorAll('[data-mode]')].map((b) => b.dataset.mode + '=' + b.getAttribute('aria-pressed')).join(' ') }));
+const toastOf = (page) => app(page).evaluate(() => { const e = document.getElementById('toast'); const b = e.querySelector('button'); return { show: e.classList.contains('show'), text: e.textContent.trim(), button: b ? b.textContent : null, disabled: !!(b && b.disabled) }; });
+const isSimple = (page) => app(page).evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), pressed: [...document.querySelectorAll('[data-mode]')].map((b) => b.dataset.mode + '=' + b.getAttribute('aria-pressed')).join(' ') }));
 const frameMode = (page) => { const f = poseFrame(page); return f ? f.evaluate(() => window.PoseAndLight ? PoseAndLight.mode() : null).catch(() => null) : null; };
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const timings = [];
 // what a step cost when measured on a busy machine, in seconds (longest first keeps the workers even); the default is 15
-const COSTS = [[/^heavy route/, 65], [/^modes/, 50], [/live resize/, 45], [/^pose\.html alone/, 40], [/storage blocked/, 36], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 25], [/hostile keys/, 24], [/forget during a figure/, 21], [/^route #/, 15], [/three|pose scripts/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20]];
+const COSTS = [[/^heavy route/, 65], [/^modes/, 50], [/live resize/, 45], [/^pose\.html alone/, 40], [/storage blocked/, 36], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 25], [/hostile keys/, 24], [/forget during a figure/, 21], [/^route #/, 15], [/three|pose scripts/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20], [/sandboxed frame/, 40]];
 const jobs = [];
 let sharedIdFinding = false;
 // a step registers itself; the pool at the end of the case runs them
@@ -72,7 +72,7 @@ async function reloadWith(page, script, arg) { await page.addInitScript(script, 
 // the wait part of lib's tab() without the click: the Pose frame up (or its failure panel), Figure's pictures (or its note)
 async function settle(page, name, timeout = 15000) {
   if (name === 'pose') { const t0 = Date.now(); while (Date.now() - t0 < timeout) { const f = poseFrame(page); if (f) { const up = await f.evaluate(() => (!!window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30) || !document.getElementById('fail').hidden).catch(() => false); if (up) return true; } await sleep(250); } return false; }
-  if (name === 'figure') return !!(await page.waitForFunction(() => { const b = document.querySelectorAll('#tab-figure [data-pose-id]'); return (b.length > 0 && [...b].every((x) => { const i = x.querySelector('img'); return i && i.src.startsWith('blob:'); })) || /could not be drawn/.test(document.getElementById('fig-libNote').textContent); }, null, { timeout }).catch(() => null));
+  if (name === 'figure') return !!(await app(page).waitForFunction(() => { const b = document.querySelectorAll('#tab-figure [data-pose-id]'); return (b.length > 0 && [...b].every((x) => { const i = x.querySelector('img'); return i && i.src.startsWith('blob:'); })) || /could not be drawn/.test(document.getElementById('fig-libNote').textContent); }, null, { timeout }).catch(() => null));
   await sleep(300); return true;
 }
 // every tab in turn, the way a visitor opens them; heavy = wait for Pose and Figure to finish; each(name) runs on
@@ -180,6 +180,16 @@ function groupA(t, site) {
     const steps = await page.evaluate(() => [...document.querySelectorAll('.help-steps li')].map((li) => ({ text: li.querySelector('strong').textContent, go: li.querySelector('[data-go]') ? li.querySelector('[data-go]').dataset.go : null })));
     t.check(steps.length === 4, 'the guide opens with a four-step path', steps);
     t.note(`the four steps and their buttons: ${steps.map((s) => `${s.text} → ${s.go || 'no button'}`).join('; ')} (the README says "buttons that jump to the part they describe"; step 2, Look at the shapes, has none, which reads as intended: it describes the Study tab step 1 leads to)`);
+    // README, How to use: "one part at a time, each with phone screenshots in a phone frame: getting around, the Study tab's pictures, the
+    // drawing tools, the Loomis head, Pose and light, colors and paints, the Studio and its sheets, Figure study, How close did I get?,
+    // Paint by numbers, Value battle, and a few things good to know (nothing is uploaded, the Studio autosaves, where Undo is)"
+    const parts = await page.evaluate(() => [...document.querySelectorAll('#tab-help .help-part')].map((p) => ({ id: p.id, h3: (p.querySelector('h3') || {}).textContent || '', frames: p.querySelectorAll('.help-shots figure.phone img').length, label: (p.querySelector('.help-shots') || document.body).getAttribute('aria-label') || '', text: p.textContent, forget: !!p.querySelector('#forgetBtn') })));
+    const promised = [[/^Getting around$/i, 1], [/^Study the photo$/i, 1], [/drawing tools/i, 1], [/^Loomis head$/i, 1], [/^Pose and light$/i, 1], [/colors and paints/i, 1], [/^Studio$/i, 1], [/^Figure study$/i, 1], [/how close did i get\?/i, 1], [/^Paint by numbers$/i, 1], [/^Value battle$/i, 1], [/good to know/i, 0]];
+    t.check(parts.length === promised.length && promised.every(([re, shots], i) => parts[i] && re.test(parts[i].h3) && (shots ? parts[i].frames >= shots : parts[i].frames === 0)), 'the guide has the twelve parts the README names, in order, each (but the last) with phone screenshots', parts.map((p) => `${p.h3} (${p.frames})`));
+    const tips = parts[parts.length - 1] || { text: '', forget: false };
+    t.check(/Nothing is uploaded/.test(tips.text) && /saves your painting as you go/.test(tips.text) && /Undo is everywhere/.test(tips.text) && tips.forget, 'Good to know says nothing is uploaded, that the Studio saves as you go and where Undo is, and holds the Forget button the Privacy section points to', { forgetInIt: tips.forget });
+    const framed = await page.evaluate(() => { const f = document.querySelector('#tab-help figure.phone img'); const g = getComputedStyle(f); return { radius: g.borderRadius, border: g.borderTopWidth, shadow: g.boxShadow !== 'none' }; });
+    t.check(framed.radius !== '0px' && framed.border !== '0px', 'a guide screenshot sits in a phone frame (rounded corners and a thick edge)', framed);
     for (const go of ['study', 'paint', 'check']) {
       await tab(page, 'help');
       await page.evaluate(() => window.scrollTo(0, 400));
@@ -575,8 +585,20 @@ function groupB(t, site) {
 // ---- C: hostile keys on every tab, every route, every way of writing one ------------------------------------
 
 // a different shape in every key: the seven above, dealt out by the key's place in the list
-const VARIANT_BASE = VARIANTS.slice();
+// (the deal also holds the shapes no variant of its own is worth a tour for: a number past any range, which JSON reads as Infinity,
+// a negative one, null, an empty string, empty containers, JSON cut off, a long string; an exploratory run dealt all of them against
+// every key in turn, twenty rotations, and every tab opened without a page error, a note or a stray word)
+const EXTRA_SHAPES = [
+  ['a number past any range', () => '1e999'], ['a negative number', () => '-1'], ['null', () => 'null'], ['an empty string', () => ''],
+  ['an empty array', () => '[]'], ['JSON cut off', () => '{"a":'], ['a 100 KB string', () => JSON.stringify('x'.repeat(100000))], ['objects holding null and Infinity', () => '{"id":null,"p":null,"x":1e999,"view":-5,"length":1e9}'],
+];
+const VARIANT_BASE = VARIANTS.concat(EXTRA_SHAPES);
 VARIANTS.push(['a different shape in every key', (k) => VARIANT_BASE[ALL_KEYS.indexOf(k) % VARIANT_BASE.length][1]()]);
+// the routes are opened with the states that differ in kind: a value that is not JSON, a string where a number or an object is read,
+// prototype names, 5000 entries, nested wrong types, and the deal. (The NaN variant reads as the plain string does and a boolean as
+// the JSON string does, neither being an object or a number; every tour of the hostile keys above opens every tab with both.)
+const ROUTE_STATES = [0, 2, 3, 4, 5, 7];
+const HEAVY_ROUTE_STATES = [0, 3, 4, 5, 7];
 
 // words a bad saved value turns up on the page when something reads it as text: NaN, undefined, [object Object],
 // a function's source (the text on show, and what is in a field)
@@ -663,11 +685,11 @@ function groupC(t, site) {
     await page.context().close();
   }
   for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#battle', '#study']) {
-    step(t, `route ${h} with every hostile state`, async () => { for (let vi = 0; vi < VARIANTS.length; vi++) await openRoute(h, vi, false); });
+    step(t, `route ${h} with every hostile state`, async () => { for (const vi of ROUTE_STATES) await openRoute(h, vi, false); });
   }
   step(t, 'route #nonsense with hostile state', async () => { for (const vi of [3, 4, 7]) await openRoute('#nonsense', vi, false); });
   for (const h of ['#pose', '#figure']) {
-    step(t, `heavy route ${h} with every hostile state`, async () => { for (let vi = 0; vi < VARIANTS.length; vi++) await openRoute(h, vi, true); });
+    step(t, `heavy route ${h} with every hostile state`, async () => { for (const vi of HEAVY_ROUTE_STATES) await openRoute(h, vi, true); });
   }
   // pose.html on its own (the Pose page opened as a page): its three keys hostile, and the app's mode key beside them
   step(t, 'pose.html alone with hostile state', async () => {
@@ -797,6 +819,8 @@ function groupD(t, site) {
     const { tabOf, loaded } = guardRules(site);
     t.check(tabOf && Object.keys(tabOf).length >= 8 && loaded.length >= 12, 'js/guard.js\'s TAB_OF and index.html\'s script list can be read', { tabOf, loaded });
     if (!tabOf) return;
+    t.check(loaded[0] === 'guard', 'js/guard.js is the first script index.html loads (the README: "loaded first"), before the page\'s own', loaded);
+    t.check(!/<script[^>]*\b(async|defer|type="module")/.test(readSite(site, 'index.html')), 'no script of index.html is async, deferred or a module (the order they are listed in is the order they run)');
     const table = BLOCKED.map(([f]) => shortName(f));
     t.check(loaded.every((s) => table.includes(s)), 'every script index.html loads is blocked in this case (a new script needs a row)', loaded.filter((s) => !table.includes(s)));
     t.check(loaded.filter((s) => !['guard', 'processing', 'mixing', 'paints'].includes(s)).every((s) => Object.prototype.hasOwnProperty.call(tabOf, s)), 'every module script has a rule in TAB_OF (a script with none is read as the app not starting)', loaded.filter((s) => !Object.prototype.hasOwnProperty.call(tabOf, s)));
@@ -1027,6 +1051,45 @@ function groupD(t, site) {
       t.check(log.errors.length === 0 && log.offsite.length === 0, `${label}, JavaScript off: no error, no request off the site`, log);
       await context.close();
     }
+  });
+
+  // README, Publishing: "Try it once inside an iframe on another site ... including a sandboxed one (sandbox="allow-scripts allow-modals"),
+  // where the fonts and the save dialog must still work". The whole app in such a frame has an opaque origin: no localStorage, no IndexedDB.
+  // Every tab opens, the typefaces load, nothing says the app failed, the Studio paints, the switch works for the visit, and Forget
+  // (which has nothing to clear there) still reloads the frame. ("Using the app inside another site's page?", Good to know, says the
+  // frame keeps its own settings.)
+  step(t, 'sandboxed frame', async () => {
+    const page = await openPage(site, { sandbox: {} });
+    const fr = app(page);
+    t.check((await fr.evaluate(() => location.origin)) === 'null', 'sandboxed frame: the app has an opaque origin (the README\'s own test)');
+    await fr.waitForFunction(() => document.fonts.status === 'loaded' && [...document.fonts].some((f) => f.status === 'loaded'), null, { timeout: 15000 }).catch(() => null);
+    const fonts = await fr.evaluate(() => ({ status: document.fonts.status, loaded: [...document.fonts].filter((f) => f.status === 'loaded').length, font: getComputedStyle(document.querySelector('h1')).fontFamily }));
+    t.check(fonts.loaded >= 1 && /Bricolage/i.test(fonts.font), 'sandboxed frame: the site\'s typefaces load', fonts);
+    const s0 = await notesOf(page);
+    t.check(s0.nojs === 'none' && s0.part === 'none' && s0.old === 'none' && s0.shown.join() === 'tab-study' && s0.hidden.length === 0, 'sandboxed frame: the app starts with all its tabs and no note', s0);
+    const out = await tour(page, { heavy: true, timeout: 40000 });
+    t.check(tourOk(out), 'sandboxed frame: every tab opens (Pose and Figure study too)', out);
+    const f = poseFrame(page);
+    t.check(!!f && (await f.evaluate(() => !!window.__poseStarted && document.getElementById('fail').hidden).catch(() => false)), 'sandboxed frame: the Pose page inside the sandboxed app starts');
+    await fr.locator('[data-mode="advanced"]').click(); await sleep(200);
+    t.check(!(await isSimple(page)).simple, 'sandboxed frame: the switch works for the visit with nowhere to keep it', await isSimple(page));
+    await tab(page, 'paint'); await sleep(1500);
+    await stroke(page, '#ps-paper');
+    t.check((await inked(page, '#ps-paper')) > 50, 'sandboxed frame: the Studio paints', await inked(page, '#ps-paper'));
+    const note = (await toastOf(page)).text;
+    t.note(`sandboxed frame: after a stroke the Studio says "${note || '(nothing)'}"`);
+    t.check(!/Something went wrong|could not be read/.test(note), 'sandboxed frame: the app reports no failure', note);
+    await tab(page, 'help');
+    await click(page, '#forgetBtn');
+    await fr.waitForFunction(() => /again/i.test(document.getElementById('forgetBtn').textContent), null, { timeout: 3000 }).catch(() => null);
+    const armed = await text(page, '#forgetBtn');
+    const reloaded = page.waitForEvent('framenavigated', { predicate: (x) => x === fr, timeout: 15000 }).then(() => true).catch(() => false);
+    await click(page, '#forgetBtn');
+    t.check(/again/i.test(armed) && (await reloaded), 'sandboxed frame: Forget arms and then reloads the frame, with nothing to clear', { armed });
+    await fr.waitForLoadState('load').catch(() => null); await sleep(1200);
+    t.check((await shownPanels(page)).join() === 'tab-study' && (await isSimple(page)).simple, 'sandboxed frame: after Forget the app is back on Study in Simple', { shown: await shownPanels(page), mode: await isSimple(page) });
+    await clean(t, page, 'sandboxed frame');
+    await page.context().close();
   });
 }
 
