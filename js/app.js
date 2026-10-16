@@ -562,6 +562,7 @@
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
   // note: a sentence about the photo itself (it was reduced), said together with the marks line below
+  // title: the reference's name in words, for the game ("Painting from ..."); name stays the label under the photo
   function useSource(img, name, baseName, note, title) {
     state.source = img;
     state.baseName = baseName || 'portrait';
@@ -2650,7 +2651,7 @@
     // so if that takes a moment), never the blank sheet before it
     const go = () => {
       const r = ps.reference();
-      if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id, '', r.title);
+      if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id, undefined, r.title);
       setArt(ps.composite(), 'Studio painting', false);
       els.drawers.check.open = true;
       runSoon(0);

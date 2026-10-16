@@ -20,6 +20,13 @@
   var PREFIX = 'portrait-value-studio.';
   var DB_NAME = 'portrait-value-studio';
 
+  // Every key this site keeps in localStorage, removed. The marker is one of them.
+  function sweep() {
+    try {
+      Object.keys(localStorage).filter(function (k) { return k.indexOf(PREFIX) === 0 || k.indexOf('pose-and-light.') === 0; }).forEach(function (k) { localStorage.removeItem(k); });
+    } catch (e) { /* storage unavailable: nothing kept */ }
+  }
+
   // Forget everything this site keeps in the browser: settings, palettes, scores and the saved painting.
   // The Studio listens for the event and stops its autosave, so the painting cannot come back.
   function forget(reload) {
@@ -29,12 +36,14 @@
     // marker: the keys still go, and the marker is written once the sweep has made room.
     var told = false;
     try { localStorage.setItem(PREFIX + 'forget', String(Date.now())); told = true; } catch (e) { /* full, or unavailable */ }
+    sweep();
     try {
-      Object.keys(localStorage).filter(function (k) { return k.indexOf(PREFIX) === 0 || k.indexOf('pose-and-light.') === 0; }).forEach(function (k) { localStorage.removeItem(k); });
       if (!told) { localStorage.setItem(PREFIX + 'forget', String(Date.now())); localStorage.removeItem(PREFIX + 'forget'); }
     } catch (e) { /* storage unavailable: nothing kept */ }
     var done = false;
-    function finish() { if (done) return; done = true; if (reload) location.reload(); }
+    // swept once more just before the reload: a module that does not watch studio:forget may have written
+    // between the first sweep and now, and what it wrote must not be what the page opens with
+    function finish() { if (done) return; done = true; if (reload) { sweep(); location.reload(); } }
     try {
       var req = window.indexedDB && indexedDB.deleteDatabase(DB_NAME);
       if (req) { req.onsuccess = finish; req.onerror = finish; req.onblocked = finish; }
@@ -159,7 +168,7 @@
   window.addEventListener('storage', function (e) {
     if (e.key !== PREFIX + 'forget' || !e.newValue) return;
     try { window.dispatchEvent(new Event('studio:forget')); } catch (err) { /* nothing listening */ }
-    setTimeout(function () { location.reload(); }, 300);
+    setTimeout(function () { sweep(); location.reload(); }, 300); // swept again first, as forget() does
   });
 
   // Until the page has loaded, the scripts are still starting: an error from one of them then means

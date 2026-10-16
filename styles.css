@@ -811,7 +811,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .game-best { margin: 0; font: 500 0.8rem var(--mono); color: var(--earth); }
 .game-best:empty { display: none; }
 .game-from { display: grid; gap: 8px; justify-items: start; margin-top: 10px; }
-.game-from .hint { margin: 0; }
+/* a grid item is never narrower than its longest unbreakable word, and a camera's file name has no spaces: it must wrap inside the card */
+.game-from .hint { margin: 0; overflow-wrap: anywhere; }
 .game-preview { margin: 0; display: grid; gap: 8px; }
 .game-preview canvas, .game-board canvas, .game-ref canvas, .game-compare canvas {
   display: block; max-width: 100%; height: auto; box-shadow: 0 1px 3px var(--shadow);

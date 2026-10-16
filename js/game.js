@@ -127,7 +127,7 @@
     return list;
   }
   // what a palette's mixes are kept under: My paints keeps its id whatever is ticked, so its paints count too
-  const paletteKey = (p) => `${p.id}:${p.codes.join(',')}`;
+  const handKey = (p) => `${p.id}:${p.codes.join(',')}`;
 
   const made = new Map();
   function paintFor(code) {
@@ -376,15 +376,21 @@
 
   /*
    * The palette that mixes this board's colors best: the highest area-weighted match, and of
-   * palettes within a point of it, the one with fewest paints. Worked out once per board, and again
-   * when the choices change (paints ticked or unticked on the Study tab).
+   * palettes within a point of it, the one with fewest paints. Picked again when the choices change
+   * (paints ticked or unticked on the Study tab), but each palette is rated once per board, under its
+   * handKey: a change of ticks rates only My paints, not all eleven (77 paints take seconds).
    */
   function suggestedPalette(b) {
     const choices = paletteChoices();
-    const key = choices.map(paletteKey).join('|');
+    const key = choices.map(handKey).join('|');
     if (!b.suggested || b.suggested.key !== key) {
       const colors = studyColors(b);
-      const rated = choices.map((p) => ({ p, cov: Mixing.coverage(p.codes.map(paintFor), colors) }));
+      b.rated = b.rated || new Map();
+      const rated = choices.map((p) => {
+        const k = handKey(p);
+        if (!b.rated.has(k)) b.rated.set(k, Mixing.coverage(p.codes.map(paintFor), colors));
+        return { p, cov: b.rated.get(k) };
+      });
       const top = Math.max(...rated.map((r) => r.cov.match));
       const pick = rated.filter((r) => r.cov.match >= top - 1).sort((a, c) => a.p.codes.length - c.p.codes.length || c.cov.match - a.cov.match)[0];
       b.suggested = { id: pick.p.id, cov: pick.cov, key };
@@ -416,7 +422,7 @@
   function targetsFor(b, p) {
     b.targets = b.targets || {};
     b.mixing = b.mixing || {};
-    const key = paletteKey(p);
+    const key = handKey(p);
     if (b.targets[key]) return Promise.resolve(b.targets[key]);
     if (b.mixing[key]) return b.mixing[key];
     const paints = p.codes.map(paintFor);
@@ -426,7 +432,7 @@
     return (b.mixing[key] = new Promise((resolve) => {
       next();
       function next() {
-        if (board !== b || paletteKey(chosenPalette()) !== key) { resolve(null); return; }
+        if (board !== b || handKey(chosenPalette()) !== key) { resolve(null); return; }
         try { step(); } catch (err) { // a mixing error ends this palette's targets as "none", never a Start button stuck off
           delete b.mixing[key];
           if (window.StudioGuard) StudioGuard.report(err);
@@ -483,7 +489,10 @@
     if (mode() === 'mystery' && mystery) return mystery;
     // a palette gone from the choices (My paints unticked below two) gives way to the suggested one
     const choices = paletteChoices();
-    return choices.find((p) => p.id === els.palette.value) || (board && choices.find((p) => p.id === suggestedPalette(board).id)) || choices[0];
+    const chosen = choices.find((p) => p.id === els.palette.value);
+    if (chosen) return chosen;
+    const sug = board && suggestedPalette(board).id; // once, not for each palette the find looks at
+    return choices.find((p) => p.id === sug) || choices[0];
   }
 
   // What the chosen mode changes in the setup
@@ -527,12 +536,12 @@
         const close = t.filter((x) => x.studyMiss < Mixing.NEAR).length;
         els.paletteHint.textContent = `${lead} ${p.codes.length} paints, which mix ${close} of its ${t.length} colors closely. The reference is mixed from them, so every number can be matched exactly.`;
       };
-      const ready = b.targets && b.targets[paletteKey(p)];
+      const ready = b.targets && b.targets[handKey(p)];
       els.start.disabled = !ready || boardTooSmall;
       if (ready) say(ready);
       else {
         targetsFor(b, p).then((t) => {
-          if (!t || board !== b || paletteKey(chosenPalette()) !== paletteKey(p)) return;
+          if (!t || board !== b || handKey(chosenPalette()) !== handKey(p)) return;
           els.start.disabled = boardTooSmall;
           say(t);
         });
@@ -565,11 +574,15 @@
 
   // keep: play the board just played again, even if the Study tab's photo has changed meanwhile
   async function startGame(keep) {
+    // Same photo skips the setup, so a palette that has gone since (My paints unticked below two) is said
+    // after the fact; the Mystery palette does not come from the menu
+    const wanted = keep && board && mode() !== 'mystery' ? els.palette.value : '';
     if (!keep || !board) refreshSetup();
     else renderPalettes(); // the paints ticked on the Study tab may have changed since the setup showed
     const p = chosenPalette();
     const targets = await targetsFor(board, p);
     if (!targets) return; // the board or palette changed while it was being mixed
+    if (wanted && p.id !== wanted) Studio.toast(`Fewer than two paints are ticked now, so this game uses ${p.name}.`, 4000);
     save(PALETTE_KEY, p.id);
     save(LEVEL_KEY, level());
     const m = mode();
@@ -1202,6 +1215,7 @@
     els.play.hidden = true;
     els.setup.hidden = false;
     refreshSetup();
+    focusSetup();                              // the ✕ that had focus is hidden now
   });
   els.clear.addEventListener('click', () => { if (game.phase !== 'play') return; game.parts[game.selected] = []; remix(game.selected); });
 
@@ -1308,14 +1322,16 @@
       return { k, g, t, lab, fill: game.fills[k], dE, match: lab ? matchOf(dE) : 0 };
     });
     const accuracy = rows.reduce((s, r) => s + r.g.share * r.match, 0) / total;
+    // the match the card shows, rounded once: the stars, grade and points all go by it, so 88% reads as five stars
+    const pct = Math.round(accuracy);
     const allPainted = rows.every((r) => r.lab);
-    const bonus = game.timed && allPainted ? Math.round(BONUS * (left / game.seconds) * (accuracy / 100)) : 0;
+    const bonus = game.timed && allPainted ? Math.round(BONUS * (left / game.seconds) * (pct / 100)) : 0;
     // Value first: the value study is worth up to 100 points, and the colors 900 instead of 1,000
     const valueMode = game.mode === 'value';
     const valueAcc = valueMode
       ? groups.reduce((s, g, k) => s + g.share * (game.values[k] == null ? 0 : Math.max(0, 100 - 2.5 * Math.abs(game.values[k] - g.lab[0]))), 0) / total
       : 0;
-    const colorPts = Math.round(accuracy * (valueMode ? 9 : 10));
+    const colorPts = Math.round(pct * (valueMode ? 9 : 10));
     const valuePts = valueMode ? Math.round(valueAcc) : 0;
     const points = colorPts + valuePts + bonus;
     const bests = load(BEST_KEY, {});
@@ -1337,14 +1353,15 @@
     drawBoard(els.final, game.board, shown(), { selected: -1, numbers: false });
     drawBoard(els.finalTarget, game.board, game.targets.map((t) => t.rgb), { selected: -1, numbers: false });
     setCompare(false);
-    game.result = { pct: Math.round(accuracy), stars: starsFor(accuracy), points, grade: GRADES[starsFor(accuracy)] };
-    showScore(accuracy, isBest, timedOut);
+    const stars = starsFor(pct);
+    game.result = { pct, stars, points, grade: GRADES[stars] };
+    showScore(pct, isBest, timedOut);
     els.points.textContent = points;
     els.breakdown.replaceChildren();
     [
       ['Mode', MODES[game.mode].name, ''],
       ...(valueMode ? [['Value study', `${valueAcc.toFixed(0)}%`, `+${valuePts}`]] : []),
-      ['Color accuracy', `${accuracy.toFixed(0)}%`, `${colorPts}`],
+      ['Color accuracy', `${pct}%`, `${colorPts}`],
       game.timed
         ? ['Time left', fmtTime(Math.ceil(left)), allPainted ? `+${bonus}` : '+0 (some numbers unpainted)']
         : ['Time taken', fmtTime(elapsed), '+0 (no clock)'],
@@ -1365,9 +1382,9 @@
 
   // The arcade card over the portrait: the match counts up, then the stars pop in one by one
   let countUp = 0;
-  function showScore(accuracy, isBest, timedOut) {
-    const pct = Math.round(accuracy);
-    const stars = starsFor(accuracy);
+  // pct is the whole-percent match lockIn rounded once, so the card's number and its stars cannot disagree
+  function showScore(pct, isBest, timedOut) {
+    const stars = starsFor(pct);
     els.kicker.textContent = timedOut ? 'Time’s up!' : 'Portrait locked in';
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
@@ -1627,13 +1644,19 @@
     else if (game.phase === 'values') endValues();
     else lockIn();
   });
-  els.start.addEventListener('click', startGame);
+  els.start.addEventListener('click', () => startGame()); // no argument: the click's event would read as keep
   function toSetup() {
     els.result.hidden = true;
     els.setup.hidden = false;
     game = null;
-    refreshSetup();
-    showPalette();
+    refreshSetup(); // a game means a photo and its study exist, so this ends in renderPalettes: the palette and the best are shown
+    focusSetup();                              // the score's buttons were hidden with it
+  }
+  // back on the setup, focus goes to its first choice (My photo or A painting), which is never disabled and sits at
+  // its top: Start may wait for a new board's mixes, and lies below the fold on a phone
+  function focusSetup() {
+    const first = els.setup.querySelector('input[name="gameSubject"]:checked');
+    if (first) first.focus();
   }
   document.querySelectorAll('[data-game="new"]').forEach((b) => b.addEventListener('click', toSetup));
 
