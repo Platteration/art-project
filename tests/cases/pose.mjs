@@ -291,6 +291,238 @@ export default async function pose(t, site) {
     await clean(t, page, 'standalone: rig and arrows');
     lap('rig and arrows');
 
+    // ---- more of the rig, Advanced, Front view: the circles under the pointer, the poles, the feet, the hips
+    //      by arrows, the floor, Copy for a whole limb, where the arrows sit, a part dragged by itself, the view
+    //      walked around, and a drag cut short or overtaken by the library ------------------------------------
+    {
+      const keepPose = await poseJson(fr);
+      const b = await fr.locator('#view').boundingBox();
+      await pick(fr, 'stand');
+      await fr.evaluate(() => { window.PoseAndLight.pick(null); document.getElementById('resetView').click(); });
+      // the mouse over a hand's circle lights it and the cursor says so; over the background, neither
+      const hr = await ctrl(fr, 'handR');
+      await page.mouse.move(b.x + hr.center.x, b.y + hr.center.y, { steps: 2 });
+      await fr.waitForFunction(() => document.querySelector('#rig > g.is-hot'), null, { timeout: 3000 }).catch(() => null);
+      const hover = await fr.evaluate(() => ({ over: document.getElementById('view').classList.contains('is-over'), hot: [...document.querySelectorAll('#rig > g')].flatMap((g, i) => (g.classList.contains('is-hot') ? [window.PoseAndLight.ctrls()[i].id] : [])) }));
+      const bg = await backgroundSpot(fr);
+      await page.mouse.move(b.x + bg.x, b.y + bg.y, { steps: 2 });
+      await fr.waitForFunction(() => !document.querySelector('#rig > g.is-hot'), null, { timeout: 3000 }).catch(() => null);
+      const unhover = await fr.evaluate(() => ({ over: document.getElementById('view').classList.contains('is-over'), hot: document.querySelectorAll('#rig > g.is-hot').length }));
+      t.check(hover.over && hover.hot.join() === 'handR' && !unhover.over && unhover.hot === 0, 'the mouse over the right hand\'s circle lights that circle and the cursor says it can be grabbed; over the background, neither', { hover, unhover });
+      // a drag the browser cancels (pointercancel) ends there, keeping and saving what it moved
+      {
+        const hl = await ctrl(fr, 'handL'), p0 = await poseJson(fr);
+        await page.mouse.move(b.x + hl.center.x, b.y + hl.center.y); await page.mouse.down(); await page.mouse.move(b.x + hl.center.x + 40, b.y + hl.center.y - 60, { steps: 2 });
+        const p1 = await poseJson(fr);
+        await fr.evaluate(() => document.getElementById('view').dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, pointerType: 'mouse', bubbles: true })));
+        const dragging = await fr.evaluate(() => document.getElementById('view').classList.contains('is-dragging'));
+        await page.mouse.move(b.x + hl.center.x + 100, b.y + hl.center.y - 100, { steps: 2 });
+        const p2 = await poseJson(fr);
+        await page.mouse.up();
+        const savedPose = await fr.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('pose-and-light.v2')).pose));
+        t.check(p1 !== p0 && p2 === p1 && !dragging && savedPose === p1 && !(await fr.evaluate(() => document.getElementById('undo').disabled)), 'a hand drag the browser cancels ends there: the move so far is kept and saved, Undo on, and the pointer moving on moves nothing', { moved: p1 !== p0, still: p2 === p1, dragging, saved: savedPose === p1 });
+      }
+      // the hand's circle: the wrist goes where the pointer goes, the hand keeping its twist
+      await pick(fr, 'stand');
+      {
+        const h = await ctrl(fr, 'handR'), w0 = await screenOf(fr, 'wristR'), twist0 = await fr.evaluate(() => window.PoseAndLight.pose.wristR.y);
+        await dragBy(page, fr, h.center, -60, -120);
+        const w1 = await screenOf(fr, 'wristR');
+        const near = { moved: [+(w1.x - w0.x).toFixed(1), +(w1.y - w0.y).toFixed(1)], twist: [twist0, await fr.evaluate(() => window.PoseAndLight.pose.wristR.y)], s: await scan(fr) };
+        t.check(Math.hypot(near.moved[0] + 60, near.moved[1] + 120) < 6 && near.twist[0] === near.twist[1] && sane(near.s), 'Front view, Stand: the right hand\'s circle dragged 60 px out and 120 px up puts the wrist under the pointer (within 6 px), the hand keeping its twist', near);
+        // the library's mark goes once the figure leaves the pose, and comes back with Undo
+        const mark = await fr.evaluate(() => {
+          const read = () => ({ note: document.getElementById('libNote').textContent, pressed: [...document.querySelectorAll('.pose-btn[aria-pressed="true"]')].map((x) => x.dataset.id).join() });
+          document.getElementById('posesBtn').click(); const moved = read(); document.getElementById('libClose').click();
+          document.getElementById('undo').click(); document.getElementById('posesBtn').click(); const undone = read(); document.getElementById('libClose').click();
+          return { moved, undone };
+        });
+        t.check(mark.moved.note === 'Tap a pose to start from it' && mark.moved.pressed === '' && mark.undone.note === 'On the figure now: Stand' && mark.undone.pressed === 'stand', 'the library after the hand moved: no pose marked, "Tap a pose to start from it"; after Undo, Stand marked and named again', mark);
+        // pulled far past its reach, the arm points straight at the pointer
+        const h2 = await ctrl(fr, 'handR'), far = { x: h2.center.x - 400, y: h2.center.y - 450 };
+        await dragBy(page, fr, h2.center, -400, -450);
+        const sh = await screenOf(fr, 'shoulderR'), w2 = await screenOf(fr, 'wristR');
+        const d = Math.atan2(w2.y - sh.y, w2.x - sh.x) - Math.atan2(far.y - sh.y, far.x - sh.x);
+        const off = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) * 180 / Math.PI;
+        t.check(off < 8 && sane(await scan(fr)), 'the right hand\'s circle pulled far past the arm\'s reach: the arm points at the pointer (within 8°)', { off: +off.toFixed(1), sh, w2, far });
+      }
+      // the foot's oval: the ankle follows the pointer and the foot keeps its turn, flat on the floor
+      await pick(fr, 'crouch');
+      {
+        const f = await ctrl(fr, 'footR'), a0 = await screenOf(fr, 'ankleR'), f0 = await footOf(fr, 'R');
+        await dragBy(page, fr, f.center, -20, 0);
+        const a1 = await screenOf(fr, 'ankleR'), f1 = await footOf(fr, 'R');
+        const res = { moved: [+(a1.x - a0.x).toFixed(1), +(a1.y - a0.y).toFixed(1)], turned: +(await turnBetween(fr, f0.q, f1.q)).toFixed(3), heading: [f0.heading, f1.heading], low: +(await fr.evaluate(() => window.PoseAndLight.legLow('R'))).toFixed(4) };
+        t.check(Math.hypot(res.moved[0] + 20, res.moved[1]) < 6 && res.turned < 0.05 && res.low >= -0.002, 'Crouch: the right foot\'s oval dragged 20 px out: the ankle follows the pointer and the foot keeps its turn on the floor', res);
+      }
+      // the hips ring pulled straight down from Crouch: lower hips, the balls of the feet where they were, a heel up
+      await pick(fr, 'crouch');
+      {
+        const pel = await ctrl(fr, 'pelvis'), b0 = await balls(fr), h0 = await fr.evaluate(() => window.PoseAndLight.pose.height);
+        await dragBy(page, fr, pel.pts[0], 0, b.height - 4 - pel.pts[0].y);
+        const b1 = await balls(fr);
+        const deep = await fr.evaluate(() => { const api = window.PoseAndLight, T = window.THREE, o = { height: +api.pose.height.toFixed(3) }; for (const s of ['R', 'L']) { const q = api.worldQuat('ankle' + s), a = api.worldPos('ankle' + s); o[s] = { heel: +new T.Vector3(0, -0.04, -0.045).applyQuaternion(q).add(a).y.toFixed(4), ball: +new T.Vector3(0, -0.04, 0.158).applyQuaternion(q).add(a).y.toFixed(4), knee: +api.worldPos('knee' + s).y.toFixed(3) }; } return o; });
+        const heelUp = ['R', 'L'].some((s) => deep[s].heel > deep[s].ball + 0.01);
+        t.check(deep.height < h0 - 0.05 && dist3(b0.R, b1.R) < 0.03 && dist3(b0.L, b1.L) < 0.03 && heelUp && deep.R.knee >= 0.048 && deep.L.knee >= 0.048, 'Crouch: the hips ring pulled straight down to the stage\'s bottom: the hips go lower, the balls of the feet stay, a heel lifts onto the toes, the knees stay off the floor', { h0, ...deep, balls: [dist3(b0.R, b1.R), dist3(b0.L, b1.L)] });
+      }
+      // the elbow's diamond swings the elbow with the hand held still; the knee's the same with the foot
+      await pick(fr, 'think');
+      {
+        const e = await ctrl(fr, 'elbowR');
+        const at = () => fr.evaluate(() => ({ w: window.PoseAndLight.worldPos('wristR').toArray(), e: window.PoseAndLight.worldPos('elbowR').toArray() }));
+        const p0 = await at();
+        await dragBy(page, fr, e.center, 0, 70);
+        const p1 = await at();
+        t.check(dist3(p0.w, p1.w) < 0.005 && dist3(p0.e, p1.e) > 0.03 && sane(await scan(fr)), 'Think: the right elbow\'s diamond dragged 70 px down swings the elbow while the hand stays where it was', { hand: dist3(p0.w, p1.w), elbow: dist3(p0.e, p1.e) });
+      }
+      await pick(fr, 'relaxed');
+      {
+        const k = await ctrl(fr, 'kneeL'), f0 = await footOf(fr, 'L'), k0 = await fr.evaluate(() => window.PoseAndLight.worldPos('kneeL').toArray());
+        await dragBy(page, fr, k.center, 40, 0);
+        const f1 = await footOf(fr, 'L'), k1 = await fr.evaluate(() => window.PoseAndLight.worldPos('kneeL').toArray());
+        const res = { knee: +dist3(k0, k1).toFixed(3), ankle: +dist3(f0.ankle, f1.ankle).toFixed(4), ball: +dist3(f0.ball, f1.ball).toFixed(3), heading: [f0.heading, f1.heading], ankleAngles: await fr.evaluate(() => window.PoseAndLight.pose.ankleL) };
+        const still = res.ankle < 0.005 && res.ball < 0.01 && Math.abs(res.heading[1] - res.heading[0]) < 3;
+        t.check(res.knee > 0.02 && still, 'Weight on one leg: the left knee\'s diamond dragged 40 px swings the knee while the foot stays where it was (ankle, ball of the foot and heading)', res);
+        if (res.knee > 0.02 && !still) t.finding({ title: 'Dragging a knee\'s diamond turns the foot on the floor once the ankle reaches its limit', severity: 'medium', steps: 'pose.html, Advanced, pick "Weight on one leg" from Poses, drag the blue diamond on the left knee 40 px to the right (Walk\'s left knee, 50 px, does the same)', expected: 'The README: a diamond at each elbow swings the elbow "with the hand held still", "and does the same for the knees": the foot stays where it stands, as the hand does', actual: `The ankle stays (${res.ankle} m) but the foot turns from ${res.heading[0]}° to ${res.heading[1]}° on the floor and the ball of the foot slides ${res.ball} m; the ankle sits at its turn limit (${JSON.stringify(res.ankleAngles)})`, cause: 'js/pose.js:1878 footTurn() keeps the foot\'s turn only within the ankle\'s limits (setTurn clamps at ±25° turn, ±20° roll, js/pose.js:337, 466-482), and the check at js/pose.js:1880 stops the swing only when the ankle\'s position moves or the leg goes into the floor, not when the foot\'s turn changes' });
+      }
+      // the whole figure by its arrows with the feet planted: Lean bends the legs, Raise waits for bent legs
+      await pick(fr, 'stand');
+      {
+        await fr.evaluate(() => { window.PoseAndLight.pick('root'); window.PoseAndLight.render(); });
+        const b0 = await balls(fr);
+        await pressArrow(page, fr, 'Lean forward', 3);
+        const b1 = await balls(fr), lean = await scan(fr), rx = await fr.evaluate(() => window.PoseAndLight.pose.root.x);
+        const raise = await fr.evaluate(() => { window.PoseAndLight.render(); return window.PoseAndLight.arrows().find((a) => a.label === 'Raise the body').disabled; });
+        await pressArrow(page, fr, 'Lower the body', 5);
+        const b2 = await balls(fr), lowered = await scan(fr), knees = await fr.evaluate(() => [window.PoseAndLight.worldPos('kneeR').y, window.PoseAndLight.worldPos('kneeL').y]);
+        t.check(rx === 18 && sane(lean) && dist3(b0.R, b1.R) < 0.01 && dist3(b0.L, b1.L) < 0.01 && raise, 'Stand, feet planted, the whole figure picked: Lean forward three times by keyboard leans 18° with both feet where they stood; Raise the body is disabled while the legs are straight', { rx, lean, balls: [dist3(b0.R, b1.R), dist3(b0.L, b1.L)], raise });
+        t.check(lowered.height < -0.1 && sane(lowered) && dist3(b0.R, b2.R) < 0.01 && dist3(b0.L, b2.L) < 0.01 && knees.every((y) => y >= 0.048), 'Lower the body five times, feet planted: the figure sinks into a crouch with both feet where they stood and the knees off the floor', { lowered, balls: [dist3(b0.R, b2.R), dist3(b0.L, b2.L)], knees });
+        await fr.evaluate(() => document.getElementById('plantFeet').click());
+        await pressArrow(page, fr, 'Lower the body', 2);
+        const free = await scan(fr);
+        await fr.evaluate(() => document.getElementById('plantFeet').click());
+        t.check(Math.abs(free.height - lowered.height) < 0.005 && free.low >= -0.002, 'Lower the body with the feet free: the figure stays on the floor rather than sinking into it', { free, was: lowered.height });
+      }
+      // Straighten, Copy to the other side and the arrows on a leg, and the floor
+      {
+        const floor = {};
+        await pick(fr, 'kneel');
+        await fr.evaluate(() => { window.PoseAndLight.pick('kneeR'); document.getElementById('straighten').click(); });
+        floor.kneelStraighten = (await scan(fr)).low;
+        await fr.evaluate(() => document.getElementById('ground').click());
+        floor.repaired = (await scan(fr)).low;
+        await pick(fr, 'stand');
+        await fr.evaluate(() => window.PoseAndLight.pick('ankleR'));
+        await pressArrow(page, fr, 'Point the toes', 3);
+        floor.pointToes = (await scan(fr)).low;
+        await pick(fr, 'dance');
+        await fr.evaluate(() => { window.PoseAndLight.pick('hipL'); document.getElementById('mirror').click(); });
+        floor.arabesqueCopy = (await scan(fr)).low;
+        t.check(floor.arabesqueCopy >= -0.002 && floor.arabesqueCopy <= 0.02, 'Arabesque: Copy to the other side on the standing leg leaves the figure on the floor', floor);
+        t.check(Math.abs(floor.repaired - 0.002) < 1e-3, 'Put the feet on the floor brings a figure sunk into the floor back onto it', floor);
+        const kneelOk = t.check(floor.kneelStraighten >= -0.002, 'Kneel: Straighten on the right shin (the one on the floor) keeps it above the floor', floor);
+        const toesOk = t.check(floor.pointToes >= -0.002, 'Stand: Point the toes three times on the right foot keeps the toes above the floor', floor);
+        if (!kneelOk || !toesOk) t.finding({ title: 'Straighten and the arrows put a leg through the floor', severity: 'medium', steps: 'pose.html, Advanced. (1) Poses → Kneel, tap the right shin (the one on the floor), press Straighten. (2) Poses → Stand, tap the right foot, press "Point the toes" three times', expected: 'The figure stays on the floor, as every drag keeps it (the rig\'s moves lift a sole that would dip, js/pose.js:1798-1825, and stop where a leg would go into the floor, js/pose.js:1876-1884), or stops where the floor stops it', actual: `(1) the straightened shin goes ${Math.abs(Math.min(0, floor.kneelStraighten)).toFixed(2)} m into the floor; (2) the toes go ${Math.abs(Math.min(0, floor.pointToes)).toFixed(3)} m into it. Both moves are remembered as they are (Undo, Where you left off); Put the feet on the floor repairs them`, cause: 'js/pose.js:999-1003: Straighten zeroes the part and calls applyPose() with no floor check (only the whole figure is grounded); js/pose.js:876-881: nudge() (every arrow) clamps the angle and calls applyPose() with no floor check unless the part is the hips' });
+      }
+      // Copy to the other side for a whole arm: the elbow and the hand come along, mirrored; none for the body
+      await pick(fr, 'wave');
+      {
+        const cp = await fr.evaluate(() => { const api = window.PoseAndLight; api.pick('shoulderL'); document.getElementById('mirror').click(); const p = JSON.parse(JSON.stringify(api.pose)); api.pick('waist'); const waist = document.getElementById('mirror').hidden; api.pick('neck'); const neck = document.getElementById('mirror').hidden; api.pick(null); return { sL: p.shoulderL, sR: p.shoulderR, eL: p.elbowL, eR: p.elbowR, wL: p.wristL, wR: p.wristR, waist, neck }; });
+        const m = (a, q) => q.x === a.x && q.y === -a.y && q.z === -a.z;
+        t.check(m(cp.sL, cp.sR) && m(cp.eL, cp.eR) && m(cp.wL, cp.wR) && cp.waist && cp.neck && sane(await scan(fr)), 'Wave: Copy to the other side on the left upper arm mirrors the whole arm, elbow and hand included; the body and the head have no Copy', cp);
+      }
+      // where the arrows sit: never two the same way, 44 px apart, clear of the small rig controls, ◉ ⊗ named
+      await pick(fr, 'stand');
+      {
+        const place = (part) => fr.evaluate((part) => {
+          const api = window.PoseAndLight; api.pick(part); api.render();
+          const ar = [...document.querySelectorAll('#arrows button')].map((x) => { const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(x.style.transform); const r = /rotate\(([-\d.e]+)rad\)/.exec((x.firstChild && x.firstChild.style.transform) || ''); return { label: x.getAttribute('aria-label'), x: m ? +m[1] : NaN, y: m ? +m[2] : NaN, rot: r ? +r[1] : null }; });
+          const ctrls = api.ctrls().filter((c) => c.center && c.kind !== 'ring').map((c) => ({ x: c.center.x, y: c.center.y, r: 22 + (c.kind === 'hand' ? c.rad : c.kind === 'foot' ? 14 : 10) }));
+          return { ar, ctrls, depth: !document.getElementById('partDepth').hidden };
+        }, part);
+        const judge = (r) => {
+          let apart = Infinity, clear = Infinity, ways = Infinity;
+          r.ar.forEach((a, i) => r.ar.slice(i + 1).forEach((q) => { apart = Math.min(apart, Math.hypot(a.x - q.x, a.y - q.y)); if (a.rot != null && q.rot != null) ways = Math.min(ways, Math.abs(Math.atan2(Math.sin(a.rot - q.rot), Math.cos(a.rot - q.rot))) * 180 / Math.PI); }));
+          r.ar.forEach((a) => r.ctrls.forEach((c) => { clear = Math.min(clear, Math.hypot(a.x - c.x, a.y - c.y) - c.r); }));
+          const toward = r.ar.filter((a) => / \(toward you\)$/.test(a.label)).length, away = r.ar.filter((a) => / \(away from you\)$/.test(a.label)).length;
+          return { n: r.ar.length, apart: +apart.toFixed(1), clear: +clear.toFixed(1), ways: +ways.toFixed(1), toward, away, depth: r.depth, ok: r.ar.length === 6 && apart >= 43.5 && clear >= -0.5 && ways > 15 && toward === away && r.depth === toward > 0 };
+        };
+        const placed = { shoulderR: judge(await place('shoulderR')) };
+        await fr.evaluate(() => { window.PoseAndLight.view.az = 90; window.PoseAndLight.placeCamera(); });
+        placed.neck = judge(await place('neck'));
+        placed.ankleL = judge(await place('ankleL'));
+        t.check(Object.values(placed).every((p) => p.ok), 'the arrows of the right upper arm (front), the head and the left foot (side): six each, 44 px apart, no two straight ones the same way, clear of the hand, foot, elbow and knee controls, ◉ and ⊗ named "toward you" and "away from you" exactly when the note about them shows', placed);
+        await fr.evaluate(() => { window.PoseAndLight.pick(null); document.getElementById('resetView').click(); });
+      }
+      // a part dragged by itself: the hips, tapped to pick them, then dragged sideways, turn the whole figure
+      await pick(fr, 'stand');
+      {
+        const at = await spotOn(fr, 'root');
+        if (!at) t.check(false, 'a spot on the hips that no rig control takes', 'none found');
+        else {
+          await page.mouse.click(b.x + at.x, b.y + at.y);
+          const picked = await fr.evaluate(() => window.PoseAndLight.picked());
+          const y0 = await fr.evaluate(() => window.PoseAndLight.pose.root.y), f0 = await footOf(fr, 'R');
+          await dragBy(page, fr, at, 100, 0);
+          const y1 = await fr.evaluate(() => window.PoseAndLight.pose.root.y), f1 = await footOf(fr, 'R');
+          const turned = (await turnBetween(fr, f0.q, f1.q)) * 180 / Math.PI;
+          t.check(picked === 'root' && Math.abs(y1 - y0 - 50) < 1 && Math.abs(turned - 50) < 2 && !(await fr.evaluate(() => document.getElementById('undo').disabled)), 'Advanced: a tap on the hips picks the whole figure, and the hips dragged 100 px sideways turn it 50°, the feet with it', { picked, y0, y1, feet: +turned.toFixed(1) });
+        }
+        // with the rig hidden, a tap 15 px beside the thin hand still picks it
+        await fr.evaluate(() => { window.PoseAndLight.pick(null); document.getElementById('showRig').click(); });
+        await pick(fr, 'stand');
+        const beside = await fr.evaluate(() => {
+          const api = window.PoseAndLight, T = window.THREE, v = document.getElementById('view');
+          const sc = (p) => { const q = p.clone().project(api.camera); return { x: (q.x + 1) / 2 * v.clientWidth, y: (1 - q.y) / 2 * v.clientHeight }; };
+          const a = sc(api.worldPos('wristR')), e = sc(api.tipWorld('wristR')), m = { x: (a.x + e.x) / 2, y: (a.y + e.y) / 2 };
+          const len = Math.hypot(e.x - a.x, e.y - a.y), nx = -(e.y - a.y) / len, ny = (e.x - a.x) / len;
+          const out = Math.abs(m.x + nx * 15 - v.clientWidth / 2) > Math.abs(m.x - nx * 15 - v.clientWidth / 2) ? 1 : -1;      // away from the body
+          const p = { x: m.x + out * nx * 15, y: m.y + out * ny * 15 };
+          const ray = new T.Raycaster(); ray.setFromCamera(new T.Vector2(p.x / v.clientWidth * 2 - 1, -(p.y / v.clientHeight) * 2 + 1), api.camera);
+          return { p, onFigure: ray.intersectObjects(api.parts, false).length > 0 };
+        });
+        await page.mouse.click(b.x + beside.p.x, b.y + beside.p.y);
+        const pickedBeside = await fr.evaluate(() => window.PoseAndLight.picked());
+        await fr.evaluate(() => { document.getElementById('showRig').click(); window.PoseAndLight.pick(null); });
+        t.check(!beside.onFigure && pickedBeside === 'wristR', 'with the rig controls hidden, a tap 15 px beside the right hand (off the figure) still picks the hand', { ...beside, picked: pickedBeside });
+      }
+      // the background dragged: the camera walks around (left 300 px is 120°), its height held between -8° and 80°
+      {
+        await fr.evaluate(() => { window.PoseAndLight.pick(null); document.getElementById('resetView').click(); });
+        const st = () => fr.evaluate(() => { const api = window.PoseAndLight; api.render(); return { view: { ...api.view }, picked: api.picked(), hand: api.ctrls().find((c) => c.id === 'handR').center, lamp: document.getElementById('lampHandle').dataset.x + ',' + document.getElementById('lampHandle').dataset.y, camY: +api.camera.position.y.toFixed(3), undo: document.getElementById('undo').disabled, saved: localStorage.getItem('pose-and-light.v2') }; });
+        const o0 = await st();
+        await dragBy(page, fr, { x: 8, y: b.height - 8 }, -300, -600);
+        const o1 = await st();
+        await dragBy(page, fr, { x: 8, y: 8 }, 0, 600);
+        const o2 = await st();
+        const inView = await fr.evaluate(() => { const api = window.PoseAndLight; return ['ankleR', 'ankleL', 'wristR', 'wristL'].map((j) => api.worldPos(j)).concat([api.tipWorld('neck')]).every((w) => { const p = w.project(api.camera); return Math.abs(p.x) < 1 && Math.abs(p.y) < 1; }); });
+        const sum = (o) => ({ view: o.view, picked: o.picked, camY: o.camY, lamp: o.lamp, hand: o.hand && [Math.round(o.hand.x), Math.round(o.hand.y)] });
+        t.check(Math.abs(o1.view.az - o0.view.az - 120) < 0.5 && o1.view.el === -8 && o1.picked === null && o1.camY > 0.25 && o1.lamp !== o0.lamp && Math.hypot(o1.hand.x - o0.hand.x, o1.hand.y - o0.hand.y) > 20 && o1.undo === o0.undo && o1.saved === o0.saved, 'the background dragged 300 px left and 600 px up: the camera walks 120° around and down to its lowest (-8°), above the floor, the rig and the lamp\'s handle redrawn, nothing picked, nothing remembered', [sum(o0), sum(o1)]);
+        t.check(o2.view.el === 80 && inView && o2.picked === null && o2.saved === o0.saved, 'and dragged 600 px down: the camera stops at 80° above, the figure still in view', { ...sum(o2), inView });
+        await fr.evaluate(() => document.getElementById('resetView').click());
+      }
+      // the library opened and a pose picked in the middle of a drag: the pose picked stays as picked
+      await pick(fr, 'stand');
+      {
+        const h = await ctrl(fr, 'handR');
+        await page.mouse.move(b.x + h.center.x, b.y + h.center.y); await page.mouse.down(); await page.mouse.move(b.x + h.center.x - 50, b.y + h.center.y - 80, { steps: 2 });
+        await fr.evaluate(() => document.getElementById('posesBtn').focus());
+        await page.keyboard.press('Enter');
+        const opened = await fr.evaluate(() => !document.getElementById('library').hidden);
+        await fr.evaluate(() => document.querySelector('#poses .pose-btn[data-id="walk"]').click());
+        const walk = await poseJson(fr);
+        await page.mouse.move(b.x + h.center.x - 120, b.y + h.center.y - 150, { steps: 2 });         // the pointer still down moves on
+        await page.mouse.up();
+        const after = await fr.evaluate((walk) => ({ kept: JSON.stringify(window.PoseAndLight.pose) === walk, hipR: window.PoseAndLight.pose.hipR.x, dragging: document.getElementById('view').classList.contains('is-dragging'), sheet: document.getElementById('library').hidden }), walk);
+        t.check(opened && after.hipR === -26 && !after.dragging && after.sheet, 'Poses opened by keyboard in the middle of a hand drag, Walk picked: the figure takes Walk and the drag ends with the pointer', { opened, ...after });
+        t.check(after.kept, 'and Walk stays as picked while the pointer, still down, moves on', after);
+        if (!after.kept) t.finding({ title: 'A drag in flight keeps posing the figure after a pose is picked from the library', severity: 'medium', steps: 'pose.html, Advanced, Stand. Hold a hand\'s circle and drag it a little; without letting go, open Poses (Tab to it and Enter, or a second finger on a tablet) and pick Walk; move the pointer (still down) and let go', expected: 'The library takes over: picking Walk ends the drag, and the figure stands in Walk as the library shows it', actual: 'Walk\'s right arm keeps following the pointer that started the drag before the library opened, and the changed Walk is remembered (saved as Where you left off, a step of its own in Undo)', cause: 'js/pose.js:1358-1367 openLibrary() makes the canvas inert but leaves `drag` and the canvas\'s pointer capture (js/pose.js:1938) in place, so pointermove (js/pose.js:1968-2000) goes on calling ctrlMove() on the new pose, and end() (js/pose.js:2008-2009) remembers it' });
+      }
+      await fr.evaluate((p) => { const api = window.PoseAndLight; api.setPose(JSON.parse(p)); api.pick(null); Object.assign(api.view, { az: 32, el: 8, dist: 5.2 }); api.placeCamera(); api.render(); }, keepPose);
+      await clean(t, page, 'standalone: more of the rig');
+      lap('more of the rig');
+    }
+
     // ---- Simple: fewer controls, the diamond of the arm last touched, no arrows ------------------------
     await fr.evaluate(() => document.querySelector('[data-mode="simple"]').click());
     const simpleCtrls = await fr.evaluate(() => { window.PoseAndLight.render(); return window.PoseAndLight.ctrls().filter((c) => c.center).map((c) => c.id).sort().join(' '); });
