@@ -804,43 +804,103 @@ export default async function gameMore(t, site) {
 }
 
 // ---- round two's helpers -----------------------------------------------------------------------------------
+// The wait budget (the idea of battle-more.mjs). Every wait of round two goes through limit(), miss() or waitFor(), directly or
+// through the helpers below (boardUp, ready2, setupReady, playing2, scored2, start2, lockIn2, toSetup2, idle2, photoIn, setupOn,
+// pick); the round-one helpers above (ready, playing, scored, start, lockIn, toSetup, studyIdle) wait their full time whatever has
+// missed, so round two does not use them. A wait that misses (its time up, its condition never true) marks the step it is in, and
+// each later wait in that step gives up after QUICK ms instead of its own time. So a step broken by one regression costs its first
+// generous wait and a few seconds per wait after it, not a generous wait each, and the next step still runs inside the case's time
+// limit. A loop stops at its first miss, with one failing check. A step that never misses waits exactly as long as it always did.
+// step() starts each step with a clean budget.
+const QUICK = 2000;
+let budget = { missed: null }; // the running step's first wait that missed, or null
+const limit = (ms) => (budget.missed ? Math.min(ms, QUICK) : ms);
+const miss = (what) => { if (!budget.missed) budget.missed = what; return false; };
+// a page wait: true when its condition came; otherwise false, and the step is marked missed under the name `what`
+const waitFor = (page, fn, arg, ms, what) => page.waitForFunction(fn, arg, { timeout: limit(ms) }).then(() => true, () => miss(what));
+// the setup has built its board and filled its menu (the note and the menu come in the same task that builds the board). Start is
+// enabled in the markup before any board exists, so ready2 alone proves nothing on a page that has only just loaded
+const boardUp = (page) => waitFor(page, () => document.getElementById('gamePreviewNote').textContent !== '' && document.getElementById('gamePalette').options.length > 0, null, 60000, 'the setup never built its board');
+const ready2 = (page, ms = 60000) => waitFor(page, () => !document.getElementById('gameStart').disabled, null, ms, 'Start painting did not come back');
+const setupReady = async (page) => (await boardUp(page)) && ready2(page);
+const playing2 = (page) => waitFor(page, () => !document.getElementById('gamePlay').hidden, null, 20000, 'Start painting did not open the game');
+const scored2 = (page) => waitFor(page, () => !document.getElementById('gameResult').hidden, null, 10000, 'Lock in portrait did not show the score');
+const start2 = async (page) => { await click(page, '#gameStart'); return playing2(page); };
+const lockIn2 = async (page) => { await click(page, '#gameLock'); return scored2(page); };
+const toSetup2 = async (page) => { await click(page, '#gamePopup [data-game="new"]'); return ready2(page); };
+const idle2 = (page) => waitFor(page, () => document.getElementById('busy').hidden, null, 30000, 'the Study did not finish its work');
+// a select set by the menu's own events (Playwright waits for the option to exist: that wait is budgeted too)
+const pick = (page, selector, value) => page.selectOption(selector, value, { timeout: limit(30000) });
+
 // a step of round two that throws (an element gone missing, a page that went away) fails its own check, its pages
-// are closed, and the case goes on to the next step
+// are closed, and the case goes on to the next step; a wait that missed in it is noted (the first one)
 async function step(t, site, label, fn) {
   const pages = [];
+  budget = { missed: null };
   const open = async (opts) => { const p = await openPage(site, opts); pages.push(p); return p; };
   try { await fn(open); } catch (e) { t.check(false, `${label}: the step ran to its end`, String((e && e.message) || e).split('\n')[0].slice(0, 300)); }
-  finally { for (const p of pages) await p.context().close().catch(() => null); }
+  finally {
+    if (budget.missed) t.note(`${label}: the first wait to miss was "${budget.missed}"; the waits after it in this step gave up after ${QUICK / 1000} s`);
+    for (const p of pages) await p.context().close().catch(() => null);
+  }
 }
 // ✕ twice in one go: the second tap lands inside the 3 s the first arms it for, however slow the machine is
 const quitNow = (page) => page.evaluate(() => { const q = document.getElementById('gameQuit'); if (!q) throw new Error('no #gameQuit'); q.click(); q.click(); });
 // back to the setup from wherever a step left the game: New portrait on the score, or ✕ twice mid-game
 async function backToSetup(page) {
   await page.evaluate(() => { const shown = (id) => !document.getElementById(id).hidden; if (shown('gameResult')) document.querySelector('#gamePopup [data-game="new"]').click(); else if (shown('gamePlay')) { const q = document.getElementById('gameQuit'); q.click(); q.click(); } }).catch(() => null);
-  return ready(page);
+  return ready2(page);
 }
 // a photo loaded and its study done: the Study names it by its base name and size, and owes no work (the busy pill,
-// which useSource shows in the same task as the new source, is hidden again)
-const photoIn = async (page, file, key, timeout = 120000) => { await loadPhoto(page, file, { settle: 0 }); return page.waitForFunction((k) => Studio.sourceKey() === k && document.getElementById('busy').hidden, key, { timeout }).then(() => true).catch(() => false); };
+// which useSource shows in the same task as the new source, is hidden again). The file goes in by the input itself, so that
+// the wait for the study is the budgeted one (lib's loadPhoto waits 30 s for the pill whatever has missed)
+const photoIn = async (page, file, key, ms = 120000) => {
+  await page.setInputFiles('#file', file, { timeout: limit(30000) });
+  return waitFor(page, (k) => Studio.sourceKey() === k && document.getElementById('busy').hidden, key, ms, `the Study did not take ${key}`);
+};
 // the game's setup showing the Study's photo now: its name, and a board of the Study's working size (a board is
 // built when the tab opens, or when a study arrives while it is open), then Start once its targets are mixed
-const setupOn = (page, base) => page.waitForFunction((b) => { const c = document.getElementById('gamePreview'); const p = Studio.prep(); return document.getElementById('gamePhotoName').textContent === `Painting from ${b}.` && !!p && c.width === p.w && c.height === p.h; }, base, { timeout: 60000 }).then(() => ready(page)).catch(() => false);
+const setupOn = async (page, base) => (await waitFor(page, (b) => { const c = document.getElementById('gamePreview'); const p = Studio.prep(); return document.getElementById('gamePhotoName').textContent === `Painting from ${b}.` && !!p && c.width === p.w && c.height === p.h; }, base, 60000, `the setup did not show ${base}`)) && ready2(page);
 // a first game locked in with nothing painted gives every number's recipe (Analyze); Same photo then mixes each to
 // it, so the second game scores well above 0 (a best of 0 is kept, but the setup shows none)
 async function playToRecipes(page) {
-  await start(page); await lockIn(page); await click(page, '#gameAnalyze');
+  if (!(await start2(page)) || !(await lockIn2(page))) return false;
+  await click(page, '#gameAnalyze');
   const recipes = (await zones(page)).map((r) => ({ k: r.n - 1, recipe: parseRecipe(r.tip) }));
   await click(page, '#gamePopup [data-game="again"]'); await click(page, '#againSame');
-  if (!(await playing(page))) return false;
+  if (!(await playing2(page))) return false;
   for (const { k, recipe } of recipes) { await click(page, `.game-number[data-number="${k}"]`); await mixExact(page, recipe); }
-  return lockIn(page);
+  return lockIn2(page);
+}
+// The value study the README's formula gives when one value is set on every number, worked out from the page's pixels alone: the
+// reference drawn as its color blocks (in the value stage the Blocks view shows the reference's own groups, edges off) is read pixel
+// by pixel, each pixel scoring 100 - 2.5 x |V - its L*| (floored at 0), averaged over the board. It knows nothing of the game's
+// groups, shares or Lab code, so it checks them. Blocks is switched on for the reading and Photo (the default) back on after it.
+async function valueStudyExpected(page, V) {
+  await click(page, '#tab-game [data-ref-view="blocks"]');
+  const read = await page.evaluate((V) => {
+    const c = document.getElementById('gameRef');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    const lin = (v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+    const lstar = (r, g, b) => { const y = 0.2126729 * lin(r) + 0.7151522 * lin(g) + 0.072175 * lin(b); return y > 216 / 24389 ? 116 * Math.cbrt(y) - 16 : (24389 / 27) * y; };
+    const seen = new Map();
+    for (let i = 0; i < d.length; i += 4) { const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2]; seen.set(k, (seen.get(k) || 0) + 1); }
+    let sum = 0;
+    for (const [k, n] of seen) sum += n * Math.max(0, 100 - 2.5 * Math.abs(V - lstar(k >> 16, (k >> 8) & 255, k & 255)));
+    return { acc: sum / (d.length / 4), colors: seen.size };
+  }, V);
+  await click(page, '#tab-game [data-ref-view="photo"]');
+  return read;
 }
 
 async function roundTwo(t, site, counts) {
   const STARS = [88, 78, 65, 50, 30];
   const GRADES = ['Keep mixing', 'Keep mixing', 'Getting there', 'Good eye', 'Sharp eye!', 'Master colorist!'];
   // the sample's three counts against the README's "about 8, 9 and 12" (the counts are read in block A)
-  t.check(Math.abs(counts.easy - 8) <= 2 && Math.abs(counts.medium - 9) <= 2 && Math.abs(counts.hard - 12) <= 3, 'the sample gives about 8, 9 and 12 numbers at Easy, Medium and Hard (README)', counts);
+  const WANT = { easy: [8, 2], medium: [9, 2], hard: [12, 3] };   // the README's count, and how far off still counts as "about"
+  t.check(Object.entries(WANT).every(([lv, [n, tol]]) => Math.abs(counts[lv] - n) <= tol), 'the sample gives about 8, 9 and 12 numbers at Easy, Medium and Hard (README)', counts);
+  // the tolerance stays; the counts are written down so that a drift towards its edge shows before it fails
+  t.note(`the sample's counts against the README's "about 8, 9 and 12", accepted within 2, 2 and 3: Easy ${counts.easy}, Medium ${counts.medium}, Hard ${counts.hard} (off by ${Object.entries(WANT).map(([lv, [n]]) => counts[lv] - n).join(', ')}${Object.entries(WANT).some(([lv, [n, tol]]) => Math.abs(counts[lv] - n) === tol) ? '; one of them is at the edge of its tolerance' : ''}).`);
 
   // My paints of two whites, and of two blacks: a palette that makes few colors must still start, score and analyze.
   // A new board selects its suggested palette (README: "marked suggested and chosen for you"; game.js renderPalettes,
@@ -848,14 +908,14 @@ async function roundTwo(t, site, counts) {
   for (const [label, codes] of [['two whites', ['TW', 'LW']], ['two blacks', ['IB', 'LB']]]) {
     await step(t, site, label, async (open) => {
       const page = await open({ url: '#game', storage: { [P + 'myPaints']: codes } });
-      const setup = await ready(page);
+      const setup = await setupReady(page);
       const offered = (await paletteOptions(page)).some((o) => o.value === 'mine');
-      if (offered) await page.selectOption('#gamePalette', 'mine');
-      const up = setup && offered && await ready(page);
+      if (offered) await pick(page, '#gamePalette', 'mine');
+      const up = setup && offered && await ready2(page);
       const s = await page.evaluate(() => ({ palette: document.getElementById('gamePalette').value, options: [...document.getElementById('gamePalette').options].map((o) => o.textContent), dots: document.querySelectorAll('#gamePaletteDots .paint-dot').length, hint: document.getElementById('gamePaletteHint').textContent }));
-      const began = up && await start(page);
+      const began = up && await start2(page);
       let locked = false;
-      if (began) { await tapPaint(page, await firstPaint(page), 2); locked = await lockIn(page); await click(page, '#gameAnalyze'); }
+      if (began) { await tapPaint(page, await firstPaint(page), 2); locked = await lockIn2(page); await click(page, '#gameAnalyze'); }
       const z = locked ? await zones(page) : [];
       const used = z.map((r) => parseRecipe(r.tip));
       t.check(began && locked && s.palette === 'mine' && s.options.some((o) => /^My paints \(2\)( \(suggested\))?$/.test(o)) && s.dots === 2 && z.length === counts.medium && used.every((rec) => rec.length && rec.every((x) => codes.includes(x.code))), `${label}: My paints of ${codes.join(' and ')} starts a game, and every number's recipe uses only those paints`, { ...s, setup, offered, began, locked, numbers: z.length, recipes: used.slice(0, 3) });
@@ -867,20 +927,25 @@ async function roundTwo(t, site, counts) {
   // (the paint tapped is the palette's first: the suggested palette on the sample need not have TW)
   await step(t, site, 'copy, quit and lock in', async (open) => {
     const page = await open({ url: '#game' });
-    await ready(page);
-    const began = await start(page);
+    await setupReady(page);
+    const began = await start2(page);
     await tapPaint(page, await firstPaint(page), 2); await click(page, '#gameCopy');
     const on = await page.evaluate(() => ({ bar: !document.getElementById('gameCopyBar').hidden, cls: document.getElementById('gamePlay').classList.contains('is-copying') }));
     await quitNow(page);
-    const setup = await ready(page);
-    const again1 = await start(page);
+    // the quit itself, before anything starts again: Start is enabled while it is hidden and a click on it begins a new game
+    // (startGame ends a copy too), so a ✕ twice that did nothing would pass everything below
+    const left = await page.evaluate(() => ({ playShown: !document.getElementById('gamePlay').hidden, setupShown: !document.getElementById('gameSetup').hidden }));
+    const quitted = !left.playShown && left.setupShown;
+    t.check(began && on.bar && on.cls && quitted, '✕ twice while copying leaves the game for the setup (the game hidden, the setup shown)', { began, on, left });
+    const setup = await ready2(page);
+    const again1 = await start2(page);
     const fresh = await page.evaluate(() => ({ bar: !document.getElementById('gameCopyBar').hidden, cls: document.getElementById('gamePlay').classList.contains('is-copying'), copy: document.getElementById('gameCopy').textContent }));
-    t.check(began && on.bar && on.cls && setup && again1 && !fresh.bar && !fresh.cls && fresh.copy === 'Copy mix', '✕ twice while copying quits to the setup, and the next game starts with no copy on', { began, on, setup, again1, fresh });
+    t.check(quitted && setup && again1 && !fresh.bar && !fresh.cls && fresh.copy === 'Copy mix', 'after ✕ twice from a copy, Start begins a new game with no copy on', { quitted, setup, again1, fresh });
     await tapPaint(page, await firstPaint(page), 1); await click(page, '#gameCopy');
-    const locked = await lockIn(page);
+    const locked = await lockIn2(page);
     const res = await page.evaluate(() => ({ result: !document.getElementById('gameResult').hidden, bar: !document.getElementById('gameCopyBar').hidden, cls: document.getElementById('gamePlay').classList.contains('is-copying') }));
     await click(page, '#gamePopup [data-game="again"]'); await click(page, '#againSame');
-    const playingAgain = await playing(page);
+    const playingAgain = await playing2(page);
     const again = await page.evaluate(() => ({ cls: document.getElementById('gamePlay').classList.contains('is-copying'), copy: document.getElementById('gameCopy').textContent, bar: !document.getElementById('gameCopyBar').hidden }));
     t.check(locked && res.result && !res.bar && !res.cls && playingAgain && !again.cls && !again.bar && again.copy === 'Copy mix', 'Lock in while copying shows the result with the copy bar gone; Same photo starts with no copy on', { locked, res, playingAgain, again });
     await clean(t, page, 'copy, quit and lock in');
@@ -891,14 +956,14 @@ async function roundTwo(t, site, counts) {
   // "later1:300x420"), then the level and palette, joined by |
   await step(t, site, "'|' in a file name", async (open) => {
     const page = await open({ url: '#game' });
-    await ready(page);
+    await setupReady(page);
     const loaded = await photoIn(page, await makeImage(page, { width: 400, height: 500, name: 'a|medium|zorn.png' }), 'a|medium|zorn:400x500');
     const up = loaded && await setupOn(page, 'a|medium|zorn');
     const name = await text(page, '#gamePhotoName');
     const scoredWell = await playToRecipes(page);
     const pts = await text(page, '#gamePoints');
     const keys = Object.keys(await bests(page));
-    await toSetup(page);
+    await toSetup2(page);
     const best = await text(page, '#gameBest');
     t.check(up && name === 'Painting from a|medium|zorn.' && scoredWell && +pts > 0 && keys.some((k) => k.startsWith('a|medium|zorn:400x500|medium|')) && best === `Your best on this portrait at this level in Classic mode: ${pts} points`, "a photo named a|medium|zorn.png: its best is kept under its name and the setup reads it back", { loaded, name, keys, best, pts });
     await clean(t, page, "'|' in a file name");
@@ -907,54 +972,72 @@ async function roundTwo(t, site, counts) {
   // the Study's working size: the board is the photo at that size (README: "with the same working size"), and it stays put mid-game
   await step(t, site, 'working size', async (open) => {
     const page = await open();
-    await click(page, '[data-mode="advanced"]'); await studyIdle(page);
+    await click(page, '[data-mode="advanced"]'); await idle2(page);
     const loaded = await photoIn(page, await makeImage(page, { width: 1500, height: 1900, name: 'big.png' }), 'big:1500x1900');
-    // a change of the select re-runs the study: the busy pill shows in that same task, so studyIdle waits for it all
-    const setDetail = async (v) => { await page.evaluate((v) => { const s = document.getElementById('detail'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }, v); await studyIdle(page); };
+    // a change of the select re-runs the study: the busy pill shows in that same task, so idle2 waits for it all
+    const setDetail = async (v) => { await page.evaluate((v) => { const s = document.getElementById('detail'); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); }, v); await idle2(page); };
     const longSide = () => page.evaluate(() => { const c = document.getElementById('gamePreview'); return Math.max(c.width, c.height); });
     // the setup's board once it has followed the study (rebuilt when the tab opens on a new one) and Start is back
-    const boardAt = (n) => page.waitForFunction((n) => { const c = document.getElementById('gamePreview'); return Math.max(c.width, c.height) === n && !document.getElementById('gameStart').disabled; }, n, { timeout: 60000 }).then(() => true).catch(() => false);
+    const boardAt = (n) => waitFor(page, (n) => { const c = document.getElementById('gamePreview'); return Math.max(c.width, c.height) === n && !document.getElementById('gameStart').disabled; }, n, 60000, `the setup's board did not follow the Study to ${n} px`);
+    // the game as the player sees it: the board's size, the selected number and its mix (the title, the parts line, the chip's
+    // color and the count on each paint), and how many numbers are painted
+    const gameNow = () => page.evaluate(() => ({
+      size: [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height],
+      title: document.getElementById('gameMixTitle').textContent,
+      mix: document.getElementById('gameMixParts').textContent.replace(/ /g, ' '),
+      chip: document.getElementById('gameMixChip').style.background,
+      counts: [...document.querySelectorAll('#gamePaints .game-paint')].map((b) => [b.querySelector('.game-paint-code').textContent, b.querySelector('.game-paint-count').textContent]).filter(([, n]) => n),
+      progress: document.getElementById('gameProgress').textContent,
+    }));
     await setDetail('600'); await tab(page, 'game'); await boardAt(600);
     const at600 = await longSide();
     await tab(page, 'study'); await setDetail('1400'); await tab(page, 'game'); await boardAt(1400);
     const at1400 = await longSide();
     t.check(loaded && at600 === 600 && at1400 === 1400, "the setup's board is the Study's photo at the Study's working size (600, then 1400 px on the long side)", { loaded, at600, at1400 });
-    await start(page); await tapPaint(page, await firstPaint(page), 2);
-    const sizeBefore = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height]);
+    await start2(page); await tapPaint(page, await firstPaint(page), 2);
+    const before = await gameNow();
     await tab(page, 'study'); await setDetail('600'); await tab(page, 'game');
-    const sizeAfter = await page.evaluate(() => [document.getElementById('gameCanvas').width, document.getElementById('gameCanvas').height]);
-    const prog = await progress(page);
-    t.check((await visible(page, '#gamePlay')) && sizeAfter.join('x') === sizeBefore.join('x') && prog === `1 of ${await numberCount(page)} numbers painted`, 'a working size changed on the Study mid-game leaves the board, its size and its paints as they were', { sizeBefore, sizeAfter, prog });
-    await lockIn(page); await toSetup(page); await boardAt(600);
+    const after = await gameNow();
+    t.check((await visible(page, '#gamePlay')) && before.mix !== '' && before.counts.length > 0 && J(after) === J(before) && after.progress === `1 of ${await numberCount(page)} numbers painted`, 'a working size changed on the Study mid-game leaves the board, its size and its paints as they were (the board, the selected number, its mix, the paints\' counts, the painted count)', { before, after });
+    await lockIn2(page); await toSetup2(page); await boardAt(600);
     t.check((await longSide()) === 600, 'Change settings then shows the board at the new working size', await longSide());
     await clean(t, page, 'working size');
   });
 
   // the score's arithmetic in every mode and both other levels: one tap of a paint on every number (so every number is
-  // painted and the time bonus counts), then the breakdown is worked back into the points it adds up to
+  // painted and the time bonus counts), then the breakdown is worked back into the points it adds up to. For the color part the
+  // percentage is the game's own (the rows check that the breakdown adds up and the clock's bonus is within the second it shows);
+  // Value first is also checked against the README's formula from the page's pixels (valueStudyExpected)
   await step(t, site, 'arithmetic', async (open) => {
     const page = await open({ url: '#game' });
-    await ready(page);
+    if (!(await setupReady(page))) t.check(false, 'arithmetic: the setup built its board and Start painting is enabled');
     const sec = { easy: 360, medium: 300, hard: 480 };
     const names = { classic: 'Classic', relaxed: 'Relaxed', memory: 'Memory', value: 'Value first', mystery: 'Mystery palette' };
+    const VALUE = 50;   // the value set on every number in Value first
     for (const [lv, mode] of [['easy', 'classic'], ['hard', 'classic'], ['medium', 'relaxed'], ['medium', 'memory'], ['medium', 'value'], ['medium', 'mystery']]) {
+      if (budget.missed) break;   // a wait has missed: the rows after it would only wait for the same thing
       const row = `${lv[0].toUpperCase()}${lv.slice(1)}, ${names[mode]}`;
       try {
-        await click(page, `#game${lv[0].toUpperCase()}${lv.slice(1)}`); await ready(page);
-        await page.selectOption('#gameMode', mode); await ready(page);
-        if (mode !== 'mystery') { await page.selectOption('#gamePalette', 'zorn'); await ready(page); }
-        if (!(await start(page))) throw new Error('Start painting did not open the game');
+        // the level, the mode and the palette are set one after the other (each is handled in its own task, and each takes
+        // Start away until the reference is mixed from the palette), then Start is waited for once
+        await click(page, `#game${lv[0].toUpperCase()}${lv.slice(1)}`);
+        await pick(page, '#gameMode', mode);
+        if (mode !== 'mystery') await pick(page, '#gamePalette', 'zorn');
+        if (!(await ready2(page))) throw new Error('Start painting did not come back after the level, mode and palette were set');
+        if (!(await start2(page))) throw new Error('Start painting did not open the game');
         // Memory: Ready hides the reference and starts the clock; pressed only while the look is on (in the same task as
         // the read), since the look ends by itself after 10 s and Lock in would then score an empty board
         if (mode === 'memory') await page.evaluate(() => { const b = document.getElementById('gameLock'); if (b.textContent === 'Ready: hide it') b.click(); });
         const n = await numberCount(page);
+        let want = null;   // Value first: the value study the formula gives for VALUE on every number
         if (mode === 'value') {
-          for (let k = 0; k < n; k++) { await click(page, `.game-number[data-number="${k}"]`); await setRange(page, 'gameValueRange', (k * 37) % 101); }
+          for (let k = 0; k < n; k++) { await click(page, `.game-number[data-number="${k}"]`); await setRange(page, 'gameValueRange', VALUE); }
+          want = await valueStudyExpected(page, VALUE);
           await click(page, '#gameLock');
-          await page.waitForFunction(() => document.getElementById('gameLock').textContent === 'Lock in portrait', null, { timeout: 10000 }).catch(() => null);
+          if (!(await waitFor(page, () => document.getElementById('gameLock').textContent === 'Lock in portrait', null, 10000, 'Done with values did not move on to the color stage'))) throw new Error('Done with values did not move on to the color stage');
         }
         for (let k = 0; k < n; k++) { await click(page, `.game-number[data-number="${k}"]`); await tapPaint(page, await firstPaint(page), 1 + (k % 3)); }
-        if (!(await lockIn(page))) throw new Error('Lock in portrait did not show the score');
+        if (!(await lockIn2(page))) throw new Error('Lock in portrait did not show the score');
         const b = await breakdown(page); const s = await popup(page);
         const acc = /^(\d+)% · (\d+)$/.exec(b['Color accuracy'] || '');
         const cp = acc ? +acc[1] : NaN, colorPts = acc ? +acc[2] : NaN;
@@ -965,16 +1048,20 @@ async function roundTwo(t, site, counts) {
         const points = +(await text(page, '#gamePoints'));
         const lo = tl ? 200 * (shown - 1) / sec[lv] * (cp / 100) : 0, hi = tl ? 200 * shown / sec[lv] * (cp / 100) : 0;   // the clock shows whole seconds, rounded up
         const timeOk = mode === 'relaxed' ? (/^\d+:\d\d · \+0 \(no clock\)$/.test(b['Time taken'] || '') && !('Time left' in b)) : (!!tl && bonus >= lo - 0.5 && bonus <= hi + 0.5);
-        const colorsOk = mode === 'value' ? (valuePct === valuePts && valuePts >= 0 && valuePts <= 100 && colorPts === cp * 9) : (!vr && colorPts === cp * 10);
+        // the shown percentage is a rounded one and the pixels carry the shapes' edges as the game's shares do not: two points of 100
+        const valueOk = !!want && Math.abs(valuePct - want.acc) <= 2 && Math.abs(valuePts - want.acc) <= 2;
+        const colorsOk = mode === 'value' ? (valuePct === valuePts && valuePts >= 0 && valuePts <= 100 && valueOk && colorPts === cp * 9) : (!vr && colorPts === cp * 10);
         const starsWant = STARS.filter((m) => cp >= m).length;
         const sums = points === colorPts + valuePts + (mode === 'relaxed' ? 0 : bonus) && +s.points === points;
         const shows = b.Mode === names[mode] && s.stars === starsWant && s.grade === GRADES[starsWant] && s.starsLabel === `${starsWant} out of 5 stars, ${cp}% color match`;
         const how = mode === 'relaxed' ? 'no time bonus' : `time left ${shown && `${Math.floor(shown / 60)}:${String(shown % 60).padStart(2, '0')}`} of ${sec[lv] / 60} minutes, bonus +${bonus}`;
-        t.check(Number.isFinite(cp) && colorsOk && timeOk && sums && shows, `${row}: ${cp}% of colors ×${mode === 'value' ? 9 : 10} = ${colorPts}${mode === 'value' ? `, value ${valuePct}% = +${valuePts}` : ''}, ${how}: ${points} points`, { b, points, lo, hi, stars: s.stars, grade: s.grade, starsLabel: s.starsLabel });
+        const valueSaid = mode === 'value' ? `, value study ${valuePct}% = +${valuePts} (the README's formula on the reference's pixels, every number set to ${VALUE}: ${want && want.acc.toFixed(1)}%)` : '';
+        t.check(Number.isFinite(cp) && colorsOk && timeOk && sums && shows, `${row}: the breakdown adds up: ${cp}% of colors ×${mode === 'value' ? 9 : 10} = ${colorPts}${valueSaid}, ${how}: ${points} points`, { b, points, lo, hi, want, stars: s.stars, grade: s.grade, starsLabel: s.starsLabel });
       } catch (e) {
         t.check(false, `${row}: the score's arithmetic ran to its end`, String((e && e.message) || e).split('\n')[0].slice(0, 300));
+        if (budget.missed) break;
       }
-      await backToSetup(page);
+      if (!(await backToSetup(page))) { t.check(false, `${row}: the setup came back for the next row`); break; }
     }
     await clean(t, page, 'arithmetic');
   });
@@ -983,14 +1070,14 @@ async function roundTwo(t, site, counts) {
   // pop-up says (README: "a browser that refuses storage keeps it for the visit, and the pop-up says so")
   await step(t, site, 'storage refused', async (open) => {
     const page = await open({ url: '#game' });
-    await ready(page);
+    await setupReady(page);
     await page.evaluate(() => { Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); }; });
     const scoredWell = await playToRecipes(page);
     const s = await popup(page);
     const said = await text(page, '#gameNewBest');
     t.check(scoredWell && s.shown && /^\d+$/.test(await text(page, '#gamePoints')) && s.grade !== '', 'storage that refuses writes: the score still pops up with its points and grade', s);
     const pts = await text(page, '#gamePoints');
-    await toSetup(page);
+    await toSetup2(page);
     const best = await text(page, '#gameBest');
     t.check(+pts > 0 && s.newBest && said === 'New best! (this visit only)' && best === `Your best on this portrait at this level in Classic mode: ${pts} points`, 'storage that refuses writes: the pop-up says the new best is kept for this visit only, and the setup shows it', { pts, newBest: s.newBest, said, best });
     await clean(t, page, 'storage refused');
@@ -1005,8 +1092,13 @@ async function roundTwo(t, site, counts) {
       await tab(page, 'game');
       const up = loaded && await setupOn(page, base);
       const nums = {};
-      for (const lv of ['easy', 'medium', 'hard']) { await click(page, `#game${lv[0].toUpperCase()}${lv.slice(1)}`); await ready(page); nums[lv] = parseInt(await text(page, '#gamePreviewNote')); }
+      for (const lv of ['easy', 'medium', 'hard']) {
+        await click(page, `#game${lv[0].toUpperCase()}${lv.slice(1)}`);
+        if (!(await ready2(page))) break;   // the check below fails on the count that did not come
+        nums[lv] = parseInt(await text(page, '#gamePreviewNote'));
+      }
       t.check(up && nums.easy >= 1 && nums.easy <= nums.medium && nums.hard >= nums.medium, `${label}: Easy has no more numbers than Medium, and Hard no fewer (${nums.easy}, ${nums.medium}, ${nums.hard})`, { up, ...nums });
+      if (budget.missed) break;   // a wait has missed: the next picture would only wait for the same thing
     }
     await clean(t, page, 'other pictures');
   });
@@ -1020,26 +1112,47 @@ async function roundTwo(t, site, counts) {
     await probe.context().close();
     const page = await open({ viewport: PHONE, url: '#game', storage: { [P + 'myPaints']: codes } });
     // the menu is filled once the board is built and every palette rated, My paints of 77 among them
-    const rated = await page.waitForFunction(() => [...document.getElementById('gamePalette').options].some((o) => o.value === 'mine'), null, { timeout: 180000 }).then(() => true).catch(() => false);
+    const rated = await waitFor(page, () => [...document.getElementById('gamePalette').options].some((o) => o.value === 'mine'), null, RATE_MS, 'the menu never offered My paints');
     const opts = await page.evaluate(() => [...document.getElementById('gamePalette').options].map((o) => o.textContent).filter((x) => /My paints/.test(x)));
     const offered = opts.some((o) => o === `My paints (${codes.length})` || o === `My paints (${codes.length}) (suggested)`);
     t.check(rated && offered, `with all ${codes.length} paints ticked: My paints (${codes.length}) is offered in the setup`, { rated, opts });
-    if (offered && (await page.evaluate(() => document.getElementById('gamePalette').value)) !== 'mine') await page.selectOption('#gamePalette', 'mine');
+    if (offered && (await page.evaluate(() => document.getElementById('gamePalette').value)) !== 'mine') await pick(page, '#gamePalette', 'mine');
+    const chosen = offered ? await page.evaluate(() => document.getElementById('gamePalette').value) : null;
+    t.check(chosen === 'mine', `with all ${codes.length} paints ticked: My paints is the palette chosen`, { chosen });
     const t0 = Date.now();
-    const up = offered && await page.waitForFunction(() => document.getElementById('gamePalette').value === 'mine' && !document.getElementById('gameStart').disabled, null, { timeout: 480000 }).then(() => true).catch(() => false);
+    const up = chosen === 'mine' && await waitFor(page, () => !document.getElementById('gameStart').disabled, null, MIX_MS, `Start painting did not come back with all ${codes.length} paints`);
     const waited = Math.round((Date.now() - t0) / 1000);
-    t.note(up ? `My paints with all ${codes.length} paints: Start came back ${waited} s after the menu was filled (the setup mixing the reference from all of them).` : `My paints with all ${codes.length} paints: Start still disabled after ${waited} s; the hint says ${JSON.stringify(await text(page, '#gamePaletteHint'))}.`);
+    const hint = await text(page, '#gamePaletteHint');
+    t.check(up, `with all ${codes.length} paints ticked: Start painting comes back once the setup has mixed the reference from them`, { waited, hint });
+    t.note(up ? `My paints with all ${codes.length} paints: Start came back ${waited} s after the menu was filled (the setup mixing the reference from all of them).` : `My paints with all ${codes.length} paints: Start still disabled after ${waited} s; the hint says ${JSON.stringify(hint)}.`);
     if (up) {
-      await start(page);
-      // the paints' scroll bar shows once the row is laid out (a frame after Start)
-      await page.waitForFunction(() => document.getElementById('gamePlay').classList.contains('has-scroll'), null, { timeout: 5000 }).catch(() => null);
-      const sb = await page.locator('#gamePaintScroll').boundingBox();
-      if (sb) await page.mouse.click(sb.x + sb.width - 4, sb.y + sb.height / 2);
+      const began = await start2(page);
+      // the paints' scroll bar shows once the row is laid out (a frame after Start): without it the phone cannot reach the last paints
+      const barUp = began && await waitFor(page, () => document.getElementById('gamePlay').classList.contains('has-scroll'), null, 5000, 'the paints scroll bar did not show');
+      const sb = barUp ? await page.locator('#gamePaintScroll').boundingBox({ timeout: limit(5000) }).catch(() => null) : null;
+      t.check(began && barUp && !!sb && sb.width > 0, `with all ${codes.length} paints on the phone: the row of paints is too wide for the screen and its scroll bar shows`, { began, barUp, scrollBar: sb });
       const last = codes[codes.length - 1];
+      let slid = null;   // where the row stands after a tap at the far end of the bar, and whether the last paint is inside it
+      if (sb) {
+        await page.mouse.click(sb.x + sb.width - 4, sb.y + sb.height / 2);
+        slid = await page.evaluate((code) => {
+          const ul = document.getElementById('gamePaints');
+          const b = [...ul.querySelectorAll('.game-paint')].find((x) => x.querySelector('.game-paint-code').textContent === code);
+          const u = ul.getBoundingClientRect(), r = b ? b.getBoundingClientRect() : null;
+          return { scrollLeft: Math.round(ul.scrollLeft), max: ul.scrollWidth - ul.clientWidth, lastInside: !!r && r.left >= u.left - 1 && r.right <= u.right + 1 };
+        }, last);
+      }
+      t.check(!!slid && slid.scrollLeft > 0 && slid.lastInside, `with all ${codes.length} paints: a tap at the far end of the scroll bar slides the row to the last paint (${last}), which is then inside it`, slid);
       await tapPaint(page, last, 1);
-      t.check((await mix(page)).startsWith(last + ' ') && (await hscroll(page)) <= 0, `with all ${codes.length} paints: the last paint takes a part after the scroll bar, no sideways scroll on the phone`, { mix: await mix(page), scrollBar: sb });
-      await lockIn(page);
-      t.check((await popup(page)).shown && (await text(page, '#gamePoints')) !== '', 'with all paints mixed in: the game locks in and scores', await text(page, '#gamePoints'));
+      t.check((await mix(page)).startsWith(last + ' ') && (await hscroll(page)) <= 0, `with all ${codes.length} paints: the last paint takes a part, no sideways scroll on the phone`, { mix: await mix(page), hscroll: await hscroll(page) });
+      const numbers = await numberCount(page);
+      const locked = await lockIn2(page);
+      await click(page, '#gameAnalyze');
+      const z = locked ? await zones(page) : [];
+      const used = z.map((r) => parseRecipe(r.tip));
+      const known = new Set(codes);
+      const points = await text(page, '#gamePoints');
+      t.check(locked && (await popup(page)).shown && points !== '' && z.length === numbers && used.every((rec) => rec.length && rec.every((x) => known.has(x.code))), `with all ${codes.length} paints ticked and the last one tapped: the game locks in and scores, and every number's recipe is non-empty and uses only those paints`, { locked, points, numbers, zones: z.length, recipes: used.slice(0, 3) });
     }
     await clean(t, page, 'seventy-seven paints');
   });
