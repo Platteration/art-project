@@ -204,8 +204,9 @@ seg('roundtrip', 60, async (t, site, pages) => {
   await click(page, '[data-sketch-show="0"]');
   const turned = await paperSize(page);
   await line(page, 0.8);
+  const strokeDone = Date.now();
   const locked = await lockMix(page, 2);
-  const rec = await waitRecord(page, (r) => r.sketchShown === false);
+  const rec = await waitRecord(page, (r) => r.sketchShown === false && r.savedAt > strokeDone);
   const before = await dumpOf(page);
   t.check(!!rec && rec.canvas && rec.canvas.ground === 'wash' && rec.canvas.weave === 'linen' && Math.abs(rec.canvas.washStr - 0.45) < 0.01, 'the Studio saved its ground, wash strength and texture with the painting', rec);
   t.check(turned.w > turned.h && !!rec && rec.w === turned.w && rec.h === turned.h, 'the Studio saved the paper turned to landscape, at its size', { turned, rec });
@@ -214,7 +215,10 @@ seg('roundtrip', 60, async (t, site, pages) => {
     await reload(page);
     const label = round === 1 ? 'after a reload' : 'after a second reload';
     const after = await dumpOf(page);
-    t.check(J(after) === J(before), `${label}: the page rewrote none of the ${Object.keys(before).length} saved values`, Object.keys(after).filter((k) => after[k] !== before[k]).concat(Object.keys(before).filter((k) => !(k in after))));
+    // (gamePainting holds the portrait last dealt, so the next one is never the same: it changes by design)
+    const rewritten = Object.keys(after).filter((k) => after[k] !== before[k] && k !== P + 'gamePainting').concat(Object.keys(before).filter((k) => !(k in after)));
+    t.check(rewritten.length === 0, `${label}: the page rewrote none of the ${Object.keys(before).length} saved values`, rewritten);
+    t.check(/^[a-z]+-\d+$/.test(JSON.parse(after[P + 'gamePainting'] || '""')), `${label}: the last painting dealt is kept as a portrait id`, after[P + 'gamePainting']);
     t.check(await app(page).evaluate(() => !document.body.classList.contains('mode-simple')) && (await pressed(page, '[data-mode="advanced"]')) === 'true', `${label}: Advanced is still chosen`);
     t.check((await checked(page, '#smoothSoft')) === true && (await checked(page, '#smoothEdge')) === false, `${label}: Soft smoothing is still chosen`);
     t.check((await val(page, '#lean')) === '30' && (await text(page, '#leanOut')) === '30%', `${label}: Lean toward lighter tones still reads 30%`, [await val(page, '#lean'), await text(page, '#leanOut')]);
@@ -269,6 +273,90 @@ seg('roundtrip', 60, async (t, site, pages) => {
   t.check(back.mine === 1, 'the saved pose is in the library', back.mine);
   await clean(t, pose, 'roundtrip: Pose and light');
 });
+
+// ---- segment: older ---------------------------------------------------------------------------------------------------------------
+// What earlier versions of the site saved (found with git log -p on js/): the keys of tabs that were taken out (Paint it in steps,
+// Train your eye, the warm / cool map, the first My paints lists), the Value battle's best under a level and then under a count only,
+// the Paint by numbers subject with its portrait, preset ids and paint codes that are gone (zorn-ub, classic, earth; W, CR, CY), the
+// Figure study class saved as the poses chosen (ids) and not the poses taken out, drawers of tabs that went, and Pose and light's
+// first light (az and el only) and a saved pose with no viewpoint.
+const OLD = {
+  [P + 'battleLevel']: '"hard"',
+  [P + 'battleBest']: { 'zorn:easy': 7, 'zorn:mix': 12, 'primary:3': 4 },
+  [P + 'battlePalette']: '"zorn-ub"',
+  [P + 'gamePalette']: '"classic"',
+  [P + 'gameSubject']: { kind: 'painting', id: 'rembrandt-12' },
+  [P + 'gamePainting']: '"rembrandt-12"',
+  [P + 'gameBest']: { 'sample-study:600x750|medium|zorn': 640, 'sample-study:600x750|hard|classic': 500 },
+  [P + 'gameLevel']: '"hard"',
+  [P + 'myPaints']: ['W', 'CR', 'CY', 'YO', 'IB', 'AC'],
+  [P + 'paintChoice']: { source: 'preset', preset: 'earth', max: 6 },
+  [P + 'paintMixes']: [{ parts: [{ code: 'W', amount: 2 }, { code: 'YO', amount: 1 }] }],
+  [P + 'figureStudy']: { mode: 'timed', secs: 30, ids: ['stand', 'walk', 'sit'] },
+  [P + 'paints']: { active: 'mine', lists: { mine: ['W', 'CR'] }, show: true },
+  [P + 'lesson-step']: '3', [P + 'next-step-only']: 'true',
+  [P + 'eye-stats']: { rounds: 12, right: 9 }, [P + 'temp']: { axis: 'warm', mode: 'x', detail: 1, gain: 1, fade: 1 },
+  [P + 'drawers']: ['values', 'steps', 'eye', 'swatches'],
+  [PL + 'v2']: { pose: { shoulderL: { z: 90 } }, light: { az: 100, el: 20 } },
+  [PL + 'mine.v1']: [{ id: 'mine-1730000000000', p: { kneeR: { x: 40 } } }],
+};
+seg('older', 55, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await appUp(page);
+  await put(page, OLD);
+  await reload(page);
+  t.check(await app(page).evaluate(() => document.getElementById('toast').textContent.trim() === '' || !/could not be read|went wrong/i.test(document.getElementById('toast').textContent)), 'with the keys of earlier versions saved, the page opens without saying something went wrong', await toastNow(page));
+  await clean(t, page, 'older: opening');
+  t.check(await app(page).evaluate(() => document.getElementById('drawer-values').open && document.getElementById('drawer-swatches').open && !document.getElementById('drawer-colors').open), 'the saved drawers that still exist are open; the names of drawers that went are ignored');
+  // Colors and paints: the old preset id is no preset, the old codes are not paints, the new ones are kept
+  await click(page, '[data-mode="advanced"]');
+  const paints = await app(page).evaluate(() => ({ mine: document.getElementById('mineCount').textContent, source: document.querySelector('input[name="paintSource"]:checked').value, pressed: [...document.querySelectorAll('#presetList .preset')].filter((b) => b.getAttribute('aria-pressed') === 'true').length, max: document.getElementById('paintMax').value }));
+  t.check(/3/.test(paints.mine), 'My paints keeps the three codes that exist (YO, IB, AC) and drops W, CR and CY, which are gone', paints.mine);
+  t.check(paints.source === 'preset' && paints.max === '6', 'the saved choice (known palettes, six paints) is read; the palette "earth" of an earlier version is not a palette now', paints);
+  // Value battle
+  await tab(page, 'battle');
+  const vb = await app(page).evaluate(() => { const s = document.getElementById('vb-palette'); return { value: s.value, ok: [...s.options].some((o) => o.value === s.value), best: document.getElementById('vb-best').textContent, count: document.querySelector('input[name="vbCount"]:checked').value, mode: document.querySelector('input[name="vbMode"]:checked').value }; });
+  t.check(vb.ok && vb.value !== 'zorn-ub', 'Value battle: the palette "zorn-ub" of an earlier version is not on the menu, and the menu holds a palette that exists', vb);
+  t.check(/^(No streak yet for these settings\.|Your best streak here: \d+ in a row\.)$/.test(vb.best), 'Value battle: the best line reads as a best line, whatever the old keys said', vb.best);
+  const streak = await battleStreak(page, 1);
+  const bests = JSON.parse(await storageGet(page, P + 'battleBest'));
+  t.check(streak.popup && /New best/.test(streak.newBest) && bests && typeof bests === 'object' && Object.values(bests).every((v) => Number.isInteger(v)), 'Value battle: a streak played on top of the old record is kept as a new best, and the record is still numbers', { streak, bests });
+  t.check(['zorn:easy', 'zorn:mix', 'primary:3'].every((k) => k in bests), 'Value battle: the earlier version\'s entries are left where they were (they age out with the fifty)', Object.keys(bests));
+  // Paint by numbers
+  await tab(page, 'game'); await gameReady(page);
+  const g = await app(page).evaluate(() => { const s = document.getElementById('gamePalette'); return { palette: s.value, ok: [...s.options].some((o) => o.value === s.value), options: [...s.options].map((o) => o.value), subject: document.querySelector('input[name="gameSubject"]:checked').value, name: document.getElementById('gamePaintingName').textContent, level: document.querySelector('input[name="gameLevel"]:checked').value, best: document.getElementById('gameBest').textContent }; });
+  t.check(g.ok && g.palette !== 'classic', 'Paint by numbers: the palette "classic" of an earlier version is not on the menu, and the menu holds a palette that exists', g);
+  t.check(g.options.includes('mine'), 'Paint by numbers: the three paints that survive (two are enough) make a My paints palette', g.options);
+  t.check(g.subject === 'painting' && /after (Rembrandt|Zorn|Sargent|Sorolla|Velázquez|Frans Hals|Vermeer)\.$/.test(g.name), 'Paint by numbers: a painting saved by its id is a painting subject, with a portrait dealt and named', g);
+  t.check(g.level === 'hard' && !/NaN|undefined|null/.test(g.best), 'Paint by numbers: the saved level is read and the best line carries no NaN', g);
+  // Figure study
+  await tab(page, 'figure', { wait: false });
+  await app(page).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
+  const fig = await app(page).evaluate(() => ({ timed: document.getElementById('fig-timed').checked, t30: document.getElementById('fig-t30').checked, out: document.querySelectorAll('#tab-figure .fig-pose[aria-pressed="false"]').length, all: document.querySelectorAll('#tab-figure .fig-pose').length, note: document.getElementById('fig-mix').textContent }));
+  t.check(fig.timed && fig.t30 && fig.out === 0 && fig.all >= 30, 'Figure study: a class saved as the poses chosen (ids) keeps its mode and time, and every pose is in the class (nothing is taken out)', fig);
+  // the Studio's mix with a code that is gone
+  await openStudio(page);
+  const mixes = await app(page).evaluate(() => [...document.querySelectorAll('#ps-mixes .ps-mix')].map((b) => b.title));
+  t.check(mixes.length === 9, 'the Studio shows its eight starting mixes and the one saved mix, whose white (W) is no paint now', mixes);
+  t.note(`a saved mix of "W 2 · YO 1" is shown as "${mixes[mixes.length - 1]}": a paint code the library no longer has is dropped from the mix, so the mix is another color (the mix is kept, not the white)`);
+  await clean(t, page, 'older: every tab');
+  // Pose and light: the first light, a saved pose with no viewpoint
+  const pose = await open(pages, site, { url: 'pose.html' });
+  await pose.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  const pl = await pose.evaluate(() => ({ cont: !document.getElementById('continueWrap').hidden, light: { ...PoseAndLight.light }, sho: PoseAndLight.pose.shoulderL, mine: [...document.querySelectorAll('#mine .pose-item')].length, hip: PoseAndLight.pose.height }));
+  t.check(pl.cont && pl.light.az === 100 && pl.light.el === 20 && pl.light.dist === 2.6 && pl.light.soft === 3 && pl.light.fill === 40, 'Pose and light: a light saved with az and el only keeps those and starts the rest at their defaults', pl.light);
+  t.check(pl.sho.z === 90 && pl.mine === 1, 'Pose and light: a pose with only some joints stands the rest straight, and a saved pose with no viewpoint is in the library', pl);
+  await pose.evaluate(() => document.querySelector('#mine .pose-btn').click());
+  t.check(await pose.evaluate(() => PoseAndLight.pose.kneeR.x === 40), 'Pose and light: that saved pose can be put on the figure', await pose.evaluate(() => PoseAndLight.pose.kneeR));
+  await clean(t, pose, 'older: Pose and light');
+  // Forget sweeps the keys nothing reads any more
+  await tab(page, 'help'); await click(page, '#forgetBtn');
+  await Promise.all([page.waitForNavigation({ waitUntil: 'load', timeout: 20000 }).catch(() => null), click(page, '#forgetBtn')]);
+  await sleep(1500);
+  t.check((await siteKeys(page)).length === 0, 'Forget my work removes every key, those of earlier versions included', await siteKeys(page));
+  await clean(t, page, 'older: Forget');
+});
+
 
 export default async function persistence(t, site) {
   await runPool(t, site, +(process.env.PERSIST_JOBS || 3));
