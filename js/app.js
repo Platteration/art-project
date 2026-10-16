@@ -2434,19 +2434,28 @@
     const maxFont = Math.round(long / 26);
     const rank = new Set(cmp.top.map((r) => r.id));
     cmp.labelBoxes = [];
-    const pill = (reg, text, font, look) => {
-      const b = drawPill(g, text, reg.lx + 0.5, reg.ly + 0.5, font, look, W, H);
-      cmp.labelBoxes.push({ x: b.x / W, y: b.y / H, w: b.w / W, h: b.h / H });
+    // the boxes are planned before any is drawn, so no label lies on another: the numbered ones first (each
+    // shrinks, down to the smallest size, until it is clear of those before it), then the percentages, the
+    // biggest shapes first, each shrunk until it is clear of every label placed or left out
+    const placed = [];
+    const clear = (b) => !placed.some((p) => b.x < p.x + p.w + 1 && p.x < b.x + b.w + 1 && b.y < p.y + p.h + 1 && p.y < b.y + b.h + 1);
+    const plan = (reg, text, font, look, must) => {
+      for (let f = font; f >= minFont; f--) {
+        const b = pillBox(pillSize(g, text, f), reg.lx + 0.5, reg.ly + 0.5, W, H);
+        if (clear(b)) { placed.push(b); return { reg, text, font: f, look }; }
+      }
+      if (!must) return null;
+      placed.push(pillBox(pillSize(g, text, minFont), reg.lx + 0.5, reg.ly + 0.5, W, H));
+      return { reg, text, font: minFont, look };
     };
-
-    cmp.regions.forEach((reg) => {
-      if (!reg.ref || rank.has(reg.id)) return;
-      const font = Math.min(maxFont, Math.floor(reg.room / 1.5));
-      if (font >= minFont) pill(reg, reg.pct + '%', font, 'dark');
-    });
-    cmp.top.forEach((reg, i) => {
-      const font = Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
-      pill(reg, `${i + 1} · ${reg.pct}%`, font, 'light');
+    const numbered = cmp.top.map((reg, i) => plan(reg, `${i + 1} · ${reg.pct}%`, Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9))), 'light', true));
+    const rest = cmp.regions.filter((reg) => reg.ref && !rank.has(reg.id) && Math.min(maxFont, Math.floor(reg.room / 1.5)) >= minFont)
+      .sort((a, b) => b.room - a.room)
+      .map((reg) => plan(reg, reg.pct + '%', Math.min(maxFont, Math.floor(reg.room / 1.5)), 'dark', false))
+      .filter(Boolean);
+    [...rest, ...numbered].forEach((l) => {
+      const b = drawPill(g, l.text, l.reg.lx + 0.5, l.reg.ly + 0.5, l.font, l.look, W, H);
+      cmp.labelBoxes.push({ x: b.x / W, y: b.y / H, w: b.w / W, h: b.h / H });
     });
   }
 
