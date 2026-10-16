@@ -1377,7 +1377,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .save-name { margin: 0; font: 500 0.8rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast, .drawer > summary::after { transition: none; }
+  .toast, .drawer > summary::after, .tab-caret { transition: none; }
+  .tab { transition-property: background, color, border-color; }
 }
 
 /* ---- Painting studio ----
