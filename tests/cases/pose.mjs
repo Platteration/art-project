@@ -326,7 +326,7 @@ export default async function pose(t, site) {
       await pick(fr, 'stand');
       {
         const h = await ctrl(fr, 'handR'), w0 = await screenOf(fr, 'wristR'), twist0 = await fr.evaluate(() => window.PoseAndLight.pose.wristR.y);
-        await dragBy(page, fr, h.center, -60, -120);
+        await dragBy(page, fr, h.center, -60, -120, 8);            // (moves of 15 px: a jump of the elbow in one move is eased, js/pose.js:518)
         const w1 = await screenOf(fr, 'wristR');
         const near = { moved: [+(w1.x - w0.x).toFixed(1), +(w1.y - w0.y).toFixed(1)], twist: [twist0, await fr.evaluate(() => window.PoseAndLight.pose.wristR.y)], s: await scan(fr) };
         t.check(Math.hypot(near.moved[0] + 60, near.moved[1] + 120) < 6 && near.twist[0] === near.twist[1] && sane(near.s), 'Front view, Stand: the right hand\'s circle dragged 60 px out and 120 px up puts the wrist under the pointer (within 6 px), the hand keeping its twist', near);
@@ -340,7 +340,7 @@ export default async function pose(t, site) {
         t.check(mark.moved.note === 'Tap a pose to start from it' && mark.moved.pressed === '' && mark.undone.note === 'On the figure now: Stand' && mark.undone.pressed === 'stand', 'the library after the hand moved: no pose marked, "Tap a pose to start from it"; after Undo, Stand marked and named again', mark);
         // pulled far past its reach, the arm points straight at the pointer
         const h2 = await ctrl(fr, 'handR'), far = { x: h2.center.x - 400, y: h2.center.y - 450 };
-        await dragBy(page, fr, h2.center, -400, -450);
+        await dragBy(page, fr, h2.center, -400, -450, 10);
         const sh = await screenOf(fr, 'shoulderR'), w2 = await screenOf(fr, 'wristR');
         const d = Math.atan2(w2.y - sh.y, w2.x - sh.x) - Math.atan2(far.y - sh.y, far.x - sh.x);
         const off = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) * 180 / Math.PI;
