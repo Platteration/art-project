@@ -505,6 +505,7 @@ async function headAndFigure(t, site, pages) {
   const own = s.codes.filter((c) => !['TW', 'LW'].includes(c) && !(sample.codes || []).includes(c));
   const washCode = own.find((c) => ['Vir', 'UB', 'PGL', 'CO', 'AC'].includes(c)) || own[0] || null;
   const washName = washCode ? await studioWash(page, washCode) : null;
+  const washPalette = s.palette;
   t.check(!!washName, `${L} Studio: a wash of ${washName || 'a paint the sample\'s palette lacks'} is laid (${s.palette} has it, ${sample.palette} does not)`, { codes: s.codes, sample: sample.codes });
   await studioMix(page, [[s.codes[1], 1], [s.codes[0], 2]]);
   await stroke(page, '#ps-paper', [[0.35, 0.3], [0.5, 0.45], [0.62, 0.6]]);
@@ -580,7 +581,7 @@ async function headAndFigure(t, site, pages) {
   const wash2 = await text(page, '#ps-washName');
   t.check(Math.abs((await inked(page, '#ps-paper')) - paper1) <= paper1 * 0.05 && Math.abs((await inked(page, '#ps-sketch')) - sketch1) <= sketch1 * 0.05, `${L} next visit: the painting and the head's underdrawing are back`);
   t.check(sameColor(ground2, ground1) && wash2 === washName, `${L} next visit: the Studio's ground is the ${washName} wash it was toned with`, { before: ground1, after: ground2, wash: wash2 });
-  if (!(sameColor(ground2, ground1) && wash2 === washName)) seen.washReload = { photoPalette: s.palette, wash: washName, now: wash2, before: ground1, after: ground2, samplePalette: sample.palette };
+  if (!(sameColor(ground2, ground1) && wash2 === washName)) seen.washReload = { photoPalette: washPalette, wash: washName, now: wash2, before: ground1, after: ground2, samplePalette: s.palette };
   await tab(page, 'loomis');
   t.note(`${L}: after the reload the Loomis head is ${await page.evaluate(() => Loomis.has()) ? 'still fitted' : 'gone with the photo (neither is kept between visits)'}`);
   await tab(page, 'figure');
@@ -880,7 +881,7 @@ function findings(t) {
     if (seen.washStudy) said.push(`Zorn picked on the Study tab after the Studio's ground was toned with Light Red (a Rembrandt paint): the Studio's ground went from rgb(${seen.washStudy.before}) to rgb(${seen.washStudy.after}), now a wash of ${seen.washStudy.wash}`);
     if (seen.washMode) said.push(`Simple to Advanced pressed while painting: the palette followed from ${seen.washMode.simple} to ${seen.washMode.advanced} and the ground toned with ${seen.washMode.wash} turned to ${seen.washMode.now} (rgb(${seen.washMode.before}) to rgb(${seen.washMode.after}))`);
     if (seen.washReload) say(seen.washReload);
-    function say(r) { said.push(`after a reload (the Study tab back on the sample, whose best palette is ${r.photoPalette}), the ground toned with ${r.wash} came back as ${r.now} (rgb(${r.before}) to rgb(${r.after})), though the saved record holds ${r.wash}`); }
+    function say(r) { said.push(`A reload after toning the ground with ${r.wash} from ${r.photoPalette} (the best match for a photo of a sitter against a blue wall, Advanced, no palette chosen): the Study tab is back on the sample, whose best match is ${r.samplePalette}, and the ground came back as ${r.now} (rgb(${r.before}) to rgb(${r.after})), though the saved record holds ${r.wash}`); }
     t.finding({
       title: 'The Studio\'s toned ground under a painting changes color by itself when the Study tab\'s palette changes: another palette picked, Simple and Advanced switched, or the next visit',
       severity: 'medium',
