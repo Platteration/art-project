@@ -192,8 +192,9 @@
     panel.querySelectorAll('.fig-pose').forEach((b) => b.setAttribute('aria-pressed', String(!out.has(b.dataset.poseId))));
     panel.querySelectorAll('.fig-group-btn').forEach((b) => {
       const ids = poses.filter((q) => q.group === b.dataset.group).map((q) => q.id), anyIn = ids.some((id) => !out.has(id));
+      // (the words it shows come first in the name, for voice control: "Take these out: the standing poses")
       b.textContent = anyIn ? 'Take these out' : 'Put these back';
-      b.setAttribute('aria-label', `${anyIn ? 'Take out' : 'Put back'} ${b.dataset.group === 'mine' ? 'your saved poses' : `the ${b.dataset.title.toLowerCase()} poses`}`);
+      b.setAttribute('aria-label', `${b.textContent}: ${b.dataset.group === 'mine' ? 'your saved poses' : `the ${b.dataset.title.toLowerCase()} poses`}`);
     });
     const n = pool().length, all = poses ? poses.length : 0;
     if (poses) $('mix').textContent = n === all ? `All ${all} poses are in the class, in a random order. Tap a pose, or a group's button, to take it out.` : n ? n === 1 ? `1 of the ${all} poses is in the class.` : `${n} of the ${all} poses are in the class, in a random order.` : 'Every pose is out of the class. Tap one to put it back.';
@@ -1023,7 +1024,13 @@
     });
   }));
   $('again').addEventListener('click', () => { if (last) startClass({ mode: last.mode, secs: last.secs, pool: last.pool }); });
-  $('new').addEventListener('click', () => { show('setup'); showSetup(); window.scrollTo(0, 0); });
+  // the setup opens with the focus on its first choice, as Paint by numbers' and Value battle's setups do (the button
+  // pressed is hidden with the drawings)
+  function focusSetup() {
+    const first = panel.querySelector('input[name="figClass"]:checked');
+    if (first) first.focus({ preventScroll: true });
+  }
+  $('new').addEventListener('click', () => { show('setup'); showSetup(); window.scrollTo(0, 0); focusSetup(); });
   // the drawings of the class before stay until another class starts
   $('back').addEventListener('click', () => { show('review'); window.scrollTo(0, 0); $('reviewTitle').focus({ preventScroll: true }); });
 

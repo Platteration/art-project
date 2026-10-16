@@ -1265,7 +1265,7 @@ export default async function figure(t, site) {
     const s = await setupState(page);
     t.check(s.poses === 30 && s.pictures === 30 && !s.start && s.setup && !s.review && !s.draw, 'the tab opens on the setup with 30 poses and pictures, Start enabled', s);
     t.check(/^All 30 poses are in the class/.test(s.mix) && /No time limit/.test(s.plan) && /A pose with a tick/.test(s.note) && s.all === 'Take them all out' && !s.allHidden && s.timesHidden && !s.timed, 'the setup says every pose is in, no time limit, and offers Take them all out', s);
-    t.check(s.heads.join('|') === 'Standing|Moving and sport|Low to the floor|Dance' && s.groups.every(([g, txt, label]) => txt === 'Take these out' && /^Take out the /.test(label)), 'the four groups each have a Take these out button with its label', s.groups);
+    t.check(s.heads.join('|') === 'Standing|Moving and sport|Low to the floor|Dance' && s.groups.every(([g, txt, label]) => txt === 'Take these out' && /^Take these out: the /.test(label)), 'the four groups each have a Take these out button with its label', s.groups);
     t.check(s.stored === null, 'a visit that changes nothing stores nothing', s.stored);
     // every pose out
     await click(page, '#fig-all');
@@ -1282,7 +1282,7 @@ export default async function figure(t, site) {
     await click(page, '.fig-group-btn[data-group="standing"]');
     const g1 = await setupState(page);
     const standing = await page.evaluate(() => [...document.querySelectorAll('#fig-poses [data-pose-id]')].filter((x) => x.closest('.fig-group').querySelector('.fig-group-btn').dataset.group === 'standing').map((x) => x.dataset.poseId));
-    t.check(standing.length === 7 && g1.inClass.length === 23 && standing.every((id) => !g1.inClass.includes(id)) && g1.mix === '23 of the 30 poses are in the class, in a random order.' && g1.groups[0][1] === 'Put these back' && g1.groups[0][2] === 'Put back the standing poses', 'Take these out on Standing takes its 7 poses out and says 23 of the 30', { standing, mix: g1.mix, group: g1.groups[0] });
+    t.check(standing.length === 7 && g1.inClass.length === 23 && standing.every((id) => !g1.inClass.includes(id)) && g1.mix === '23 of the 30 poses are in the class, in a random order.' && g1.groups[0][1] === 'Put these back' && g1.groups[0][2] === 'Put these back: the standing poses', 'Take these out on Standing takes its 7 poses out and says 23 of the 30', { standing, mix: g1.mix, group: g1.groups[0] });
     await click(page, `#fig-poses [data-pose-id="${standing[0]}"]`);
     const g2 = await setupState(page);
     t.check(g2.inClass.length === 24 && g2.inClass.includes(standing[0]) && g2.groups[0][1] === 'Take these out' && /^24 of the 30/.test(g2.mix), 'one standing pose tapped back: 24 in, the group button offers Take these out again', { n: g2.inClass.length, mix: g2.mix, group: g2.groups[0] });
@@ -1528,7 +1528,7 @@ export default async function figure(t, site) {
     await page.waitForFunction(() => document.querySelectorAll('#fig-poses [data-pose-id^="mine-"] img[src^="blob:"]').length === 1, null, { timeout: 20000 }).catch(() => null);
     const m = await setupState(page);
     const mine = await page.evaluate(() => { const b = document.querySelector('#fig-poses [data-pose-id^="mine-"]'); return b && { id: b.dataset.poseId, name: b.querySelector('.fig-pose-name').textContent, pressed: b.getAttribute('aria-pressed'), pic: b.classList.contains('has-img'), group: b.closest('.fig-group').querySelector('h4').textContent, btn: b.closest('.fig-group').querySelector('.fig-group-btn').getAttribute('aria-label') }; });
-    t.check(m.poses === 31 && m.pictures === 31 && mine && mine.name === 'Your pose 1' && mine.pressed === 'true' && mine.pic && mine.group === 'Your poses' && mine.btn === 'Take out your saved poses' && m.heads[4] === 'Your poses', 'the saved pose appears in the setup under Your poses, with its picture, in the class', { poses: m.poses, pictures: m.pictures, mine, heads: m.heads });
+    t.check(m.poses === 31 && m.pictures === 31 && mine && mine.name === 'Your pose 1' && mine.pressed === 'true' && mine.pic && mine.group === 'Your poses' && mine.btn === 'Take these out: your saved poses' && m.heads[4] === 'Your poses', 'the saved pose appears in the setup under Your poses, with its picture, in the class', { poses: m.poses, pictures: m.pictures, mine, heads: m.heads });
     t.check(/^31 of the 31 poses|^All 31 poses/.test(m.mix) || /of the 31 poses/.test(m.mix), 'the message counts 31 poses now', m.mix);
     // a class of that one pose alone: it has to repeat
     await onlyPoses(page, [mine.id]);

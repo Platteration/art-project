@@ -757,7 +757,8 @@
       b.type = 'button';
       b.className = 'game-paint';
       b.dataset.index = i;
-      b.setAttribute('aria-label', `Add ${paint.name}`);
+      // the code the button shows comes first in its name, for voice control ("LW: add Lead White")
+      b.setAttribute('aria-label', `${paint.code}: add ${paint.name}`);
       b.title = paint.name;
       const dot = document.createElement('span');
       dot.className = 'game-paint-dot';

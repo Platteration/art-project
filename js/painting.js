@@ -537,8 +537,25 @@
 
     // ---- Sheets ----------------------------------------------------------------------------------
     const SHEETS = { brushSheet: 'brushBtn', eraserSheet: null, refSheet: 'refBtn', canvasSheet: 'canvasBtn', viewSheet: 'viewBtn', paintSheet: 'colorBtn' };
-    function closeSheets() { Object.entries(SHEETS).forEach(([id, btn]) => { $(id).hidden = true; if (btn) $(btn).setAttribute('aria-expanded', 'false'); }); }
-    function openSheet(id) { const was = !$(id).hidden; closeSheets(); if (!was) { $(id).hidden = false; if (SHEETS[id]) $(SHEETS[id]).setAttribute('aria-expanded', 'true'); } }
+    // a sheet closed with the focus in it (Escape, its ×, Lock in, Save as PNG), or with the focus lost from a control
+    // the sheet hid, gives the focus back to the icon that opened it (the eraser has no icon of its own in SHEETS:
+    // its sheet opens from the eraser's button, tapped again)
+    function closeSheets() {
+      const open = Object.keys(SHEETS).find((id) => !$(id).hidden);
+      const lost = !!open && (document.activeElement === document.body || !document.activeElement || $(open).contains(document.activeElement));
+      Object.entries(SHEETS).forEach(([id, btn]) => { $(id).hidden = true; if (btn) $(btn).setAttribute('aria-expanded', 'false'); });
+      const back = open === 'eraserSheet' ? q('[data-ps-tool="eraser"]')[0] : open && SHEETS[open] ? $(SHEETS[open]) : null;
+      if (lost && back) back.focus();
+    }
+    // a sheet opened from the keyboard puts the focus in it, on its first control (as the My paints dialog does), so the
+    // next Tab is in the sheet, not on the strip's next icon
+    function openSheet(id) {
+      const was = !$(id).hidden; closeSheets();
+      if (was) return;
+      $(id).hidden = false; if (SHEETS[id]) $(SHEETS[id]).setAttribute('aria-expanded', 'true');
+      const first = [...$(id).querySelectorAll('button:not([disabled]), input:not([disabled]), select')].find((e) => e.offsetParent);
+      if (first) first.focus();
+    }
     q('[data-close]').forEach((b) => b.addEventListener('click', closeSheets));
     $('colorBtn').addEventListener('click', () => openSheet('paintSheet'));
     $('viewBtn').addEventListener('click', () => openSheet('viewSheet'));
@@ -553,7 +570,8 @@
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); if (!$('undo').disabled) $('undo').click(); }
     });
     // on a phone the tabs are out of view while painting, so the strip has a way back
-    $('exit').addEventListener('click', () => (o.onExit ? o.onExit() : Studio.go('study')));
+    // (the focus goes to the section it opens: the button pressed is hidden with the Studio's strip)
+    $('exit').addEventListener('click', () => (o.onExit ? o.onExit() : Studio.go('study', true)));
 
     // ---- The reference: the Study tab's photo, or a generated portrait, shown as itself, its ---------
     // three-value study or its color-block study

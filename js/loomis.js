@@ -329,7 +329,8 @@
     draw(g, prep.w, prep.h, Math.max(1, Math.max(prep.w, prep.h) / 500));
     Studio.savePng(c, 'loomis-head.png');
   });
-  $('exit').addEventListener('click', () => Studio.go('study'));
+  // (the focus goes to the section it opens: the button pressed is hidden with the head's strip)
+  $('exit').addEventListener('click', () => Studio.go('study', true));
 
   // ---- The photo on the stage, and the marks made on it ----------------------------------------
   const photo = $('photo'), overlay = $('overlay'), wrap = $('wrap');

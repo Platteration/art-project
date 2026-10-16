@@ -1233,9 +1233,13 @@
     clearTimeout(clearArmed);
     clearArmed = 0;
     els.palClear.textContent = 'Clear';
+    const focused = document.activeElement === els.palClear;
     state.palette = [];
     savePalette();
     renderPalette();
+    // Clear is disabled once the list is empty, so the focus that was on it goes to the drawer's summary, as the ×
+    // does when the color it removed was the last one
+    if (focused) els.drawers.swatches.querySelector('summary').focus();
     toast('Palette cleared');
   });
 
@@ -2242,7 +2246,6 @@
     if (groupSubs[group]) groupSubs[group].textContent = TAB_NAMES[name];
     document.querySelectorAll('.tab-item').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.tab === name)));
     closeMenus();
-    if (focus) groupBtns[group].focus();
     if (checking() && state.art.dirty) runCheck();
     // the game, the Studio, the Loomis head and the guide have their own layouts: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
@@ -2254,6 +2257,9 @@
     if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
+    // the focus comes last: the tab that was left (the Studio, the Loomis head) takes its classes off in that event,
+    // and on a phone they hide the section buttons, so the Studio's ← could not focus its section before
+    if (focus) groupBtns[group].focus();
   }
   document.querySelectorAll('.tab-item').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab, true)));
 
