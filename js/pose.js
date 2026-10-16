@@ -2221,9 +2221,11 @@
 
   // ---- Snapshot ------------------------------------------------------------------------------
 
+  let snapsAsked = 0;
   $('snap').addEventListener('click', () => {
     render();
-    canvas.toBlob((blob) => { if (!blob) return; const img = $('snapImg'); if (img.dataset.blobUrl) URL.revokeObjectURL(img.dataset.blobUrl); const url = URL.createObjectURL(blob); img.dataset.blobUrl = url; img.src = url; }, 'image/png');
+    const asked = ++snapsAsked;              // an earlier picture still being encoded must not land over this one
+    canvas.toBlob((blob) => { if (!blob || asked !== snapsAsked) return; const img = $('snapImg'); if (img.dataset.blobUrl) URL.revokeObjectURL(img.dataset.blobUrl); const url = URL.createObjectURL(blob); img.dataset.blobUrl = url; img.src = url; }, 'image/png');
     $('snapDialog').showModal();
   });
   $('snapClose').addEventListener('click', () => $('snapDialog').close());
