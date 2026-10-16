@@ -556,7 +556,6 @@ export default async function battle(t, site) {
 // ================================================================================================
 // The gaps: what the README promises and the first pass above did not reach.
 // ================================================================================================
-const want = (name) => { if (process.env.BATTLE_TIMES) { const now = Date.now(); console.log(`  [${((now - (globalThis.__last || now)) / 1000).toFixed(1)} s] before ${name}`); globalThis.__last = now; } return !process.env.BATTLE_ONLY || process.env.BATTLE_ONLY.split(',').includes(name); };
 // answers n rounds right inside the page, moving on with Next ▸ after each (after the last one too unless next is false):
 // the long runs the star thresholds need would otherwise cost a round trip per tap. Returns what each round held.
 const rightRounds = (page, n, { next = true } = {}) => page.evaluate(([n, next]) => {
@@ -586,9 +585,9 @@ const reopen = async (site, opts) => { try { return await openPage(site, opts); 
 const reopenTab = async (site, page, opts) => { try { return await newTab(site, page, opts); } catch (e) { if (!/Timeout/.test(String(e && e.message))) throw e; await sleep(2000); return newTab(site, page, opts); } };
 const MINS = { 60: '1 minute', 120: '2 minutes', 300: '5 minutes' };
 
-export async function gaps(t, site) {
+async function gaps(t, site) {
   // ---- the windows between a phone and a wide screen: a tablet held upright, a half-screen window, a phone on its side ----
-  if (want('windows')) {
+  {
     // where the pinned board is, whether it is the screen (or the tabs' width below them), and whether the controls can be tapped
     const measure = () => {
       const vw = innerWidth, vh = innerHeight, box = (e) => e.getBoundingClientRect();
@@ -643,7 +642,7 @@ export async function gaps(t, site) {
   }
 
   // ---- ties: "paired so the colors really are the same in what is asked" — and read the same on the chips ----
-  if (want('ties')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     const sweep = await page.evaluate(() => {
       const tLabel = (c) => (c.warmth > 0.35 ? 'warm' : c.warmth < -0.35 ? 'cool' : 'in between'), vLabel = (c) => `V ${(c.L / 10).toFixed(1)}`;
@@ -688,7 +687,7 @@ export async function gaps(t, site) {
   }
 
   // ---- the 2 and 5 minute clocks played to their end, stars by right answers a minute on every boundary, Play again on the clock ----
-  if (want('clocks')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2' });
     const plan = [['60', [0, 1, 2, 3, 4, 5, 7, 9, 10]], ['120', [5, 6, 10, 14, 19, 20]], ['300', [15, 24, 25, 35, 49, 50]]];
@@ -726,7 +725,7 @@ export async function gaps(t, site) {
   }
 
   // ---- stars by the streak on every boundary: 2, 5, 8, 12 and 20 in a row, and one short of each ----
-  if (want('stars')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
     const plan = [1, 2, 4, 5, 7, 8, 11, 12, 19, 20], rows = [];
@@ -749,7 +748,7 @@ export async function gaps(t, site) {
   }
 
   // ---- a clock game left on another tab: the minute can run out out of sight, and a miss left open keeps the clock paused ----
-  if (want('away')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: '60' }); await start(page);
     await rightRounds(page, 3);
@@ -780,7 +779,7 @@ export async function gaps(t, site) {
   }
 
   // ---- a new photo arriving mid-battle: dropped on the board, pasted, or chosen with Load photo in the top bar ----
-  if (want('photo')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
     await answer(page, true); await next(page);
@@ -816,7 +815,7 @@ export async function gaps(t, site) {
   }
 
   // ---- Paint by numbers and the battle both in progress, through the Games menu ----
-  if (want('both')) {
+  {
     for (const [label, viewport] of [['phone', PHONE]]) {
       const page = await reopen(site, { viewport, url: '#game' });
       await page.waitForFunction(() => !document.getElementById('gameStart').disabled, null, { timeout: 30000 }).catch(() => null);
@@ -855,7 +854,7 @@ export async function gaps(t, site) {
   }
 
   // ---- My paints of one color and white, of two with no white, of three: the questions the palette can really ask ----
-  if (want('mine')) {
+  {
     const dealt = {}, sets = [['TW', 'YO'], ['YO', 'IB'], ['TW', 'YO', 'IB']];
     const page = await reopen(site, { storage: { [K.mine]: sets[0] } });
     for (const mine of sets) {
@@ -886,7 +885,7 @@ export async function gaps(t, site) {
   }
 
   // ---- game.js missing: Paint by numbers leaves the menu, the battle must still play (silently, with no sound switch) ----
-  if (want('nogame')) {
+  {
     const page = await reopen(site, { block: [site.base + 'js/game.js'], url: '#battle' });
     await sleep(300);
     await page.evaluate(() => { window.__vib = []; const v = navigator.vibrate; navigator.vibrate = function (p) { window.__vib.push(JSON.stringify(p)); return v ? v.apply(this, arguments) : true; }; });
@@ -914,7 +913,7 @@ export async function gaps(t, site) {
   }
 
   // ---- the keyboard alone: Start, Tab to a color, Space and Enter on it, Enter on Next ▸; the colors' names ----
-  if (want('keyboard')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: 'streak' });
     await page.focus('#vb-start'); await page.keyboard.press('Enter');
@@ -953,7 +952,7 @@ export async function gaps(t, site) {
   }
 
   // ---- keys that must do nothing: digits in a pair, arrows in a pick, and arrows meant for the Games menu or the mode switch ----
-  if (want('keys')) {
+  {
     let page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '3', mode: 'streak' }); await start(page);
     for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowDown', '=']) await page.keyboard.press(k);
@@ -975,7 +974,7 @@ export async function gaps(t, site) {
     s = await state(page); const u = await ui(page);
     const menuOpen = await page.evaluate(() => document.getElementById('tabGamesBtn').getAttribute('aria-expanded') === 'true');
     if (!t.check(!s.answered && menuOpen, 'ArrowDown on the focused Games menu button opens the menu and leaves the round alone', { answered: s.answered, missed: s.missed, miss: u.miss, menuOpen })) keyCase.push({ key: 'ArrowDown on the Games menu button', answered: s.answered, missed: s.missed, menuOpen });
-    if (keyCase.length) t.finding({ title: 'The battle answers the round from any arrow key or = pressed anywhere: ArrowDown on the Games menu button answers "Both the same" (a miss that ends the streak) instead of opening the menu', severity: 'medium',
+    if (keyCase.length) t.finding({ title: 'The battle answers the round from any arrow key or = pressed anywhere: ArrowDown on the Games menu button answers "Both the same" (a miss that ends the streak, unless the round is a tie) instead of opening the menu', severity: 'medium',
       steps: 'Value battle, 2 colors, Streak, Start. With the keyboard, Tab to the Games section button in the tab bar (or the Simple/Advanced switch in the top bar) and press ArrowDown (or ArrowLeft/ArrowRight).',
       expected: 'The keys answer the round only when the board has the focus; ArrowDown on the Games button opens its menu, the arrows on the mode switch do nothing to the game.',
       actual: keyCase.map((c) => `${c.key}: round answered ${c.answered}, ${c.missed} missed${c.menuOpen === false ? ', the menu did not open' : ''}`).join('; ') + '. A keyboard visitor leaving the battle by the menu loses the streak.',
@@ -985,7 +984,7 @@ export async function gaps(t, site) {
   }
 
   // ---- axe on the phone, and in the dark: the setup, a round, a right answer and both pop-ups ----
-  if (want('axe')) {
+  {
     const noted = new Set();
     const states = async (page, label, serious, all) => {
       const run = async (what) => { for (const v of await axe(page)) { if (v.impact === 'critical' || v.impact === 'serious') serious.push(`${label}, ${what}: ${v.id} ${v.help} e.g. ${v.nodes[0]}`); else if (!noted.has(label + v.id)) { noted.add(label + v.id); t.note(`axe battle ${label}: ${v.id} (${v.impact}) ${v.help} ×${v.count} e.g. ${v.nodes[0]}`); } } };
@@ -1006,7 +1005,7 @@ export async function gaps(t, site) {
   }
 
   // ---- reduced motion: the score shown at once, the flourish still marked ----
-  if (want('motion')) {
+  {
     const page = await reopen(site, { url: '#battle', reducedMotion: true });
     await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
     await rightRounds(page, 4); await answer(page, true);
@@ -1022,7 +1021,7 @@ export async function gaps(t, site) {
   }
 
   // ---- a frame with no storage at all, and storage that refuses writes mid-game ----
-  if (want('storage')) {
+  {
     {
       const outer = await reopen(site, { sandbox: {}, url: '#battle' });
       const fr = outer.app;
@@ -1060,7 +1059,7 @@ export async function gaps(t, site) {
   }
 
   // ---- two tabs: a best made in one is on the other's setup, and each tab's games keep their own best ----
-  if (want('tabs')) {
+  {
     const a = await reopen(site, { url: '#battle' });
     const b = await reopenTab(site, a, { url: '#battle' });
     await setup(a, { palette: 'primary', count: '2', mode: 'streak' });
@@ -1081,7 +1080,7 @@ export async function gaps(t, site) {
   }
 
   // ---- the best is filed under palette:count:mode: changing the palette on the setup changes the line ----
-  if (want('palette')) {
+  {
     const page = await reopen(site, { url: '#battle', storage: { [K.best]: { 'zorn:2:streak': 7, 'primary:2:streak': 12, 'primary:2:120': 9 } } });
     await setup(page, { palette: 'zorn', count: '2', mode: 'streak' });
     const seen = [];
@@ -1095,7 +1094,7 @@ export async function gaps(t, site) {
   }
 
   // ---- a miss in a four-color round: red beside gold, all four chips in order; an order taken by tap with its badges, and the round started over ----
-  if (want('picks')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '4', mode: 'streak' }); await start(page);
     const s = await state(page), r = await answer(page, false); let u = await ui(page);
@@ -1119,7 +1118,7 @@ export async function gaps(t, site) {
   }
 
   // ---- Both the same's pulse, the vibration pattern and the chime, as such ----
-  if (want('feel')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
     await page.evaluate(() => {
@@ -1149,7 +1148,7 @@ export async function gaps(t, site) {
   }
 
   // ---- the setup's own words: the lede, the hints and the About card say what the game does ----
-  if (want('words')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'zorn', count: 'mix', mode: 'streak' });
     const read = () => page.evaluate(() => { const r = document.getElementById('vb-setup'); return { lede: r.querySelector('.game-lede').textContent, hints: [...r.querySelectorAll('.field .hint')].map((h) => h.textContent), about: r.querySelector('.vb-about').textContent, legends: [...r.querySelectorAll('legend, label[for="vb-palette"]')].map((l) => l.textContent.trim()), modes: [...r.querySelectorAll('input[name="vbMode"] + label')].map((l) => l.textContent), counts: [...r.querySelectorAll('input[name="vbCount"] + label')].map((l) => l.textContent), start: document.getElementById('vb-start').textContent }; });
@@ -1174,7 +1173,7 @@ export async function gaps(t, site) {
   }
 
   // ---- a resize with a pop-up up: the miss and the score stay inside the board, desktop to phone and back ----
-  if (want('popresize')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
     await rightRounds(page, 1);
@@ -1196,7 +1195,7 @@ export async function gaps(t, site) {
   }
 
   // ---- the sound switch remembered from an earlier visit applies to the battle without visiting Paint by numbers ----
-  if (want('sound')) {
+  {
     for (const on of [false]) {
       const page = await reopen(site, { url: '#battle', storage: { 'portrait-value-studio.gameSound': on } });
       await page.evaluate(() => { window.__snd = 0; window.__vib = 0; for (const name of ['createOscillator', 'createBufferSource']) { const f = AudioContext.prototype[name]; AudioContext.prototype[name] = function () { window.__snd++; return f.call(this); }; } const v = navigator.vibrate; navigator.vibrate = function () { window.__vib++; return v ? v.apply(this, arguments) : true; }; });
@@ -1210,7 +1209,7 @@ export async function gaps(t, site) {
   }
 
   // ---- ✕ twice from the miss pop-up, and ✕ twice on the clock with the next round already on its way ----
-  if (want('quit')) {
+  {
     const page = await reopen(site, { url: '#battle' });
     await setup(page, { palette: 'primary', count: '2', mode: '60' }); await start(page);
     await answer(page, false);
