@@ -32,7 +32,7 @@
   const BEST_KEY = 'portrait-value-studio.battleBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
-  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { return false; /* private mode */ } }
   // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
   function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
 
@@ -107,6 +107,7 @@
   const LEVELS = { easy: EASY, medium: levelAt(12), hard: HARD };   // for tests and the README
   const SAME = { value: 0.9, temp: 0.05 };      // closer than this is "the same"
   const LETTERS = ['A', 'B', 'C', 'D'];
+  const SIDE = { left: 'The left one', right: 'The right one', same: 'Both' };   // how the answer line names a pair's colors
   function measure(kind, c) { return kind === 'value' ? c.L : c.warmth; }
   // a pair of colors for the question at the level, or a "same" pair when the dice say so
   // the temperature ladder is scaled to the palette's own reach: a warm-only palette (Zorn, the earths)
@@ -116,6 +117,9 @@
     const lo = Math.max(FLOOR.temp[0], lv.temp[0] * k);
     return [lo, Math.max(lo + 0.04, lv.temp[1] * k)];
   }
+  // a tie must read the same on the chips: the same V on the scale, or the same lean word (a hair apart either
+  // side of the line between "cool" and "in between" is still two words under a line that says they lean alike)
+  const reads = (kind, a, b) => (kind === 'value' ? vLabel(a) === vLabel(b) : tLabel(a) === tLabel(b));
   function makePair(pool, lv, q) {
     const colorful = pool.filter((c) => c.chroma >= 10);
     const usable = q.kind === 'temp' && colorful.length >= 2 ? colorful : pool;
@@ -128,8 +132,7 @@
       const d = Math.abs(measure(q.kind, a) - measure(q.kind, b));
       // a "same" pair must still look different, so it is a real question
       const differs = q.kind === 'value' ? Math.abs(a.warmth - b.warmth) > 0.4 || Math.abs(a.chroma - b.chroma) > 12 : Math.abs(a.L - b.L) > 8;
-      const reads = q.kind !== 'value' || vLabel(a) === vLabel(b); // a value tie shows the same V on the scale
-      if (wantSame ? d < SAME[q.kind] && differs && reads : d >= lo && d <= hi) best = [a, b];
+      if (wantSame ? d < SAME[q.kind] && differs && reads(q.kind, a, b) : d >= lo && d <= hi) best = [a, b];
     }
     if (!best) {
       // the palette can't make the pair asked for at this level: take the nearest it can
@@ -140,7 +143,7 @@
     }
     const colors = Math.random() < 0.5 ? best : [best[1], best[0]];
     const d = measure(q.kind, colors[1]) - measure(q.kind, colors[0]);
-    const tie = Math.abs(d) < SAME[q.kind] && (q.kind !== 'value' || vLabel(colors[0]) === vLabel(colors[1]));
+    const tie = Math.abs(d) < SAME[q.kind] && reads(q.kind, colors[0], colors[1]);
     const answer = tie ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
     return { q, n: 2, colors, answer, band: [lo, hi] };
   }
@@ -212,15 +215,24 @@
     els.palette.replaceChildren();
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const has = (name, v) => [...root.querySelectorAll(`input[name="${name}"]`)].some((r) => r.value === v);
-    const ct = has('vbCount', load(COUNT_KEY, 'mix')) ? load(COUNT_KEY, 'mix') : 'mix', md = has('vbMode', load(MODE_KEY, 'streak')) ? load(MODE_KEY, 'streak') : 'streak';
-    root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
-    root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
+    // the saved count and mode are read once: after that the radios hold this visit's choice, which a browser that
+    // refuses storage could not have saved (the best shown would be another setting's)
+    if (!settingsRead) {
+      settingsRead = true;
+      const has = (name, v) => [...root.querySelectorAll(`input[name="${name}"]`)].some((r) => r.value === v);
+      const ct = has('vbCount', load(COUNT_KEY, 'mix')) ? load(COUNT_KEY, 'mix') : 'mix', md = has('vbMode', load(MODE_KEY, 'streak')) ? load(MODE_KEY, 'streak') : 'streak';
+      root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
+      root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
+    }
     showBest();
   }
+  let settingsRead = false;
+  // a best the browser would not keep still stands for this visit
+  const visit = {};
+  const loadBests = () => Object.assign(load(BEST_KEY, {}), visit);
   const bestOf = (bests, key) => (Number.isInteger(bests[key]) && bests[key] >= 0 && bests[key] <= 1e6 ? bests[key] : null); // a count of rounds, or no best
   function showBest() {
-    const best = bestOf(load(BEST_KEY, {}), bestKey());
+    const best = bestOf(loadBests(), bestKey());
     els.best.textContent = best == null ? (mode() === 'streak' ? 'No streak yet for these settings.' : 'No score yet for these settings.') : mode() === 'streak' ? `Your best streak here: ${best} in a row.` : `Your best here: ${best} right in ${mode() / 60} minute${mode() === '60' ? '' : 's'}.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
@@ -238,6 +250,7 @@
     els.time.hidden = !seconds;
     setFocus(true);
     nextRound();
+    swatch(0).focus({ preventScroll: true });   // the Start button just went; without this the focus falls to the page
     startClock();
   }
   // the clock, for a timed game: it pauses while the answer to a miss is being read
@@ -293,7 +306,7 @@
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'vb-swatch'; b.dataset.index = i;
       b.style.background = css(c.rgb);
-      b.setAttribute('aria-label', `Color ${LETTERS[i]}`);
+      b.setAttribute('aria-label', r.n === 2 ? SIDE[i ? 'right' : 'left'] : `Color ${LETTERS[i]}`);   // a pair shows no letters: its colors are the left one and the right one
       const letter = document.createElement('span'); letter.className = 'vb-letter'; letter.textContent = LETTERS[i];
       const badge = document.createElement('span'); badge.className = 'vb-badge'; badge.hidden = true;
       b.append(letter, badge);
@@ -339,16 +352,15 @@
   const same = (a, b) => Array.isArray(a) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b;
   // why the answer is what it is, in a sentence the student can check against the swatches
   function explain(r) {
-    const side = { left: 'The left one', right: 'The right one', same: 'Both' };
     if (r.q.mode === 'pair') {
       const [L, R] = r.colors;
       if (r.q.kind === 'value') {
         if (r.answer === 'same') return `Both are the same value: ${vLabel(L)} and ${vLabel(R)}. Different colors, equal in light and dark.`;
         const win = r.answer === 'left' ? L : R, lose = r.answer === 'left' ? R : L;
-        return `${side[r.answer]} is ${r.q.key}: ${vLabel(win)} against ${vLabel(lose)}.`;
+        return `${SIDE[r.answer]} is ${r.q.key}: ${vLabel(win)} against ${vLabel(lose)}.`;
       }
       if (r.answer === 'same') return `Both lean the same way: ${tLabel(L)}. The difference is in value, not temperature.`;
-      return `${side[r.answer]} is ${r.q.key}: it leans more toward ${r.q.key === 'warmer' ? 'orange and yellow' : 'blue and green'} than the other.`;
+      return `${SIDE[r.answer]} is ${r.q.key}: it leans more toward ${r.q.key === 'warmer' ? 'orange and yellow' : 'blue and green'} than the other.`;
     }
     const vals = r.colors.map((c, i) => `${LETTERS[i]} ${vLabel(c)}`).join(', ');
     if (r.q.mode === 'pick') return `${LETTERS[r.answer]} is the ${r.q.key}. The values: ${vals}.`;
@@ -421,8 +433,11 @@
     clearTimeout(game.auto);
     nextRound();
   });
+  // the keys are the board's: a menu, the Simple/Advanced switch or a field elsewhere on the page keeps its own arrows
+  const onBoard = (el) => el === document.body || els.play.contains(el);
   document.addEventListener('keydown', (e) => {
-    if (!game || game.over || Studio.tab() !== 'battle') return;
+    if (!game || game.over || Studio.tab() !== 'battle' || e.defaultPrevented || !onBoard(e.target)) return;
+    if (e.repeat && e.key === 'Enter') { e.preventDefault(); return; }   // an Enter held on Start or Next answers nothing
     if (!els.miss.hidden) { if (e.key === 'Enter') { e.preventDefault(); els.missNext.click(); } return; } // one press, one answer: the key's own activation of whatever is focused next is stopped
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') {
@@ -446,15 +461,18 @@
     const onClock = game.seconds > 0;
     const score = onClock ? game.right : game.streak;
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
-    const bests = load(BEST_KEY, {}), key = bestKey();
+    const bests = loadBests(), key = bestKey();
     const isBest = score > 0 && (bestOf(bests, key) == null || score > bestOf(bests, key));
     // every setting played is re-added last, with the best it keeps, so the prune drops the least recently played
     const kept = isBest ? score : bestOf(bests, key);
-    if (kept != null) { delete bests[key]; bests[key] = kept; pruneBests(bests); save(BEST_KEY, bests); }
+    let written = true;
+    if (kept != null) { delete bests[key]; bests[key] = kept; pruneBests(bests); written = save(BEST_KEY, bests); }
+    if (written) delete visit[key]; else visit[key] = kept;          // a best that has been kept since needs no stand-in
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
+    els.newBest.textContent = written ? 'New best!' : 'New best! (this visit only)';   // a best the browser would not keep says so
     els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${score} ${onClock ? 'right' : 'in a row'}`);
     const pct = score;
     els.stars.querySelectorAll('.game-star').forEach((st, i) => { st.classList.toggle('is-on', i < stars); st.style.setProperty('--i', i); });
@@ -472,7 +490,12 @@
     els.again.focus({ preventScroll: true });
   }
   els.again.addEventListener('click', start);
-  els.settings.addEventListener('click', () => { clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null; els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); renderSetup(); });
+  els.settings.addEventListener('click', () => {
+    clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null;
+    els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false;
+    setFocus(false); renderSetup();
+    els.palette.focus();                     // the ✕ or the score's button that had focus is hidden now
+  });
   // the tabs are hidden while playing on a phone, so the bar has a way out: tap ✕ twice
   let quitArmed = -1e9; // long ago: the first ✕ asks even in the page's first three seconds
   els.quit.addEventListener('click', () => {
