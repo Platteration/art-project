@@ -22,10 +22,13 @@
 // the gain limits at their edges, a pick under the faded reference and on the gray fill of a moved photo, the fix
 // through moves, fits and a new reference; the Studio after another deal, a photo of the visitor's own, a turned
 // and toned paper, and a press before the Studio has read its painting back; touch on a phone and Working size
-// 1400 there; the Palette block view; axe with the drawer open, light and dark; the drawer's how-tos.
+// 1400 there; the Palette block view; axe with the drawer open, light and dark; the drawer's how-tos; the map's
+// labels (their numbers, kept inside the picture and apart, on the example, moved, and on a reference of slivers);
+// Rotate's and Size's keyboard steps and a half-faded reference; Save PNG inside another site's sandboxed frame;
+// Forget, and a second tab, with a painting in the drawer.
 import fs from 'node:fs';
 import path from 'node:path';
-import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, axe, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
+import { openPage, newTab, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, axe, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
 
 const EXAMPLE_LABEL = 'Example painting · a made-up attempt at the sample: lifted shadows, warmer skin, and photographed slightly tilted. Line it up below to see the score change. Load your own to replace it.';
 const NO_ART_LABEL = 'Load a photo of your finished painting to score it against the reference.';
@@ -310,6 +313,18 @@ async function exifJpeg(page, name = 'phone.jpg') {
   const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 255]), body]);
   return { name, mimeType: 'image/jpeg', buffer: Buffer.concat([jpg.subarray(0, 2), app1, jpg.subarray(2)]) };
 }
+// the labels the page draws on the accuracy map, as it draws them: each rounded box (canvas px) with its text and
+// font, read off the 2D context's own calls on #cv-diff (a recorder only: every call goes on to the real method);
+// the list starts over each time the map's picture is put down
+const PILL_LOG = () => {
+  const P = CanvasRenderingContext2D.prototype; const rr = P.roundRect, put = P.putImageData, ft = P.fillText;
+  window.__pills = [];
+  P.putImageData = function putImageData(...a) { if (this.canvas && this.canvas.id === 'cv-diff') window.__pills = []; return put.apply(this, a); };
+  P.roundRect = function roundRect(x, y, w, h) { if (this.canvas && this.canvas.id === 'cv-diff') window.__pills.push({ x, y, w, h }); return rr.apply(this, arguments); };
+  P.fillText = function fillText(s) { const l = window.__pills; if (this.canvas && this.canvas.id === 'cv-diff' && l.length) { l[l.length - 1].text = s; l[l.length - 1].font = +(/(\d+)px/.exec(this.font) || [])[1]; } return ft.apply(this, arguments); };
+};
+const pillsOverlapping = (ps) => { const out = []; ps.forEach((a, i) => ps.slice(i + 1).forEach((b) => { const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y); if (ix > 0.5 && iy > 0.5) out.push({ labels: [a.text, b.text], at: [Math.round(a.x), Math.round(a.y), Math.round(b.x), Math.round(b.y)], by: [+ix.toFixed(1), +iy.toFixed(1)] }); })); return out; };
+const pillInside = (p, W, H) => p.x >= 0 && p.y >= 0 && p.x + p.w <= W && p.y + p.h <= H;
 
 export default async function checkPainting(t, site) {
   let exampleBadge = null; // the example's badge on the #check route, for the Palette block view below
