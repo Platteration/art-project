@@ -20,7 +20,7 @@
 //   fields     the paint search and the canvas length, typed hostile
 // HOSTILE_ONLY=names,formats runs some segments only.
 import zlib from 'node:zlib';
-import { openPage, clean, tab, app, poseFrame, renderFrame, textFile, svgImage, sleep, click, stroke, hscroll, PHONE } from '../lib.mjs';
+import { openPage, newTab, clean, tab, app, poseFrame, renderFrame, textFile, svgImage, sleep, click, stroke, hscroll, PHONE } from '../lib.mjs';
 
 const ONLY = (process.env.HOSTILE_ONLY || '').split(',').filter(Boolean);
 
@@ -590,6 +590,19 @@ export default async function hostile(t, site) {
     await dropItems(page, [fileItem(textFile('a-note.txt')), fileItem({ ...png, name: 'second-of-three.png' }), fileItem({ ...png, name: 'third-of-three.png' })]);
     await fr.waitForFunction(() => document.getElementById('source').textContent.startsWith('second-of-three.png') && document.getElementById('busy').hidden, null, { timeout: 15000 }).catch(() => null);
     t.check((await labelOf(page)).startsWith('second-of-three.png') && /^Of the 3 files dropped, only second-of-three\.png was taken\.$/.test(await toastOf(page)), 'textdrops: of three files dropped the first picture is taken and the page says which', { label: await labelOf(page), toast: await toastOf(page) });
+    // eight drops in the same instant, good and bad alternating: the last picture dropped is the one shown, and the page settles
+    await resetToast(page);
+    const burst = [];
+    for (let i = 0; i < 8; i++) burst.push(i % 2 ? fileItem(textFile(`burst-${i}.txt`)) : fileItem({ ...png, name: `burst-${i}.png` }));
+    await app(page).evaluate(async (items) => {
+      for (const f of items) {
+        const bin = atob(f.file.b64), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const dt = new DataTransfer(); dt.items.add(new File([bytes], f.file.name, { type: f.file.mimeType }));
+        document.body.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      }
+    }, burst);
+    await fr.waitForFunction(() => document.getElementById('source').textContent.startsWith('burst-6.png') && document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+    t.check((await labelOf(page)).startsWith('burst-6.png · 80 × 100 px') && (await busyDown(page, 5000)), 'textdrops: eight drops in the same instant, pictures and text files alternating, end on the last picture with the page settled', await labelOf(page));
     await clean(t, page, 'textdrops: drops');
   });
 
@@ -719,7 +732,7 @@ export default async function hostile(t, site) {
       const by = (id) => t.find((b) => b.dataset.poseId === id);
       return { n: t.length, hasEvil: t.filter((b) => b.querySelector('.fig-pose-name').textContent === '<img src=x onerror=window.__pwn=1>').length, imgs: document.querySelectorAll('#tab-figure img[src="x"]').length, pwn: window.__pwn, dupNames: t.filter((b) => b.dataset.poseId === 'dup').map((b) => b.querySelector('.fig-pose-name').textContent), p1: by('p1') && by('p1').classList.contains('has-img'), p2: by('p2') && by('p2').classList.contains('has-img'), p3: by('p3') && by('p3').classList.contains('has-img'), p4: by('p4') && by('p4').classList.contains('has-img'), weird: !!by('a"] b'), note: document.getElementById('fig-libNote').textContent.slice(0, 50) };
     });
-    t.check(h.n === 3004 && h.hasEvil === 1 && !h.imgs && h.pwn === undefined && h.dupNames.join() === 'one', 'foreign: a list of 3000 poses with quotes, markup, duplicates, prototype names and entries of the wrong type is listed once each (3004 tiles), names as text, nothing made from them', h);
+    t.check(h.n === 3003 && h.hasEvil === 1 && !h.imgs && h.pwn === undefined && h.dupNames.join() === 'one' && h.weird, 'foreign: a list of 3000 poses with quotes, markup, duplicates, prototype names and entries of the wrong type is listed once each (3003 tiles: the one pose whose group has no heading is not shown), names as text, nothing made from them', h);
     t.check(h.p1 === true && !h.p2 && !h.p3 && !h.p4, 'foreign: of the pictures sent, a JPEG data address is shown; a javascript: address, an SVG and an outside address are not', { p1: h.p1, p2: h.p2, p3: h.p3, p4: h.p4 });
     await clean(t, page, 'foreign: hostile lists from the drawing frame');
 
@@ -874,15 +887,15 @@ export default async function hostile(t, site) {
     const SEARCHES = ['(', '[', '\\', '*', '.*', '+', '?', '^$', '(?:', '<img src=x onerror=window.__pwn=1>', '\'; DROP TABLE paints;--', '%s%n%x', CH(0), 'a'.repeat(100000), '\u{1F3A8}', 'PY42', 'py42', '  PY42  ', 'earths', CH(0x130), CH(0xdf), '__proto__', 'constructor', CH(0x202e) + 'white'];
     const rows = [];
     for (const q of SEARCHES) {
-      const r = await fr.evaluate((q) => { const s = document.getElementById('paintSearch'); s.value = q; s.dispatchEvent(new Event('input', { bubbles: true })); const shown = [...document.querySelectorAll('#paintCats li')].filter((li) => !li.hidden).length, secs = [...document.querySelectorAll('#paintCats .paint-cat')].filter((s) => !s.hidden).length; return { shown, secs, hint: !document.getElementById('paintNoMatch').hidden, pwn: window.__pwn }; }, q);
+      const r = await fr.evaluate((q) => { const s = document.getElementById('paintSearch'); s.value = q; s.dispatchEvent(new Event('input', { bubbles: true })); const lis = [...document.querySelectorAll('#paintCats li')], shown = lis.filter((li) => !li.hidden).length, secs = [...document.querySelectorAll('#paintCats .paint-cat')].filter((s) => !s.hidden).length, want = q.trim().toLowerCase(); return { shown, secs, literal: lis.filter((li) => !want || li.dataset.search.includes(want)).length, hint: !document.getElementById('paintNoMatch').hidden, pwn: window.__pwn }; }, q);
       rows.push([q, r]);
     }
-    const bad = rows.filter(([q, r]) => (r.shown === 0) !== r.hint || (r.shown === 0) !== (r.secs === 0) || r.pwn !== undefined).map(([q, r]) => `${JSON.stringify(q.slice(0, 20))}: ${JSON.stringify(r)}`);
-    t.check(!bad.length, 'fields: twenty-four hostile searches (regex characters, markup, NUL, 100000 characters, emoji, prototype names) leave the list and the "No paint matches that" hint agreeing', bad);
+    const bad = rows.filter(([q, r]) => (r.shown === 0) !== r.hint || (r.shown === 0) !== (r.secs === 0) || r.pwn !== undefined || r.shown !== r.literal).map(([q, r]) => `${JSON.stringify(q.slice(0, 20))}: ${JSON.stringify(r)}`);
+    t.check(!bad.length, 'fields: twenty-four hostile searches (pattern characters, markup, NUL, 100000 characters, emoji, prototype names) show exactly the paints whose text contains the words typed, and the list and the "No paint matches that" hint agree', bad);
     const by = Object.fromEntries(rows.map(([q, r]) => [q, r]));
     t.check(by['PY42'].shown > 0 && by['py42'].shown === by['PY42'].shown && by['  PY42  '].shown === by['PY42'].shown, 'fields: a pigment code finds its paints whatever its case or the spaces round it', [by['PY42'].shown, by['py42'].shown, by['  PY42  '].shown]);
     t.check(by['earths'].shown > 0, 'fields: a family (earths) finds its paints', by['earths']);
-    t.check(['(', '[', '\\', '*', '.*', '+', '?', '^$', '(?:', '<img src=x onerror=window.__pwn=1>'].every((q) => by[q].shown === 0 && by[q].hint), 'fields: characters that mean something in a pattern are searched for as themselves (and found nowhere)', ['(', '[', '\\', '*', '.*'].map((q) => by[q].shown));
+    t.check(['[', '\\', '*', '.*', '+', '?', '^$', '(?:', '<img src=x onerror=window.__pwn=1>'].every((q) => by[q].shown === 0 && by[q].hint), 'fields: characters that mean something in a pattern ([ \\ * .* + ? ^$ (?:) are searched for as themselves, and found nowhere', ['[', '\\', '*', '.*'].map((q) => by[q].shown));
     await fr.evaluate(() => { const s = document.getElementById('paintSearch'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); document.getElementById('paintDialogDone').click(); });
     await clean(t, page, 'fields: the paint search');
 
@@ -916,6 +929,44 @@ export default async function hostile(t, site) {
     }
     t.check(!hints.length, 'fields: with a measure and a grid, the hint\'s canvas lengths stay readable for a unit of 0.0001, 0.05, 1e-300 and 9999.99 cm and inches (no NaN, Infinity or exponent)', hints);
     await clean(t, page, 'fields: the canvas length');
+  });
+
+  // ====================================================================================================================
+  // crosstab: another tab of the same site writes junk into a key this tab is showing (the storage event path)
+  // ====================================================================================================================
+  await seg.run('crosstab', async (open) => {
+    const PAL = 'portrait-value-studio.palette', MINE = 'portrait-value-studio.myPaints';
+    const three = [{ r: 10, g: 20, b: 30 }, { r: 200, g: 100, b: 50 }, { r: 255, g: 255, b: 255 }];
+    const a = await open({ storage: { [PAL]: three } });
+    const b = await newTab(site, a);
+    const swatches = () => app(a).evaluate(() => [...document.querySelectorAll('#swatches li.swatch')].map((li) => li.querySelector('.swatch-meta span').textContent));
+    const write = (key, value) => b.evaluate(([k, v]) => { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); }, [key, value]);
+    // what the colours in a stored text come to, as the README says picked colours are kept: whole numbers 0 to 255 in r, g and b
+    const hexes = (text) => { try { const l = JSON.parse(text); return Array.isArray(l) ? l.filter((c) => c && typeof c === 'object' && [c.r, c.g, c.b].every((n) => Number.isInteger(n) && n >= 0 && n <= 255)).map((c) => '#' + [c.r, c.g, c.b].map((n) => n.toString(16).padStart(2, '0')).join('').toUpperCase()) : []; } catch (e) { return null; } };
+    const JUNK = ['oops', '[]', '[{"r":1,"g":2,"b":3}]', '[{"r":300,"g":0,"b":0},{"r":1.5,"g":0,"b":0},{"r":"9","g":0,"b":0}]', '{"r":1}', 'null', '[null,1,"a",[],{}]', '{"__proto__":{"r":1,"g":2,"b":3}}', JSON.stringify(Array.from({ length: 3000 }, (_, i) => ({ r: i % 256, g: (i >> 4) % 256, b: 7 }))), '[{"r":9,"g":9,"b":9,"extra":"<img src=x onerror=window.__pwn=1>"}]', null];
+    const first = await swatches();
+    t.check(first.join() === '#0A141E,#C86432,#FFFFFF', 'crosstab: the tab opens with the three colours stored', first);
+    let was = first;
+    const wrong = [];
+    for (const junk of JUNK) {
+      await write(PAL, junk);
+      const want = junk === null ? [] : hexes(junk);
+      const expect = want === null ? was : want;
+      await app(a).waitForFunction((n) => document.querySelectorAll('#swatches li.swatch').length === n, expect.length, { timeout: 4000 }).catch(() => null);
+      const got = await swatches();
+      if (got.join() !== expect.join()) wrong.push(`${String(junk).slice(0, 40)}: shows ${got.length} (${got.slice(0, 2)}), wanted ${expect.length}`);
+      was = got;
+    }
+    t.check(!wrong.length, 'crosstab: junk written to the picked colours by another tab leaves this tab with exactly the valid colours in it, or what it had when the text is not JSON', wrong);
+    t.check(await app(a).evaluate(() => window.__pwn === undefined) && (await usable(a)), 'crosstab: nothing ran, and the tab is usable afterwards');
+    // My paints and the mode written the same way
+    for (const junk of ['oops', '["TW","YO","constructor","__proto__",5,null]', JSON.stringify(Array.from({ length: 20000 }, (_, i) => ['TW', 'YO', 'IB', 'nope'][i % 4])), '{"a":1}', null]) await write(MINE, junk);
+    await write('portrait-value-studio.mode', 'advanced'); await write('portrait-value-studio.drawers', '["colors","__proto__"]'); await write('pose-and-light.mine.v1', '[{"id":"<b>","p":{}}]');
+    await sleep(600);
+    await tab(a, 'game'); await tab(a, 'study');
+    t.check(await usable(a), 'crosstab: after My paints, the mode, the drawers and the saved poses were rewritten from another tab, this tab still opens its tabs');
+    await clean(t, a, 'crosstab: the first tab');
+    await clean(t, b, 'crosstab: the writing tab');
   });
 
   t.note(`segments: ${seg.timings.join('; ')}`);

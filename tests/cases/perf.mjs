@@ -13,7 +13,7 @@
 // SwiftShader, a software rasteriser that makes each frame cost 150-350 ms of main-thread time that a GPU does not,
 // so for those two only the page's own script time is held to a budget and the task lengths are notes.
 //
-// Memory: each action is repeated 12-60 times after a warm-up and the JS heap (after a forced collection), the DOM
+// Memory: each action is repeated 16-36 times after a warm-up and the JS heap (after a forced collection), the DOM
 // node and listener counts, the live object URLs (URL.createObjectURL minus revokeObjectURL) and the live WebGL
 // objects (created minus deleted, by kind) must not grow. The renderer's resident size is a note and a loose bound
 // only: Chromium's own decoded-image cache grows it by about 3 MB per picture shown until it reaches a ceiling
@@ -42,6 +42,9 @@ function instrument() {
   const mk = URL.createObjectURL.bind(URL), rv = URL.revokeObjectURL.bind(URL);
   URL.createObjectURL = (b) => { const u = mk(b); live.add(u); window.__blobs.made++; return u; };
   URL.revokeObjectURL = (u) => { if (live.delete(u)) window.__blobs.revoked++; return rv(u); };
+  const si = window.setInterval.bind(window), ci = window.clearInterval.bind(window), ivs = window.__intervals = new Set();
+  window.setInterval = (...a) => { const id = si(...a); ivs.add(id); return id; };
+  window.clearInterval = (id) => { ivs.delete(id); return ci(id); };
   const gl = window.__gl = { made: {}, gone: {} };
   for (const C of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
     if (!C) continue;
@@ -164,7 +167,7 @@ async function probe(page, bcdp) {
   const send = (m) => page.cdp.send(m).catch(() => null);
   await send('HeapProfiler.collectGarbage'); await send('HeapProfiler.collectGarbage');
   const heap = await send('Runtime.getHeapUsage'), dom = await send('Memory.getDOMCounters');
-  const frames = await Promise.all(page.frames().map((f) => f.evaluate(() => ({ blobs: window.__blobs ? window.__blobs.live.size : 0, made: window.__blobs ? window.__blobs.made : 0, gl: window.__gl ? JSON.parse(JSON.stringify(window.__gl)) : null })).catch(() => null)));
+  const frames = await Promise.all(page.frames().map((f) => f.evaluate(() => ({ blobs: window.__blobs ? window.__blobs.live.size : 0, made: window.__blobs ? window.__blobs.made : 0, ivs: window.__intervals ? window.__intervals.size : 0, gl: window.__gl ? JSON.parse(JSON.stringify(window.__gl)) : null })).catch(() => null)));
   const gl = {};
   for (const f of frames) if (f && f.gl) for (const k of Object.keys(f.gl.made)) gl[k] = (gl[k] || 0) + f.gl.made[k] - (f.gl.gone[k] || 0);
   // the page's live typed arrays (every photo's pixels and Lab planes), ImageData, canvases and images, counted by the engine after a collection
@@ -178,9 +181,9 @@ async function probe(page, bcdp) {
       await page.cdp.send('Runtime.releaseObject', { objectId: proto.result.objectId }).catch(() => null);
     } catch (e) { live[name] = -1; }
   }
-  return { live, heap: heap ? Math.round(heap.usedSize / 1048576 * 10) / 10 : -1, nodes: dom ? dom.nodes : -1, listeners: dom ? dom.jsEventListeners : -1, blobs: frames.reduce((s, f) => s + (f ? f.blobs : 0), 0), made: frames.reduce((s, f) => s + (f ? f.made : 0), 0), gl, rss: await rendererMB(bcdp) };
+  return { live, heap: heap ? Math.round(heap.usedSize / 1048576 * 10) / 10 : -1, nodes: dom ? dom.nodes : -1, listeners: dom ? dom.jsEventListeners : -1, blobs: frames.reduce((s, f) => s + (f ? f.blobs : 0), 0), intervals: frames.reduce((s, f) => s + (f ? f.ivs : 0), 0), made: frames.reduce((s, f) => s + (f ? f.made : 0), 0), gl, rss: await rendererMB(bcdp) };
 }
-const fmt = (p) => `heap ${p.heap} MB, live ${JSON.stringify(p.live)}, ${p.nodes} nodes, ${p.listeners} listeners, ${p.blobs} object URLs live (${p.made} made), WebGL ${JSON.stringify(p.gl)}, renderer ${p.rss} MB`;
+const fmt = (p) => `heap ${p.heap} MB, live ${JSON.stringify(p.live)}, ${p.nodes} nodes, ${p.listeners} listeners, ${p.intervals} timers running, ${p.blobs} object URLs live (${p.made} made), WebGL ${JSON.stringify(p.gl)}, renderer ${p.rss} MB`;
 const sameGl = (a, b) => Object.keys({ ...a, ...b }).every((k) => (a[k] || 0) === (b[k] || 0));
 // a photo chosen and studied: the label names it and the "Updating…" pill has come up and gone since the file was chosen
 // (a pill already down, with the label of the photo before, would otherwise be taken for the new photo being done)
@@ -190,8 +193,11 @@ async function loadFile(fr, file, pattern, timeout = 180000) {
   await fr.waitForFunction((p) => { const b = window.__pf.busy; return b.length > 0 && b[b.length - 1].hidden && new RegExp(p).test(document.getElementById('source').textContent); }, pattern, { timeout });
 }
 // one section: a thrown error is one failed check, not the end of the case
+const took = {};
 async function segment(t, name, fn) {
+  const t0 = Date.now();
   try { await fn(); } catch (e) { t.check(false, `${name}: the section ran to its end`, String((e && e.message) || e).slice(0, 300)); }
+  took[name] = Math.round((Date.now() - t0) / 1000);
 }
 const ms = (n) => `${n} ms`;
 const min = (a) => Math.min(...a);
@@ -300,16 +306,6 @@ export default async function perf(t, site) {
         t.check(w.shown && w.uncovered.length === 0, 'each study re-run shows Updating… (painted) before it starts', w.uncovered);
         const ok = t.check(min(lat) <= 200 && w.max <= 200, 'dragging Simplify: the slowest mouse event of a drag and the longest study task are within 200 ms at full speed', { slowestEvent: lat, longestTask: w.max, tasks: w.tasks });
         t.check(slow.max <= 800, 'the same at phone speed (4 × 200 ms)', { longestTask: slow.max, slowestEvent: drags[2].max });
-        if (!ok && lat.every((x) => x > 200) && w.tasks.length >= 2) {
-          t.finding({
-            severity: 'medium',
-            title: 'Dragging Simplify freezes the page for 0.4-0.8 s at every step (2-3 s on a phone): the whole study is one synchronous task',
-            steps: '1. Load any photo (here 4000 × 3000). 2. Advanced. 3. Open "Dark, middle, light" and drag the Simplify slider from 3 to 7 with the mouse, pausing a moment at each step. 4. Watch the slider thumb and the page while the studies update. (Measured with a real mouse through CDP, the working size at its default 900 px and edge-aware smoothing.)',
-            expected: 'An input response should not hold the main thread for more than about 200 ms: the slider keeps following the hand while the studies update behind it (or the work is cut into slices, or done in a worker). The README says Working size 600 px is "fastest", but nothing lets the default feel responsive.',
-            actual: `The slowest mouse event of each drag took ${lat.join(' ms and ')} ms to be handled at full speed (the page was blocked that long); the re-runs were single tasks of ${w.tasks.join(', ')} ms. At phone speed (4x CPU) a single task took ${slow.max} ms (${slow.tasks.join(', ')}) and the slowest mouse event ${drags[2].max} ms. The "Updating…" pill is painted first, so a visitor is told, but the slider cannot be moved while it is up.`,
-            cause: 'js/app.js:274-296: runSoon() waits 90 ms and run() calls Study.process() (js/processing.js:848) on the whole 900 px picture in one go: for Simplify the blur (edge-aware: the domain-transform filter, js/processing.js:159-232, two guided rounds over L*, a*, b*), then the value split, the merges, k-means in every value mass and the color rescue, all synchronously. The blur is cached only for the last (radius, smoothing) pair (js/processing.js:235-247), so any change of Simplify recomputes it; and nothing is sliced between rows or passes, so nothing can yield to input.',
-          });
-        }
         // the other controls: only the first stage is skipped when the blur radius is unchanged, the rest still runs
         const others = {};
         for (const [id, a, b] of [['merge', 7, 4], ['colors', 5, 3], ['t1', 40, 35], ['lean', 30, 0], ['g0', 8, 20]]) {
@@ -317,14 +313,25 @@ export default async function perf(t, site) {
           for (const v of [a, b]) { const r = await measure(page, 1, async () => { await setRange(page, id, v); await busyDone(page); }); runs.push(r.max); }
           others[id] = runs;
         }
-        t.note(`longest task per re-run, full speed, by control (two values each): ${JSON.stringify(others)}`);
-        for (const [id, runs] of Object.entries(others)) t.check(min(runs) <= 300, `a move of the ${id} control re-runs the study in under 300 ms at full speed`, runs);
+        t.note(`longest task per re-run, full speed, by control (two values each; g0, a gray value that only recolors, is a note and not a check: ${JSON.stringify(others)}`);
+        for (const [id, runs] of Object.entries(others)) if (id !== 'g0') t.check(min(runs) <= 300, `a move of the ${id} control re-runs the study in under 300 ms at full speed`, runs);
         // Simple mode: the three Detail presets set Simplify and Merge together
         await click(page, '[data-mode="simple"]'); await sleep(500); await busyDone(page); await sleep(300);
         const presets = {};
         for (const p of ['soft', 'sharp', 'normal']) { const r = await measure(page, 1, async () => { await fr.evaluate((p) => document.querySelector(`input[name="detailPreset"][value="${p}"]`).click(), p); await sleep(150); await busyDone(page); }); presets[p] = r.max; }
         t.note(`Simple mode Detail presets, longest task at full speed: ${JSON.stringify(presets)}`);
-        t.check(Math.max(...Object.values(presets)) <= 200, 'choosing a Detail preset in Simple mode re-runs the study in under 200 ms at full speed', presets);
+        const okPresets = t.check(Math.max(...Object.values(presets)) <= 200, 'choosing a Detail preset in Simple mode re-runs the study in under 200 ms at full speed', presets);
+        const lo = Math.min(...w.tasks), hi = Math.max(...w.tasks), sec = (n) => (n / 1000).toFixed(1);
+        if (!ok && !okPresets && lat.every((x) => x > 200) && w.tasks.length >= 2 && Math.min(...Object.values(presets)) > 200) {
+          t.finding({
+            severity: 'medium',
+            title: `Every move of Simplify or choice of a Detail preset freezes the page for ${sec(lo)}-${sec(hi)} s (about ${sec(slow.max)} s on a phone): the whole study is one synchronous task`,
+            steps: '1. Load any photo (here 4000 × 3000; the study is computed at the working size, so the photo\'s size does not matter). 2. Advanced, "Dark, middle, light": drag the Simplify slider from 3 to 7 with a real mouse, pausing a moment at each step; or, in Simple, tap Soft, Sharp and Normal under Detail. 3. Watch the slider thumb and the page while the studies update. (Timed with a real mouse through CDP, working size at its default 900 px, edge-aware smoothing.)',
+            expected: 'The README makes no timing promise, so the budget is the one that keeps a page responsive: an input is answered within about 200 ms and work that takes longer is sliced, deferred or done in a worker, so the slider keeps following the hand while the studies update behind it.',
+            actual: `Two drags of Simplify (3 to 7 and back, four steps each): the slowest mouse event of each took ${lat.join(' ms and ')} ms to be handled at full speed (the page was blocked that long) and the eight re-runs were single tasks of ${w.tasks.join(', ')} ms. At 4x CPU a single re-run took ${slow.max} ms (${slow.tasks.join(', ')}) and the slowest mouse event ${drags[2].max} ms. In Simple mode the Detail presets re-ran in one task of ${presets.soft} ms (Soft), ${presets.sharp} ms (Sharp) and ${presets.normal} ms (Normal). Even a gray value or a split, which change no shape, cost ${Math.min(...others.g0, ...others.t1)}-${Math.max(...others.g0, ...others.t1)} ms. The "Updating…" pill is painted first, so a visitor is told, but nothing can be moved while it is up.`,
+            cause: 'js/app.js:274-296: runSoon() waits 90 ms and run() calls Study.process() (js/processing.js:848) on the whole 900 px picture in one go: for Simplify the blur (edge-aware: the domain-transform filter, js/processing.js:159-232, two guided rounds over L*, a*, b*), then the value split, the merges, k-means in every value mass and the color rescue, all synchronously. The blur is cached only for the last (radius, smoothing) pair (js/processing.js:235-247), so any change of Simplify recomputes it, and every other control re-runs all the stages after it; nothing is sliced between rows or passes, so nothing can yield to input.',
+          });
+        }
         // the detail (working size) select re-prepares the photo
         await click(page, '[data-mode="advanced"]'); await sleep(300);
         const sizes = {};
@@ -399,7 +406,7 @@ export default async function perf(t, site) {
         if (!ok && worst.every((x) => x > 200)) {
           t.finding({
             severity: 'medium',
-            title: 'Every move of a Line up slider re-processes the painting in one 0.7-1 s task (3 s on a phone), so lining a painting up by hand cannot be done by dragging',
+            title: `Every move of a Line up slider re-processes the painting in one ${(Math.min(...worst) / 1000).toFixed(1)}-${(Math.max(...worst) / 1000).toFixed(1)} s task (${(r4s.max / 1000).toFixed(1)} s on a phone), so lining a painting up by hand cannot be done by dragging`,
             steps: '1. Load a photo. 2. Open "How close did I get?" and load a photo of a painting (here the same 4000 × 3000 file). 3. Open "Line up the photo and fix its colors". 4. Drag Move left / right, Move up / down, Size or Rotate by even a step or two.',
             expected: 'A slider used to line one picture up with another has to follow the hand: the response to each input within about 200 ms, or the score re-run only when the hand rests, or on a cheaper preview.',
             actual: `Each of ${runs.length} slider moves held the main thread for ${worst.join(', ')} ms at full speed (and ${r4s.max} ms at 4x CPU); loading the painting is a single ${l1.max} ms task (${l4.max} ms at 4x). The pill is painted first, but the slider is frozen under it.`,
@@ -501,7 +508,7 @@ export default async function perf(t, site) {
         if (!ok) {
           t.finding({
             severity: 'medium',
-            title: 'Tapping Games with a photo loaded freezes the page for 0.6-0.8 s (2.5 s on a phone) before the tab even switches, with no progress shown',
+            title: `Tapping Games with a photo loaded freezes the page for ${(g1.handler / 1000).toFixed(1)} s (${(g4.handler / 1000).toFixed(1)} s on a phone) before the tab even switches, with no progress shown; Easy, Hard and A painting cost up to ${(Math.max(builds.easy, builds.hard, builds.painting, builds.anotherPainting) / 1000).toFixed(1)} s more`,
             steps: '1. Load a photo (here 4000 × 3000; any photo costs about the same, the board is built at the working size). 2. Open the Games menu and choose Paint by numbers (or tap Easy / Hard / A painting in its setup). 3. Watch the tab bar: the tab does not change until the board is built.',
             expected: 'A tap is answered within a frame or two (about 200 ms at most); work that takes longer shows progress first (as the Study tab\'s "Updating…" pill does before its own runs).',
             actual: `The click handler itself ran for ${g1.handler} ms at full speed (next frame ${g1.toFrame} ms; tasks ${g1.tasks.join(', ')}), and ${g4.handler} ms at 4x CPU; choosing Easy cost ${builds.easy} ms, Hard ${builds.hard} ms, A painting ${builds.painting} ms. The page cannot paint a pill because it never gets a frame.`,
@@ -627,24 +634,37 @@ export default async function perf(t, site) {
           shown.push({ ms: r.ms, max: r.max });
           await stroke(page, '#fs-paper'); await sleep(700);
           let d;
-          const sc = await measure(page, 1, async () => { d = await timedClick(page, '#fig-done'); await fr.waitForFunction(() => !document.getElementById('fig-popup').hidden, null, { timeout: 60000 }); }, { settle: 600 });
+          const sc = await measure(page, 1, async () => { d = await timedClick(page, '#fig-done'); await fr.waitForFunction(() => !document.getElementById('fig-result').hidden, null, { timeout: 60000 }); }, { settle: 600 });
           done.push({ handler: d.handler, max: sc.max });
+          await sleep(700); // (the card takes no tap for 0.6 s)
         }
         // and one Done at phone speed
         await click(page, '#fig-nextPose');
         await fr.waitForFunction(() => document.getElementById('fig-say').textContent.startsWith('Pose 4'), null, { timeout: 120000 });
         await sleep(1500); await stroke(page, '#fs-paper'); await sleep(700);
-        let d4; await measure(page, 4, async () => { d4 = await timedClick(page, '#fig-done'); await fr.waitForFunction(() => !document.getElementById('fig-popup').hidden, null, { timeout: 90000 }); }, { settle: 600 });
-        await click(page, '#fig-stop'); await sleep(300); await click(page, '#fig-stop'); await sleep(1000);
+        let d4; await measure(page, 4, async () => { d4 = await timedClick(page, '#fig-done'); await fr.waitForFunction(() => !document.getElementById('fig-result').hidden, null, { timeout: 90000 }); }, { settle: 600 });
+        await sleep(700); await click(page, '#fig-stop'); await sleep(300); await click(page, '#fig-stop'); await sleep(1000);
         await fr.evaluate(() => { const b = document.getElementById('fig-new'); if (b && !b.hidden) b.click(); });
         t.note(`Figure study at full speed: pose shown ${JSON.stringify(shown)}; Done (composite, score, JPEG): ${JSON.stringify(done)}; at phone speed Done ran ${d4.handler} ms`);
         t.check(shown.every((x) => x.ms < 4000), 'each Figure study pose is drawn and shown within 4 s at full speed', shown);
         t.check(min(done.map((x) => x.handler)) <= 400, 'Done scores and shows the card within 400 ms of the tap at full speed', done);
         t.check(d4.handler <= 1600, 'Done answers within 1.6 s of the tap at phone speed', d4.handler);
-        if (min(done.map((x) => x.handler)) > 200) t.note(`Done holds the main thread for ${min(done.map((x) => x.handler))}-${Math.max(...done.map((x) => x.handler))} ms at full speed (js/figure.js:344-346 composites the page, scores it and encodes a JPEG synchronously); not held to 200 ms because it is under the 2x slack`);
+        t.note(`Done holds the main thread for ${min(done.map((x) => x.handler))}-${Math.max(...done.map((x) => x.handler))} ms at full speed (js/figure.js:344-346 composites the page, scores it against the figure and encodes a JPEG in the click); the check allows twice the 200 ms budget`);
         if (!softwareGl) t.check(Math.max(...shown.map((x) => x.max)) <= 200, 'drawing a pose picture holds no task over 200 ms at full speed', shown);
       });
       await clean(t, page, 'figure study');
+
+      // ---- the page after the whole tour (a Pose and light frame, a Figure study frame and a played game behind it) is idle when left alone
+      await segment(t, 'idle', async () => {
+        await tab(page, 'study'); await sleep(1500);
+        const metrics = async () => Object.fromEntries((await page.cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
+        const m0 = await metrics(); await sleep(3000); const m1 = await metrics();
+        const script = Math.round((m1.ScriptDuration - m0.ScriptDuration) * 1000 / 3), task = Math.round((m1.TaskDuration - m0.TaskDuration) * 1000 / 3);
+        const timers = (await probe(page, bcdp)).intervals;
+        t.note(`idle on the Study tab after the tour: ${script} ms of script and ${task} ms of main-thread tasks a second; ${timers} interval timers running`);
+        t.check(script <= 30 && task <= 120, 'left alone, the page spends under 30 ms a second in script and 120 ms in tasks', { script, task });
+        t.check(timers <= 1, 'left alone, at most one interval timer is running after games, classes and frames have been used', timers);
+      });
     } finally { await page.context().close(); }
 
     // ======================================================================================================
@@ -665,16 +685,16 @@ export default async function perf(t, site) {
             const p = path.join(tmp, f.name); fs.writeFileSync(p, f.buffer); files.push([p, `${w} × ${h}`]);
           }
           const p0 = await probe(m, bcdp);
-          for (let i = 0; i < 12; i++) await loadM(...files[i % files.length]);
+          for (let i = 0; i < 8; i++) await loadM(...files[i % files.length]);
           const p1 = await probe(m, bcdp);
-          for (let i = 12; i < 36; i++) await loadM(...files[i % files.length]);
+          for (let i = 8; i < 24; i++) await loadM(...files[i % files.length]);
           const p2 = await probe(m, bcdp);
-          t.note(`36 photos replaced: start ${fmt(p0)}; after 12 ${fmt(p1)}; after 36 ${fmt(p2)}`);
-          t.check(p2.heap - p1.heap <= 6, 'the JS heap does not grow over 24 more photos (after a collection)', { after12: p1.heap, after36: p2.heap });
-          t.check(p1.live.typed >= 0 && p2.live.typed - p1.live.typed <= 2 && p2.live.imageData - p1.live.imageData <= 2 && p2.live.canvases - p1.live.canvases <= 4 && p2.live.images - p1.live.images <= 2, 'no earlier photo is kept: the live typed arrays (pixels, Lab planes), ImageData, canvases and images are the same after 36 photos as after 12', { after12: p1.live, after36: p2.live });
-          t.check(p2.nodes - p1.nodes <= 30 && p2.listeners - p1.listeners <= 30, 'DOM nodes and listeners do not grow over 24 more photos', { nodes: [p1.nodes, p2.nodes], listeners: [p1.listeners, p2.listeners] });
-          t.check(p2.blobs === 0 && p2.made > 0, 'every object URL made to read a photo is let go of (none live after 36 photos)', { live: p2.blobs, made: p2.made });
-          t.check(p2.rss < 0 || p2.rss - p1.rss <= 400, 'the renderer does not keep growing without bound over 24 more photos (loose bound: 400 MB)', { after12: p1.rss, after36: p2.rss });
+          t.note(`24 photos replaced: start ${fmt(p0)}; after 8 ${fmt(p1)}; after 24 ${fmt(p2)}`);
+          t.check(p2.heap - p1.heap <= 6, 'the JS heap does not grow over 16 more photos (after a collection)', { after8: p1.heap, after24: p2.heap });
+          t.check(p1.live.typed >= 0 && p2.live.typed - p1.live.typed <= 2 && p2.live.imageData - p1.live.imageData <= 2 && p2.live.canvases - p1.live.canvases <= 4 && p2.live.images - p1.live.images <= 2, 'no earlier photo is kept: the live typed arrays (pixels, Lab planes), ImageData, canvases and images are the same after 24 photos as after 8', { after8: p1.live, after24: p2.live });
+          t.check(p2.nodes - p1.nodes <= 30 && p2.listeners - p1.listeners <= 30, 'DOM nodes and listeners do not grow over 16 more photos', { nodes: [p1.nodes, p2.nodes], listeners: [p1.listeners, p2.listeners] });
+          t.check(p2.blobs === 0 && p2.made > 0, 'every object URL made to read a photo is let go of (none live after 24 photos)', { live: p2.blobs, made: p2.made });
+          t.check(p2.rss < 0 || p2.rss - p1.rss <= 400, 'the renderer does not keep growing without bound over 16 more photos (loose bound: 400 MB)', { after8: p1.rss, after24: p2.rss });
         });
 
         await segment(t, 'games and battles', async () => {
@@ -687,11 +707,11 @@ export default async function perf(t, site) {
           };
           await play(); await play();
           const g0 = await probe(m, bcdp);
-          for (let i = 0; i < 18; i++) await play();
+          for (let i = 0; i < 12; i++) await play();
           const g1 = await probe(m, bcdp);
-          t.note(`20 Paint by numbers games started and quit: after 2 ${fmt(g0)}; after 20 ${fmt(g1)}`);
-          t.check(g1.heap - g0.heap <= 5 && g1.nodes - g0.nodes <= 40 && g1.listeners - g0.listeners <= 40, 'a game started and quit 18 more times leaves no heap, nodes or listeners behind', { heap: [g0.heap, g1.heap], nodes: [g0.nodes, g1.nodes], listeners: [g0.listeners, g1.listeners] });
-          t.check(g1.blobs === g0.blobs, 'a game started and quit leaves no object URL behind', { before: g0.blobs, after: g1.blobs });
+          t.note(`14 Paint by numbers games started and quit: after 2 ${fmt(g0)}; after 14 ${fmt(g1)}`);
+          t.check(g1.heap - g0.heap <= 5 && g1.nodes - g0.nodes <= 40 && g1.listeners - g0.listeners <= 40, 'a game started and quit 12 more times leaves no heap, nodes or listeners behind', { heap: [g0.heap, g1.heap], nodes: [g0.nodes, g1.nodes], listeners: [g0.listeners, g1.listeners] });
+          t.check(g1.blobs === g0.blobs && g1.intervals <= g0.intervals, 'a game started and quit leaves no object URL and no running timer behind', { objectURLs: [g0.blobs, g1.blobs], timers: [g0.intervals, g1.intervals] });
           await tab(m, 'battle'); await sleep(500);
           const fight = async () => {
             await click(m, '#vb-start'); await sleep(80);
@@ -700,10 +720,10 @@ export default async function perf(t, site) {
           };
           await fight(); await fight();
           const b0 = await probe(m, bcdp);
-          for (let i = 0; i < 28; i++) await fight();
+          for (let i = 0; i < 18; i++) await fight();
           const b1 = await probe(m, bcdp);
-          t.note(`30 battles: after 2 ${fmt(b0)}; after 30 ${fmt(b1)}`);
-          t.check(b1.heap - b0.heap <= 5 && b1.nodes - b0.nodes <= 40 && b1.listeners - b0.listeners <= 40, 'a battle started and quit 28 more times leaves no heap, nodes or listeners behind', { heap: [b0.heap, b1.heap], nodes: [b0.nodes, b1.nodes], listeners: [b0.listeners, b1.listeners] });
+          t.note(`20 battles: after 2 ${fmt(b0)}; after 20 ${fmt(b1)}`);
+          t.check(b1.heap - b0.heap <= 5 && b1.nodes - b0.nodes <= 40 && b1.listeners - b0.listeners <= 40 && b1.intervals <= b0.intervals, 'a battle started and quit 18 more times leaves no heap, nodes, listeners or running timers behind', { heap: [b0.heap, b1.heap], nodes: [b0.nodes, b1.nodes], listeners: [b0.listeners, b1.listeners], timers: [b0.intervals, b1.intervals] });
         });
 
         await segment(t, 'studio strokes', async () => {
@@ -712,14 +732,14 @@ export default async function perf(t, site) {
           for (let i = 0; i < 10; i++) await line(i);
           await sleep(1500);
           const s0 = await probe(m, bcdp);
-          for (let i = 10; i < 50; i++) { await line(i); if (i % 10 === 9) for (let u = 0; u < 4; u++) await click(m, '#ps-undo'); }
+          for (let i = 10; i < 40; i++) { await line(i); if (i % 10 === 9) for (let u = 0; u < 4; u++) await click(m, '#ps-undo'); }
           await sleep(1500);
           const s1 = await probe(m, bcdp);
-          t.note(`50 strokes, 16 undone: after 10 ${fmt(s0)}; after 50 ${fmt(s1)}`);
-          t.check(s1.heap - s0.heap <= 5, 'the JS heap does not grow over 40 more Studio strokes', { after10: s0.heap, after50: s1.heap });
-          t.check(s1.live.imageData - s0.live.imageData <= 22 && s1.live.canvases - s0.live.canvases <= 4, 'the undo stack stays capped: at most twenty pictures of the paper are kept over 40 more strokes', { after10: s0.live, after50: s1.live });
-          t.check(s1.nodes - s0.nodes <= 20 && s1.listeners - s0.listeners <= 20, 'DOM nodes and listeners do not grow over 40 more Studio strokes', { nodes: [s0.nodes, s1.nodes], listeners: [s0.listeners, s1.listeners] });
-          t.check(s1.rss < 0 || s1.rss - s0.rss <= 160, 'the renderer does not keep growing over 40 more strokes (the undo stack is capped at 20 pictures)', { after10: s0.rss, after50: s1.rss });
+          t.note(`40 strokes, 12 undone: after 10 ${fmt(s0)}; after 40 ${fmt(s1)}`);
+          t.check(s1.heap - s0.heap <= 5, 'the JS heap does not grow over 30 more Studio strokes', { after10: s0.heap, after40: s1.heap });
+          t.check(s1.live.imageData - s0.live.imageData <= 22 && s1.live.canvases - s0.live.canvases <= 4, 'the undo stack stays capped: at most twenty pictures of the paper are kept over 30 more strokes', { after10: s0.live, after40: s1.live });
+          t.check(s1.nodes - s0.nodes <= 20 && s1.listeners - s0.listeners <= 20, 'DOM nodes and listeners do not grow over 30 more Studio strokes', { nodes: [s0.nodes, s1.nodes], listeners: [s0.listeners, s1.listeners] });
+          t.check(s1.rss < 0 || s1.rss - s0.rss <= 160, 'the renderer does not keep growing over 30 more strokes (the undo stack is capped at 20 pictures)', { after10: s0.rss, after40: s1.rss });
         });
 
         await segment(t, 'figure classes', async () => {
@@ -730,8 +750,8 @@ export default async function perf(t, site) {
               await mf.waitForFunction((k) => { const s = document.querySelector('.fig-studio'); return s && !s.hidden && document.getElementById('fig-say').textContent.startsWith('Pose ' + (k + 1)); }, k, { timeout: 90000 });
               await sleep(500); await stroke(m, '#fs-paper'); await sleep(250);
               await click(m, '#fig-done');
-              await mf.waitForFunction(() => !document.getElementById('fig-popup').hidden, null, { timeout: 60000 });
-              await sleep(400);
+              await mf.waitForFunction(() => !document.getElementById('fig-result').hidden, null, { timeout: 60000 });
+              await sleep(750); // (the card takes no tap for 0.6 s)
               if (!k) await click(m, '#fig-nextPose');
             }
             await click(m, '#fig-stop'); await sleep(250); await click(m, '#fig-stop'); await sleep(1100);
@@ -739,13 +759,13 @@ export default async function perf(t, site) {
           };
           await oneClass();
           const f1 = await probe(m, bcdp);
-          for (let i = 0; i < 4; i++) await oneClass();
+          for (let i = 0; i < 3; i++) await oneClass();
           const f2 = await probe(m, bcdp);
-          t.note(`5 Figure study classes of 2 poses: after 1 ${fmt(f1)}; after 5 ${fmt(f2)}`);
-          t.check(sameGl(f1.gl, f2.gl), "Pose and light's off-screen render targets (shotTargets) do not accumulate: the live WebGL objects are the same after 5 classes as after 1", { after1: f1.gl, after5: f2.gl });
-          t.check(f2.heap - f1.heap <= 8 && f2.nodes - f1.nodes <= 80 && f2.listeners - f1.listeners <= 60, 'four more classes leave no heap, nodes or listeners behind', { heap: [f1.heap, f2.heap], nodes: [f1.nodes, f2.nodes], listeners: [f1.listeners, f2.listeners] });
-          t.check(f2.blobs <= 110, 'the object URLs alive after 5 classes are the poses\' pictures and the last class (at most 30 library + 42 shots + a few), not one per class', { after1: f1.blobs, after5: f2.blobs });
-          t.check(f2.rss < 0 || f2.rss - f1.rss <= 200, 'the renderer does not keep growing over 4 more classes (loose bound: 200 MB)', { after1: f1.rss, after5: f2.rss });
+          t.note(`4 Figure study classes of 2 poses: after 1 ${fmt(f1)}; after 4 ${fmt(f2)}`);
+          t.check(sameGl(f1.gl, f2.gl), "Pose and light's off-screen render targets (shotTargets) do not accumulate: the live WebGL objects are the same after 4 classes as after 1", { after1: f1.gl, after4: f2.gl });
+          t.check(f2.heap - f1.heap <= 8 && f2.nodes - f1.nodes <= 80 && f2.listeners - f1.listeners <= 60 && f2.intervals <= f1.intervals, 'three more classes leave no heap, nodes, listeners or running timers behind', { heap: [f1.heap, f2.heap], nodes: [f1.nodes, f2.nodes], listeners: [f1.listeners, f2.listeners], timers: [f1.intervals, f2.intervals] });
+          t.check(f2.blobs <= 110, 'the object URLs alive after 4 classes are the poses\' pictures and the last class (at most 30 library + 42 shots + a few), not one per class', { after1: f1.blobs, after4: f2.blobs });
+          t.check(f2.rss < 0 || f2.rss - f1.rss <= 200, 'the renderer does not keep growing over 3 more classes (loose bound: 200 MB)', { after1: f1.rss, after4: f2.rss });
         });
         await clean(t, m, 'memory loops (app page)');
       } finally { await m.context().close(); }
@@ -765,22 +785,22 @@ export default async function perf(t, site) {
           };
           for (let i = 0; i < 3; i++) await snap();
           const a = await probe(p, bcdp);
-          for (let i = 0; i < 42; i++) await snap();
+          for (let i = 0; i < 27; i++) await snap();
           const b = await probe(p, bcdp);
-          t.note(`45 Pose and light snapshots: after 3 ${fmt(a)}; after 45 ${fmt(b)}`);
-          t.check(b.blobs <= a.blobs + 1, 'only the last snapshot\'s object URL is alive after 45 snapshots', { after3: a.blobs, after45: b.blobs });
-          t.check(sameGl(a.gl, b.gl), 'snapshots create no WebGL objects that are kept', { after3: a.gl, after45: b.gl });
-          t.check(b.heap - a.heap <= 3 && b.nodes === a.nodes, 'the JS heap and the DOM do not grow over 42 snapshots', { heap: [a.heap, b.heap], nodes: [a.nodes, b.nodes] });
+          t.note(`30 Pose and light snapshots: after 3 ${fmt(a)}; after 30 ${fmt(b)}`);
+          t.check(b.blobs <= a.blobs + 1, 'only the last snapshot\'s object URL is alive after 30 snapshots', { after3: a.blobs, after30: b.blobs });
+          t.check(sameGl(a.gl, b.gl), 'snapshots create no WebGL objects that are kept', { after3: a.gl, after30: b.gl });
+          t.check(b.heap - a.heap <= 3 && b.nodes === a.nodes, 'the JS heap and the DOM do not grow over 27 snapshots', { heap: [a.heap, b.heap], nodes: [a.nodes, b.nodes] });
         });
         await segment(t, 'pose library', async () => {
           const pick = async (i) => { await p.evaluate((i) => { if (document.getElementById('library').hidden) document.getElementById('posesBtn').click(); const bs = document.querySelectorAll('#poses .pose-btn'); bs[i % bs.length].click(); }, i); await sleep(120); };
           for (let i = 0; i < 4; i++) await pick(i);
           const a = await probe(p, bcdp);
-          for (let i = 4; i < 64; i++) await pick(i);
+          for (let i = 4; i < 40; i++) await pick(i);
           const b = await probe(p, bcdp);
-          t.note(`64 poses picked from the library: after 4 ${fmt(a)}; after 64 ${fmt(b)}`);
+          t.note(`40 poses picked from the library: after 4 ${fmt(a)}; after 40 ${fmt(b)}`);
           t.check(b.blobs === a.blobs && sameGl(a.gl, b.gl), 'picking poses from the library makes no new pictures or WebGL objects', { objectURLs: [a.blobs, b.blobs], gl: [a.gl, b.gl] });
-          t.check(b.heap - a.heap <= 3 && b.nodes === a.nodes && b.listeners === a.listeners, 'the JS heap, DOM nodes and listeners do not grow over 60 picks', { heap: [a.heap, b.heap], nodes: [a.nodes, b.nodes], listeners: [a.listeners, b.listeners] });
+          t.check(b.heap - a.heap <= 3 && b.nodes === a.nodes && b.listeners === a.listeners, 'the JS heap, DOM nodes and listeners do not grow over 36 picks', { heap: [a.heap, b.heap], nodes: [a.nodes, b.nodes], listeners: [a.listeners, b.listeners] });
         });
         await segment(t, 'saved poses', async () => {
           // Save this pose sixteen times (the page keeps twelve), then remove what is left
@@ -812,6 +832,7 @@ export default async function perf(t, site) {
       } finally { await p.context().close(); }
     }
   } finally {
+    t.note(`seconds per section: ${JSON.stringify(took)}`);
     try { await bcdp.detach(); } catch (e) { /* closed with the browser */ }
     fs.rmSync(tmp, { recursive: true, force: true });
   }

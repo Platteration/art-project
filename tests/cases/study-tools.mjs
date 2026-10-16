@@ -1820,7 +1820,7 @@ export default async function studyTools(t, site) {
       steps: '1. Open the Study tab with the sample. Keep the magnifier on (it is on at the start) and rest the pointer on the photo. 2. Paste a different photo (Ctrl+V) without moving the pointer. 3. Read the magnifier, or the hex code it shows, before moving the pointer.',
       expected: 'The magnifier shows the pixels under the pointer on the photo now shown ("hover any image to see the pixels under the pointer magnified", README), or is hidden until the pointer moves.',
       actual: `The loupe stays open with the old photo's color (${JSON.stringify(swapped)}) and the new photo is white at that point (#FFFFFF). It shows the new color only after the pointer moves a pixel.`,
-      cause: 'js/app.js:566-598 (useSource) replaces the photo and clears the marks but neither hides the loupe nor refreshes state.hover; the loupe is only redrawn by a pointer event (js/app.js:836-845, showLoupeFor), and the stale sample is still in state.hover from the earlier hover.',
+      cause: 'js/app.js:566-586 (useSource) replaces the photo and clears the marks but neither hides the loupe nor refreshes state.hover; the loupe is only redrawn by a pointer event (js/app.js:835-845, showLoupeFor), and the stale sample is still in state.hover from the earlier hover.',
     });
     await tapAt(page, 0.5, 0.42);
     const picked = (await swatches(page)).map((s) => s.hex);
@@ -1857,5 +1857,42 @@ export default async function studyTools(t, site) {
     await clean(t, page, 'magnifier on known tones');
     await page.context().close();
   }
-  t.note('Round 2 closed from the first pass\'s list: the device-pixel-ratio 2 and 3 runs (each its own context), the palette PNG past 200 colors (both sides of the 200 line, its tiles read back), and a photo pasted while the check drawer is open. Still left out: a Copy the Study lines that carries the Loomis head together with the Study marks (the head needs a fitted head, which loomis.mjs builds; its head copy is covered there), and the toast race between the marks-cleared message and a text drop.');
+  // ---- Copy the Study lines with the Loomis head and the Study's marks together: with nothing to copy the Studio says so; with a
+  // fitted head, a grid and a plumb line, the head's own lines reach the underdrawing with the rest ----
+  {
+    const page = await openPage(site);
+    await tab(page, 'paint'); await click(page, '#ps-brushBtn'); await sleep(150); await click(page, '[data-brush="sketch"]'); await sleep(150);
+    await click(page, '#ps-sketchFromStudy');
+    const none = await toastSaid(page, /Nothing to copy/, 3000);
+    await tab(page, 'loomis');
+    const marks = await app(page).evaluate(() => { const p = Studio.prep(); const a = p.h / p.w; const out = {}; Loomis.STEPS.forEach((st) => { out[st.key] = [0.5 + 0.2 * st.model[0], (0.45 + 0.2 * st.model[1]) / a]; }); return out; });
+    for (const key of ['leftEye', 'rightEye', 'leftBrow', 'rightBrow', 'nose', 'mouth', 'chin', 'forehead']) {
+      if (['leftBrow', 'rightBrow', 'forehead'].includes(key)) { await click(page, '#lh-skip'); await sleep(80); continue; }
+      const r = await app(page).evaluate(() => { const o = document.getElementById('lh-overlay').getBoundingClientRect(); return { x: o.left, y: o.top, w: o.width, h: o.height }; });
+      await page.mouse.move(r.x + marks[key][0] * r.w, r.y + marks[key][1] * r.h); await page.mouse.down(); await page.mouse.up(); await sleep(80);
+      await click(page, '#lh-lock'); await sleep(120);
+    }
+    const fitted = await app(page).evaluate(() => !!Loomis.state.fit);
+    await tab(page, 'study');
+    await click(page, '#gridBtn');
+    await setTool(page, 'plumb'); await tapAt(page, 0.3, 0.7);
+    const counts = await app(page).evaluate(() => ({ all: Studio.marks().length, head: Loomis.segments().length }));
+    t.check(fitted && counts.head > 5 && counts.all === 4 + 2 + counts.head, 'with a fitted head, a 3 × 3 grid and a plumb line, Studio.marks carries the grid (4), the plumb line (2) and every head segment', { fitted, counts });
+    await tab(page, 'paint'); await click(page, '#ps-sketchFromStudy');
+    const said = await toastSaid(page, /The Study lines are on the underdrawing/);
+    const ink = await app(page).evaluate(() => {
+      const prep = Studio.prep(); const c = document.getElementById('ps-sketch'); const k = Math.min(c.width / prep.w, c.height / prep.h);
+      const w = prep.w * k, h = prep.h * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2;
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const inkAt = (x, y) => { for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) { const i = (Math.round(y) + dy) * c.width + Math.round(x) + dx; if (i >= 0 && d[i * 4 + 3] > 8) return true; } return false; };
+      let hit = 0, all = 0;
+      for (const [x1, y1, x2, y2] of Loomis.segments()) for (let s = 0.2; s <= 0.81; s += 0.1) { all++; if (inkAt(ox + (x1 + (x2 - x1) * s) * w, oy + (y1 + (y2 - y1) * s) * h)) hit++; }
+      return { hit, all, ratio: hit / Math.max(1, all) };
+    });
+    t.check(!!none && !!said && ink.ratio >= 0.5, 'Copy the Study lines draws the head\'s lines on the underdrawing (at least half of the sampled points on each head line are inked)', { nothingToCopy: none, said, ink });
+    await clean(t, page, 'copy the Study lines with the head');
+    await page.context().close();
+  }
+
+  t.note('Round 2 closed from the first pass\'s list: the device-pixel-ratio 2 and 3 runs (each its own context), the palette PNG past 200 colors (both sides of the 200 line, its tiles read back), and a photo pasted while the check drawer is open. Also closed: Copy the Study lines with a fitted Loomis head, a grid and a plumb line together (and nothing to copy). Still left out: the toast race between the marks-cleared message and a text drop (the later message replaces the earlier one by design).');
 }

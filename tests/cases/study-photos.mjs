@@ -1321,7 +1321,7 @@ export default async function studyPhotos(t, site) {
       steps: '1. Open the Study tab (the sample, or any photo). 2. Drag an item whose data is marked as files but carries no file (a folder dragged from some file managers, or a file promise that did not resolve) over the page and let go.',
       expected: 'The page says why no picture was taken, as it does for an empty file ("That is an empty file or a folder. Choose a JPG, PNG or WebP photo.", js/app.js:488) and for a text drop ("That was text, not a picture. ..."). The drop hint goes away.',
       actual: `No toast (${JSON.stringify(said)}); the drop hint goes and the study is unchanged. Measured with a dispatched dragenter and drop whose dataTransfer has types ["Files"] and no files: nothing is said at any point.`,
-      cause: 'js/app.js:652 takes `files.find(...) || files[0]`, which is undefined for an empty list, and js/app.js:653 passes it to loadForTab, then loadFile and readImage (js/app.js:478, `if (!file) return;`), which return without a message. The drop handler only speaks when the drag has no Files type at all (js/app.js:644-648).',
+      cause: 'js/app.js:652 takes `files.find(...) || files[0]`, which is undefined for an empty list, and js/app.js:653 passes it to loadForTab, then loadFile and readImage (js/app.js:478, `if (!file) return;`), which return without a message. The drop handler only speaks when the drag has no Files type at all (js/app.js:643-649).',
     });
     await clean(t, page, 'a drop with no file');
     await page.context().close();
