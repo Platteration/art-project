@@ -676,6 +676,90 @@ export default async function checkPainting(t, site) {
     t.check(same(s.outs.alignX, ['10', '+10%']) && s.alignState === 'moved, 10% of picture left out', 'the alignment is kept across the new reference', { out: s.outs.alignX, alignState: s.alignState });
     checkScorecard(t, s, 'the painting against a new reference');
     await clean(t, page, 'the patches and a new reference');
+
+    // the gain limits at their edges, a pick under the faded reference, and the fix through a move, Reset position,
+    // a fit change and a new reference (the gains live outside the alignment), then a pick on the gray fill
+    t.check(await loadArt(page, await ownPixels(page, { patches: EDGES, name: 'edges.png' })), 'a painting with spots at the gain limits loads');
+    s = await state(page);
+    const [AW, AH] = s.art;
+    const at = (i, dx = 0) => [(patchAt(i)[0] + dx) / AW, patchAt(i)[1] / AH];
+    const edgeGains = await page.evaluate((list) => list.map((p) => (window.Study.neutralGains(p[1][0], p[1][1], p[1][2]) || []).map((v) => +v.toFixed(3))), EDGES);
+    for (let i = 0; i < 4; i++) {
+      const [name, rgb, want] = EDGES[i];
+      await resetToast(page);
+      if (!(await state(page)).picking) { await click(page, '#wbPick'); await sleep(50); }
+      await clickAt(page, '#cv-art', ...at(i));
+      s = await state(page);
+      const r = { gains: edgeGains[i], toast: s.toast, picking: s.picking, wbUndo: s.wbUndo };
+      if (want === 'accept') t.check(FIXED.test(s.toast) && !s.picking && s.wbUndo, `${name} ${JSON.stringify(rgb)}: accepted`, r);
+      else t.check(REFUSED.test(s.toast) && s.picking && !s.wbUndo, `${name} ${JSON.stringify(rgb)}: refused as a color`, r);
+      if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
+      if (s.wbUndo) { await click(page, '#wbUndo'); await busyHidden(page); await sleep(80); }
+    }
+    t.note('Gain limits: of "no channel halved, red or green at most doubled, blue at most tripled" only blue\'s can bind. Gains that make a spot neutral at its own luminance satisfy 0.2126/r + 0.7152/g + 0.0722/b = 1, and a spot the page takes as tinted by light keeps g within 10% of r^0.6 × b^0.4: red at ×0.52 would need blue near ×4.6, red reaches ×1.66 before blue is halved, and green cannot pass ×1.66 while red and blue stay at ×0.5 or more. So blue was tried at ×0.49 and ×0.53, ×2.96 and ×3.05; the red and green edges cannot be reached by any spot.');
+    // Show reference on top at 100%: the visitor sees the reference where they click; the pick reads the painting
+    await setRange(page, 'onion', 100);
+    const seen = await px(page, 'cv-art', patchAt(6)[0], patchAt(6)[1]);
+    await resetToast(page); await click(page, '#wbPick'); await sleep(50);
+    await clickAt(page, '#cv-art', ...at(6));
+    s = await state(page);
+    t.check(s.toast === '#E0AC8C is too colorful to be white or gray. Pick paper or a neutral gray area.' && s.picking && !s.wbUndo, 'with the reference on top at 100%, a pick reads the painting under it: the skin patch is refused by its own color', { toast: s.toast, shownThere: cssHex(seen) });
+    t.note(`With Show reference on top at 100% the visitor sees ${cssHex(seen)} where they click, and the pick answers about the painting's #E0AC8C under it; nothing says the pick reads the painting, not what is shown (the README does not say which one it reads).`);
+    if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
+    await setRange(page, 'onion', 0);
+    // the fix through a move, Reset position and Stretch to match
+    await click(page, '#wbPick'); await sleep(50); await clickAt(page, '#cv-art', ...at(4));
+    s = await state(page);
+    t.check(FIXED.test(s.toast) && s.alignState === 'color cast fixed', 'the warm-tinted white is fixed', { toast: s.toast, alignState: s.alignState });
+    await setRange(page, 'alignX', 10);
+    s = await state(page);
+    const movedPatch = await px(page, 'cv-art', Math.round(patchAt(4)[0] + 0.1 * AW), patchAt(4)[1]);
+    t.check(s.alignState === 'moved, 10% of picture left out · color cast fixed' && s.wbUndo && neutral(movedPatch, 3), 'moved with the fix on: the panel names both, and the moved patch stays neutral', { alignState: s.alignState, patch: movedPatch });
+    await click(page, '#alignReset'); await busyHidden(page); await sleep(150);
+    s = await state(page);
+    t.check(s.alignState === 'color cast fixed' && s.wbUndo && same(s.outs.alignX, ['0', '0%']) && neutral(await px(page, 'cv-art', ...patchAt(4)), 3), 'Reset position puts the photo back and keeps the fix', { alignState: s.alignState, wbUndo: s.wbUndo });
+    await afterResult(page, () => page.evaluate(() => { const e = document.getElementById('artFit'); e.value = 'stretch'; e.dispatchEvent(new Event('change', { bubbles: true })); }));
+    s = await state(page);
+    t.check(s.alignState === 'color cast fixed' && s.wbUndo && neutral(await px(page, 'cv-art', ...patchAt(4)), 3), 'Stretch to match keeps the fix', { alignState: s.alignState, wbUndo: s.wbUndo });
+    await afterResult(page, () => page.evaluate(() => { const e = document.getElementById('artFit'); e.value = 'crop'; e.dispatchEvent(new Event('change', { bubbles: true })); }));
+    // Remove color fix while picking is armed
+    await click(page, '#wbPick'); await sleep(50);
+    await click(page, '#wbUndo'); await busyHidden(page); await sleep(150);
+    s = await state(page);
+    t.check(!s.wbUndo && s.alignState === '' && !neutral(await px(page, 'cv-art', ...patchAt(4)), 3), 'Remove color fix pressed while picking undoes the fix', { wbUndo: s.wbUndo, alignState: s.alignState });
+    t.note(`Remove color fix pressed while picking leaves picking ${s.picking ? 'on' : 'off'} (the README does not say which).`);
+    // a fix on, picking armed, and a new reference: the fix stays, and the next click is a pick on the rebuilt photo
+    if (!s.picking) { await click(page, '#wbPick'); await sleep(50); }
+    await clickAt(page, '#cv-art', ...at(4));
+    await click(page, '#wbPick'); await sleep(50);
+    t.check(await afterResult(page, async () => page.setInputFiles('#file', await makeImage(page, { width: 800, height: 1000, type: 'image/jpeg', name: 'newref2.jpg' }))), 'another reference loads with the fix on and picking armed');
+    s = await state(page);
+    t.check(/^newref2\.jpg · 800 × 1000 px$/.test(s.source) && s.label === 'edges.png · 720 × 900 px' && s.wbUndo && s.alignState === 'color cast fixed' && neutral(await px(page, 'cv-art', ...patchAt(4)), 3), 'across a new reference the painting keeps its color fix', { source: s.source, label: s.label, wbUndo: s.wbUndo, alignState: s.alignState });
+    t.note(`A new reference while picking is armed leaves picking ${s.picking ? 'on' : 'off'}.`);
+    await resetToast(page);
+    if (!s.picking) { await click(page, '#wbPick'); await sleep(50); }
+    await clickAt(page, '#cv-art', ...at(5));
+    s = await state(page);
+    const coolNow = await px(page, 'cv-art', ...patchAt(5)), warmNow = await px(page, 'cv-art', ...patchAt(4));
+    t.check(FIXED.test(s.toast) && neutral(coolNow, 2) && !neutral(warmNow, 3) && s.alignState === 'color cast fixed', 'picked after the new reference, the cool-tinted white replaces the earlier fix (read from the rebuilt photo)', { toast: s.toast, cool: coolNow, warm: warmNow });
+    await setRange(page, 'alignX', 10);
+    await click(page, '#wbUndo'); await busyHidden(page); await sleep(150);
+    s = await state(page);
+    t.check(s.alignState === 'moved, 10% of picture left out' && !s.wbUndo, 'Remove color fix with the photo moved: the panel keeps the move alone', s.alignState);
+    // the gray the page fills in where a moved photo no longer reaches is not the painting: a click there must not
+    // count as the painting's neutral spot (nor undo the fix the visitor made)
+    await setRange(page, 'alignX', 20);
+    await click(page, '#wbPick'); await sleep(50); await clickAt(page, '#cv-art', ...at(4, 0.2 * AW));
+    const fixedBefore = await state(page);
+    await click(page, '#wbPick'); await sleep(50); await resetToast(page);
+    await clickAt(page, '#cv-art', 0.05, 0.5);
+    s = await state(page);
+    const grayFill = await px(page, 'cv-art', Math.round(0.05 * AW), Math.round(0.5 * AH));
+    if (!t.check(fixedBefore.wbUndo && s.wbUndo && s.alignState === fixedBefore.alignState && !/already neutral/.test(s.toast), 'a click on the gray fill a moved photo leaves is not taken as the painting\'s neutral spot: the fix stays', { fixedBefore: fixedBefore.alignState, after: s.alignState, toast: s.toast, wbUndo: s.wbUndo, picking: s.picking, clicked: grayFill })) {
+      t.finding({ title: 'A pick on the gray fill beside a moved photo removes the color fix and calls #7F7F7F the painting\'s neutral', severity: 'medium', steps: 'Open index.html#check and load a photo of a painting that has a warm-tinted white spot (rgb 231, 215, 184). Open "Line up the photo and fix its colors", set Move left / right to +20%, press Fix color cast and click the spot (now 20% further right): "Color cast removed". Press Fix color cast again and click the flat gray strip down the left side of Your painting, the part the moved photo no longer covers. Twice, with the same result.', expected: 'The strip is not the painting (the map hatches it as left out): the click is refused or ignored with a word that the spot is outside the photo, and the fix the visitor made stays.', actual: `The toast says "${s.toast}", Remove color fix disappears and the panel's note goes from "${fixedBefore.alignState}" to "${s.alignState}": the fix is silently undone, and the gray the page itself painted in (${cssHex(grayFill)}) is reported as a color of the painting.`, cause: 'js/app.js pickNeutral (line 2567) averages prep.photo, the aligned canvas that alignArt fills with #7f7f7f where the photo does not reach (line 2321), without looking at prep.mask; a gray patch then takes the "already neutral" branch (line 2596), which sets the gains back to [1, 1, 1].' });
+    }
+    if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
+    await clean(t, page, 'the color fix through moves, fits and a new reference');
     await page.context().close();
   }
 
@@ -694,7 +778,7 @@ export default async function checkPainting(t, site) {
       { title: 'a 20 × 4000 strip', file: await makeImage(page, { width: 20, height: 4000, draw: 'noise', name: 'thin.png' }), label: 'thin.png · 20 × 4000 px' },
       { title: 'an SVG without a size (Chromium gives it 300 × 150)', file: svgImage(), label: 'drawing.svg · 300 × 150 px' },
       { title: 'a 200 × 200 SVG', file: svgImage('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#ddd"/><circle cx="100" cy="100" r="60" fill="#c66"/></svg>', 'sized.svg'), label: 'sized.svg · 200 × 200 px' },
-      { title: 'a transparent PNG', file: await makeImage(page, { width: 400, height: 500, draw: 'transparent', name: 'alpha.png' }), label: 'alpha.png · 400 × 500 px' },
+      { title: 'a transparent PNG', file: await makeImage(page, { width: 400, height: 500, draw: 'transparent', name: 'alpha.png' }), label: 'alpha.png · 400 × 500 px', midGray: true },
       { title: 'a flat white PNG', file: await makeImage(page, { width: 300, height: 300, draw: 'white', name: 'white.png' }), label: 'white.png · 300 × 300 px' },
       { title: 'a flat black PNG', file: await makeImage(page, { width: 300, height: 300, draw: 'black', name: 'black.png' }), label: 'black.png · 300 × 300 px' },
       { title: 'a WebP', file: await makeImage(page, { width: 500, height: 700, type: 'image/webp', name: 'photo.webp' }), label: 'photo.webp · 500 × 700 px' },
@@ -717,6 +801,12 @@ export default async function checkPainting(t, site) {
         t.check(k.note ? k.note.test(s.toast) : s.toast === '', `${k.title}: ${k.note ? 'the reduction is said' : 'no complaint'}`, s.toast);
         t.check(same(s.art, [600, 750]) && SAMPLE.test(s.source), `${k.title}: fitted to the reference, which stays the sample`, { art: s.art, source: s.source.slice(0, 30) });
         checkScorecard(t, s, k.title);
+        if (k.midGray) {
+          // README: transparent parts are placed on mid gray (not read as black)
+          const corner = await px(page, 'cv-art', 4, 4);
+          const lc = await hoverAt(page, '#cv-art', 0.01, 0.01); await page.mouse.move(5, 5);
+          t.check(corner.every((v) => Math.abs(v - 127) <= 1) && lc.hex === '#7F7F7F' && /^V 5(\.\d)?$/.test(lc.val), `${k.title}: its see-through part is mid gray (#7F7F7F, V 5), not black`, { corner, loupe: [lc.hex, lc.val] });
+        }
         lastLabel = k.label;
       }
     }
@@ -798,6 +888,74 @@ export default async function checkPainting(t, site) {
     s = await state(page);
     t.check(switched && portrait && s.source === `${portrait[1]}, after ${portrait[2]} · 600 × 750 px` && /^Studio painting/.test(s.label) && s.body, 'with a dealt portrait, Use my Studio painting makes that portrait the reference and scores against it', { source: s.source, label: s.label });
     checkScorecard(t, s, 'the Studio painting against the dealt portrait');
+    // Another portrait on the Studio: the next press follows the new deal
+    await tab(page, 'paint'); await sleep(300);
+    const title2 = await page.evaluate(() => { const b = document.getElementById('ps-refAnother'); if (!b || b.hidden) return null; b.click(); return document.getElementById('ps-refName').textContent.trim(); });
+    const portrait2 = title2 && /^(.*), after ([^:]+):/.exec(title2);
+    await tab(page, 'study');
+    await click(page, '#artFromStudio');
+    const switched2 = await page.waitForFunction((want) => document.getElementById('source').textContent.startsWith(want) && document.getElementById('busy').hidden, portrait2 ? `${portrait2[1]}, after ${portrait2[2]} ·` : 'never', { timeout: 30000 }).then(() => true).catch(() => false);
+    await busyHidden(page); await sleep(400);
+    s = await state(page);
+    t.check(switched2 && title2 !== title && /^Studio painting/.test(s.label), 'Another portrait on the Studio, then Use my Studio painting: the new portrait becomes the reference', { before: title, after: title2, source: s.source });
+    // a photo of the visitor's own loaded on the Study tab while the Studio is closed: the press scores against the
+    // reference the Studio shows (README: a dealt portrait becomes the reference here)
+    t.check(await afterResult(page, async () => page.setInputFiles('#file', await makeImage(page, { width: 800, height: 1000, type: 'image/jpeg', name: 'own.jpg' }))), 'a photo of the visitor\'s own loads as the reference after the deal');
+    const studioRef = await page.evaluate(() => document.getElementById('ps-refName').textContent.trim());
+    const dealtStill = /^(.*), after ([^:]+):/.exec(studioRef);
+    const wantSource = dealtStill ? `${dealtStill[1]}, after ${dealtStill[2]} · 600 × 750 px` : 'own.jpg · 800 × 1000 px';
+    await click(page, '#artFromStudio');
+    await page.waitForFunction((want) => document.getElementById('source').textContent === want && document.getElementById('busy').hidden && /^Studio painting/.test(document.getElementById('artSource').textContent), wantSource, { timeout: 30000 }).catch(() => null);
+    await busyHidden(page); await sleep(400);
+    s = await state(page);
+    t.check(s.source === wantSource && /^Studio painting/.test(s.label), 'after a photo of the visitor\'s own, the press scores against the reference the Studio shows', { studio: studioRef.slice(0, 90), source: s.source });
+    if (dealtStill) t.note('A photo loaded on the Study tab while the Studio is closed leaves the Studio on its dealt portrait (js/painting.js follows a new photo only while the Studio is open), so the next Use my Studio painting puts that portrait back as the reference in place of the visitor\'s photo, as the README\'s rule says; nothing on the page says the photo was replaced.');
+    // Turn the paper: the label names the turned size, the painting is cropped to the reference
+    const labelUpright = s.label;
+    await tab(page, 'paint'); await sleep(300);
+    await page.evaluate(() => document.getElementById('ps-orient').click()); await sleep(400);
+    await tab(page, 'study');
+    t.check(await afterResult(page, () => click(page, '#artFromStudio')), 'the turned paper scores');
+    s = await state(page);
+    const d0 = /(\d+) × (\d+) px$/.exec(labelUpright) || [], d1 = /(\d+) × (\d+) px$/.exec(s.label) || [];
+    const turnedInk = await inked(page, '#cv-art');
+    t.check(d0[1] !== undefined && d0[1] === d1[2] && d0[2] === d1[1] && same(s.art, s.orig) && turnedInk > blankInk + 100, 'Turn the paper, then the press: the label names the turned size, the painting is cropped to the reference and keeps its strokes', { before: labelUpright, after: s.label, art: s.art, orig: s.orig, ink: turnedInk });
+    // a toned wash and linen: the bare paper checked is the ground as the Studio shows it, not white
+    await tab(page, 'paint'); await sleep(300);
+    await page.evaluate(() => { document.querySelector('#ps-root [data-ground="wash"]').click(); const r = document.getElementById('ps-washStr'); r.value = 50; r.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#ps-root [data-weave="linen"]').click(); });
+    const lastChange = await page.evaluate(() => Date.now());
+    await sleep(300);
+    await tab(page, 'study');
+    t.check(await afterResult(page, () => click(page, '#artFromStudio')), 'the paper with a toned wash and linen scores');
+    const ground = await page.evaluate(([aw, ah]) => {
+      const src = window.PaintStudio.composite(); const sw = src.width, sh = src.height;
+      const c = document.createElement('canvas'); c.width = aw; c.height = ah; const g = c.getContext('2d');
+      const k = Math.max(aw / sw, ah / sh), cw = aw / k, ch = ah / k; g.imageSmoothingQuality = 'high'; g.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, aw, ah); // cropped to match, centred
+      const mean = (ctx) => { const d = ctx.getImageData(8, 8, 40, 40).data; const m = [0, 0, 0]; for (let i = 0; i < d.length; i += 4) { m[0] += d[i]; m[1] += d[i + 1]; m[2] += d[i + 2]; } return m.map((v) => Math.round(v / (d.length / 4))); };
+      return { studio: mean(g), checked: mean(document.getElementById('cv-art').getContext('2d')) };
+    }, (await state(page)).art);
+    const RAW = [243, 238, 226]; // the raw canvas ground (js/painting.js)
+    t.check(ground.studio.every((v, i) => Math.abs(v - ground.checked[i]) <= 8) && ground.checked.some((v, i) => Math.abs(v - RAW[i]) > 12), 'a toned wash and linen on the Studio: the bare paper checked is that ground, not a white or raw sheet', ground);
+    // pressed before the Studio has read its saved painting back: a slow device's database (every indexedDB.open
+    // answers 1.5 s late) and a press as soon as the page is up
+    let savedAt = 0; const waitFrom = Date.now();
+    while (Date.now() - waitFrom < 15000) { savedAt = await studioSavedAt(page); if (savedAt >= lastChange) break; await sleep(300); }
+    t.check(savedAt >= lastChange, 'the Studio has saved the painting, with its wash and linen, in the browser', { savedAt, lastChange });
+    await page.addInitScript(SLOW_DB);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const readyAtPress = await page.evaluate(async () => { let done = false; window.PaintStudio.ready().then(() => { done = true; }); await Promise.resolve(); await Promise.resolve(); const was = done; document.getElementById('artFromStudio').click(); return was; });
+    await page.waitForFunction(() => document.getElementById('busy').hidden && /^Studio painting/.test(document.getElementById('artSource').textContent), null, { timeout: 30000 }).catch(() => null);
+    await sleep(300);
+    const early = await state(page), earlyInk = await inked(page, '#cv-art');
+    await page.evaluate(() => window.PaintStudio.ready());
+    await countResults(page);
+    await afterResult(page, () => click(page, '#artFromStudio'));
+    const late = await state(page), lateInk = await inked(page, '#cv-art');
+    const waited = readyAtPress || /Studio/.test(early.toast) || (early.label === late.label && earlyInk >= lateInk * 0.8);
+    if (!t.check(waited && lateInk > 100, 'pressed while the Studio is still reading its saved painting back, the press scores that painting, or says it is not there yet', { readyAtPress, firstPress: { label: early.label, badge: early.badge, ink: earlyInk, toast: early.toast }, onceRead: { label: late.label, badge: late.badge, ink: lateInk } })) {
+      t.finding({ title: 'Use my Studio painting pressed while the Studio is still loading its saved painting scores a blank sheet, and says nothing', severity: 'medium', steps: 'On the Studio tab paint two strokes, turn the paper, choose Toned wash at 50% and Linen, and wait a second for the autosave. Reload index.html#check in a browser whose database is slow to answer (reproduced by making indexedDB.open answer 1.5 s late, as on a slow phone) and press Use my Studio painting at once. Then press it again a few seconds later. Reproduced twice.', expected: 'The press scores the painting the Studio holds (it waits for the Studio to finish reading it back), or says the Studio is still loading and to press again.', actual: `The first press scores a blank, unturned raw sheet ("${early.label}", ${early.badge}; Your painting has ${earlyInk} inked samples and no strokes) with no word; pressed again once the Studio has read it back, the same button gives "${late.label}", ${late.badge} with the strokes (${lateInk}).`, cause: 'js/app.js, the artFromStudio click handler (line 2622): setArt(ps.composite(), ...) reads the Studio\'s canvases at once and never waits for PaintStudio.ready() (js/painting.js line 909: the restore that draws the saved paper, its size, ground and texture back).' });
+    }
+    if (readyAtPress) t.note('The Studio had read its saved painting back before the press landed, even with the database slowed, so the press-before-restore race was not reached this run.');
     await screenshot(page, 'check-painting-studio');
     await clean(t, page, 'use my studio painting');
     await page.context().close();
