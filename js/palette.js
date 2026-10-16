@@ -213,7 +213,9 @@
     els.mineCount.textContent = n
       ? `${n} paint${n === 1 ? '' : 's'} ticked`
       : 'No paints ticked yet: suggestions come from the whole library.';
-    els.maxOut.textContent = `${els.max.value} + white`;
+    // "+ white" only where the suggestion will have one: a white ticked, or none ticked (the whole library)
+    const hasWhite = !n || [...mine].some((c) => (Paints.byCode(c) || {}).category === 'white');
+    els.maxOut.textContent = hasWhite ? `${els.max.value} + white` : `${els.max.value}`;
     els.dialogCount.textContent = n ? `${n} ticked` : '';
   }
 
