@@ -263,7 +263,7 @@
       if (canvasState.weave !== 'off') { x.globalCompositeOperation = 'multiply'; x.globalAlpha = WEAVE_ALPHA[canvasState.weave]; x.drawImage(weave, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; }
       return c;
     }
-    $('save').addEventListener('click', () => { Studio.savePng(composite(), o.fileName || 'painting.png'); closeSheets(); });
+    $('save').addEventListener('click', () => { Studio.savePng(composite(), o.fileName || 'painting.png', 'Close other tabs and try again.'); closeSheets(); });
 
     // ---- Stamps: each brush lays one mark, and a stroke is a run of them ----------------------------
     const ANGLE = -0.7;
@@ -346,8 +346,10 @@
     };
     const press = (e) => (e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5);
     let locked = false;          // pencils down: the paper takes no marks (Figure study, when the time is up)
+    let strokeId = null;         // the pointer the stroke follows: a second finger (a pinch, a resting hand) draws nothing
     paper.addEventListener('pointerdown', (e) => {
       if (e.button > 0) return;
+      if (last && e.pointerId !== strokeId) { e.preventDefault(); return; }
       e.preventDefault(); closeSheets();
       if (locked) { if (o.onLocked) o.onLocked(); return; }
       paper.setPointerCapture(e.pointerId);
@@ -357,21 +359,22 @@
       else { useLayer(paper); state.lastLayer = 'paint'; }
       const p = pos(e);
       if (!p) return;
+      strokeId = e.pointerId;
       snapshot(); last = p; dragFrom = null; segment(last, last, press(e));
     });
     // the stroke ends where the pointer lets go, or where the paper leaves the screen
     function endStroke(pointerId) {
       if (last) saveSoon();
-      last = null; dragFrom = null;
+      last = null; dragFrom = null; strokeId = null;
       if (pointerId != null) { try { if (paper.hasPointerCapture(pointerId)) paper.releasePointerCapture(pointerId); } catch (err) { /* already released */ } }
     }
     paper.addEventListener('pointermove', (e) => {
-      if (!last) return;
+      if (!last || e.pointerId !== strokeId) return;
       const p = pos(e);
       if (!p) { endStroke(e.pointerId); return; }
       segment(last, p, press(e)); last = p;
     });
-    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => paper.addEventListener(t, () => endStroke()));
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => paper.addEventListener(t, (e) => { if (e.pointerId === strokeId) endStroke(); }));
     paper.addEventListener('contextmenu', (e) => e.preventDefault());
     $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
     let clearArmed = 0;
@@ -454,6 +457,9 @@
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
     let saveTimer = 0, saving = false, saveAgain = false, forgetting = false, saveFailed = false;
+    // until the painting saved last time is read back, nothing is saved: a save that landed first would
+    // replace it (a slow database, a stroke made at once); the save asked for meanwhile is made after
+    let restoring = true, saveWanted = false;
     function saveSoon() {
       // a browser with its database off (Firefox's dom.indexedDB.enabled, some private modes) keeps nothing:
       // the first change says so, as a failed save does
@@ -464,6 +470,7 @@
     }
     async function saveNow() {
       if (!hasDb || forgetting) return;
+      if (restoring) { saveWanted = true; return; }
       if (saving) { saveAgain = true; return; }
       saving = true;
       // the record is stamped with the moment its pictures were taken (toBlob copies the canvas as it is
@@ -498,9 +505,12 @@
       const [pImg, sImg] = usable ? await Promise.all([loadBlob(saved.paper), hasSketch ? loadBlob(saved.sketch) : null]) : [null, null];
       if (!pImg) { badRecord = true; return; }
       if (hasSketch && !sImg) sketchLost = true; // the paint is back; the underdrawing alone is not, and that is said
+      // strokes made while it was on its way are kept, on top of the painting that comes back
+      const early = undoStack.length ? [paper, sketch].map((c) => { const k = document.createElement('canvas'); k.width = c.width; k.height = c.height; k.getContext('2d').drawImage(c, 0, 0); return k; }) : null;
       [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
       paper.getContext('2d').drawImage(pImg, 0, 0);
       if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
+      if (early) { paper.getContext('2d').drawImage(early[0], 0, 0, saved.w, saved.h); sketch.getContext('2d').drawImage(early[1], 0, 0, saved.w, saved.h); undoStack.length = 0; $('undo').disabled = true; saveWanted = true; }
       if (saved.canvas && typeof saved.canvas === 'object') { // field by field, each to what the sheet offers
         const c = saved.canvas;
         if (['raw', 'wash', 'gray'].includes(c.ground)) canvasState.ground = c.ground;
@@ -533,6 +543,7 @@
     $('refBtn').addEventListener('click', () => openSheet('refSheet'));
     document.addEventListener('keydown', (e) => {
       if (!active) return;
+      if (document.querySelector('dialog[open]')) return; // a modal dialog (Save by hand) is on top: nothing behind it changes
       if (e.key === 'Escape') closeSheets();
       // Ctrl/⌘+Z undoes the last stroke, as the Undo button does
       const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) && document.activeElement.type !== 'range';
@@ -613,6 +624,21 @@
       $('refSize').max = top;
       if (ref.size > top / 100) { ref.size = top / 100; $('refSize').value = top; }
       $('refFig').style.width = `${Math.round(ref.size * side)}px`;
+      // the status pill along the top stops short of the reference (it would cover the pill's end on a phone)
+      $('stage').style.setProperty('--ref-w', $('refFig').hidden ? '0px' : `${Math.round(ref.size * side)}px`);
+      clampReference();
+    }
+    // a reference dragged to an edge stays on the stage when the stage gets smaller (a smaller window, a
+    // phone turned), as a drag keeps it there
+    function clampReference() {
+      const fig = $('refFig');
+      if (fig.hidden) return;
+      const st = $('stage').getBoundingClientRect(), r = fig.getBoundingClientRect();
+      if (!st.width || !r.width) return;
+      const bx = r.left - ref.x, by = r.top - ref.y;
+      const x = Math.min(st.right - r.width - bx, Math.max(st.left - bx, ref.x));
+      const y = Math.min(st.bottom - r.height - by, Math.max(st.top - by, ref.y));
+      if (x !== ref.x || y !== ref.y) { ref.x = x; ref.y = y; fig.style.transform = `translate(${x}px, ${y}px)`; }
     }
     function dealReference() {
       if (!window.Subjects) { Studio.toast('The generated portraits are not available: a script did not load. Reload the page.'); return; }
@@ -881,6 +907,7 @@
     applyView();
     let welcomed = false;
     const ready = restore().catch((err) => { restoreFailed = true; if (window.StudioGuard) StudioGuard.report(err, { saved: true }); }); // a bad saved painting never stops the Studio
+    ready.then(() => { restoring = false; if (saveWanted) { saveWanted = false; saveSoon(); } });
     // Forget my work on this device: stop saving, so the pending autosave (or the one on pagehide) can't bring the painting back
     window.addEventListener('studio:forget', () => { forgetting = true; clearTimeout(saveTimer); saveTimer = 0; });
 
