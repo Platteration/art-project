@@ -78,7 +78,7 @@ async function answer(page, right, how = 'click') {
 }
 const next = (page) => click(page, '#vb-next');
 // the pop-up's button by a real click: the id is doubled in the markup (see the first step), so the board's copy
-const closeMiss = (page) => page.locator('#vb-board #vb-missNext').click();
+const closeMiss = (page) => page.locator('#vb-board #vb-missNext').click({ timeout: 20000 }).catch(() => null); // (a pop-up that never came fails the check that waits for what follows, not the block)
 const waitRound = (page, n) => page.waitForFunction((n) => document.getElementById('vb-score').textContent === `Round ${n}`, n, { timeout: 20000 }).then(() => true).catch(() => false);
 const waitShown = (page, sel) => page.waitForFunction((s) => !document.querySelector(s).hidden, sel, { timeout: 20000 }).then(() => true).catch(() => false);
 const waitPct = (page, n) => page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), n, { timeout: 20000 }).then(() => true).catch(() => false);

@@ -1012,22 +1012,23 @@ async function roundTwo(t, site, counts) {
   });
 
   // every paint at once (My paints with all 77): its targets take a long time to mix, so the wait is long and this comes last.
-  // The fresh board selects its suggested palette, so My paints is chosen from the menu (as in "two whites" above)
+  // A fresh board selects its suggested palette, which with all 77 ticked can be My paints itself (it rates best by more
+  // than a point): then the setup mixes its targets before Start comes back. Otherwise My paints is chosen from the menu
   await step(t, site, 'seventy-seven paints', async (open) => {
     const probe = await open({ url: '#game' });
     const codes = await probe.evaluate(() => Paints.LIBRARY.map((p) => p.code));
     await probe.context().close();
     const page = await open({ viewport: PHONE, url: '#game', storage: { [P + 'myPaints']: codes } });
-    // the setup rates every palette, My paints of 77 among them, before Start comes back
-    const setup = await page.waitForFunction(() => !document.getElementById('gameStart').disabled, null, { timeout: 180000 }).then(() => true).catch(() => false);
+    // the menu is filled once the board is built and every palette rated, My paints of 77 among them
+    const rated = await page.waitForFunction(() => [...document.getElementById('gamePalette').options].some((o) => o.value === 'mine'), null, { timeout: 180000 }).then(() => true).catch(() => false);
     const opts = await page.evaluate(() => [...document.getElementById('gamePalette').options].map((o) => o.textContent).filter((x) => /My paints/.test(x)));
     const offered = opts.some((o) => o === `My paints (${codes.length})` || o === `My paints (${codes.length}) (suggested)`);
-    if (offered) await page.selectOption('#gamePalette', 'mine');
+    t.check(rated && offered, `with all ${codes.length} paints ticked: My paints (${codes.length}) is offered in the setup`, { rated, opts });
+    if (offered && (await page.evaluate(() => document.getElementById('gamePalette').value)) !== 'mine') await page.selectOption('#gamePalette', 'mine');
     const t0 = Date.now();
-    const up = setup && offered && await page.waitForFunction(() => document.getElementById('gamePalette').value === 'mine' && !document.getElementById('gameStart').disabled, null, { timeout: 400000 }).then(() => true).catch(() => false);
+    const up = offered && await page.waitForFunction(() => document.getElementById('gamePalette').value === 'mine' && !document.getElementById('gameStart').disabled, null, { timeout: 480000 }).then(() => true).catch(() => false);
     const waited = Math.round((Date.now() - t0) / 1000);
-    t.note(`My paints with all ${codes.length} paints: the setup took ${waited} s to mix its targets${up ? '' : ` and Start was still disabled; the hint says ${JSON.stringify(await text(page, '#gamePaletteHint'))}`}.`);
-    t.check(setup && offered, `with all ${codes.length} paints ticked: My paints (${codes.length}) is offered in the setup`, { setup, opts });
+    t.note(up ? `My paints with all ${codes.length} paints: Start came back ${waited} s after the menu was filled (the setup mixing the reference from all of them).` : `My paints with all ${codes.length} paints: Start still disabled after ${waited} s; the hint says ${JSON.stringify(await text(page, '#gamePaletteHint'))}.`);
     if (up) {
       await start(page);
       // the paints' scroll bar shows once the row is laid out (a frame after Start)
