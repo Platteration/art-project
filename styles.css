@@ -16,6 +16,7 @@
   --danger: #93341f;
   --well: #8b8c8e;         /* mid-gray matte behind images: kept neutral so values and colors read true */
   --shadow: rgba(40, 32, 18, 0.18);
+  --star: #8a6a1f;         /* the figure ratings' gold: 4.6:1 on the cream card (--surface) */
 
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -38,6 +39,7 @@
     --danger: #ee9c82;
     --well: #3b3c3f;
     --shadow: rgba(0, 0, 0, 0.45);
+    --star: #d9a441;
     color-scheme: dark;
   }
 }
@@ -53,6 +55,7 @@
   --danger: #ee9c82;
   --well: #3b3c3f;
   --shadow: rgba(0, 0, 0, 0.45);
+  --star: #d9a441;
   color-scheme: dark;
 }
 
@@ -267,6 +270,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   color: var(--muted);
 }
 .seg input:checked + label { background: var(--ink); color: var(--ground); }
+.seg input:checked + label small { color: inherit; } /* the caption keeps contrast on the dark chosen one */
 .seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ---- Work area ---- */
@@ -344,7 +348,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .tab[aria-haspopup] .tab-sub { white-space: normal; }
   .tabs > .tab .tab-sub { display: none; }
 }
-.tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; } /* a section the guard hides leaves no column behind */
 .tab-group { position: relative; min-width: 0; display: grid; }
 .tab {
   appearance: none;
@@ -369,16 +373,17 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tab-caret { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; transition: transform 0.15s; }
 .tab[aria-expanded="true"] .tab-caret { transform: rotate(180deg); }
 .tab-text { display: grid; gap: 1px; min-width: 0; }
-.tab-sub { font: 500 0.72rem/1.2 var(--body); opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-sub { font: 500 0.72rem/1.2 var(--body); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab[aria-current="true"] .tab-sub { color: inherit; }
 .tab:hover { color: var(--ink); border-color: var(--accent); }
 .tab:active { transform: translateY(1px); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 6px var(--shadow); }
+.tab[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 6px var(--shadow); }
 .tab-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; min-width: min(320px, 92vw); display: grid; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow); }
 .tab-group:last-child .tab-menu { left: auto; right: 0; }
 .tab-item { appearance: none; display: grid; gap: 2px; width: 100%; padding: 10px 12px; border: 0; border-radius: 7px; background: none; color: var(--ink); text-align: left; cursor: pointer; font: 600 0.95rem/1.2 var(--display); }
 .tab-item small { font: 400 0.78rem/1.3 var(--body); color: var(--muted); }
-.tab-item:hover, .tab-item:focus-visible { background: var(--ground); outline: none; }
+.tab-item:hover, .tab-item:focus-visible { background: var(--ground); }
 .tab-item[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
 .tab-item[aria-checked="true"] small { color: inherit; opacity: 0.8; }
 .tab-menu-note { margin: 2px 0 0; padding: 8px 12px; font-size: 0.78rem; color: var(--muted); border-top: 1px solid var(--line); }
@@ -662,7 +667,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .preset[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .preset-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .preset-name { font-weight: 600; }
-.preset-best {
+.preset-best, .preset-best-simple {
   flex: none;
   padding: 1px 7px;
   border-radius: 999px;
@@ -670,6 +675,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   color: var(--surface);
   font: 600 0.66rem/1.5 var(--mono);
 }
+.preset-best-simple { display: none; } /* the best of Simple mode's three: shown there only */
+.mode-simple .preset-best-simple { display: inline; }
 .paint-dots { display: flex; flex-wrap: wrap; gap: 3px; }
 .paint-dot {
   width: 14px; height: 14px; flex: none;
@@ -802,12 +809,13 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 }
 .game-lede { margin: 0; color: var(--muted); }
 .game-levels label { display: grid; gap: 2px; padding: 8px 6px; line-height: 1.2; }
-.game-levels small { font-size: 0.7rem; font-weight: 500; opacity: 0.85; }
+.game-levels small { font-size: 0.7rem; font-weight: 500; color: var(--muted); }
 .game-start { justify-self: start; }
 .game-best { margin: 0; font: 500 0.8rem var(--mono); color: var(--earth); }
 .game-best:empty { display: none; }
 .game-from { display: grid; gap: 8px; justify-items: start; margin-top: 10px; }
-.game-from .hint { margin: 0; }
+/* a grid item is never narrower than its longest unbreakable word, and a camera's file name has no spaces: it must wrap inside the card */
+.game-from .hint { margin: 0; overflow-wrap: anywhere; }
 .game-preview { margin: 0; display: grid; gap: 8px; }
 .game-preview canvas, .game-board canvas, .game-ref canvas, .game-compare canvas {
   display: block; max-width: 100%; height: auto; box-shadow: 0 1px 3px var(--shadow);
@@ -1123,6 +1131,14 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-numbers { grid-area: numbers; }
   .game-mix > .hint { grid-area: hint; }
 }
+/* on a narrow phone the buttons (with Lock in portrait) leave the progress line too little room beside them (about 9 px
+   at 320 px), and Memory's longest line ("Memorize the colors. ...") still spills out of a one-row bar up to 411 px, so up
+   to 430 px it takes a row of its own under them; wider keeps the one row */
+@media (max-width: 430px) {
+  .game-play { --bar-h: 66px; }
+  .game-bar { flex-wrap: wrap; }
+  .game-progress { order: 1; flex: 1 0 100%; }
+}
 
 /* ---- Paint by numbers: the arcade score over the finished portrait ---- */
 .game-final-matte { position: relative; overflow: hidden; }
@@ -1245,15 +1261,17 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 @keyframes lock-nudge { 0%, 100% { transform: none; } 30% { transform: scale(1.12); } 60% { transform: scale(0.96); } }
 
 /* the reveal: drag the divider to wipe between your portrait and the colors to match */
-.game-final-wrap { position: relative; display: grid; max-width: 100%; line-height: 0; --cut: 50%; }
+.game-final-wrap { position: relative; display: grid; max-width: 100%; line-height: 0; --cut: 50%; --show-gap: 60px; }   /* --show-gap: the Show score row's band at the foot */
 .game-final-target { display: none; position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 0 0 var(--cut)); }
 .is-comparing .game-final-target { display: block; }
 .game-final-wrap.is-comparing { touch-action: none; cursor: ew-resize; }
-.game-final-handle { display: none; position: absolute; top: 0; bottom: 0; left: var(--cut); width: 48px; translate: -50% 0; cursor: ew-resize; touch-action: none; z-index: 2; }
+/* the handle's box ends above the Show score row, so it and its focus ring stay clear of the buttons, while its line and
+   grip still run the portrait's whole height; a drag starts anywhere on the portrait (the pointerdown is on .game-final-wrap) */
+.game-final-handle { display: none; position: absolute; top: 0; bottom: var(--show-gap); left: var(--cut); width: 48px; translate: -50% 0; cursor: ew-resize; touch-action: none; z-index: 2; }
 .is-comparing .game-final-handle { display: block; }
-.game-final-handle span { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; translate: -50% 0; background: #faf5ea; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.game-final-handle span { position: absolute; left: 50%; top: 0; bottom: calc(-1 * var(--show-gap)); width: 3px; translate: -50% 0; background: #faf5ea; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .game-final-handle span::after {
-  content: "\2194"; position: absolute; top: 50%; left: 50%; translate: -50% -50%;
+  content: "\2194"; position: absolute; top: 50%; left: 50%; translate: -50% -50%;   /* 50% of the line: the portrait's middle */
   width: 38px; height: 38px; border-radius: 50%;
   display: grid; place-items: center;
   background: #faf5ea; color: #1e2b22; font: 700 20px/1 var(--body);
@@ -1344,8 +1362,13 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   transition: opacity 0.18s, transform 0.18s;
   z-index: 70;
   max-width: calc(100% - 32px);
+  overflow-wrap: break-word; /* a long file name in the message wraps inside the box, not past it (the box keeps its width) */
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* with the Studio's (or a Figure class's) tool strip along the bottom of a phone, the note sits above it */
+@media (max-width: 759px) {
+  body.tab-paint .toast, body.tab-loomis .toast, body.figure-focus .toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+}
 
 /* ---- Save dialog (where downloads are blocked) ---- */
 .save-dialog {
@@ -1369,7 +1392,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .save-name { margin: 0; font: 500 0.8rem var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast, .drawer > summary::after { transition: none; }
+  .toast, .drawer > summary::after, .tab-caret { transition: none; }
+  .tab { transition-property: background, color, border-color; }
 }
 
 /* ---- Painting studio ----
@@ -1393,7 +1417,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .ps-paper-wrap.ps-textured-paper .ps-layer-weave { opacity: 0.7; }
 .ps-layer-sketch { pointer-events: none; }
 .ps-paper-wrap.ps-no-sketch .ps-layer-sketch { visibility: hidden; }
-.ps-status { position: absolute; left: 12px; top: 12px; font: 500 0.72rem var(--mono); color: #faf5ea; background: rgba(20, 24, 20, 0.55); padding: 3px 8px; border-radius: 999px; pointer-events: none; }
+.ps-status { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 36px - var(--ref-w, 0px)); font: 500 0.72rem var(--mono); color: #faf5ea; background: rgba(20, 24, 20, 0.55); padding: 3px 8px; border-radius: 12px; pointer-events: none; } /* stops short of the reference at the top right (painting.js sets --ref-w) */
 
 /* the strip of icons */
 .ps-strip { display: flex; align-items: center; justify-content: center; gap: 3px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
@@ -1453,7 +1477,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .ps-picked .ps-acts { display: flex; gap: 6px; }
 
 /* the reference floats over the paper and can be dragged anywhere on it */
-.ps-ref { position: absolute; right: 12px; top: 12px; z-index: 3; width: 36%; max-width: 300px; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: end; touch-action: none; }
+.ps-ref { position: absolute; right: 12px; top: 12px; z-index: 3; width: 36%; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: end; touch-action: none; }
 /* the switch may be wider than a small reference: it then runs out to the left, never off the screen */
 .ps-ref .pill-switch { justify-self: end; }
 .ps-ref .pill-switch { box-shadow: 0 1px 4px var(--shadow); }
@@ -1472,11 +1496,13 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .ps-sheet, .ps-sheet-small { left: 84px; right: auto; top: 14px; bottom: auto; width: 320px; max-height: calc(100% - 28px); }
   .ps-sheet-small { width: 280px; }
 }
-/* phones: the studio fills the screen, so the header and tabs step aside and the strip has a way back */
-@media (max-width: 759px) {
+/* phones (upright, or turned on their side: a short window): the studio fills the screen, so the header and
+   tabs step aside and the strip has a way back (painting.js pin() keeps the same 560 px line) */
+@media (max-width: 759px), (max-height: 559px) {
   .tab-paint .topbar, .tab-paint .tabs, .tab-loomis .topbar, .tab-loomis .tabs, .figure-focus .topbar, .figure-focus .tabs { display: none; }
   .ps-exit { display: grid; }
 }
+@media (min-width: 760px) and (max-height: 559px) { .ps { border: 0; border-radius: 0; } }
 @media (max-width: 480px) { .ps-strip { gap: 2px; padding-inline: 4px; } .ps-ic svg { width: 22px; height: 22px; } .ps-sep { margin: 0; } .ps-ic .ps-sub { right: 0; } }
 @media (prefers-reduced-motion: reduce) { .ps-paint .ps-dot { transition: none; } }
 
@@ -1495,11 +1521,13 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-pose img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .fig-pose:not(.has-img) img { visibility: hidden; }
 .fig-pose-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 5px 3px; font: 600 0.68rem/1.15 var(--body); text-align: left; background: linear-gradient(transparent, rgba(0, 0, 0, 0.62)); }
-.fig-pose:not(.has-img) .fig-pose-name { top: 0; display: grid; place-items: center; text-align: center; background: none; }
+.fig-pose:not(.has-img) .fig-pose-name { top: 0; display: grid; place-items: center; text-align: center; background: none; color: #1b1d1b; } /* dark on the placeholder's grey (the poses' own backdrop): 5.2 : 1 until the picture comes */
 .fig-pose:hover { border-color: var(--accent); }
 .fig-pose:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* in the class: a tick in the corner; taken out: faded, no tick */
-.fig-pose[aria-pressed="true"]::after { content: ""; position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
+.fig-pose[aria-pressed="true"]::after { content: ""; position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
+/* the tick itself, drawn with borders (the policy allows no data: pictures): two sides of a box, turned */
+.fig-pose[aria-pressed="true"]::before { content: ""; position: absolute; z-index: 1; top: 9px; right: 9px; width: 9px; height: 5px; border-left: 2.5px solid #fff; border-bottom: 2.5px solid #fff; border-radius: 1px; transform: rotate(-45deg); transform-origin: center; }
 .fig-pose[aria-pressed="false"] img { opacity: 0.3; filter: grayscale(1); }
 .fig-pose[aria-pressed="false"] { border-style: dashed; }
 
@@ -1571,7 +1599,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-card figcaption { width: 100%; display: flex; justify-content: space-between; gap: 8px; font: 700 0.95rem var(--display); }
 .fig-card figcaption span { font: 500 0.8rem var(--mono); color: var(--muted); }
 .fig-rating { margin: 0; font: 600 0.82rem var(--body); color: var(--muted); }
-.fig-rating-stars { font-size: 1.05rem; letter-spacing: 1px; color: #d9a441; }
+.fig-rating-stars { font-size: 1.05rem; letter-spacing: 1px; color: var(--star); }
 
 /* ---- Simple and advanced modes: Simple hides the fine controls and shows presets instead ---- */
 .mode-simple .advanced { display: none !important; }
@@ -1621,17 +1649,18 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .lh-acts .btn-ghost { padding: 6px 8px; }
 .lh-done .lh-card { gap: 4px; padding: 10px 14px; }
 .lh-done .lh-ask { font-size: 1.05rem; }
-.lh-done .lh-sub { display: none; }
 .lh-loupe { position: absolute; z-index: 6; width: 120px; height: 120px; border-radius: 50%; overflow: hidden; border: 3px solid var(--surface); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); pointer-events: none; background: #222; }
 .lh-loupe canvas { display: block; width: 100%; height: 100%; }
 .lh .ps-ic[aria-pressed="true"] { background: none; color: var(--ink); border-color: var(--line); }
 .lh .ps-ic[aria-pressed="false"] { opacity: 0.55; }
-.lh label.ps-ic { cursor: pointer; }
 @media (min-width: 760px) {
   .lh { grid-template-rows: minmax(0, 1fr); }
   .lh-card { position: absolute; left: 84px; top: 14px; width: 300px; margin: 0; }
   .lh .ps-stage { padding: 18px 88px 18px 400px; }
 }
+/* on a phone the card sits above the photo: once the head is fitted its line about the arrows gives
+   the photo back its room (the No head card keeps its line, which says what to do) */
+@media (max-width: 759px) { .lh-fitted .lh-sub { display: none; } }
 
 /* ---- Value battle: one primer-gray board holds the bar, the colors and the answers ---- */
 .vb-about h3 { margin: 0; font: 700 1rem var(--display); }
@@ -1642,18 +1671,20 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .battle-focus { overflow: hidden; }
 .vb-board { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; min-height: min(72vh, 600px); padding: 10px 14px 18px; background: #8c8a86; border-radius: var(--r); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
 .vb-stage { display: grid; gap: 18px; justify-items: center; align-content: center; min-width: 0; }
-.vb-bar { justify-self: stretch; display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 10px; border-bottom: 1px solid rgba(243, 238, 226, 0.25); color: #f3eee2; }
+.vb-bar { justify-self: stretch; display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 10px; border-bottom: 1px solid rgba(28, 26, 23, 0.25); color: #1c1a17; } /* dark on the primer gray: 4.9:1 */
 .vb-round { font: 700 1.15rem/1 var(--mono); font-variant-numeric: tabular-nums; }
 .vb-round.is-pulse { animation: vb-pulse-btn 0.3s ease-out; display: inline-block; }
-.vb-round.is-milestone { animation: vb-milestone 0.9s ease-out; display: inline-block; color: #e8c47a; }
+.vb-round.is-milestone { animation: vb-milestone 0.9s ease-out; display: inline-block; color: #e8c47a; background: #1c1a17; border-radius: 6px; box-shadow: 0 0 0 4px #1c1a17; }
 @keyframes vb-milestone { 0% { transform: scale(1); } 30% { transform: scale(1.35); } 60% { transform: scale(0.95); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .vb-round.is-pulse, .vb-round.is-milestone { animation: none; } }
-.vb-score { flex: 1; font-size: 0.82rem; opacity: 0.8; }
+.vb-score { flex: 1; font-size: 0.82rem; }
 .vb-time { font: 600 1.3rem/1 var(--mono); font-variant-numeric: tabular-nums; }
-.vb-time.is-low { color: #f0a28a; }
-.vb-quit { appearance: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(243, 238, 226, 0.4); background: none; color: #f3eee2; cursor: pointer; display: grid; place-items: center; padding: 0; }
+/* the last ten seconds, and a milestone, sit on a dark chip: the salmon and gold alone are under 2.1:1 on the primer gray.
+   The chip is a shadow, not padding, so the bar's row keeps its width at 320 px */
+.vb-time.is-low { color: #f0a28a; background: #1c1a17; border-radius: 6px; box-shadow: 0 0 0 4px #1c1a17; }
+.vb-quit { appearance: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(28, 26, 23, 0.55); background: none; color: #1c1a17; cursor: pointer; display: grid; place-items: center; padding: 0; }
 .vb-quit svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.vb-question { margin: 0; font: 700 clamp(1.15rem, 1rem + 1vw, 1.5rem)/1.2 var(--display); color: #f3eee2; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.vb-question { margin: 0; font: 700 clamp(1.15rem, 1rem + 1vw, 1.5rem)/1.2 var(--display); color: #faf5ea; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
 .vb-swatches { display: grid; gap: clamp(12px, 3vw, 28px); justify-content: center; grid-template-columns: repeat(2, auto); }
 .vb-swatches[data-count="3"] { grid-template-columns: repeat(3, auto); }
 .vb-swatches[data-count="4"] { grid-template-columns: repeat(2, auto); }
@@ -1665,7 +1696,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-swatch:focus-visible { outline: 3px solid #faf5ea; outline-offset: 4px; }
 .vb-swatch.is-answer { border-color: #d9a441; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px #d9a441, 0 6px 18px rgba(0, 0, 0, 0.3); }
 .vb-swatch.is-wrong { border-color: #93341f; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px rgba(147, 52, 31, 0.9), 0 6px 18px rgba(0, 0, 0, 0.3); }
-.vb-letter { position: absolute; left: 6px; top: 4px; font: 700 0.8rem var(--mono); color: #faf5ea; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.vb-letter { position: absolute; left: 6px; top: 4px; font: 700 0.8rem var(--mono); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.vb-letter.is-dark { color: #000; text-shadow: none; }   /* on a light paint (js/battle.js: L* over 49.4) */
 .vb-swatches[data-count="2"] .vb-letter { display: none; }
 .vb-badge { position: absolute; right: 6px; bottom: 6px; min-width: 26px; height: 26px; padding: 0 6px; display: grid; place-items: center; border-radius: 13px; background: #1e2b22; color: #faf5ea; font: 700 0.85rem var(--mono); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
 .vb-answered .vb-swatch { cursor: default; }
@@ -1682,7 +1714,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 @keyframes vb-pulse { 0% { transform: scale(1); } 40% { transform: scale(1.09); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 8px rgba(250, 245, 234, 0.35), 0 8px 22px rgba(0, 0, 0, 0.35); } 100% { transform: scale(1); } }
 @keyframes vb-pulse-btn { 0% { transform: scale(1); } 40% { transform: scale(1.05); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .vb-swatch.is-pulse, .vb-choice.is-pulse { animation: none; } }
-.vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #f3eee2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #1c1a17; }   /* the bar's ink: 5:1 on the primer gray (body text needs 4.5:1) */
 .vb-answer.is-right::first-line { font-weight: 700; }
 /* the answer row inside the board: one button for a pair, a reset once an order has begun, Next after a right answer */
 .vb-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; min-height: 52px; }
@@ -1692,7 +1724,6 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 [data-mode="pair"] .vb-choice { display: inline-block; }
 .vb-answered .vb-choice, .vb-answered .vb-undo { display: none; }
 .vb-choice.is-chosen { box-shadow: 0 0 0 3px #d9a441; }
-.vb-choice.is-pulse { animation: vb-pulse-btn 0.3s ease-out; }
 @media (max-width: 999px) {
   .vb-board { min-height: 60vh; padding-inline: 10px; }
   .vb-play.is-pinned .vb-board { border-radius: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
@@ -1707,17 +1738,23 @@ body.not-found { min-height: 100vh; display: grid; place-items: center; padding:
 .not-found-mark { width: 48px; height: 48px; color: var(--ink); fill: none; stroke: currentColor; stroke-width: 1.6; }
 
 /* ---- Without JavaScript (or when a script failed to load): a note, and the guide instead of dead controls.
-   js/guard.js removes .no-js as the first thing it does; it adds .load-failed when a script or the stylesheet fails. ---- */
+   js/guard.js removes .no-js as the first thing it does; it adds .load-failed when a script or the stylesheet fails.
+   (The notes cannot carry the hidden attribute: Chromium lets it beat these rules.) ---- */
+.help-shots:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .nojs-note { display: none; margin: 16px max(16px, 2vw) 0; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--earth); border-radius: var(--r); }
-.no-js .nojs-note, .load-failed .nojs-note { display: block; }
+.no-js .nojs-note, .load-failed .nojs-note, .all-failed .nojs-note { display: block; }
 .oldbrowser-note { display: none; margin: 16px max(16px, 2vw) 0; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--earth); border-radius: var(--r); }
 .old-browser .oldbrowser-note { display: block; }
 .partfail-note { display: none; margin: 16px max(16px, 2vw) 0; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--earth); border-radius: var(--r); }
-.part-failed .partfail-note, .all-failed .partfail-note { display: block; }
+.part-failed:not(.load-failed):not(.all-failed) .partfail-note { display: block; }
 .no-js .topbar-actions, .no-js .tabs, .no-js .rail, .no-js .tabpanel:not(#tab-help), .no-js .help-steps .btn,
 .old-browser .topbar-actions, .old-browser .tabs, .old-browser .rail, .old-browser .tabpanel:not(#tab-help), .old-browser .help-steps .btn,
-.all-failed .topbar-actions, .all-failed .tabs, .all-failed .rail, .all-failed .tabpanel:not(#tab-help), .all-failed .help-steps .btn { display: none !important; }
+.all-failed .topbar-actions, .all-failed .tabs, .all-failed .rail, .all-failed .tabpanel:not(#tab-help), .all-failed .help-steps .btn,
+.no-js .toolstrip, .old-browser .toolstrip, .all-failed .toolstrip, .no-js .forget-row, .all-failed .forget-row { display: none !important; }
+/* (the tool bar works on the Study pictures, which the fallbacks hide; Forget needs app.js, which an old browser still runs) */
 .no-js #tab-help, .old-browser #tab-help, .all-failed #tab-help { display: block !important; }
 .brand-privacy { margin: 2px 0 0; font-size: 0.85rem; color: var(--muted); }
-.toast .toast-action { pointer-events: auto; margin-left: 8px; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--ground); background: transparent; color: var(--ground); font: 600 0.8rem/1.4 var(--body); cursor: pointer; }
+.toast.show .toast-action { pointer-events: auto; }
+.toast:not(.show) .toast-action { visibility: hidden; }
+.toast .toast-action { margin-left: 8px; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--ground); background: transparent; color: var(--ground); font: 600 0.8rem/1.4 var(--body); cursor: pointer; }
 .toast .toast-action:hover { background: var(--ground); color: var(--ink); }

@@ -33,6 +33,7 @@
   }
   const MIXES_KEY = 'portrait-value-studio.paintMixes';
   const MINE_KEY = 'portrait-value-studio.myPaints';
+  const NOTICE_KEY = 'portrait-value-studio.studioNotice'; // the one-time note that the painting is kept in this browser
 
   /*
    * The studio is pinned to the screen. On a phone it fills the visual viewport: Safari's toolbars
@@ -51,8 +52,11 @@
     const devW = portrait ? sw : sh, devH = portrait ? sh : sw;
     if (W > devW + 2) W = devW;
     if (H > devH + 2) H = devH;
-    if (matchMedia('(min-width: 760px)').matches) {
-      const tabs = document.querySelector('.tabs').getBoundingClientRect();
+    // a short window (a phone turned on its side) has no height to spare for the header and tabs: the studio
+    // takes the whole screen there too, as on a phone held upright (styles.css steps the header and tabs aside)
+    // (a game's focus mode hides the tabs below 1000 px: with no tabs to sit under, it takes the screen as well)
+    const tabs = document.querySelector('.tabs').getBoundingClientRect();
+    if (matchMedia('(min-width: 760px) and (min-height: 560px)').matches && tabs.width > 0) {
       const inset = Math.max(0, Math.round(tabs.bottom + 14 - top));
       el.style.left = `${Math.round(tabs.left)}px`; el.style.top = `${Math.round(top + inset)}px`;
       el.style.width = `${Math.round(tabs.width)}px`; el.style.height = `${Math.max(240, Math.round(H - inset - 16))}px`;
@@ -80,7 +84,7 @@
     const hexOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
     const lab = (c) => Study.rgbToLab(c[0], c[1], c[2]);
     function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
-    function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+    function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { return false; /* private mode, or storage blocked */ } }
 
     // ---- Paints and the mixing model (the same as the Study tab and the game use) ----------------
     const made = new Map();
@@ -105,7 +109,7 @@
     // current palette when it is neither
     function palettes() {
       const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
-      const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+      const mine = [...new Set(load(MINE_KEY, []))].filter((c) => Paints.byCode(c));
       if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
       const cur = window.StudioPalette && StudioPalette.current();
       if (cur && cur.codes.length >= 2 && !list.some((p) => sameCodes(p.codes, cur.codes))) list.push({ id: 'study', name: `Study tab: ${cur.name}`, codes: cur.codes.slice() });
@@ -143,6 +147,7 @@
       wrap.style.width = `${Math.floor(paper.width * k)}px`;
       wrap.style.height = `${Math.floor(paper.height * k)}px`;
       applyView();
+      sizeReference();
     }
     let active = false;
     function layout() {
@@ -230,6 +235,7 @@
       $('washOpts').hidden = canvasState.ground !== 'wash';
       $('groundHint').textContent = { raw: 'Raw canvas: pale and warm. The painting stays as it is when the ground changes.', wash: 'A thin wash of one of your paints over the canvas, as painters tone a ground before starting.', gray: 'A neutral mid-value gray, so both lights and darks read against it.' }[canvasState.ground];
       $('washOut').textContent = `${Math.round(canvasState.washStr * 100)}%`;
+      $('washStr').value = Math.round(canvasState.washStr * 100); // (a restored painting sets the slider too)
       $('washName').textContent = canvasState.washCode ? paintName(canvasState.washCode) : '';
     }
     // the wash can be any paint in the palette; an earth is the usual choice, so one starts chosen
@@ -258,7 +264,7 @@
       if (canvasState.weave !== 'off') { x.globalCompositeOperation = 'multiply'; x.globalAlpha = WEAVE_ALPHA[canvasState.weave]; x.drawImage(weave, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; }
       return c;
     }
-    $('save').addEventListener('click', () => { Studio.savePng(composite(), o.fileName || 'painting.png'); closeSheets(); });
+    $('save').addEventListener('click', () => { Studio.savePng(composite(), o.fileName || 'painting.png', 'Close other tabs and try again.'); closeSheets(); });
 
     // ---- Stamps: each brush lays one mark, and a stroke is a run of them ----------------------------
     const ANGLE = -0.7;
@@ -323,18 +329,28 @@
     function segment(a, b, pressure) {
       const leadColor = state.tool === 'pencil' ? state.pcolor : state.tool === 'sketch' ? state.scolor : null;
       g.globalCompositeOperation = leadColor ? (leadColor === 'white' ? 'screen' : 'multiply') : 'source-over';
-      const d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.ceil(d / spacing()));
+      // a stroke never stamps more dabs than a line across the whole paper would need (a broken position can
+      // never become an endless loop)
+      const d = Math.hypot(b.x - a.x, b.y - a.y), n = Math.max(1, Math.min(Math.ceil(d / spacing()), Math.ceil(Math.hypot(paper.width, paper.height) * 2)));
       const dir = Math.atan2(b.y - a.y, b.x - a.x);
       for (let i = 1; i <= n; i++) stamp(a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n, pressure, dir);
       g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
     }
 
     let last = null;
-    const pos = (e) => { const r = paper.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * paper.width, y: (e.clientY - r.top) / r.height * paper.height }; };
+    // where the pointer is on the paper; null once the paper is hidden (another tab opened mid-stroke)
+    const pos = (e) => {
+      const r = paper.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) return null;
+      const p = { x: (e.clientX - r.left) / r.width * paper.width, y: (e.clientY - r.top) / r.height * paper.height };
+      return Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
+    };
     const press = (e) => (e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5);
     let locked = false;          // pencils down: the paper takes no marks (Figure study, when the time is up)
+    let strokeId = null;         // the pointer the stroke follows: a second finger (a pinch, a resting hand) draws nothing
     paper.addEventListener('pointerdown', (e) => {
       if (e.button > 0) return;
+      if (last && e.pointerId !== strokeId) { e.preventDefault(); return; }
       e.preventDefault(); closeSheets();
       if (locked) { if (o.onLocked) o.onLocked(); return; }
       paper.setPointerCapture(e.pointerId);
@@ -342,27 +358,47 @@
       if (state.tool === 'sketch') { useLayer(sketch); state.lastLayer = 'sketch'; showSketch(true); }
       else if (state.tool === 'eraser') useLayer(state.lastLayer === 'sketch' ? sketch : paper);
       else { useLayer(paper); state.lastLayer = 'paint'; }
-      snapshot(); last = pos(e); dragFrom = null; segment(last, last, press(e));
+      const p = pos(e);
+      if (!p) return;
+      strokeId = e.pointerId;
+      snapshot(); last = p; dragFrom = null; segment(last, last, press(e));
     });
-    paper.addEventListener('pointermove', (e) => { if (!last) return; const p = pos(e); segment(last, p, press(e)); last = p; });
-    ['pointerup', 'pointercancel'].forEach((t) => paper.addEventListener(t, () => { if (last) saveSoon(); last = null; dragFrom = null; }));
+    // the stroke ends where the pointer lets go, or where the paper leaves the screen
+    function endStroke(pointerId) {
+      if (last) saveSoon();
+      last = null; dragFrom = null; strokeId = null;
+      if (pointerId != null) { try { if (paper.hasPointerCapture(pointerId)) paper.releasePointerCapture(pointerId); } catch (err) { /* already released */ } }
+    }
+    paper.addEventListener('pointermove', (e) => {
+      if (!last || e.pointerId !== strokeId) return;
+      const p = pos(e);
+      if (!p) { endStroke(e.pointerId); return; }
+      segment(last, p, press(e)); last = p;
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => paper.addEventListener(t, (e) => { if (e.pointerId === strokeId) endStroke(); }));
     paper.addEventListener('contextmenu', (e) => e.preventDefault());
-    $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
-    let clearArmed = 0;
+    // Undo (the button, or Ctrl/⌘+Z) during a stroke takes back that stroke's snapshot, so the stroke in hand ends
+    // first, as a release ends it: what the pointer draws after that lands nowhere
+    $('undo').addEventListener('click', () => { if (last) endStroke(strokeId); const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
+    // performance.now() counts from the page's load, so an arming time of 0 would take the first tap of a page
+    // under three seconds old (or the first after a Clear, made that early) as the second of a pair: it starts
+    // at -Infinity, and a Clear leaves it there
+    let clearArmed = -Infinity;
     $('clear').addEventListener('click', () => {
       closeSheets();
       if (performance.now() - clearArmed > 3000) { clearArmed = performance.now(); Studio.toast('Tap again to clear the paper (Undo brings it back)'); return; }
-      clearArmed = 0;
+      clearArmed = -Infinity;
       useLayer(paper); snapshot(); blank(); saveSoon();
     });
     $('sketchClear').addEventListener('click', () => { useLayer(sketch); snapshot(); blank(); saveSoon(); });
     // The grid, lines, measures and plumb lines from the Study tab, drawn on the underdrawing in
     // pencil, with the underdrawing brush as it is set. They were drawn over the reference, so they
-    // are fitted to the paper the way the reference would be: as large as fits, centred.
-    $('sketchFromStudy').addEventListener('click', () => {
-      const prep = Studio.prep(), segs = Studio.marks();
+    // are fitted to the paper the way the reference would be: as large as fits, centred. copyLines draws
+    // any list of segments (in picture fractions) that way: Draw it in the Studio sends the head alone.
+    function copyLines(segs, what) {
+      const prep = Studio.prep();
       if (!prep) return;
-      if (!segs.length) { Studio.toast('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); return; }
+      if (!segs.length) { const none = withNotice('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); Studio.toast(none, none.length > 120 ? 8000 : 5000); return; }
       const k = Math.min(paper.width / prep.w, paper.height / prep.h);
       const w = prep.w * k, h = prep.h * k, ox = (paper.width - w) / 2, oy = (paper.height - h) / 2;
       useLayer(sketch); snapshot();
@@ -374,8 +410,14 @@
       state.lastLayer = 'sketch';
       closeSheets();
       saveSoon();
-      Studio.toast('The Study lines are on the underdrawing, in pencil');
-    });
+      const said = withNotice(`${what} on the underdrawing, in pencil`);
+      Studio.toast(said, said.length > 60 ? 8000 : 1800);
+    }
+    $('sketchFromStudy').addEventListener('click', () => copyLines(Studio.marks(), 'The Study lines are'));
+    // the one-time note, shown as the Studio opens, is not lost to a message that follows at once
+    // (Draw it in the Studio copies the head a moment after opening it): that message carries it
+    let noticeAt = 0;
+    function withNotice(msg) { return noticeAt && performance.now() - noticeAt < 7000 ? `${msg.replace(/\.$/, '')}. ${o.notice}` : msg; }
     function showSketch(on) {
       wrap.classList.toggle('ps-no-sketch', !on);
       q('[data-sketch-show]').forEach((x) => x.setAttribute('aria-pressed', String(!!+x.dataset.sketchShow === on)));
@@ -412,41 +454,81 @@
     }
     async function dbPut(key, value) {
       const db = await openDb();
-      await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); });
+      await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE, 'readwrite'); t.objectStore(DB_STORE).put(value, key); t.oncomplete = resolve; t.onerror = () => reject(t.error); t.onabort = () => reject(t.error || new Error('aborted')); });
       db.close();
     }
     async function dbGet(key) {
       const db = await openDb();
-      const v = await new Promise((resolve, reject) => { const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const v = await new Promise((resolve, reject) => { const t = db.transaction(DB_STORE); const r = t.objectStore(DB_STORE).get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); t.onabort = () => reject(t.error || new Error('aborted')); });
       db.close();
       return v;
     }
     const toBlob = (c) => new Promise((resolve) => c.toBlob(resolve, 'image/png'));
-    let saveTimer = 0, saving = false, saveAgain = false;
-    function saveSoon() { if (!hasDb) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
+    let saveTimer = 0, saving = false, saveAgain = false, forgetting = false, saveFailed = false;
+    // until the painting saved last time is read back, nothing is saved: a save that landed first would
+    // replace it (a slow database, a stroke made at once); the save asked for meanwhile is made after
+    let restoring = true, saveWanted = false;
+    function saveSoon() {
+      // a browser with its database off (Firefox's dom.indexedDB.enabled, some private modes) keeps nothing:
+      // the first change says so, as a failed save does
+      if (!hasDb && o.autosave !== false && !saveFailed && !forgetting) { saveFailed = true; Studio.toast('The painting cannot be saved in this browser (its storage is turned off). It stays for this visit only.', 7000); }
+      if (!hasDb || forgetting) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => { saveTimer = 0; saveNow(); }, 800);
+    }
     async function saveNow() {
-      if (!hasDb) return;
+      if (!hasDb || forgetting) return;
+      if (restoring) { saveWanted = true; return; }
       if (saving) { saveAgain = true; return; }
       saving = true;
+      // the record is stamped with the moment its pictures were taken (toBlob copies the canvas as it is
+      // called), not the moment the slow write lands, so a later change is never older than the record
+      const at = Date.now();
       try {
         const [paperBlob, sketchBlob] = await Promise.all([toBlob(paper), toBlob(sketch)]);
-        await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: Date.now() });
-      } catch (e) { /* storage unavailable: the painting lives in this visit only */ }
+        if (forgetting) { saving = false; return; } // Forget landed while the pictures were encoded: write nothing back
+        await dbPut(SAVE_KEY, { w: paper.width, h: paper.height, paper: paperBlob, sketch: sketchBlob, canvas: { ...canvasState }, sketchShown: !wrap.classList.contains('ps-no-sketch'), savedAt: at });
+      } catch (e) {
+        // said once a visit, since the first visit was told the painting is kept: it is not, this time
+        if (!saveFailed) { saveFailed = true; Studio.toast(e && e.name === 'QuotaExceededError' ? 'The painting could not be saved: browser storage is full. It stays for this visit only.' : 'The painting could not be saved in this browser. It stays for this visit only.', 7000); }
+      }
       saving = false;
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
-    const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
-    let restored = false;
+    // a picture the page cannot read back (an SVG with a foreignObject: the Studio itself only writes PNGs) would
+    // taint the paper it is drawn on, and every save and export after that would throw: it counts as unreadable
+    const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(Study.readable(img) ? img : null); }; img.onerror = () => resolve(null); img.src = url; });
+    let restored = false, dbOk = false, restoreFailed = false, badRecord = false, sketchLost = false; // dbOk: the database answered, so saving works here
     async function restore() {
       if (!hasDb) return;
       let saved;
       try { saved = await dbGet(SAVE_KEY); } catch (e) { return; }
-      if (!saved || !saved.w || !saved.h) return;
-      const [pImg, sImg] = await Promise.all([loadBlob(saved.paper), loadBlob(saved.sketch)]);
+      dbOk = true;
+      if (saved == null) return;
+      // only a record of the expected shape is used: sizes a paper can be shown at (each side 64 to
+      // 16384, neither more than eight times the other), a paper that is a blob and reads as an image,
+      // and an underdrawing that reads when it is there; anything else (a bad write, a tampered record)
+      // leaves a fresh paper and is said so when the Studio opens
+      const size = (n) => Number.isInteger(n) && n >= 64 && n <= 16384;
+      const usable = typeof saved === 'object' && size(saved.w) && size(saved.h) && saved.w <= saved.h * 8 && saved.h <= saved.w * 8 && saved.paper instanceof Blob;
+      const hasSketch = usable && saved.sketch instanceof Blob;
+      const [pImg, sImg] = usable ? await Promise.all([loadBlob(saved.paper), hasSketch ? loadBlob(saved.sketch) : null]) : [null, null];
+      if (!pImg) { badRecord = true; return; }
+      if (hasSketch && !sImg) sketchLost = true; // the paint is back; the underdrawing alone is not, and that is said
+      // strokes made while it was on its way are kept, on top of the painting that comes back
+      const early = undoStack.length ? [paper, sketch].map((c) => { const k = document.createElement('canvas'); k.width = c.width; k.height = c.height; k.getContext('2d').drawImage(c, 0, 0); return k; }) : null;
       [paper, sketch].forEach((c) => { c.width = saved.w; c.height = saved.h; });
-      if (pImg) paper.getContext('2d').drawImage(pImg, 0, 0);
+      paper.getContext('2d').drawImage(pImg, 0, 0);
       if (sImg) sketch.getContext('2d').drawImage(sImg, 0, 0);
-      if (saved.canvas) Object.assign(canvasState, saved.canvas);
+      if (early) { paper.getContext('2d').drawImage(early[0], 0, 0, saved.w, saved.h); sketch.getContext('2d').drawImage(early[1], 0, 0, saved.w, saved.h); undoStack.length = 0; $('undo').disabled = true; saveWanted = true; }
+      if (saved.canvas && typeof saved.canvas === 'object') { // field by field, each to what the sheet offers
+        const c = saved.canvas;
+        if (['raw', 'wash', 'gray'].includes(c.ground)) canvasState.ground = c.ground;
+        if (typeof c.weave === 'string' && Object.prototype.hasOwnProperty.call(WEAVE_ALPHA, c.weave)) canvasState.weave = c.weave;
+        if (typeof c.washCode === 'string' && c.washCode.length <= 8) canvasState.washCode = c.washCode;
+        const sl = $('washStr');
+        if (Number.isFinite(c.washStr) && c.washStr >= +sl.min / 100 && c.washStr <= +sl.max / 100) canvasState.washStr = c.washStr;
+      }
       renderWash(); applyCanvas();
       showSketch(saved.sketchShown !== false);
       undoStack.length = 0; $('undo').disabled = true;
@@ -454,12 +536,33 @@
       layout();
       showStatus();
     }
-    window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveNow(); } });
+    // a change still waiting is saved as the page goes (pagehide), and as soon as it is hidden (a phone
+    // switching apps, which may never show it again): a save begun at pagehide may not finish
+    const saveNowIfDue = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0; saveNow(); } };
+    window.addEventListener('pagehide', saveNowIfDue);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNowIfDue(); });
 
     // ---- Sheets ----------------------------------------------------------------------------------
     const SHEETS = { brushSheet: 'brushBtn', eraserSheet: null, refSheet: 'refBtn', canvasSheet: 'canvasBtn', viewSheet: 'viewBtn', paintSheet: 'colorBtn' };
-    function closeSheets() { Object.entries(SHEETS).forEach(([id, btn]) => { $(id).hidden = true; if (btn) $(btn).setAttribute('aria-expanded', 'false'); }); }
-    function openSheet(id) { const was = !$(id).hidden; closeSheets(); if (!was) { $(id).hidden = false; if (SHEETS[id]) $(SHEETS[id]).setAttribute('aria-expanded', 'true'); } }
+    // a sheet closed with the focus in it (Escape, its ×, Lock in, Save as PNG), or with the focus lost from a control
+    // the sheet hid, gives the focus back to the icon that opened it (the eraser has no icon of its own in SHEETS:
+    // its sheet opens from the eraser's button, tapped again)
+    function closeSheets() {
+      const open = Object.keys(SHEETS).find((id) => !$(id).hidden);
+      const lost = !!open && (document.activeElement === document.body || !document.activeElement || $(open).contains(document.activeElement));
+      Object.entries(SHEETS).forEach(([id, btn]) => { $(id).hidden = true; if (btn) $(btn).setAttribute('aria-expanded', 'false'); });
+      const back = open === 'eraserSheet' ? q('[data-ps-tool="eraser"]')[0] : open && SHEETS[open] ? $(SHEETS[open]) : null;
+      if (lost && back) back.focus();
+    }
+    // a sheet opened from the keyboard puts the focus in it, on its first control (as the My paints dialog does), so the
+    // next Tab is in the sheet, not on the strip's next icon
+    function openSheet(id) {
+      const was = !$(id).hidden; closeSheets();
+      if (was) return;
+      $(id).hidden = false; if (SHEETS[id]) $(SHEETS[id]).setAttribute('aria-expanded', 'true');
+      const first = [...$(id).querySelectorAll('button:not([disabled]), input:not([disabled]), select')].find((e) => e.offsetParent);
+      if (first) first.focus();
+    }
     q('[data-close]').forEach((b) => b.addEventListener('click', closeSheets));
     $('colorBtn').addEventListener('click', () => openSheet('paintSheet'));
     $('viewBtn').addEventListener('click', () => openSheet('viewSheet'));
@@ -467,13 +570,15 @@
     $('refBtn').addEventListener('click', () => openSheet('refSheet'));
     document.addEventListener('keydown', (e) => {
       if (!active) return;
+      if (document.querySelector('dialog[open]')) return; // a modal dialog (Save by hand) is on top: nothing behind it changes
       if (e.key === 'Escape') closeSheets();
       // Ctrl/⌘+Z undoes the last stroke, as the Undo button does
       const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName) && document.activeElement.type !== 'range';
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); if (!$('undo').disabled) $('undo').click(); }
     });
     // on a phone the tabs are out of view while painting, so the strip has a way back
-    $('exit').addEventListener('click', () => (o.onExit ? o.onExit() : Studio.go('study')));
+    // (the focus goes to the section it opens: the button pressed is hidden with the Studio's strip)
+    $('exit').addEventListener('click', () => (o.onExit ? o.onExit() : Studio.go('study', true)));
 
     // ---- The reference: the Study tab's photo, or a generated portrait, shown as itself, its ---------
     // three-value study or its color-block study
@@ -507,7 +612,7 @@
     function refreshReference() {
       if (ref.kind === 'image') {
         $('refName').textContent = ref.label;
-      } else if (ref.kind === 'painting' && ref.id) {
+      } else if (ref.kind === 'painting' && ref.id && window.Subjects) {
         if (!ref.prep) Object.assign(ref, studyPortrait(ref.id));
         const e = Subjects.entry(ref.id);
         $('refName').textContent = `${e.title}, after ${Subjects.painterOf(ref.id)}: a generated portrait, as the game deals them.`;
@@ -530,19 +635,64 @@
       q('[data-ref-kind]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.refKind === ref.kind)));
       $('refAnother').hidden = ref.kind !== 'painting';
       $('refFig').hidden = !ref.shown || !ref.prep;
-      $('refFig').style.width = `${ref.size * 100}%`;
-      $('refSizeOut').textContent = `${Math.round(ref.size * 100)}%`;
+      sizeReference();
       q('[data-ref-show]').forEach((b) => b.setAttribute('aria-pressed', String(!!+b.dataset.refShow === ref.shown)));
     }
-    function dealReference() { ref.kind = 'painting'; ref.id = Subjects.random(ref.id); ref.prep = ref.res = null; ref.shown = true; refreshReference(); }
+    // the size is a share of the stage's shorter side, so every step of the slider shows on a wide screen
+    // as on a phone (a hidden stage has no size: the width stays until the next layout)
+    function sizeReference() {
+      const st = $('stage'), side = Math.min(st.clientWidth, st.clientHeight);
+      if (side <= 0) return;
+      // the picture has to fit the stage both ways, with its switch above it: a very tall picture is narrower, so
+      // its largest size is smaller (no floor of 20%, which would be taller than the stage), and the slider's low
+      // end follows it, so the readout never names a size that is not shown
+      const aspect = ref.prep ? ref.prep.w / ref.prep.h : 1;
+      const fitW = Math.max(0, Math.min(st.clientWidth - 24, (st.clientHeight - 48) * aspect));
+      const top = Math.max(1, Math.min(70, Math.floor((fitW / side) * 100)));
+      const low = top >= 20 ? 20 : Math.max(1, Math.floor(top / 2));
+      $('refSize').min = low; $('refSize').max = top;
+      if (ref.size > top / 100) ref.size = top / 100;
+      if (ref.size < low / 100) ref.size = low / 100;
+      $('refSize').value = Math.round(ref.size * 100);
+      $('refSizeOut').textContent = `${Math.round(ref.size * 100)}%`;   // here, so a size a resize moved is read out too
+      $('refFig').style.width = `${Math.round(ref.size * side)}px`;
+      // the status pill along the top stops short of the reference (it would cover the pill's end on a phone)
+      $('stage').style.setProperty('--ref-w', $('refFig').hidden ? '0px' : `${Math.round(ref.size * side)}px`);
+      clampReference();
+    }
+    // the figure with its switch, which hangs past a narrow figure's sides: the part that has to stay on the stage
+    function refBounds(fig) {
+      const r = fig.getBoundingClientRect(), sw = fig.querySelector('.pill-switch'), s = sw ? sw.getBoundingClientRect() : r;
+      const left = Math.min(r.left, s.left), top = Math.min(r.top, s.top);
+      return { left, top, width: Math.max(r.right, s.right) - left, height: Math.max(r.bottom, s.bottom) - top };
+    }
+    // a reference dragged to an edge stays on the stage when the stage gets smaller (a smaller window, a
+    // phone turned), as a drag keeps it there
+    function clampReference() {
+      const fig = $('refFig');
+      if (fig.hidden) return;
+      const st = $('stage').getBoundingClientRect(), r = refBounds(fig);
+      if (!st.width || !r.width) return;
+      const bx = r.left - ref.x, by = r.top - ref.y;
+      const x = Math.min(st.right - r.width - bx, Math.max(st.left - bx, ref.x));
+      const y = Math.min(st.bottom - r.height - by, Math.max(st.top - by, ref.y));
+      if (x !== ref.x || y !== ref.y) { ref.x = x; ref.y = y; fig.style.transform = `translate(${x}px, ${y}px)`; }
+    }
+    function dealReference() {
+      if (!window.Subjects) { Studio.toast('The generated portraits are not available: a script did not load. Reload the page.'); return; }
+      ref.kind = 'painting'; ref.id = Subjects.random(ref.id); ref.prep = ref.res = null; ref.shown = true; refreshReference();
+    }
     $('refAnother').addEventListener('click', dealReference);
+    // without subjects.js (the generated portraits) the reference offers the Study photo only
+    if (!window.Subjects) q('[data-ref-kind="painting"]').forEach((b) => { b.hidden = true; });
     if (o.followStudy !== false) {
       q('[data-ref-kind]').forEach((b) => b.addEventListener('click', () => {
         if (b.dataset.refKind === 'painting') { if (ref.kind !== 'painting') dealReference(); }
         else { ref.kind = 'studio'; ref.shown = true; refreshReference(); }
       }));
-      // a photo loaded here goes to the Study tab, and the reference follows it
-      document.getElementById('file').addEventListener('change', () => { if (active) { ref.kind = 'studio'; ref.shown = true; } });
+      // a photo loaded while the Studio is open (its Load a photo, a drop or a paste) goes to the Study tab,
+      // and the reference follows it once it has arrived: a file refused there changes nothing here
+      window.addEventListener('studio:source', () => { if (active) { ref.kind = 'studio'; ref.shown = true; ref.prep = ref.res = null; drawReference(); } });
       window.addEventListener('studio:result', () => { if (ref.kind === 'studio') refreshReference(); });
     } else {
       // a studio whose owner gives the reference has none of the Study tab's controls: the choice of
@@ -562,7 +712,7 @@
         fig.classList.add('is-moving');
         const start = { x: e.clientX, y: e.clientY, px: ref.x, py: ref.y };
         const move = (ev) => {
-          const st = $('stage').getBoundingClientRect(), r = fig.getBoundingClientRect();
+          const st = $('stage').getBoundingClientRect(), r = refBounds(fig);
           const bx = r.left - ref.x, by = r.top - ref.y;
           ref.x = Math.min(st.right - r.width - bx, Math.max(st.left - bx, start.px + ev.clientX - start.x));
           ref.y = Math.min(st.bottom - r.height - by, Math.max(st.top - by, start.py + ev.clientY - start.y));
@@ -578,6 +728,8 @@
     const view = { zoom: 1, px: 0, py: 0 };
     function applyView() {
       const st = $('stage'), z = view.zoom;
+      // at 100% the pan sliders are off: the paper sits centred, and a pan left over from a zoom is cleared
+      if (z === 1 && (view.px || view.py)) { view.px = view.py = 0; $('panX').value = 0; $('panY').value = 0; }
       const w = wrap.clientWidth * z, h = wrap.clientHeight * z;
       const ox = Math.max(0, (w - st.clientWidth) / 2 + 24), oy = Math.max(0, (h - st.clientHeight) / 2 + 24);
       wrap.style.transform = `translate(${-view.px * ox}px, ${-view.py * oy}px) scale(${z})`;
@@ -600,6 +752,8 @@
       const subs = { chisel: state.chisel.toUpperCase(), round: state.round, pencil: state.lead === 'charcoal' ? 'Ch' : HARD[state.hard].short, sketch: state.slead === 'charcoal' ? 'Ch' : HARD[state.shard].short, blend: state.blend };
       $('chiselSub').textContent = subs.chisel; $('roundSub').textContent = subs.round; $('pencilSub').textContent = subs.pencil; $('sketchSub').textContent = subs.sketch; $('blendSub').textContent = subs.blend;
       q('[data-hard]').forEach((b) => { b.textContent = state.lead === 'charcoal' ? CHAR[b.dataset.hard].label : HARD[b.dataset.hard].label; });
+      // the underdrawing is the same pencil: its hardness reads 2H / HB / 4B in graphite too
+      q('[data-shard]').forEach((b) => { b.textContent = state.slead === 'charcoal' ? CHAR[b.dataset.shard].label : HARD[b.dataset.shard].label; });
       $('pencilHint').textContent = state.lead === 'charcoal' ? 'A hard stick keeps a crisp line; a soft one spreads and goes black. Press harder with a pen for more.' : 'Light is pale and fine; Dark builds up fast. Press harder with a pen for more.';
       $('eraserSub').textContent = state.eraser;
       // the Brushes icon shows the brush in hand (or the last one used)
@@ -666,7 +820,10 @@
       $('wellParts').textContent = parts.length ? [...by].map(([c, n]) => `${c} ${fmt(n)}`).join(' · ') : 'Empty. Tap a paint to start a mix.';
       ['lock', 'wellUndo', 'wellClear'].forEach((id) => { $(id).disabled = !parts.length; });
       q('.ps-paint').forEach((b) => { const n = by.get(b.dataset.code); b.querySelector('.ps-n').textContent = n ? fmt(n) : ''; });
-      if (mixed) { setColor(mixed, 'Current mix'); q('.ps-mix').forEach((m) => m.setAttribute('aria-pressed', 'false')); picked = -1; $('picked').hidden = true; }
+      if (mixed) setColor(mixed, 'Current mix');
+      // a kept mix is named only while its parts are in the well (pickMix sets the row again after it loads them):
+      // a well that empties (a palette change, its Clear or Undo) lets it go, so the row never names a mix not in the well
+      q('.ps-mix').forEach((m) => m.setAttribute('aria-pressed', 'false')); picked = -1; $('picked').hidden = true;
     }
     $('wellUndo').addEventListener('click', () => { state.well.pop(); showWell(); });
     $('wellClear').addEventListener('click', () => { state.well = []; showWell(); });
@@ -723,6 +880,7 @@
       ['Cheek and lip', '#C06A54'],
     ];
     function skinMixes(codes) {
+      codes = [...new Set(codes)];
       const whites = codes.filter((c) => paintFor(c).white), white = whites[0];
       const colors = codes.filter((c) => !whites.includes(c));
       const sets = [];
@@ -741,6 +899,8 @@
         const t = lab(hexOf(target));
         let best = null, bd = Infinity;
         candidates.forEach((k) => { if (used.has(k)) return; const d = Math.hypot(k.lab[0] - t[0], k.lab[1] - t[1], k.lab[2] - t[2]); if (d < bd) { bd = d; best = k; } });
+        // with one or two paints there are fewer mixes than skin tones: the closest serves twice
+        if (!best) candidates.forEach((k) => { const d = Math.hypot(k.lab[0] - t[0], k.lab[1] - t[1], k.lab[2] - t[2]); if (d < bd) { bd = d; best = k; } });
         used.add(best);
         return { name, c: best.c, parts: best.parts.map((p) => ({ ...p })), starter: true };
       });
@@ -766,28 +926,51 @@
     }
     function applyPalette() { state.well = []; renderPaints(); renderWash(); applyCanvas(); seedMixes(); }
     $('palette').addEventListener('change', () => { paletteTouched = true; applyPalette(); });
-    window.addEventListener('studio:palette', () => { if (paletteTouched) return; const was = $('palette').value; renderPalettes(); if ($('palette').value !== was) applyPalette(); });
+    // the menu always learns of My paints and the Study tab's palette; a palette chosen here stays chosen
+    // (renderPalettes keeps it), and the paints change only when the choice or its paints did (My paints
+    // ticked again)
+    function followPalette() {
+      const was = $('palette').value, wasCodes = (paletteList.find((p) => p.id === was) || {}).codes;
+      renderPalettes();
+      const now = paletteList.find((p) => p.id === $('palette').value);
+      if ($('palette').value !== was || !now || !wasCodes || !sameCodes(now.codes, wasCodes)) applyPalette();
+    }
+    window.addEventListener('studio:palette', followPalette);
+    // a new study while the Studio is open (a photo loaded from here) can change the Study tab's palette
+    window.addEventListener('studio:result', () => { if (active) followPalette(); });
 
     // ---- Start ---------------------------------------------------------------------------------------
     renderPalettes();
-    state.mixes = load(mixesKey, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && p.amount > 0), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
+    state.mixes = load(mixesKey, []).map((m) => m && Array.isArray(m.parts) ? { parts: m.parts.filter((p) => p && Paints.byCode(p.code) && Number.isFinite(p.amount) && p.amount > 0 && p.amount <= 100), c: null } : null).filter((m) => m && m.parts.length).map((m) => ({ ...m, c: mixColor(m.parts) }));
     blank();
     applyPalette();
     showStatus();
     applyView();
     let welcomed = false;
-    const ready = restore();
+    const ready = restore().catch((err) => { restoreFailed = true; if (window.StudioGuard) StudioGuard.report(err, { saved: true }); }); // a bad saved painting never stops the Studio
+    ready.then(() => { restoring = false; if (saveWanted) { saveWanted = false; saveSoon(); } });
+    // Forget my work on this device: stop saving, so the pending autosave (or the one on pagehide) can't bring the painting back
+    window.addEventListener('studio:forget', () => { forgetting = true; clearTimeout(saveTimer); saveTimer = 0; });
 
     function activate(on) {
       active = on;
       if (o.bodyClass) document.body.classList.toggle(o.bodyClass, active);
-      if (!active) { closeSheets(); return; }
+      if (!active) { closeSheets(); endStroke(); return; }
       window.scrollTo(0, 0);
-      if (!paletteTouched) { const was = $('palette').value; renderPalettes(); if ($('palette').value !== was) applyPalette(); }
+      followPalette();
       refreshReference();
       layout();
       setTimeout(layout, 120);
-      ready.then(() => { layout(); if (restored && !welcomed && o.welcome) Studio.toast(o.welcome); welcomed = true; });
+      ready.then(() => {
+        layout();
+        if (!welcomed && !restoreFailed) { // a failed restore has the guard's reset offer on screen: leave it there
+          if (restored && o.welcome) Studio.toast(sketchLost ? `${o.welcome}, without its underdrawing, which could not be read.` : o.welcome, sketchLost ? 6000 : 1800);
+          else if (badRecord && o.welcome) Studio.toast('The painting saved last time could not be read, so this is a fresh paper.', 6000);
+          // the one-time note is only true where the database works, and only once the flag could be kept
+          else if (o.notice && dbOk && !load(NOTICE_KEY, false) && save(NOTICE_KEY, true)) { noticeAt = performance.now(); Studio.toast(o.notice, 7000); }
+        }
+        welcomed = true;
+      });
     }
     if (o.tab) {
       window.addEventListener('studio:tab', (e) => activate(e.detail === o.tab));
@@ -824,9 +1007,10 @@
       x.drawImage(paper, 0, 0);
       return c;
     }
-    return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
+    return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, copyLines, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
   }
 
-  const main = createStudio({ root: psRoot, prefix: 'ps-', tab: 'paint', bodyClass: 'tab-paint', welcome: 'Your painting is back from last time' });
+  const main = createStudio({ root: psRoot, prefix: 'ps-', tab: 'paint', bodyClass: 'tab-paint', welcome: 'Your painting is back from last time',
+    notice: 'Your painting is saved in this browser as you go. "Forget my work on this device", under How to use, clears it.' });
   window.PaintStudio = Object.assign(main, { pin, create: createStudio, copyMarkup });
 })();

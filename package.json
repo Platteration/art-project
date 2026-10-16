@@ -1,0 +1,16 @@
+{
+  "name": "portrait-value-studio-tests",
+  "private": true,
+  "description": "Test tooling only: the site itself has no build step and no dependencies. Not part of the published site.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "node scripts/check-policy.mjs && node tests/run.mjs",
+    "test": "node tests/run.mjs",
+    "serve": "node tests/serve.mjs"
+  },
+  "devDependencies": {
+    "axe-core": "4.10.3",
+    "playwright": "1.56.1"
+  }
+}

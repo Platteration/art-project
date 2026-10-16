@@ -6,10 +6,15 @@
   // same failure panel pose.js shows when its 3D library is missing.
   window.addEventListener('load', () => setTimeout(() => {
     if (window.__poseStarted) return;
+    document.documentElement.classList.add('failed');
     const f = document.getElementById('fail');
     const h = document.getElementById('hint');
     if (f) f.hidden = false;
     if (h) h.hidden = true;
+    // drawing for Figure study (pose.html?render=1): tell it now rather than let it wait out its timeout
+    if (/[?&]render=1(&|$)/.test(location.search) && window.parent !== window) {
+      window.parent.postMessage({ type: 'pose-and-light:failed' }, self.origin && self.origin !== 'null' ? self.origin : '*');
+    }
   }, 1500));
   if (!/[?&]embed=1(&|$)/.test(location.search) || window.parent === window) return;
   const root = document.documentElement;
@@ -32,12 +37,15 @@
     host.addEventListener('resize', size);
     new MutationObserver(theme).observe(host.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   }
+  // the app is told at this page's own origin; where the page has none (opened from disk, or inside another
+  // site's sandboxed frame, where the origin reads 'null') at any: the app checks the sender window either way
+  const APP_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
   let told = 0;
   const tell = () => {
     const app = document.querySelector('.app');
     if (!app) return;
     const h = Math.ceil(app.getBoundingClientRect().bottom + window.scrollY);
-    if (h !== told) { told = h; window.parent.postMessage({ type: 'pose-and-light:height', height: h }, location.origin); }
+    if (h !== told) { told = h; window.parent.postMessage({ type: 'pose-and-light:height', height: h }, APP_ORIGIN); }
   };
   document.addEventListener('DOMContentLoaded', () => { tell(); if (window.ResizeObserver) new ResizeObserver(tell).observe(document.querySelector('.app')); });
   window.addEventListener('load', tell);

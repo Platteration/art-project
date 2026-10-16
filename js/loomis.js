@@ -83,7 +83,11 @@
     const roll = Math.atan2(ey, ex), eyeDist = Math.hypot(ex, ey);
     const mid = [(L.x + R.x) / 2, ((L.y + R.y) / 2) * state.aspect];
     const nx = (N.x - mid[0]) * Math.cos(-roll) - (N.y * state.aspect - mid[1]) * Math.sin(-roll);
-    const s0 = eyeDist / 0.8;
+    // the size to start from: the eyes' distance, or, with the eyes on one point, the chin's distance
+    // from them; marks all on one point give no size, and no head
+    const C = state.points.chin, chinDist = Math.hypot(C.x - mid[0], C.y * state.aspect - mid[1]);
+    const s0 = Math.max(eyeDist / 0.8, chinDist / 1.5);
+    if (s0 < 1e-4) return null;
     const yaw0 = Math.max(-1.2, Math.min(1.2, Math.asin(Math.max(-0.95, Math.min(0.95, nx / (s0 * 0.95))))));
     const cost = (v) => {
       const f = { s: v[0], tx: v[1], ty: v[2], yaw: v[3], pitch: v[4], roll: v[5], len: v[6] };
@@ -156,7 +160,7 @@
     state.pending = null;
     state.step++;
     refit();
-    if (done()) Studio.toast('The head is over the face');
+    announceFit();
   }
   function skip() {
     if (done() || !current().optional) return;
@@ -164,6 +168,14 @@
     state.pending = null;
     state.step++;
     refit();
+    announceFit();
+  }
+  const NO_FIT = 'No head fits these marks: the eyes, nose, mouth and chin must be different points.';
+  function announceFit() {
+    if (!done()) return;
+    // a head the eye button hid stays hidden through Back one mark: the note says so, not that it is drawn
+    if (state.fit && !state.shown) Studio.toast('The head is fitted, and hidden: the eye button shows it', 4000);
+    else Studio.toast(state.fit ? 'The head is over the face' : `${NO_FIT} Press Back and move them.`, state.fit ? 1800 : 5000);
   }
   function back() {
     if (state.pending) { state.pending = null; render(); return; }
@@ -173,7 +185,9 @@
     delete state.points[current().key];
     refit();
   }
-  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; render(); }
+  // a fresh start (Start over, a new photo) shows the head again: hiding it was about the fit before (and the
+  // keyboard's crosshair goes back to the middle)
+  function reset() { state.points = {}; state.step = 0; state.pending = null; state.fit = null; state.auto = null; state.moving = null; state.shown = true; aim = { x: 0.5, y: 0.5 }; render(); }
   function refit() { state.fit = fitHead(); state.auto = state.fit && { ...state.fit }; render(); }
 
   // ---- Adjusting the fitted head on the canvas: arrows turn, nod and tilt it; its lines drag -----
@@ -190,11 +204,32 @@
     const f = state.fit;
     if (!f) return [];
     const cx = f.tx * W, cy = f.ty * W, R = f.s * W, pad = 26 * (W / 700 + 0.6);
-    return [
+    // kept inside the picture (a head whose crown is cut off would put the nod and tilt arrows above it)
+    const H = W * state.aspect, m = 18 * (W / 400);
+    const inside = (h) => Object.assign(h, { x: Math.max(m, Math.min(W - m, h.x)), y: Math.max(m, Math.min(H - m, h.y)) });
+    const all = [
       { key: 'yaw', d: -1, x: cx - R - pad, y: cy, glyph: 'left' }, { key: 'yaw', d: 1, x: cx + R + pad, y: cy, glyph: 'right' },
       { key: 'pitch', d: -1, x: cx - pad * 0.9, y: cy - R - pad, glyph: 'up' }, { key: 'pitch', d: 1, x: cx + pad * 0.9, y: cy - R - pad, glyph: 'down' },
       { key: 'roll', d: -1, x: cx - R * 0.78 - pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'ccw' }, { key: 'roll', d: 1, x: cx + R * 0.78 + pad * 0.6, y: cy - R * 0.78 - pad * 0.6, glyph: 'cw' },
-    ];
+    ].map(inside);
+    // arrows pushed into the picture (a small head cut off at its top, or near a corner) would land on
+    // each other: the arrows are placed in turn, turn then nod then tilt, each taking the first of its
+    // spots clear of those already placed by a disc and a half (or, with none clear, the clearest):
+    // its own place, below it, outward, and for the tilt arrows the ball's lower corner
+    const [left, right, up, down, ccw, cw] = all, r = 15 * (W / 400) * 2.3, placed = [];
+    const nearest = (p) => Math.min(...placed.map((o) => Math.hypot(o.x - p.x, o.y - p.y)));
+    const take = (h, spots) => {
+      const cands = [{ x: h.x, y: h.y }, ...spots].map((p) => inside(p));
+      const best = cands.find((p) => nearest(p) >= r) || cands.reduce((p, q) => (nearest(q) > nearest(p) ? q : p));
+      h.x = best.x; h.y = best.y; placed.push(h);
+    };
+    take(left, [{ x: left.x, y: left.y + r }]);
+    take(right, [{ x: right.x, y: right.y + r }]);
+    take(up, [{ x: up.x, y: up.y + r }, { x: up.x - r, y: up.y }, { x: cx - pad * 0.9, y: cy + R + pad }]);
+    take(down, [{ x: down.x, y: down.y + r }, { x: down.x + r, y: down.y }, { x: cx + pad * 0.9, y: cy + R + pad }]);
+    take(ccw, [{ x: cx - R * 0.78 - pad * 0.6, y: cy + R * 0.78 + pad * 0.6 }, { x: up.x - r, y: m }, { x: left.x, y: left.y + r }, { x: up.x, y: up.y + r }, { x: cx - R * 0.78 - pad * 0.6, y: cy + R * 0.78 + pad * 0.6 + r }]);
+    take(cw, [{ x: cx + R * 0.78 + pad * 0.6, y: cy + R * 0.78 + pad * 0.6 }, { x: down.x + r, y: m }, { x: right.x, y: right.y + r }, { x: down.x, y: down.y + r }, { x: cx + R * 0.78 + pad * 0.6, y: cy + R * 0.78 + pad * 0.6 + r }]);
+    return all;
   }
   function nudge(key, d) {
     if (!state.fit) return;
@@ -246,31 +281,44 @@
 
   // ---- The card and the strip -----------------------------------------------------------------
   function render() {
-    const d = done();
-    $('stepLabel').textContent = d ? 'Head fitted' : `${state.step + 1} of ${STEPS.length}`;
-    $('ask').textContent = d ? 'Drag a dot or a line to adjust it' : current().name;
-    $('sub').textContent = d ? 'The arrows turn, nod and tilt the head. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.' : `${current().ask}${state.pending ? ' Drag to fine-tune, then lock it in.' : ''}`;
+    const d = done(), fitted = d && !!state.fit;
+    $('stepLabel').textContent = fitted ? 'Head fitted' : d ? 'No head' : `${state.step + 1} of ${STEPS.length}`;
+    $('ask').textContent = fitted ? (state.shown ? 'Drag a dot or a line to adjust it' : 'Hidden: the eye button shows it') : d ? 'These marks make no head' : current().name;
+    $('sub').textContent = fitted ? 'The arrows turn, nod and tilt the head. Then draw it: the ball, the flat side, the centre line, the brow line, then the eye, nose, mouth and chin lines and the jaw.'
+      : d ? `${NO_FIT} Press Back and move them.` : `${current().ask}${state.pending ? ' Drag to fine-tune, then lock it in.' : ''}`;
     $('lock').hidden = d; $('lock').disabled = !state.pending;
     $('skip').hidden = d || !current().optional;
-    $('back').hidden = d; $('back').disabled = !state.step && !state.pending;
-    $('cardStudio').hidden = !d;
-    $('refit').hidden = !d;
+    $('back').hidden = fitted; $('back').disabled = !state.step && !state.pending;
+    $('cardStudio').hidden = !fitted;
+    $('refit').hidden = !fitted;
     $('undo').disabled = !state.step && !state.pending;
     $('reset').disabled = !state.step && !state.pending;
     ['show', 'studio', 'save'].forEach((id) => { $(id).disabled = !state.fit; });
     $('show').setAttribute('aria-pressed', String(state.shown));
     root.classList.toggle('lh-done', d);
+    root.classList.toggle('lh-fitted', fitted); // the stylesheet keeps the fitted card small on a phone
     Studio.redraw();
     drawTab();
   }
-  $('lock').addEventListener('click', lock);
-  $('skip').addEventListener('click', skip);
-  $('back').addEventListener('click', back);
-  $('undo').addEventListener('click', back);
-  $('reset').addEventListener('click', reset);
+  // a button pressed from the keyboard may go off as it acts (Lock in waits for the next mark, Skip and Back
+  // leave at the end): the focus moves to the card's next live button instead of falling to the page
+  const CARD = ['lock', 'skip', 'back', 'cardStudio', 'refit'];
+  function keepFocus(btn) {
+    const a = document.activeElement;
+    if (a !== btn && a !== document.body && a !== null) return;
+    if (!btn.disabled && !btn.hidden && btn.offsetParent) return;
+    const next = CARD.map((id) => $(id)).find((b) => b && !b.disabled && !b.hidden && b.offsetParent);
+    if (next) next.focus();
+  }
+  [['lock', lock], ['skip', skip], ['back', back], ['undo', back], ['reset', reset]].forEach(([id, fn]) => {
+    const btn = $(id);
+    btn.addEventListener('click', () => { fn(); keepFocus(btn); });
+  });
   $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; Studio.redraw(); drawTab(); } });
   $('show').addEventListener('click', () => { state.shown = !state.shown; render(); });
-  const toStudio = () => { Studio.go('paint'); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
+  // Draw it in the Studio draws the head, so a hidden head is shown again first. It copies the head alone: the
+  // Study tab's grid, lines and measures are not on this tab, so the Studio's Copy the Study lines is not pressed
+  const toStudio = () => { if (state.fit && !state.shown) { state.shown = true; render(); } Studio.go('paint'); setTimeout(() => PaintStudio.copyLines(segments(), 'The head is'), 150); };
   $('studio').addEventListener('click', toStudio);
   $('cardStudio').addEventListener('click', toStudio);
   $('save').addEventListener('click', () => {
@@ -282,11 +330,13 @@
     draw(g, prep.w, prep.h, Math.max(1, Math.max(prep.w, prep.h) / 500));
     Studio.savePng(c, 'loomis-head.png');
   });
-  $('exit').addEventListener('click', () => Studio.go('study'));
+  // (the focus goes to the section it opens: the button pressed is hidden with the head's strip)
+  $('exit').addEventListener('click', () => Studio.go('study', true));
 
   // ---- The photo on the stage, and the marks made on it ----------------------------------------
   const photo = $('photo'), overlay = $('overlay'), wrap = $('wrap');
   let active = false;
+  let aim = null;   // the keyboard's crosshair on the photo, in picture fractions (see "The photo from the keyboard")
   function showPhoto() {
     const prep = Studio.prep();
     if (!prep) return;
@@ -315,12 +365,17 @@
     g.clearRect(0, 0, overlay.width, overlay.height);
     draw(g, overlay.width, overlay.height, dpr * 1.15);
     drawHandles(g, overlay.width, dpr * 1.15);
+    if (aim && overlay.matches(':focus-visible')) drawAim(g, overlay.width, overlay.height, dpr * 1.15);
   }
   function layout() { if (!active) return; PaintStudio.pin(root); fit(); }
   window.addEventListener('resize', layout);
   window.addEventListener('orientationchange', () => setTimeout(layout, 60));
   if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }
-  window.addEventListener('studio:result', () => { if (active) showPhoto(); });
+  // a new photo begins a new head: marks tapped on the old picture while the new one was being prepared
+  // ("Updating…") are dropped when it arrives (the marks before were cleared as the file was read)
+  let newPhoto = false;
+  window.addEventListener('studio:source', () => { newPhoto = true; });
+  window.addEventListener('studio:result', () => { if (newPhoto) { newPhoto = false; if (state.step || state.pending) reset(); } if (active) showPhoto(); });
 
   const pos = (e) => { const r = overlay.getBoundingClientRect(); return [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))]; };
   // the loupe: the photo magnified around the finger while a mark is placed, so the tap lands exactly
@@ -357,6 +412,7 @@
     if (e.button > 0) return;
     e.preventDefault(); overlay.setPointerCapture(e.pointerId);
     const [x, y] = pos(e), dpr = window.devicePixelRatio || 1, px = x * overlay.width, py = y * overlay.height;
+    aim = { x, y };                            // the keyboard's crosshair goes where the pointer is, so Enter acts there
     const hit = done() ? hitTest(px, py, overlay.width) : null;
     if (hit && hit.kind === 'handle') {
       // a tap nudges; holding keeps nudging
@@ -375,6 +431,7 @@
   overlay.addEventListener('pointermove', (e) => {
     if (!drag_) return;
     const [x, y] = pos(e), px = x * overlay.width, py = y * overlay.height, W = overlay.width;
+    aim = { x, y };
     if (drag_.kind === 'place') { drag(x, y); showLoupe(x, y); return; }
     if (drag_.kind === 'mark') { if (state.moving) { state.points[state.moving] = { x, y }; refit(); } showLoupe(x, y); return; }
     if (drag_.kind === 'handle') return;
@@ -388,6 +445,33 @@
   });
   ['pointerup', 'pointercancel'].forEach((t) => overlay.addEventListener(t, () => { clearTimeout(holdTimer); drag_ = null; release(); hideLoupe(); }));
   overlay.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---- The photo from the keyboard: it takes the focus, the arrow keys move a crosshair over it (Shift for
+  // bigger steps, with the loupe), and Enter or Space taps there: it places the pending mark, so Lock in comes
+  // on, or once the head is fitted presses the arrow button under it. The crosshair shows only while the focus
+  // came from the keyboard, so a pointer sees nothing new. It is always where Enter acts: it starts on the
+  // pending mark (else the middle) each time the photo takes the focus, and a tap or a drag takes it along.
+  const AIM_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  overlay.addEventListener('focus', () => { aim = state.pending ? { ...state.pending } : { x: 0.5, y: 0.5 }; drawTab(); });
+  overlay.addEventListener('blur', () => { hideLoupe(); drawTab(); });
+  overlay.addEventListener('keydown', (e) => {
+    if (!aim || e.altKey || e.ctrlKey || e.metaKey) return;
+    const d = AIM_KEYS[e.key];
+    if (d) {
+      e.preventDefault();
+      const px = e.shiftKey ? 20 : 2; // CSS pixels a press moves it
+      aim = { x: Math.max(0, Math.min(1, aim.x + (d[0] * px) / (wrap.clientWidth || 1))), y: Math.max(0, Math.min(1, aim.y + (d[1] * px) / (wrap.clientHeight || 1))) };
+      showLoupe(aim.x, aim.y);
+      drawTab();
+      return;
+    }
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    hideLoupe();                               // as a pointer's release does
+    if (!done()) { place(aim.x, aim.y); return; }
+    const hit = hitTest(aim.x * overlay.width, aim.y * overlay.height, overlay.width);
+    if (hit && hit.kind === 'handle') nudge(hit.handle.key, hit.handle.d);
+  });
 
   // ---- Drawing the head: on this tab's overlay, on the Study pictures and into saved PNGs ---------
   const COLORS = { side: '#e5322d', sideLine: '#e5322d', brow: '#1ec8ec', hair: '#e5322d', centre: '#1ec8ec', face: '#1ec8ec', eyes: '#ffd21f', nose: '#ffd21f', mouth: '#ffd21f', chin: '#ffd21f', jaw: '#e5322d' };
@@ -463,9 +547,19 @@
     });
     g.restore();
   }
+  // the keyboard's crosshair, where Enter or Space taps
+  function drawAim(g, W, H, unit) {
+    const x = aim.x * W, y = aim.y * H, a = 11 * unit, gap = 3 * unit;
+    g.save(); g.lineCap = 'round';
+    g.beginPath();
+    [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dx, dy]) => { g.moveTo(x + dx * gap, y + dy * gap); g.lineTo(x + dx * a, y + dy * a); });
+    g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 3.5 * unit; g.stroke();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 1.6 * unit; g.stroke();
+    g.restore();
+  }
   // the near-side lines as straight segments in picture fractions, for the Studio's underdrawing
   function segments() {
-    if (!state.fit || !state.shown) return [];
+    if (!state.fit || !state.shown) return []; // a hidden head is in none of the Study's pictures, nor in a copy
     const W = 1000, H = Math.round(W * state.aspect), f = state.fit, out = [], n = 48;
     for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2, b = ((i + 1) / n) * Math.PI * 2; out.push([f.tx + f.s * Math.cos(a), (f.ty + f.s * Math.sin(a)) / state.aspect, f.tx + f.s * Math.cos(b), (f.ty + f.s * Math.sin(b)) / state.aspect]); }
     projected(W).forEach((piece) => { for (let i = 1; i < piece.pts.length; i++) { const a = piece.pts[i - 1], b = piece.pts[i]; if (a[2] && b[2]) out.push([a[0] / W, a[1] / H, b[0] / W, b[1] / H]); } });

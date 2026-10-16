@@ -32,7 +32,7 @@
   const BEST_KEY = 'portrait-value-studio.battleBest';
   const MINE_KEY = 'portrait-value-studio.myPaints';
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); if (v == null) return fallback; if (Array.isArray(fallback) !== Array.isArray(v) || typeof fallback !== typeof v) return fallback; return v; } catch (e) { return fallback; } } // a saved value of another shape than the default is ignored
-  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* private mode */ } }
+  function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { return false; /* private mode */ } }
   // best scores are kept for the newest fifty boards only (keys name the photo), so the list never grows for good
   function pruneBests(bests) { const keys = Object.keys(bests); if (keys.length > 50) keys.slice(0, keys.length - 50).forEach((k) => { delete bests[k]; }); }
 
@@ -44,7 +44,7 @@
   }
   function palettes() {
     const list = Paints.PRESETS.map((p) => ({ id: p.id, name: p.name, codes: p.paints }));
-    const mine = load(MINE_KEY, []).filter((c) => Paints.byCode(c));
+    const mine = [...new Set(load(MINE_KEY, []))].filter((c) => Paints.byCode(c));
     if (mine.length >= 2) list.push({ id: 'mine', name: `My paints (${mine.length})`, codes: mine });
     return list;
   }
@@ -107,12 +107,24 @@
   const LEVELS = { easy: EASY, medium: levelAt(12), hard: HARD };   // for tests and the README
   const SAME = { value: 0.9, temp: 0.05 };      // closer than this is "the same"
   const LETTERS = ['A', 'B', 'C', 'D'];
+  const SIDE = { left: 'The left one', right: 'The right one', same: 'Both' };   // how the answer line names a pair's colors
   function measure(kind, c) { return kind === 'value' ? c.L : c.warmth; }
   // a pair of colors for the question at the level, or a "same" pair when the dice say so
+  // the temperature ladder is scaled to the palette's own reach: a warm-only palette (Zorn, the earths)
+  // has no cool mix, so its first rounds ask for as wide a gap as it can make, closing from there
+  function tempBand(lv, usable) {
+    const w = usable.map((c) => c.warmth), span = Math.max(...w) - Math.min(...w), k = Math.min(1, span / 2);
+    const lo = Math.max(FLOOR.temp[0], lv.temp[0] * k);
+    return [lo, Math.max(lo + 0.04, lv.temp[1] * k)];
+  }
+  // a tie must read the same on the chips: the same V on the scale, or the same lean word (a hair apart either
+  // side of the line between "cool" and "in between" is still two words under a line that says they lean alike)
+  const reads = (kind, a, b) => (kind === 'value' ? vLabel(a) === vLabel(b) : tLabel(a) === tLabel(b));
   function makePair(pool, lv, q) {
-    const usable = q.kind === 'temp' ? pool.filter((c) => c.chroma >= 10) : pool;
+    const colorful = pool.filter((c) => c.chroma >= 10);
+    const usable = q.kind === 'temp' && colorful.length >= 2 ? colorful : pool;
     const wantSame = Math.random() < lv.same;
-    const [lo, hi] = lv[q.kind];
+    const [lo, hi] = q.kind === 'temp' ? tempBand(lv, usable) : lv[q.kind];
     let best = null;
     for (let tries = 0; tries < 400 && !best; tries++) {
       const a = usable[rnd(usable.length)], b = usable[rnd(usable.length)];
@@ -120,18 +132,20 @@
       const d = Math.abs(measure(q.kind, a) - measure(q.kind, b));
       // a "same" pair must still look different, so it is a real question
       const differs = q.kind === 'value' ? Math.abs(a.warmth - b.warmth) > 0.4 || Math.abs(a.chroma - b.chroma) > 12 : Math.abs(a.L - b.L) > 8;
-      if (wantSame ? d < SAME[q.kind] && differs : d >= lo && d <= hi) best = [a, b];
+      if (wantSame ? d < SAME[q.kind] && differs && reads(q.kind, a, b) : d >= lo && d <= hi) best = [a, b];
     }
     if (!best) {
       // the palette can't make the pair asked for at this level: take the nearest it can
-      const a = usable[rnd(usable.length)];
-      const sorted = usable.filter((c) => c !== a).sort((x, y) => Math.abs(Math.abs(measure(q.kind, x) - measure(q.kind, a)) - (lo + hi) / 2) - Math.abs(Math.abs(measure(q.kind, y) - measure(q.kind, a)) - (lo + hi) / 2));
+      // (one at least the band's low end apart when it has one: nearer than that is closer than the eye can tell)
+      const a = usable[rnd(usable.length)], gap = (c) => Math.abs(measure(q.kind, c) - measure(q.kind, a));
+      const sorted = usable.filter((c) => c !== a).sort((x, y) => (gap(x) < lo) - (gap(y) < lo) || Math.abs(gap(x) - (lo + hi) / 2) - Math.abs(gap(y) - (lo + hi) / 2));
       best = [a, sorted[0] || a];
     }
     const colors = Math.random() < 0.5 ? best : [best[1], best[0]];
     const d = measure(q.kind, colors[1]) - measure(q.kind, colors[0]);
-    const answer = Math.abs(d) < SAME[q.kind] ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
-    return { q, n: 2, colors, answer };
+    const tie = Math.abs(d) < SAME[q.kind] && reads(q.kind, colors[0], colors[1]);
+    const answer = tie ? 'same' : q.pick(d) > 0 ? 'right' : 'left';
+    return { q, n: 2, colors, answer, band: [lo, hi] };
   }
   // three or four colors for a swatch question: values at least a level's gap apart where the
   // question needs them told apart
@@ -145,6 +159,7 @@
       if (q.mode === 'order') { const s = byL(set); if (s.every((c, i) => !i || c.L - s[i - 1].L >= lv.gap)) colors = set; }
       else { const s = byL(set); const edge = q.dir < 0 ? s[1].L - s[0].L : s[n - 1].L - s[n - 2].L; if (edge >= lv.gap) colors = set; }
     }
+    if (!colors) colors = buildMany(pool, lv, q, n, byL);
     if (!colors) {
       // the palette can't make such a set: take the n most spread colors it has
       const from = pool.slice().sort(() => Math.random() - 0.5).slice(0, 40);
@@ -155,6 +170,28 @@
     if (q.mode === 'pick') { const s = byL(colors); answer = colors.indexOf(q.dir < 0 ? s[0] : s[n - 1]); }
     else answer = byL(colors).map((c) => colors.indexOf(c));
     return { q, n, colors, answer };
+  }
+  // a set built step by step when random draws keep missing (a narrow palette, a wide gap): for an order, each
+  // color the gap above the last, taken from the nearest dozen so the set stays in range; for darkest or
+  // lightest, the extreme the gap beyond all the others. Shuffled, so the answer is not the order shown.
+  function buildMany(pool, lv, q, n, byL) {
+    const sorted = byL(pool), shuffle = (a) => a.sort(() => Math.random() - 0.5);
+    for (let t = 0; t < 200; t++) {
+      if (q.mode === 'order') {
+        const set = [pool[rnd(pool.length)]];
+        while (set.length < n) {
+          const last = set[set.length - 1], up = sorted.filter((c) => c.L - last.L >= lv.gap);
+          if (!up.length) break;
+          set.push(up[rnd(Math.min(up.length, 12))]);
+        }
+        if (set.length === n) return shuffle(set);
+      } else {
+        const extreme = pool[rnd(pool.length)];
+        const others = shuffle(sorted.filter((c) => (q.dir < 0 ? c.L - extreme.L : extreme.L - c.L) >= lv.gap));
+        if (others.length >= n - 1) return shuffle([extreme, ...others.slice(0, n - 1)]);
+      }
+    }
+    return null;
   }
   function makeRound(pool, lv, q, n) { return n === 2 ? makePair(pool, lv, q) : makeMany(pool, lv, q, n); }
 
@@ -178,13 +215,24 @@
     els.palette.replaceChildren();
     list.forEach((p) => els.palette.append(new Option(p.name, p.id)));
     els.palette.value = list.some((p) => p.id === was) ? was : list[0].id;
-    const ct = load(COUNT_KEY, 'mix'), md = load(MODE_KEY, 'streak');
-    root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
-    root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
+    // the saved count and mode are read once: after that the radios hold this visit's choice, which a browser that
+    // refuses storage could not have saved (the best shown would be another setting's)
+    if (!settingsRead) {
+      settingsRead = true;
+      const has = (name, v) => [...root.querySelectorAll(`input[name="${name}"]`)].some((r) => r.value === v);
+      const ct = has('vbCount', load(COUNT_KEY, 'mix')) ? load(COUNT_KEY, 'mix') : 'mix', md = has('vbMode', load(MODE_KEY, 'streak')) ? load(MODE_KEY, 'streak') : 'streak';
+      root.querySelectorAll('input[name="vbMode"]').forEach((r) => { r.checked = r.value === md; });
+      root.querySelectorAll('input[name="vbCount"]').forEach((r) => { r.checked = r.value === ct; });
+    }
     showBest();
   }
+  let settingsRead = false;
+  // a best the browser would not keep still stands for this visit
+  const visit = {};
+  const loadBests = () => Object.assign(load(BEST_KEY, {}), visit);
+  const bestOf = (bests, key) => (Number.isInteger(bests[key]) && bests[key] >= 0 && bests[key] <= 1e6 ? bests[key] : null); // a count of rounds, or no best
   function showBest() {
-    const best = load(BEST_KEY, {})[bestKey()];
+    const best = bestOf(loadBests(), bestKey());
     els.best.textContent = best == null ? (mode() === 'streak' ? 'No streak yet for these settings.' : 'No score yet for these settings.') : mode() === 'streak' ? `Your best streak here: ${best} in a row.` : `Your best here: ${best} right in ${mode() / 60} minute${mode() === '60' ? '' : 's'}.`;
   }
   els.palette.addEventListener('change', () => { save(PALETTE_KEY, els.palette.value); showBest(); });
@@ -194,12 +242,16 @@
   function start() {
     const pal = paletteNow();
     const pool = mixPool(pal.codes, 220);
+    // whites alone mix no colors to compare; grays alone (a white and a black) have no temperature to ask about
+    if (pool.length < 2) { Studio.toast(`${pal.name} makes no colors to compare: it needs a paint that is not a white.`, 5000); return; }
     const seconds = mode() === 'streak' ? 0 : +mode();
-    game = { pool, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
+    game = { pool, hasTemp: pool.filter((c) => c.chroma >= 10).length >= 2, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
     els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true; els.miss.hidden = true;
     els.time.hidden = !seconds;
+    els.round.classList.remove('is-milestone', 'is-pulse');   // the last game's flourish (its chip) does not carry over
     setFocus(true);
     nextRound();
+    swatch(0).focus({ preventScroll: true });   // the Start button just went; without this the focus falls to the page
     startClock();
   }
   // the clock, for a timed game: it pauses while the answer to a miss is being read
@@ -235,11 +287,15 @@
     if (!game.bag.length) { game.bag = game.count === 'mix' ? [2, 3, 4].sort(() => Math.random() - 0.5) : [+game.count]; }
     const n = game.bag.shift();
     const qs = n === 2 ? PAIR_Q : MANY_Q, key = n === 2 ? 'pair' : 'many';
-    const q = qs[game.dealt[key]++ % qs.length];
+    let q = qs[game.dealt[key]++ % qs.length];
+    while (q.kind === 'temp' && !game.hasTemp) q = qs[game.dealt[key]++ % qs.length]; // a gray pool gets the value questions only
     game.rounds[game.i] = makeRound(game.pool, levelAt(game.i), q, n);
     showRound();
   }
   const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  // a swatch's letter is black on a light paint and white on a dark one: the two meet at L* 49.4, where each is 4.6:1,
+  // so one of them reaches 4.5:1 on any paint (the palette's own inks do not: about 3.6:1 on the middle values)
+  const darkInk = (c) => c.L > 49.4;
   const vLabel = (c) => `V ${(c.L / 10).toFixed(1)}`;
   const tLabel = (c) => (c.warmth > 0.35 ? 'warm' : c.warmth < -0.35 ? 'cool' : 'in between');
   function showRound() {
@@ -254,8 +310,9 @@
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'vb-swatch'; b.dataset.index = i;
       b.style.background = css(c.rgb);
-      b.setAttribute('aria-label', `Color ${LETTERS[i]}`);
+      b.setAttribute('aria-label', r.n === 2 ? SIDE[i ? 'right' : 'left'] : `Color ${LETTERS[i]}`);   // a pair shows no letters: its colors are the left one and the right one
       const letter = document.createElement('span'); letter.className = 'vb-letter'; letter.textContent = LETTERS[i];
+      letter.classList.toggle('is-dark', darkInk(c));
       const badge = document.createElement('span'); badge.className = 'vb-badge'; badge.hidden = true;
       b.append(letter, badge);
       b.addEventListener('click', () => tapSwatch(i));
@@ -263,10 +320,13 @@
     });
     els.answer.textContent = ''; els.answer.classList.remove('is-right', 'is-wrong');
     root.dataset.mode = r.q.mode;
-    els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen'); });
+    els.choices.querySelectorAll('.vb-choice').forEach((b) => { b.disabled = false; b.classList.remove('is-chosen', 'is-pulse'); });   // a pulse left on the button would play again each time the round shows it
     els.undo.hidden = true;
     els.next.hidden = true;
     root.classList.remove('vb-answered');
+    // Next ▸ (or the miss's button) just went, and the old colors with it: the new round's first color takes the focus, and the group's
+    // name (the question) is read with it. Only from the page or the board: a menu opened while the clock runs keeps its focus, and so does ✕.
+    if (document.activeElement !== els.quit && onBoard(document.activeElement)) swatch(0).focus({ preventScroll: true });
   }
   const swatch = (i) => els.swatches.querySelector(`.vb-swatch[data-index="${i}"]`);
   // a tap on a swatch: the answer itself for a pair or a pick, the next in line for an order
@@ -295,21 +355,22 @@
     click(2);
     game.picked = [];
     els.swatches.querySelectorAll('.vb-swatch').forEach((b) => { b.classList.remove('is-picked'); b.querySelector('.vb-badge').hidden = true; });
+    const held = document.activeElement === els.undo;
     els.undo.hidden = true;
+    if (held) swatch(0).focus({ preventScroll: true });   // the button hides itself with the focus on it: the first color takes it, not the page
   });
   const same = (a, b) => Array.isArray(a) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b;
   // why the answer is what it is, in a sentence the student can check against the swatches
   function explain(r) {
-    const side = { left: 'The left one', right: 'The right one', same: 'Both' };
     if (r.q.mode === 'pair') {
       const [L, R] = r.colors;
       if (r.q.kind === 'value') {
         if (r.answer === 'same') return `Both are the same value: ${vLabel(L)} and ${vLabel(R)}. Different colors, equal in light and dark.`;
         const win = r.answer === 'left' ? L : R, lose = r.answer === 'left' ? R : L;
-        return `${side[r.answer]} is ${r.q.key}: ${vLabel(win)} against ${vLabel(lose)}.`;
+        return `${SIDE[r.answer]} is ${r.q.key}: ${vLabel(win)} against ${vLabel(lose)}.`;
       }
       if (r.answer === 'same') return `Both lean the same way: ${tLabel(L)}. The difference is in value, not temperature.`;
-      return `${side[r.answer]} is ${r.q.key}: it leans more toward ${r.q.key === 'warmer' ? 'orange and yellow' : 'blue and green'} than the other.`;
+      return `${SIDE[r.answer]} is ${r.q.key}: it leans more toward ${r.q.key === 'warmer' ? 'orange and yellow' : 'blue and green'} than the other.`;
     }
     const vals = r.colors.map((c, i) => `${LETTERS[i]} ${vLabel(c)}`).join(', ');
     if (r.q.mode === 'pick') return `${LETTERS[r.answer]} is the ${r.q.key}. The values: ${vals}.`;
@@ -382,16 +443,19 @@
     clearTimeout(game.auto);
     nextRound();
   });
+  // the keys are the board's: a menu, the Simple/Advanced switch or a field elsewhere on the page keeps its own arrows
+  const onBoard = (el) => el === document.body || els.play.contains(el);
   document.addEventListener('keydown', (e) => {
-    if (!game || game.over || Studio.tab() !== 'battle') return;
-    if (!els.miss.hidden) { if (e.key === 'Enter') els.missNext.click(); return; }
+    if (!game || game.over || Studio.tab() !== 'battle' || e.defaultPrevented || !onBoard(e.target)) return;
+    if (e.repeat && e.key === 'Enter') { e.preventDefault(); return; }   // an Enter held on Start or Next answers nothing
+    if (!els.miss.hidden) { if (e.key === 'Enter') { e.preventDefault(); els.missNext.click(); } return; } // one press, one answer: the key's own activation of whatever is focused next is stopped
     const r = game.rounds[game.i];
     if (r.q.mode === 'pair') {
       if (e.key === 'ArrowLeft') tapSwatch(0);
       else if (e.key === 'ArrowRight') tapSwatch(1);
       else if (e.key === '=' || e.key === 'ArrowDown') choose('same');
     } else if (/^[1-4]$/.test(e.key) && +e.key <= r.n) tapSwatch(+e.key - 1);
-    if (e.key === 'Enter' && game.answered) els.next.click();
+    if (e.key === 'Enter' && game.answered && e.target !== els.quit) { e.preventDefault(); els.next.click(); }   // the new round's first color has the focus now: this Enter must not press it too; on ✕ it quits as before
   });
 
   // ---- The score, the way Paint by numbers shows one ----------------------------------------------
@@ -407,14 +471,21 @@
     const onClock = game.seconds > 0;
     const score = onClock ? game.right : game.streak;
     const stars = onClock ? TIMED_STARS.filter((min) => game.right / (game.seconds / 60) >= min).length : STARS.filter((min) => score >= min).length;
-    const bests = load(BEST_KEY, {}), key = bestKey();
-    const isBest = score > 0 && (bests[key] == null || score > bests[key]);
-    if (isBest) { delete bests[key]; bests[key] = score; pruneBests(bests); save(BEST_KEY, bests); } // re-added last, so the prune drops the least recently played
+    const bests = loadBests(), key = bestKey();
+    const isBest = score > 0 && (bestOf(bests, key) == null || score > bestOf(bests, key));
+    // every setting played is re-added last, with the best it keeps, so the prune drops the least recently played
+    const kept = isBest ? score : bestOf(bests, key);
+    let written = true;
+    if (kept != null) { delete bests[key]; bests[key] = kept; pruneBests(bests); written = save(BEST_KEY, bests); }
+    if (written) delete visit[key]; else visit[key] = kept;          // a best that has been kept since needs no stand-in
     els.kicker.textContent = onClock ? `Time's up${game.missed ? ` · ${game.missed} missed` : ' · none missed'}` : game.streak ? `Streak over after round ${game.i + 1}` : 'Out on the first round';
     els.label.textContent = onClock ? 'right' : 'in a row';
     els.grade.textContent = GRADES[stars];
     els.newBest.hidden = !isBest;
+    els.newBest.textContent = written ? 'New best!' : 'New best! (this visit only)';   // a best the browser would not keep says so
     els.stars.setAttribute('aria-label', `${stars} out of 5 stars, ${score} ${onClock ? 'right' : 'in a row'}`);
+    // the pop-up's description is what the focus on Play again reads; New best! is in it only while shown (a hidden element named here is read all the same)
+    els.popup.setAttribute('aria-describedby', isBest ? 'vb-stars vb-grade vb-newBest' : 'vb-stars vb-grade');
     const pct = score;
     els.stars.querySelectorAll('.game-star').forEach((st, i) => { st.classList.toggle('is-on', i < stars); st.style.setProperty('--i', i); });
     els.popup.hidden = false;
@@ -422,20 +493,27 @@
     cancelAnimationFrame(countUp);
     if (reduceMotion.matches) els.pct.textContent = pct;
     else {
-      const t0 = performance.now(), ms = 1100;
-      const step = (t) => { const k = Math.min(1, (t - t0) / ms); els.pct.textContent = Math.round(pct * (1 - Math.pow(1 - k, 3))); if (k < 1) countUp = requestAnimationFrame(step); };
+      // timed from the first frame, as the figure card's count is
+      let t0 = -1;
+      const ms = 1100;
+      const step = (t) => { if (t0 < 0) t0 = t; const k = Math.min(1, (t - t0) / ms); els.pct.textContent = Math.round(pct * (1 - Math.pow(1 - k, 3))); if (k < 1) countUp = requestAnimationFrame(step); };
       countUp = requestAnimationFrame(step);
     }
     els.again.focus({ preventScroll: true });
   }
   els.again.addEventListener('click', start);
-  els.settings.addEventListener('click', () => { clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null; els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false; setFocus(false); showBest(); });
+  els.settings.addEventListener('click', () => {
+    clearInterval(clock); clock = 0; if (game) clearTimeout(game.auto); game = null;
+    els.popup.hidden = true; els.miss.hidden = true; els.play.hidden = true; els.setup.hidden = false;
+    setFocus(false); renderSetup();
+    els.palette.focus();                     // the ✕ or the score's button that had focus is hidden now
+  });
   // the tabs are hidden while playing on a phone, so the bar has a way out: tap ✕ twice
-  let quitArmed = 0;
+  let quitArmed = -1e9; // long ago: the first ✕ asks even in the page's first three seconds
   els.quit.addEventListener('click', () => {
     if (!game || game.over) { els.settings.click(); return; }
     if (performance.now() - quitArmed > 3000) { quitArmed = performance.now(); Studio.toast('Tap ✕ again to quit this battle'); return; }
-    quitArmed = 0;
+    quitArmed = -1e9;
     els.settings.click();
   });
   // While a game is on, the board is pinned to the screen the Studio's way: the whole visual
@@ -447,7 +525,12 @@
     if (on) { window.scrollTo(0, 0); layout(); setTimeout(layout, 120); }
     else els.play.style.cssText = '';
   }
-  function layout() { if (!game || els.play.hidden || !window.PaintStudio) return; PaintStudio.pin(els.play); }
+  // without painting.js (a failed download) the board is pinned to the viewport by hand
+  function pinByHand(el) {
+    const vv = window.visualViewport, ok = vv && Math.abs(vv.scale - 1) < 0.02;
+    el.style.cssText = `left:${ok ? vv.offsetLeft : 0}px;top:${ok ? vv.offsetTop : 0}px;width:${ok ? vv.width : innerWidth}px;height:${ok ? vv.height : innerHeight}px`;
+  }
+  function layout() { if (!game || els.play.hidden) return; if (window.PaintStudio) PaintStudio.pin(els.play); else pinByHand(els.play); }
   window.addEventListener('resize', layout);
   window.addEventListener('orientationchange', () => setTimeout(layout, 60));
   if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }

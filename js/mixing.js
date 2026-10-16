@@ -278,6 +278,21 @@
   }
 
   /*
+   * A target as dark as the paints go, or darker (or as light, or lighter), is at their limit:
+   * edge is 'dark' or 'light' there, else null, and short(L) is how many L* a mix of value L stays
+   * lighter than the darkest the paints go (or darker than the lightest), past the first. The
+   * recipes and the palettes' count of colors they mix both charge PER_VALUE for each.
+   */
+  function limitOf(tL, reach) {
+    const edge = tL < (reach.dark + reach.light) / 2
+      ? (tL <= reach.dark + LIMIT ? 'dark' : null)
+      : (tL >= reach.light - LIMIT ? 'light' : null);
+    const short = (L) => (edge === 'dark' ? Math.max(0, L - Math.max(tL, reach.dark) - 1)
+      : edge === 'light' ? Math.max(0, Math.min(tL, reach.light) - 1 - L) : 0);
+    return { edge, short };
+  }
+
+  /*
    * Finds a recipe for one color in steps, so a page can spread the work over several frames:
    * call step(ms) until it returns true, then read .result. recipe() runs it all at once.
    *
@@ -297,13 +312,9 @@
     const tLab = rgbToLab(target);
     const tY = tLab[0] > 8 ? Math.pow((tLab[0] + 16) / 116, 3) : tLab[0] / KAPPA;
     const reach = reachOf(paints);
-    const edge = tLab[0] < (reach.dark + reach.light) / 2
-      ? (tLab[0] <= reach.dark + LIMIT ? 'dark' : null)
-      : (tLab[0] >= reach.light - LIMIT ? 'light' : null);
+    const { edge, short } = limitOf(tLab[0], reach);
     // How far a mix is from the target: ΔE (CIEDE2000), plus the value it gives up at a limit
-    const offBy = (lab) => deltaE(lab, tLab) + PER_VALUE * (
-      edge === 'dark' ? Math.max(0, lab[0] - Math.max(tLab[0], reach.dark) - 1)
-        : edge === 'light' ? Math.max(0, Math.min(tLab[0], reach.light) - 1 - lab[0]) : 0);
+    const offBy = (lab) => deltaE(lab, tLab) + PER_VALUE * short(lab[0]);
     const whiteIdx = paints.findIndex((p) => p.white);
     const white = whiteIdx >= 0 ? paints[whiteIdx] : null;
     const colors = paints.map((p, i) => i).filter((i) => i !== whiteIdx);
@@ -423,6 +434,7 @@
         const parts = amounts.map((a, j) => (touch[j] ? (a / mainSum) * size : Math.round((a / mainSum) * size)));
         const whole = parts.filter((v, j) => !touch[j]);
         if (whole.some((v) => v < 1) || whole.reduce(gcd) > 1) continue; // a gcd > 1 is a smaller size again
+        if (sumOf(whole) > MAX_PARTS) continue; // rounding each share up can take a size past the cap
         const cp = colorParts(parts);
         const dE = evaluate(c.set, cp, c.white ? parts[parts.length - 1] / sumOf(cp) : 0);
         const cost = dE + PER_PAINT * (ids.length - 1) + PER_PART * sumOf(whole);
@@ -651,6 +663,9 @@
    *
    * A set of colors is [{ rgb, weight }]. Each color's miss counts up to CAP, so one color no
    * paint can reach doesn't decide the whole palette.
+   *
+   * A color at the paints' limit (limitOf) counts as mixed only if the blend its recipe's rule picks
+   * (missesOf) is within NEAR; the score and match keep the nearest blend.
    */
   const CAP = 30;
   const PAIR_PARTS = 10;
@@ -674,7 +689,7 @@
     });
     const n = sumOf(parts);
     for (let i = 0; i < SIZE; i++) num[i] /= n;
-    return { num, den: den / n };
+    return { num, den: den / n, n: ids.length };
   }
 
   function lightOf(b, white, w) {
@@ -693,8 +708,8 @@
     return xyzToLab(x, y, z);
   }
 
-  // The miss for one blend and one color, after adding white until the values meet
-  function missWith(b, white, t) {
+  // One blend's color after adding white until its value meets the color's
+  function labFor(b, white, t) {
     let w = 0;
     if (white && lightOf(b, white, 0) < t.lab[0]) {
       let lo = Math.log(0.01), hi = Math.log(WHITE_MAX);
@@ -707,8 +722,10 @@
       }
       w = Math.exp((lo + hi) / 2);
     }
-    return Math.min(CAP, deltaE(labWith(b, white, w), t.lab));
+    return labWith(b, white, w);
   }
+
+  const missWith = (b, white, t) => Math.min(CAP, deltaE(labFor(b, white, t), t.lab));
 
   // Every blend that uses paint `id`, alone or with one of `others`, in tenths
   function blendsWith(paints, id, others) {
@@ -719,33 +736,54 @@
     return out;
   }
 
+  /*
+   * White alone and every blend of these paints, against each color: miss[k] is the least ΔE (up
+   * to CAP). A color at the paints' limit (limitOf) takes the blend its recipe would, the least ΔE
+   * plus PER_VALUE per L* short, and reached counts it only if that blend is within NEAR too.
+   */
+  function missesOf(paints, targets) {
+    const white = paints.find((p) => p.white) || null;
+    const ids = paints.map((p, i) => i).filter((i) => !paints[i].white);
+    const reach = reachOf(paints);
+    const lims = targets.map((t) => limitOf(t.lab[0], reach));
+    const miss = targets.map(() => CAP);
+    const cost = targets.map(() => Infinity), picked = targets.map(() => Infinity);
+    const take = (lab, k, np) => {
+      const d = deltaE(lab, targets[k].lab);
+      if (d < miss[k]) miss[k] = Math.min(CAP, d);
+      if (!lims[k].edge) return;
+      const c = d + PER_VALUE * lims[k].short(lab[0]) + PER_PAINT * (np - 1);
+      if (c < cost[k]) { cost[k] = c; picked[k] = d; }
+    };
+    if (white) targets.forEach((t, k) => take(white.lab, k, 1));
+    ids.forEach((id, n) => blendsWith(paints, id, ids.slice(n + 1)).forEach((b) => {
+      targets.forEach((t, k) => take(labFor(b, white, t), k, b.n + (white && lightOf(b, white, 0) < t.lab[0] ? 1 : 0)));
+    }));
+    const reached = targets.filter((t, k) => (lims[k].edge ? picked[k] : miss[k]) < NEAR).length;
+    return { miss, reached };
+  }
+
   const scoreOf = (targets, miss) => sumOf(targets.map((t, k) => t.weight * miss[k]));
   const matchOf = (dE) => Math.max(0, 100 - 2.5 * dE);
 
-  function summary(targets, miss) {
+  function summary(targets, miss, reached) {
     return {
       dE: Array.from(miss),
       score: scoreOf(targets, miss),
       match: sumOf(targets.map((t, k) => t.weight * matchOf(miss[k]))),
-      reached: miss.filter((d) => d < NEAR).length,
+      reached,
     };
   }
 
   /*
    * How well these paints mix the colors: { dE per color, score (weighted miss), match (0-100,
-   * as the painting check scores a shape), reached (colors within NEAR) }
+   * as the painting check scores a shape), reached (colors within NEAR, a limit's as its recipe
+   * picks) }
    */
   function coverage(paints, colors) {
     const targets = prepTargets(colors);
-    const white = paints.find((p) => p.white) || null;
-    const ids = paints.map((p, i) => i).filter((i) => !paints[i].white);
-    const miss = targets.map((t) => (white ? Math.min(CAP, deltaE(white.lab, t.lab)) : CAP));
-    ids.forEach((id, n) => {
-      blendsWith(paints, id, ids.slice(n + 1)).forEach((b) => {
-        targets.forEach((t, k) => { miss[k] = Math.min(miss[k], missWith(b, white, t)); });
-      });
-    });
-    return summary(targets, miss);
+    const m = missesOf(paints, targets);
+    return summary(targets, m.miss, m.reached);
   }
 
   /*
@@ -797,7 +835,8 @@
           startRound();
           continue;
         }
-        task.result = Object.assign({ picks }, summary(targets, miss));
+        // the count follows the picked palette's recipes at the paints' limits, as coverage()'s does
+        task.result = Object.assign({ picks }, summary(targets, miss, missesOf(picks.map((i) => pool[i]), targets).reached));
         task.progress = 1;
         return true;
       }

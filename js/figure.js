@@ -70,10 +70,14 @@
     if (failed || poses) return;
     failed = true;
     frame.removeAttribute('src');
-    $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library from the internet. Check the connection, then come back to this tab or reload the page.';
+    $('libNote').textContent = 'The poses could not be drawn here. Pose and light needs 3D drawing (WebGL), which this browser may have turned off, and its 3D library, which may not have loaded. Try another browser, or reload the page and come back to this tab.';
     showSetup();
   }
-  const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, location.origin); };
+  // the frames' messages go to this page's own origin; where the page has none (opened from disk, or inside
+  // another site's sandboxed frame, where the origin reads 'null') they go to any, as the receivers check the
+  // sender window either way
+  const FRAME_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
+  const tellFrame = (msg) => { if (frame.contentWindow) frame.contentWindow.postMessage(msg, FRAME_ORIGIN); };
   const isPicture = (u) => typeof u === 'string' && /^data:image\/(jpeg|png);base64,/.test(u);
   // The page CSP allows blob: images, not data:, so frame pictures are re-wrapped as Blob URLs on
   // arrival (kept for the visit; the data strings themselves are dropped).
@@ -85,13 +89,16 @@
     if (d.type === 'pose-and-light:ready') tellFrame({ type: 'pose-and-light:list' });
     else if (d.type === 'pose-and-light:failed') noPictures();
     else if (d.type === 'pose-and-light:list' && Array.isArray(d.poses)) {
-      poses = d.poses.filter((q) => q && typeof q.id === 'string' && typeof q.name === 'string').map((q) => ({ id: q.id, name: q.name, group: String(q.group || 'standing') }));
+      const ids = new Set(); // one tile per pose id, whatever the list sent
+      poses = d.poses.filter((q) => q && typeof q.id === 'string' && typeof q.name === 'string' && !ids.has(q.id) && ids.add(q.id)).map((q) => ({ id: q.id, name: q.name, group: String(q.group || 'standing') }));
       groups = (Array.isArray(d.groups) ? d.groups : []).filter((g) => Array.isArray(g) && typeof g[0] === 'string' && typeof g[1] === 'string');
       failed = false;
       buildLibrary();
     } else if (d.type === 'pose-and-light:thumb' && typeof d.id === 'string' && isPicture(d.url)) {
       const thumbUrl = asBlobUrl(d.url);
       if (!thumbUrl) return;
+      const old = thumbs.get(d.id);
+      if (old && old !== thumbUrl) URL.revokeObjectURL(old); // the list comes again after every class: the picture before goes
       thumbs.set(d.id, thumbUrl);
       panel.querySelectorAll(`[data-pose-id="${CSS.escape(d.id)}"] img`).forEach((img) => { img.src = thumbUrl; img.closest('button').classList.add('has-img'); });
     } else if (d.type === 'pose-and-light:shot' && pending.has(d.req)) {
@@ -127,9 +134,13 @@
   let last = null;           // the class before, for the review
   const out = new Set(Array.isArray(kept.out) ? kept.out.filter((x) => typeof x === 'string').slice(0, 200) : []);
   if (kept.mode === 'timed') $('timed').checked = true;
-  if (TIMES[kept.secs]) $('t' + kept.secs).checked = true;
+  // (an own time only: a saved 'constructor' would pass a plain lookup and name no radio)
+  if (Object.prototype.hasOwnProperty.call(TIMES, kept.secs) && $('t' + kept.secs)) $('t' + kept.secs).checked = true;
   const modeNow = () => ($('timed').checked ? 'timed' : 'relaxed');
   const secsNow = () => { const v = +((panel.querySelector('input[name="figTime"]:checked') || {}).value); return TIMES[v] ? v : 30; };
+  // what the page shows after loading; the settings are written back only once they differ from it, so a
+  // visit that changes nothing (or a page reloaded after Forget my work on this device) stores nothing
+  let lastSaved = JSON.stringify({ mode: modeNow(), secs: secsNow(), out: [...out] });
   const GROUPS = [['standing', 'Standing'], ['moving', 'Moving and sport'], ['low', 'Low to the floor'], ['dance', 'Dance'], ['mine', 'Your poses']];
   const groupList = () => (groups.length ? groups : GROUPS).filter(([g]) => poses.some((q) => q.group === g));
   const pool = () => (poses ? poses.filter((q) => !out.has(q.id)).map((q) => q.id) : []);
@@ -181,17 +192,19 @@
     panel.querySelectorAll('.fig-pose').forEach((b) => b.setAttribute('aria-pressed', String(!out.has(b.dataset.poseId))));
     panel.querySelectorAll('.fig-group-btn').forEach((b) => {
       const ids = poses.filter((q) => q.group === b.dataset.group).map((q) => q.id), anyIn = ids.some((id) => !out.has(id));
+      // (the words it shows come first in the name, for voice control: "Take these out: the standing poses")
       b.textContent = anyIn ? 'Take these out' : 'Put these back';
-      b.setAttribute('aria-label', `${anyIn ? 'Take out' : 'Put back'} ${b.dataset.group === 'mine' ? 'your saved poses' : `the ${b.dataset.title.toLowerCase()} poses`}`);
+      b.setAttribute('aria-label', `${b.textContent}: ${b.dataset.group === 'mine' ? 'your saved poses' : `the ${b.dataset.title.toLowerCase()} poses`}`);
     });
     const n = pool().length, all = poses ? poses.length : 0;
-    if (poses) $('mix').textContent = n === all ? `All ${all} poses are in the class, in a random order. Tap a pose, or a group's button, to take it out.` : n ? `${n} of the ${all} poses are in the class, in a random order.` : 'Every pose is out of the class. Tap one to put it back.';
+    if (poses) $('mix').textContent = n === all ? `All ${all} poses are in the class, in a random order. Tap a pose, or a group's button, to take it out.` : n ? n === 1 ? `1 of the ${all} poses is in the class.` : `${n} of the ${all} poses are in the class, in a random order.` : 'Every pose is out of the class. Tap one to put it back.';
     $('plan').textContent = !n ? '' : timed ? `${TIMES[secs]} a pose, until you stop the class` : 'No time limit: tap Done when you finish a pose';
     $('all').hidden = !poses;
     $('all').textContent = n ? 'Take them all out' : 'Put them all back';
     $('start').disabled = !n || failed;
     $('back').hidden = !(last && last.results.some((r) => r.analysis.marked));
-    save({ mode: timed ? 'timed' : 'relaxed', secs, out: [...out] });
+    const now = JSON.stringify({ mode: timed ? 'timed' : 'relaxed', secs, out: [...out] });
+    if (now !== lastSaved) { save(JSON.parse(now)); lastSaved = now; }
   }
   panel.querySelectorAll('input[name="figClass"], input[name="figTime"]').forEach((r) => r.addEventListener('change', showSetup));
   $('all').addEventListener('click', () => {
@@ -214,7 +227,8 @@
   }
   function startClass(how) {
     const ids = how.pool.filter((id) => byId(id));
-    if (!ids.length) return;
+    // a class whose poses have since left the pose library (deleted there) cannot start again
+    if (!ids.length) { Studio.toast('None of that class\'s poses is in the pose library any more. Start a new class.', 5000); return; }
     click();
     cls = { mode: how.mode, secs: how.secs, pool: ids, deck: [], prev: null, next: null, n: 0, id: null, results: [], used: 0, from: 0, running: false, held: false, over: false, shot: null, since: 0, fails: 0 };
     hold(false);
@@ -284,7 +298,7 @@
       const left = Math.max(0, cls.secs - used);
       clock.textContent = fmtTime(Math.ceil(left));
       clock.setAttribute('aria-label', 'Time left');
-      // the last stretch shows: the last fifth of a short pose, the last 30 seconds of a long one
+      // the last stretch shows: the last fifth of a short pose (at least 3 s), the last 30 seconds of a long one
       clock.classList.toggle('is-low', !!cls.shot && left <= Math.min(30, Math.max(3, cls.secs * 0.2)));
       if (left <= 0 && cls.running) endPose(true);
     } else {
@@ -325,11 +339,12 @@
     if (timedOut && window.GameSound && GameSound.on()) GameSound.chime();
     showResult(keep(), timedOut);
   }
-  // the drawing of this pose, with its gesture and score, kept for the end of the class (as a JPEG: the
-  // full picture is only held until the card has shown it, and an empty sheet keeps no picture at all)
+  // the drawing of this pose, with its gesture and score, kept for the end of the class (as a JPEG behind a
+  // Blob URL, which the policy allows where a data: picture is refused: the full picture is only held until
+  // the card has shown it, and an empty sheet keeps no picture at all)
   function keep() {
     const pic = studio.composite(), a = analyze(cls.shot, studio.ink());
-    const r = { n: cls.n, id: cls.id, name: (byId(cls.id) || { name: 'Pose' }).name, shot: cls.shot, pic, image: a.marked ? pic.toDataURL('image/jpeg', 0.88) : null, w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) };
+    const r = { n: cls.n, id: cls.id, name: (byId(cls.id) || { name: 'Pose' }).name, shot: cls.shot, pic, image: a.marked ? asBlobUrl(pic.toDataURL('image/jpeg', 0.88)) : null, w: pic.width, h: pic.height, analysis: a, secs: Math.round(usedMs() / 1000) };
     cls.results.push(r);
     return r;
   }
@@ -355,6 +370,7 @@
     if (poses) tellFrame({ type: 'pose-and-light:list' });
     // a class with nothing drawn in it goes straight back to the setup (the drawings before stay)
     if (!c.results.some((r) => r.analysis.marked)) { show('setup'); showSetup(); $('start').focus(); return; }
+    if (last) last.results.forEach((r) => { if (r.image) URL.revokeObjectURL(r.image); r.image = null; r.img = null; }); // the class before goes, pictures and all
     last = c;
     showReview(c);
     show('review');
@@ -904,8 +920,12 @@
     cancelAnimationFrame(countUp);
     if (reduceMotion.matches) $('pct').textContent = pct;
     else {
-      const t0 = performance.now(), ms = 1100;
+      // timed from the first frame: a frame's timestamp can come before a performance.now() read
+      // earlier in the same frame, which would start the count below zero
+      let t0 = -1;
+      const ms = 1100;
       const step = (t) => {
+        if (t0 < 0) t0 = t;
         const k = Math.min(1, (t - t0) / ms);
         $('pct').textContent = Math.round(pct * (1 - Math.pow(1 - k, 3)));
         if (k < 1) countUp = requestAnimationFrame(step);
@@ -924,6 +944,8 @@
   $('nextPose').addEventListener('click', () => {
     if (!cls || !resultShown || !cardSettled()) return;
     $('nextPose').disabled = true;            // (one pose for one tap)
+    // a hold belonged to the pose that ended: Next pose, pressed here on the tab, starts the next one's clock
+    if (cls.held) hold(false);
     hideResult();
     $('done').focus({ preventScroll: true });
     showPose();
@@ -1002,7 +1024,13 @@
     });
   }));
   $('again').addEventListener('click', () => { if (last) startClass({ mode: last.mode, secs: last.secs, pool: last.pool }); });
-  $('new').addEventListener('click', () => { show('setup'); showSetup(); window.scrollTo(0, 0); });
+  // the setup opens with the focus on its first choice, as Paint by numbers' and Value battle's setups do (the button
+  // pressed is hidden with the drawings)
+  function focusSetup() {
+    const first = panel.querySelector('input[name="figClass"]:checked');
+    if (first) first.focus({ preventScroll: true });
+  }
+  $('new').addEventListener('click', () => { show('setup'); showSetup(); window.scrollTo(0, 0); focusSetup(); });
   // the drawings of the class before stay until another class starts
   $('back').addEventListener('click', () => { show('review'); window.scrollTo(0, 0); $('reviewTitle').focus({ preventScroll: true }); });
 

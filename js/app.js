@@ -2,9 +2,6 @@
 (function () {
   'use strict';
 
-  // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to load
-  document.documentElement.classList.remove('no-js');
-
   // the modules this one needs; without them the page shows the standing note instead of half an app
   if (!window.Study || !window.Mixing || !window.Paints) {
     if (window.StudioGuard) StudioGuard.failed('app.js: processing.js, mixing.js or paints.js did not load', 'all');
@@ -119,6 +116,7 @@
   const state = {
     source: null,      // HTMLImageElement or canvas
     baseName: 'sample-study',
+    sourceTitle: '',   // a dealt portrait's name in words (the key above is its id); a photo is named by its file
     isSample: true,    // the built-in sample is showing
     prep: null,        // Study.prepare() output
     result: null,      // Study.process() output
@@ -159,6 +157,8 @@
   let toastTimer = 0;
   // ms: how long it stays; a problem the visitor has to read gets longer than a passing confirmation
   function toast(msg, ms = 1800) {
+    // the guard's toast shares its hide timer with the guard's own notes (a reset offer keeps its 20 s)
+    if (window.StudioGuard && StudioGuard.toast) { StudioGuard.toast(msg, ms); return; }
     els.toast.textContent = msg;
     els.toast.classList.add('show');
     clearTimeout(toastTimer);
@@ -195,9 +195,9 @@
   })();
 
   let saveImgUrl = '';
-  function savePng(canvas, name) {
+  function savePng(canvas, name, advice = 'Try a smaller Working size.') {
     canvas.toBlob((blob) => {
-      if (!blob) { toast('The PNG could not be made. Try a smaller Working size.', 5000); return; }
+      if (!blob) { toast(`The PNG could not be made. ${advice}`, 5000); return; }
       downloadBlob(blob, name);
       if (!downloadsMayBeBlocked) return;
       // the same blob is the preview to save by hand, so the page needs no data: URLs
@@ -267,14 +267,20 @@
   // ---- Processing ---------------------------------------------------------
 
   let runTimer = 0;
+  // "Updating…" stays up while any of the work is still owed: a photo being prepared, a study rerun or a
+  // painting's score; whichever finishes first does not take it down over a result about to change
+  const owed = { prep: false, run: false, check: false };
+  function settleBusy() { els.busy.hidden = !(owed.prep || owed.run || owed.check); }
   function runSoon(delay) {
+    owed.run = true;
     els.busy.hidden = false;
     clearTimeout(runTimer);
     runTimer = setTimeout(run, delay == null ? 90 : delay);
   }
 
   function run() {
-    if (!state.prep) return;
+    owed.run = false;
+    if (!state.prep) { settleBusy(); return; }
     const r = Study.process(state.prep, settings());
     state.result = r;
     paint(els.canvases.value, r.valueImage, r.w, r.h);
@@ -288,7 +294,7 @@
       : `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
     state.art.dirty = true;
     if (checking()) runCheck();
-    els.busy.hidden = true;
+    settleBusy();
     window.dispatchEvent(new CustomEvent('studio:result'));
   }
 
@@ -382,19 +388,29 @@
   // phone, so for a photo the visitor just loaded the "Updating…" indicator is painted first and the
   // work runs two frames later; a newer photo arriving in between wins. Start-up prepares at once,
   // so the sample study and the hash routes find the data ready.
-  let prepareJob = 0;
+  let prepareJob = 0, prepareReset = false;
   function prepareAndRun(resetSplit, immediate) {
     const job = ++prepareJob;
+    // a photo's auto split is owed until a job runs: a setting changed in the window takes it over
+    prepareReset = prepareReset || !!resetSplit;
     const work = () => {
       if (job !== prepareJob) return;
-      state.prep = Study.prepare(state.source, +els.detail.value);
-      const { w, h, rgba } = state.prep;
-      paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
-      state.pixels.orig = rgba;
-      if (resetSplit) autoSplit();
-      runSoon(0);
+      owed.prep = false;
+      const reset = prepareReset;
+      prepareReset = false;
+      try {
+        state.prep = Study.prepare(state.source, +els.detail.value);
+        const { w, h, rgba } = state.prep;
+        paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
+        state.pixels.orig = rgba;
+        if (reset) autoSplit();
+        runSoon(0);
+      } finally {
+        settleBusy(); // a throw above is still reported, but "Updating…" does not stay up for good (work owed by runSoon keeps it)
+      }
     };
     if (immediate) { work(); return; }
+    owed.prep = true;
     els.busy.hidden = false;
     clearTimeout(runTimer);
     requestAnimationFrame(() => requestAnimationFrame(work));
@@ -457,12 +473,24 @@
 
   // ---- Loading photos -----------------------------------------------------
 
-  function readImage(file, done) {
+  // The last file chosen wins: a read still under way when another file is chosen for the same
+  // place (two files in the same instant) shows nothing and says nothing when it finishes.
+  const readJobs = { photo: 0, art: 0 };
+  // extra: a sentence about how the file arrived (the others dropped with it), said before any refusal
+  // and with the photo's own note on success
+  function readImage(file, done, slot = 'photo', extra = '') {
     if (!file) return;
-    if (file.type && !file.type.startsWith('image/')) {
-      toast('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
+    const refuse = (msg, ms) => toast([extra, msg].filter(Boolean).join(' '), ms);
+    // the type is the browser's guess from the name: a file with none, or with the catch-all
+    // application/octet-stream, is tried by its content
+    const typed = file.type && file.type !== 'application/octet-stream';
+    if (typed && !file.type.startsWith('image/')) {
+      refuse('That file is not an image. Choose a JPG, PNG or WebP photo.', 5000);
       return;
     }
+    // an empty file, or a folder (which a browser hands over as a file of no size), is said to be one
+    if (!file.size) { refuse('That is an empty file or a folder. Choose a JPG, PNG or WebP photo.', 5000); return; }
+    const job = ++readJobs[slot];
     const url = URL.createObjectURL(file);
     const img = new Image();
     let settled = false;
@@ -470,10 +498,21 @@
       if (settled) return;
       settled = true;
       URL.revokeObjectURL(url);
+      if (job !== readJobs[slot]) return; // another file was chosen while this one was read
       const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-      // an image with no size (an SVG without width and height) would become a blank 1 x 1 study
+      // an image with no size at all would become a blank 1 x 1 study (an SVG without width, height or
+      // viewBox, where the browser gives it none: Chromium gives such an SVG 300 x 150, and it loads as
+      // that), and one under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
-        toast('That image has no usable size. Use a JPG, PNG or WebP photo.', 5000);
+        refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
+        return;
+      }
+      // a picture the browser draws but will not let the page read back (an SVG with a foreignObject) would
+      // throw in every study: it is refused here, for every way in, and the photo on show stays as it is.
+      // Only an SVG can do that (a photo from the visitor's own files never does), so a JPG or PNG is not
+      // drawn an extra time here, before the Updating line can show
+      if ((!typed || /svg/i.test(file.type)) && !Study.readable(img)) {
+        refuse('That picture cannot be read here (an SVG that holds text or HTML laid out by the browser is one). Save it as a PNG or JPG first.', 6000);
         return;
       }
       const r = shrinkIfHuge(img, w, h);
@@ -483,7 +522,8 @@
       if (settled) return;
       settled = true;
       URL.revokeObjectURL(url);
-      toast('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
+      if (job !== readJobs[slot]) return;
+      refuse('This image could not be opened. HEIC photos from a phone open in Safari; elsewhere save them as JPG or PNG first.', 6000);
     };
     img.onload = loaded;
     img.onerror = failed;
@@ -517,19 +557,35 @@
     return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
-  function loadFile(file) {
-    readImage(file, (img, note) => useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', note));
+  // the tabs that show the loaded photo (the Studio and the Loomis head follow it; the game's setup takes it)
+  const SHOWS_PHOTO = ['study', 'paint', 'loomis', 'game'];
+  function loadFile(file, extra) {
+    readImage(file, (img, note) => {
+      // a photo loaded where it is not shown: from the guide or Pose and light, Study the photo opens with it;
+      // in the middle of a Figure study class or a battle the tab stays, and the note says where the photo went
+      let where = '';
+      if (!SHOWS_PHOTO.includes(state.tab)) {
+        if (state.tab === 'figure' || state.tab === 'battle') where = 'The new photo is on Study the photo.';
+        else switchTab('study');
+      }
+      useSource(img, file.name || 'Pasted image', (file.name || 'portrait').replace(/\.[^.]+$/, '') || 'portrait', [extra, note, where].filter(Boolean).join(' '));
+    }, 'photo', extra);
   }
 
   // Takes an image (or canvas) as the reference, keeping an example painting out of the way
   // note: a sentence about the photo itself (it was reduced), said together with the marks line below
-  function useSource(img, name, baseName, note) {
+  // title: the reference's name in words, for the game ("Painting from ..."); name stays the label under the photo
+  function useSource(img, name, baseName, note, title) {
     state.source = img;
     state.baseName = baseName || 'portrait';
+    state.sourceTitle = title || '';
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
+    window.dispatchEvent(new CustomEvent('studio:source')); // a new reference photo (its studies follow with studio:result)
+    els.loupe.hidden = true; state.hover = null; // the magnifier showed the old photo's pixels; the next move shows the new one's
     const marks = [
       state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
     ].filter(Boolean);
+    cancelDrag(); state.drawing = null; // a line, measure or plumb point begun on the photo before does not land on this one
     clearMarks();
     const said = [];
     if (note) said.push(note);
@@ -542,16 +598,17 @@
     prepareAndRun(true);
   }
 
-  function loadArtFile(file) {
+  function loadArtFile(file, extra) {
     readImage(file, (img, note) => {
       setArt(img, file.name || 'Pasted painting', false);
       runSoon(0);
-      if (note) toast(note, 5000);
-    });
+      const said = [extra, note].filter(Boolean).join(' ');
+      if (said) toast(said, 5000);
+    }, 'art', extra);
   }
 
   // Loads whichever image the open tab is about
-  const loadForTab = (file) => (checking() ? loadArtFile(file) : loadFile(file));
+  const loadForTab = (file, extra) => (checking() ? loadArtFile(file, extra) : loadFile(file, extra));
 
   function setSourceLabel(name, w, h, isSample) {
     state.isSample = isSample;
@@ -567,10 +624,23 @@
     );
   }
 
+  // the Load a photo buttons beside the header's (the Loomis strip, the Studio's reference sheet, the game's
+  // setup) open the same file input: buttons, so the keyboard reaches them, where a label for it would not
+  document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-open-file]'); if (b) els.file.click(); });
   els.file.addEventListener('change', () => {
     loadFile(els.file.files[0]);
     els.file.value = '';
   });
+
+  // What a drop or a paste with no file in it is told: its text or link is not a photo (nothing is said for other
+  // data). A link, or a page's html holding a picture, is a picture still on the web; other html is copied words.
+  // A file that is not a picture is refused by readImage, the same way for both.
+  function notPicture(data, pasted) {
+    const types = Array.from((data && data.types) || []);
+    const html = types.includes('text/html') ? data.getData('text/html') : '';
+    if (types.includes('text/uri-list') || /<img\b/i.test(html)) toast(`Save the picture to your device first, then ${pasted ? 'load or drop' : 'drop'} the file here.`, 5000);
+    else if (html || types.includes('text/plain')) toast('That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one.', 5000);
+  }
 
   let dragDepth = 0;
   const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
@@ -593,16 +663,24 @@
     e.preventDefault();
     dragDepth = 0;
     els.dropHint.hidden = true;
-    if (!hasFiles(e)) {
-      const types = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
-      if (types.includes('text/uri-list') || types.includes('text/html')) toast('Save the picture to your device first, then drop the file here.', 5000);
-      return;
-    }
-    loadForTab(e.dataTransfer.files[0]);
+    if (!hasFiles(e)) { notPicture(e.dataTransfer); return; }
+    // one photo at a time: of several files the first that looks like a picture is taken (a text file
+    // dropped beside a photo does not win), and the drop says so, whether or not that one loads
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) { toast('That drop held no file. Save the picture to your device first, then drop the file here.', 5000); return; }
+    const pick = files.find((f) => !f.type || f.type === 'application/octet-stream' || f.type.startsWith('image/')) || files[0];
+    loadForTab(pick, files.length > 1 ? `Of the ${files.length} files dropped, only ${pick.name || 'the first'} was taken.` : '');
   });
   window.addEventListener('paste', (e) => {
-    const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith('image/'));
-    if (item) loadForTab(item.getAsFile());
+    // pasting into a field (the canvas length) is for the field, even with a picture on the clipboard too
+    if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+    const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+    const files = items.filter((i) => i.kind === 'file');
+    // a picture first; a file that is not one (a PDF, a text file) goes to readImage, which refuses it as a drop does
+    const item = items.find((i) => i.type.startsWith('image/')) || files[0];
+    if (!item) { notPicture(e.clipboardData, true); return; }
+    const file = item.getAsFile();
+    loadForTab(file, files.length > 1 ? `Of the ${files.length} files pasted, only ${(file && file.name) || 'the first'} was taken.` : '');
   });
 
   // ---- Control events -----------------------------------------------------
@@ -937,6 +1015,8 @@
         } else if (len >= 4) {
           state.lines.push({ x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, color: d.color });
           record({ kind: 'line', op: 'add' });
+        } else {
+          toast('Drag from one point to another to draw a line');
         }
         drawAllOverlays();
         // the drag is over, and with it the loupe's length and tilt
@@ -968,7 +1048,8 @@
       }
       if (state.picking) {
         if (canvas === els.canvases.art && s && moved < 10) pickNeutral(s);
-        else if (moved < 10) toast('Click a white or gray spot on Your painting');
+        else if (canvas === els.canvases.art) toast('Click one white or gray spot, without dragging');
+        else toast('Click a white or gray spot on Your painting');
         return;
       }
       // the accuracy map's tints are not colors worth keeping; a drag cancelled with Esc ends here too
@@ -1114,9 +1195,11 @@
 
   els.palSave.addEventListener('click', () => {
     const list = state.palette;
-    const cols = Math.min(6, list.length);
+    // a long list goes in more, smaller columns: a canvas taller than the browser allows makes no picture
+    const k = list.length > 200 ? 0.5 : 1;
+    const cols = Math.max(Math.min(6, list.length), Math.ceil(list.length / 60));
     const rows = Math.ceil(list.length / cols);
-    const sw = 180, lab = 54, pad = 24, gap = 16;
+    const sw = 180 * k, lab = 54 * k, pad = 24 * k, gap = 16 * k;
     const c = document.createElement('canvas');
     c.width = pad * 2 + cols * sw + (cols - 1) * gap;
     c.height = pad * 2 + rows * (sw + lab) + (rows - 1) * gap;
@@ -1131,13 +1214,13 @@
       g.strokeStyle = 'rgba(0,0,0,0.15)';
       g.strokeRect(x + 0.5, y + 0.5, sw - 1, sw - 1);
       g.fillStyle = '#1e2b22';
-      g.font = '600 20px "IBM Plex Mono", monospace';
-      g.fillText(toHex(col), x, y + sw + 26);
+      g.font = `600 ${20 * k}px "IBM Plex Mono", monospace`;
+      g.fillText(toHex(col), x, y + sw + 26 * k);
       g.fillStyle = '#5c6157';
-      g.font = '16px "IBM Plex Mono", monospace';
-      g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47);
+      g.font = `${16 * k}px "IBM Plex Mono", monospace`;
+      g.fillText('Value ' + valueLabel(Study.lightnessOf(col.r, col.g, col.b)), x, y + sw + 47 * k);
     });
-    savePng(c, `${state.baseName}-palette.png`);
+    savePng(c, `${state.baseName}-palette.png`, 'Save fewer colors at a time.');
   });
 
   let clearArmed = 0;
@@ -1150,9 +1233,13 @@
     clearTimeout(clearArmed);
     clearArmed = 0;
     els.palClear.textContent = 'Clear';
+    const focused = document.activeElement === els.palClear;
     state.palette = [];
     savePalette();
     renderPalette();
+    // Clear is disabled once the list is empty, so the focus that was on it goes to the drawer's summary, as the ×
+    // does when the color it removed was the last one
+    if (focused) els.drawers.swatches.querySelector('summary').focus();
     toast('Palette cleared');
   });
 
@@ -1501,7 +1588,7 @@
   function loadCanvasSize() {
     try {
       const saved = JSON.parse(localStorage.getItem(CANVAS_KEY) || 'null');
-      if (saved && +saved.value > 0) els.canvasSize.value = +saved.value;
+      if (saved && +saved.value > 0 && +saved.value < 10000) els.canvasSize.value = +saved.value; // the range the labels use
       if (saved && (saved.sys === 'cm' || saved.sys === 'in')) els.canvasSys.value = saved.sys;
     } catch (err) {
       /* nothing saved, or storage unavailable: start empty */
@@ -2106,6 +2193,11 @@
   const canvasSizeChanged = () => { saveCanvasSize(); updateToolHint(); drawAllOverlays(); };
   els.canvasSize.addEventListener('input', canvasSizeChanged);
   els.canvasSys.addEventListener('change', canvasSizeChanged);
+  // a length the labels cannot use (0, below 0, 10 000 or more) is said when the field is left; the
+  // browser itself empties letters and a number beyond what it holds, and empty means not set
+  els.canvasSize.addEventListener('change', () => {
+    if (els.canvasSize.value !== '' && !canvasSize()) toast('Unit on my canvas needs a length over 0 and under 10 000: the labels leave it out until then.', 5000);
+  });
 
   window.addEventListener('keydown', (e) => {
     // the save dialog is modal: Esc only closes it, and nothing behind it should change
@@ -2123,7 +2215,7 @@
     // plumb point is held, since undoing could renumber the points under it.
     // (the Studio and Figure study undo their own strokes)
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z' &&
-      state.history.length && !typing && !state.dragging && state.tab !== 'paint' && state.tab !== 'figure') {
+      state.history.length && !typing && !state.dragging && state.tab === 'study') { // only where the marks are in sight
       e.preventDefault();
       toast(undo());
     }
@@ -2144,15 +2236,16 @@
   }
   function switchTab(name, focus) {
     if (!els.tabPanels[name]) return;
+    const item = document.querySelector(`.tab-item[data-tab="${name}"], .tab[data-tab="${name}"]`);
+    if (item && item.hidden) { if (name !== 'study') switchTab('study', focus); return; } // a module the guard took off the menu stays off: its panel would be dead
     state.tab = name;
     if (name !== 'study') setPicking(false); // picking a neutral spot only works on Your painting
     Object.entries(els.tabPanels).forEach(([key, panel]) => { panel.hidden = key !== name; });
     const group = GROUP_OF[name];
-    Object.entries(groupBtns).forEach(([key, btn]) => btn.setAttribute('aria-selected', String(key === group)));
+    Object.entries(groupBtns).forEach(([key, btn]) => btn.setAttribute('aria-current', String(key === group)));
     if (groupSubs[group]) groupSubs[group].textContent = TAB_NAMES[name];
     document.querySelectorAll('.tab-item').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.tab === name)));
     closeMenus();
-    if (focus) groupBtns[group].focus();
     if (checking() && state.art.dirty) runCheck();
     // the game, the Studio, the Loomis head and the guide have their own layouts: the drawers and tool bar step aside
     document.body.classList.toggle('tab-game', name === 'game');
@@ -2164,19 +2257,28 @@
     if (name !== 'study') els.loupe.hidden = true;
     drawAllOverlays();
     window.dispatchEvent(new CustomEvent('studio:tab', { detail: name }));
+    // the focus comes last: the tab that was left (the Studio, the Loomis head) takes its classes off in that event,
+    // and on a phone they hide the section buttons, so the Studio's ← could not focus its section before
+    if (focus) groupBtns[group].focus();
   }
   document.querySelectorAll('.tab-item').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab, true)));
 
   // Pose and light is its own page (pose.html), shown in a frame that loads the first time the tab
   // opens. The page says how tall it is, and the frame grows to fit, so it scrolls with the app.
   const poseFrame = $('poseFrame');
+  // the frames' messages go to this page's own origin; where the page has none (opened from disk, or inside
+  // another site's sandboxed frame, where the origin reads 'null') they go to any, as the receivers check the
+  // sender window either way
+  const FRAME_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
   function openPose() {
+    // an old browser has the standing note and the guide instead of the tabs: the Pose page is not loaded
+    if (document.documentElement.classList.contains('old-browser')) return;
     if (!poseFrame.getAttribute('src')) poseFrame.setAttribute('src', poseFrame.dataset.src);
   }
   // it follows the app's Simple or Advanced switch: told when it loads and whenever the switch changes
   function tellPoseMode() {
     if (!poseFrame.getAttribute('src') || !poseFrame.contentWindow) return;
-    poseFrame.contentWindow.postMessage({ type: 'pose-and-light:mode', mode: document.body.classList.contains('mode-simple') ? 'simple' : 'advanced' }, location.origin);
+    poseFrame.contentWindow.postMessage({ type: 'pose-and-light:mode', mode: document.body.classList.contains('mode-simple') ? 'simple' : 'advanced' }, FRAME_ORIGIN);
   }
   poseFrame.addEventListener('load', tellPoseMode);
   window.addEventListener('studio:mode', tellPoseMode);
@@ -2190,19 +2292,28 @@
   $('tabFigureBtn').addEventListener('click', () => switchTab('figure'));
   document.querySelectorAll('.tab[aria-haspopup]').forEach((btn) => {
     const menu = $(btn.getAttribute('aria-controls'));
+    // Tab (or anything) taking the focus out of the group closes its menu, as Esc and a tap elsewhere do
+    const group = btn.closest('.tab-group');
+    if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
+    // the items the guard has not taken off the menu (a hidden one cannot take the focus)
+    const items = () => [...menu.querySelectorAll('.tab-item')].filter((b) => !b.hidden);
+    const focusIn = () => { const on = items().find((b) => b.getAttribute('aria-checked') === 'true') || items()[0]; if (on) on.focus(); };
     btn.addEventListener('click', () => {
       const open = menu.hidden;
       closeMenus();
-      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); const on = menu.querySelector('.tab-item[aria-checked="true"]') || menu.querySelector('.tab-item'); if (on) on.focus(); }
+      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); focusIn(); }
     });
-    btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); btn.click(); } });
+    // ArrowDown opens the menu, or moves into it when it is already open (it never closes it)
+    btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); if (menu.hidden) btn.click(); else focusIn(); } });
     menu.addEventListener('keydown', (e) => {
-      const items = [...menu.querySelectorAll('.tab-item')], i = items.indexOf(document.activeElement);
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+      const list = items(), i = list.indexOf(document.activeElement);
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && list.length) { e.preventDefault(); list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1) + (i < 0 && e.key === 'ArrowUp' ? 1 : 0)) % list.length].focus(); }
       if (e.key === 'Escape') { closeMenus(); btn.focus(); }
     });
   });
   document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.tab-group')) closeMenus(); });
+  // a click into the Pose and light frame never reaches this document, but it takes the focus from this window
+  window.addEventListener('blur', closeMenus);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 
   // ---- Check my painting --------------------------------------------------
@@ -2213,6 +2324,8 @@
     setPicking(false);
     updateColorFix();
     els.artSource.textContent = '';
+    // the badge says what the drawer holds before it is opened (scoring waits for that); a score replaces it
+    els.drawerState.check.textContent = img ? 'Not scored yet' : 'No painting yet';
     if (!img) {
       els.artSource.textContent = 'Load a photo of your finished painting to score it against the reference.';
       return;
@@ -2310,9 +2423,10 @@
 
   let checkTimer = 0;
   function checkSoon() {
+    owed.check = true;
     els.busy.hidden = false;
     clearTimeout(checkTimer);
-    checkTimer = setTimeout(() => { runCheck(); els.busy.hidden = true; }, 120);
+    checkTimer = setTimeout(() => { owed.check = false; runCheck(); settleBusy(); }, 120);
   }
 
   function runCheck() {
@@ -2322,7 +2436,7 @@
     els.checkBody.hidden = !ready;
     els.checkPanels.hidden = !ready;
     els.alignPanel.hidden = !ready;
-    if (!ready) { els.drawerState.check.textContent = state.art.source ? '' : 'No painting yet'; return; }
+    if (!ready) { els.drawerState.check.textContent = state.art.source ? 'Not scored yet' : 'No painting yet'; return; }
 
     const a = align();
     const key = [state.prep.w, state.prep.h, els.artFit.value, a.x, a.y, a.scale, a.rot, state.art.gains.join(',')].join(':');
@@ -2362,19 +2476,28 @@
     const maxFont = Math.round(long / 26);
     const rank = new Set(cmp.top.map((r) => r.id));
     cmp.labelBoxes = [];
-    const pill = (reg, text, font, look) => {
-      const b = drawPill(g, text, reg.lx + 0.5, reg.ly + 0.5, font, look, W, H);
-      cmp.labelBoxes.push({ x: b.x / W, y: b.y / H, w: b.w / W, h: b.h / H });
+    // the boxes are planned before any is drawn, so no label lies on another: the numbered ones first (each
+    // shrinks, down to the smallest size, until it is clear of those before it), then the percentages, the
+    // biggest shapes first, each shrunk until it is clear of every label placed or left out
+    const placed = [];
+    const clear = (b) => !placed.some((p) => b.x < p.x + p.w + 1 && p.x < b.x + b.w + 1 && b.y < p.y + p.h + 1 && p.y < b.y + b.h + 1);
+    const plan = (reg, text, font, look, must) => {
+      for (let f = font; f >= minFont; f--) {
+        const b = pillBox(pillSize(g, text, f), reg.lx + 0.5, reg.ly + 0.5, W, H);
+        if (clear(b)) { placed.push(b); return { reg, text, font: f, look }; }
+      }
+      if (!must) return null;
+      placed.push(pillBox(pillSize(g, text, minFont), reg.lx + 0.5, reg.ly + 0.5, W, H));
+      return { reg, text, font: minFont, look };
     };
-
-    cmp.regions.forEach((reg) => {
-      if (!reg.ref || rank.has(reg.id)) return;
-      const font = Math.min(maxFont, Math.floor(reg.room / 1.5));
-      if (font >= minFont) pill(reg, reg.pct + '%', font, 'dark');
-    });
-    cmp.top.forEach((reg, i) => {
-      const font = Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9)));
-      pill(reg, `${i + 1} · ${reg.pct}%`, font, 'light');
+    const numbered = cmp.top.map((reg, i) => plan(reg, `${i + 1} · ${reg.pct}%`, Math.max(minFont, Math.min(maxFont, Math.floor(reg.room / 1.9))), 'light', true));
+    const rest = cmp.regions.filter((reg) => reg.ref && !rank.has(reg.id) && Math.min(maxFont, Math.floor(reg.room / 1.5)) >= minFont)
+      .sort((a, b) => b.room - a.room)
+      .map((reg) => plan(reg, reg.pct + '%', Math.min(maxFont, Math.floor(reg.room / 1.5)), 'dark', false))
+      .filter(Boolean);
+    [...rest, ...numbered].forEach((l) => {
+      const b = drawPill(g, l.text, l.reg.lx + 0.5, l.reg.ly + 0.5, l.font, l.look, W, H);
+      cmp.labelBoxes.push({ x: b.x / W, y: b.y / H, w: b.w / W, h: b.h / H });
     });
   }
 
@@ -2495,28 +2618,42 @@
   function pickNeutral(s) {
     const data = state.art.prep && state.art.prep.photo;
     if (!data) return;
+    // a moved photo leaves a gray fill where the painting is not: a spot there is not the painting's
+    const mask = state.art.prep.mask;
+    if (mask && !mask[s.y * s.w + s.x]) { toast('That spot is outside your painting, where the photo was moved off. Pick a white or gray area of the painting.', 4000); return; }
     let r = 0, g = 0, b = 0, k = 0;
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const x = s.x + dx, y = s.y + dy;
         if (x < 0 || y < 0 || x >= s.w || y >= s.h) continue;
+        if (mask && !mask[y * s.w + x]) continue; // only the painting's own pixels
         const p = (y * s.w + x) * 4;
         r += data[p]; g += data[p + 1]; b += data[p + 2]; k++;
       }
     }
     const patch = { r: Math.round(r / k), g: Math.round(g / k), b: Math.round(b / k) };
     const gains = Study.neutralGains(patch.r, patch.g, patch.b);
+    const colorful = Study.chromaOf(patch.r, patch.g, patch.b) > NEAR_GRAY;
+    // what is wrong with the spot is said first: a strong color (orange, yellow) is a color, not a dark spot
     if (!gains) {
-      toast('That spot is too dark to judge. Pick a white or light gray area.');
+      toast(colorful ? `${toHex(patch)} is too colorful to be white or gray. Pick paper or a neutral gray area.` : 'That spot is too dark to judge. Pick a white or light gray area.');
       return;
     }
     const neutral = gains.every((v, i) => v >= GAIN_LIMITS[i][0] && v <= GAIN_LIMITS[i][1])
-      && (Study.chromaOf(patch.r, patch.g, patch.b) <= NEAR_GRAY || tintedByLight(gains));
+      && (!colorful || tintedByLight(gains));
     if (!neutral) {
       toast(`${toHex(patch)} is too colorful to be white or gray. Pick paper or a neutral gray area.`);
       return;
     }
     setPicking(false);
+    // a spot that is already neutral has no cast to remove: the photo is shown as taken
+    if (gains.every((v) => Math.abs(v - 1) < 0.02)) {
+      state.art.gains = [1, 1, 1];
+      updateColorFix();
+      toast(`${toHex(patch)} is already neutral: there is no color cast to remove`);
+      checkSoon();
+      return;
+    }
     state.art.gains = gains;
     updateColorFix();
     toast(`Color cast removed: ${toHex(patch)} is now neutral`);
@@ -2539,12 +2676,21 @@
   // or the portrait the Studio dealt, which then becomes the reference here
   els.artFromStudio.addEventListener('click', () => {
     const ps = window.PaintStudio;
-    if (!ps) return;
-    const r = ps.reference();
-    if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
-    setArt(ps.composite(), 'Studio painting', false);
-    els.drawers.check.open = true;
-    runSoon(0);
+    if (!ps) { toast('The Studio did not start, so there is no Studio painting to check. Load a photo of your painting instead.', 5000); return; }
+    // the Studio may still be reading its saved painting back: the press scores it once it is there (and says
+    // so if that takes a moment), never the blank sheet before it
+    const go = () => {
+      const r = ps.reference();
+      if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id, undefined, r.title);
+      setArt(ps.composite(), 'Studio painting', false);
+      els.drawers.check.open = true;
+      runSoon(0);
+    };
+    const ready = ps.ready ? ps.ready() : null;
+    if (!ready || typeof ready.then !== 'function') { go(); return; }
+    let done = false;
+    ready.then(() => { done = true; go(); });
+    setTimeout(() => { if (!done) toast('Reading your Studio painting back…', 2500); }, 150);
   });
   els.artFit.addEventListener('change', () => { state.art.key = ''; if (checking()) runSoon(0); });
 
@@ -2580,9 +2726,15 @@
   // the guide's Try it buttons lead to the part they describe
   document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
     const go = b.dataset.go;
-    switchTab(go === 'check' ? 'study' : go);
-    if (go === 'check') { els.drawers.check.open = true; els.drawers.check.scrollIntoView({ block: 'start' }); }
-    else window.scrollTo(0, 0);
+    // the button pressed is hidden with the guide: the focus goes to the section opened (as a menu item's
+    // does), or to the drawer opened, so the next Tab starts there and not from the top of the page
+    switchTab(go === 'check' ? 'study' : go, true);
+    if (go === 'check') {
+      els.drawers.check.open = true;
+      els.drawers.check.scrollIntoView({ block: 'start' });
+      const summary = els.drawers.check.querySelector('summary');
+      if (summary) summary.focus({ preventScroll: true });
+    } else window.scrollTo(0, 0);
   }));
 
   // ---- Simple and advanced ------------------------------------------------
@@ -2592,13 +2744,26 @@
   function setMode(mode, remember = true) {
     document.body.classList.toggle('mode-simple', mode === 'simple');
     document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    if (mode === 'simple') syncDetail();
     if (remember) { try { localStorage.setItem(MODE_KEY, mode); } catch (err) { /* not remembered */ } }
     window.dispatchEvent(new CustomEvent('studio:mode', { detail: mode }));
     if (state.result) runSoon(0);
   }
   document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
-  // Simple mode's Detail presets set Simplify and Merge together
+  // Simple mode's Detail presets set Simplify and Merge together. Coming back to Simple, the preset shown
+  // is the one in force: the one the sliders match, or, when Advanced left them matching none, the
+  // checked preset is applied, so the header and the study agree.
   const DETAIL = { soft: [6, 6], normal: [3, 4], sharp: [1, 2] };
+  function syncDetail() {
+    const radios = [...document.querySelectorAll('input[name="detailPreset"]')];
+    const match = radios.find((r) => DETAIL[r.value] && DETAIL[r.value][0] === +els.simplify.value && DETAIL[r.value][1] === +els.merge.value);
+    if (match) { match.checked = true; return; }
+    const shown = radios.find((r) => r.checked) || radios.find((r) => r.value === 'normal');
+    if (!shown || !DETAIL[shown.value]) return;
+    shown.checked = true;
+    [els.simplify.value, els.merge.value] = DETAIL[shown.value];
+    updateOutputs();
+  }
   document.querySelectorAll('input[name="detailPreset"]').forEach((r) => r.addEventListener('change', () => {
     const [simplify, merge] = DETAIL[r.value];
     els.simplify.value = simplify; els.merge.value = merge;
@@ -2634,6 +2799,14 @@
     return segs;
   }
 
+  // The name a best score is kept under. The built-in sample keeps 'sample-study' (its scores were saved under it);
+  // a visitor's photo is named by its file, but one whose file is called sample-study is not the sample, so it
+  // gets a name of its own and never shares the sample's scores.
+  function sourceKeyName() {
+    if (state.isSample) return 'sample-study';
+    return state.baseName === 'sample-study' ? 'sample-study/photo' : state.baseName; // a file's name never holds a '/'
+  }
+
   window.Studio = {
     marks,
     tool: () => state.tool,
@@ -2644,7 +2817,10 @@
     prep: () => state.prep,
     savePng,
     openDialog,
-    sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
+    sourceKey: () => state.source && `${sourceKeyName()}:${state.source.width}x${state.source.height}`,
+    sourceTitle: () => state.sourceTitle,
+    sourceBase: () => state.baseName, // a photo's name without its extension (its key's name, unless it is sample-study)
+    isSample: () => state.isSample,
     settings,
     tab: () => state.tab,
     addColor,
@@ -2675,14 +2851,18 @@
     setSourceLabel('Sample study', 600, 750, true);
     setArt(makeExamplePainting(state.source), '', true);
     prepareAndRun(true, true);
-    if (location.hash === '#check') { switchTab('study'); els.drawers.check.open = true; }
-    if (location.hash === '#game') switchTab('game');
-    if (location.hash === '#paint') switchTab('paint');
-    if (location.hash === '#help') switchTab('help');
-    if (location.hash === '#loomis') switchTab('loomis');
-    if (location.hash === '#pose') switchTab('pose');
-    if (location.hash === '#figure') switchTab('figure');
-    if (location.hash === '#battle') switchTab('battle');
+    routeHash();
+  }
+  // the address's #part opens that part: at load, and whenever it changes later (Back and Forward between two
+  // of them, a link followed, one typed); an address with none, met by going Back, is the Study tab
+  const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
+  function routeHash(e) {
+    // a shortcut typed by hand matches however it is written: #Help, #help/ and #loomis?x name their tabs
+    const h = location.hash.toLowerCase().replace(/[/?&].*$/, '');
+    const to = Object.prototype.hasOwnProperty.call(ROUTES, h) ? ROUTES[h] : e && (h === '' || h === '#') ? 'study' : null;
+    if (!to) return;
+    switchTab(to);
+    if (h === '#check') els.drawers.check.open = true;
   }
 
   // Help tab: forget everything this site keeps in the browser. Two taps, so a stray tap does nothing.
@@ -2715,4 +2895,8 @@
   }
 
   start();
+  window.addEventListener('hashchange', routeHash);
+  // guard.js drops the no-js class first; this is the fallback for a page where only that script failed to
+  // load, taken once the app has started, so a page whose other scripts failed too keeps its standing note
+  document.documentElement.classList.remove('no-js');
 })();

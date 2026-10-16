@@ -1,7 +1,8 @@
 // Fails if any copy of the Content Security Policy differs from the others, if the
-// @font-face rules live anywhere but fonts.css, or if a third-party origin creeps
-// back into a served page. Run: node scripts/check-policy.mjs
-import { readFileSync } from 'node:fs';
+// @font-face rules live anywhere but fonts.css, if a third-party origin creeps back
+// into a served page, or if a page or script holds something the policy refuses
+// (an inline style or script, a string turned into markup). Run: node scripts/check-policy.mjs
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
@@ -23,6 +24,7 @@ const copies = {
   '_headers': headerLine('_headers', /Content-Security-Policy:\s*(.+)/),
   '.htaccess': headerLine('.htaccess', /Content-Security-Policy "([^"]+)"/),
   'deploy/nginx.conf': headerLine('deploy/nginx.conf', /Content-Security-Policy "([^"]+)"/),
+  'README.md': headerLine('README.md', /\| `Content-Security-Policy` \| `([^`]+)` \|/),
 };
 
 let failed = false;
@@ -52,6 +54,24 @@ for (const file of ['index.html', 'pose.html', '404.html', 'styles.css', 'pose.c
     console.error(`FAIL: third-party origin referenced in ${file}`);
     failed = true;
   }
+}
+
+for (const file of ['styles.css', 'pose.css', 'fonts.css']) {
+  if (/url\(\s*["']?data:/i.test(read(file))) { console.error(`FAIL: data: URL in ${file} (img-src refuses data: pictures)`); failed = true; }
+}
+
+// What the policy refuses must not be in the pages or scripts: an inline style attribute or script
+// (style-src / script-src 'self'), and a string turned into markup (Trusted Types with no policy).
+for (const file of ['index.html', 'pose.html', '404.html']) {
+  const html = read(file);
+  if (/\sstyle="/.test(html)) { console.error(`FAIL: inline style attribute in ${file}`); failed = true; }
+  if (/<script(?![^>]*\ssrc=)[^>]*>/.test(html) || /<style[\s>]/.test(html)) { console.error(`FAIL: inline <script> or <style> in ${file}`); failed = true; }
+  if (/\son[a-z]+="/.test(html)) { console.error(`FAIL: inline event handler in ${file}`); failed = true; }
+}
+for (const file of readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js'))) {
+  const js = read(`js/${file}`);
+  const m = /innerHTML|outerHTML|insertAdjacentHTML|DOMParser|document\.write|createContextualFragment|\beval\(|new Function\(/.exec(js);
+  if (m) { console.error(`FAIL: ${m[0]} in js/${file} (refused by the policy: build nodes instead)`); failed = true; }
 }
 
 if (failed) process.exit(1);

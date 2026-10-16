@@ -23,3 +23,7 @@ fonts/README.md   export-ignore
 .editorconfig     export-ignore
 
 scripts/          export-ignore
+tests/            export-ignore
+.github/          export-ignore
+package.json      export-ignore
+package-lock.json export-ignore

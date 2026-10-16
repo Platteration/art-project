@@ -1,12 +1,25 @@
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  // Trusted Types forbids HTML-string assignment; build the same nodes through DOMParser instead.
-  const setRich = (el, html) => { const doc = new DOMParser().parseFromString(html, 'text/html'); el.replaceChildren(...[...doc.body.childNodes].map((n) => document.importNode(n, true))); };
-  const setSvg = (el, svgInner) => { const doc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${svgInner}</svg>`, 'image/svg+xml'); el.replaceChildren(...[...doc.documentElement.childNodes].map((n) => document.importNode(n, true))); };
+  // Trusted Types forbids turning a string into markup (an HTML string assigned to an element, or handed to
+  // a parser), so the few rich texts and icons are built as nodes: a lesson is plain text with <b>…</b> runs,
+  // an icon a list of shapes.
+  const setRich = (el, text) => el.replaceChildren(...text.split(/(<b>.*?<\/b>)/).filter(Boolean).map((s) => { const m = /^<b>(.*)<\/b>$/.exec(s); if (!m) return document.createTextNode(s); const b = document.createElement('b'); b.textContent = m[1]; return b; }));
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const setSvg = (el, shapes) => {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    shapes.forEach(([tag, attrs]) => { const n = document.createElementNS(SVG_NS, tag); Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, String(v))); svg.appendChild(n); });
+    el.replaceChildren(svg);
+  };
   // pose.html?render=1 in a hidden frame: the page draws pictures for Portrait Value Studio's Figure study
   const RENDER = /[?&]render=1(&|$)/.test(location.search) && window.parent !== window;
-  const fail = () => { $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, location.origin); };
+  // the app is told at this page's own origin; where the page has none (opened from disk, or inside another
+  // site's sandboxed frame, where the origin reads 'null') at any: the app checks the sender window either way
+  const APP_ORIGIN = self.origin && self.origin !== 'null' ? self.origin : '*';
+  // the 3D view could not start: the panel says so, and the controls that would do nothing leave the page
+  const fail = () => { document.documentElement.classList.add('failed'); $('fail').hidden = false; $('hint').hidden = true; if (RENDER) window.parent.postMessage({ type: 'pose-and-light:failed' }, APP_ORIGIN); };
   if (!window.THREE) { fail(); return; }
   window.__poseStarted = true; // pose-embed.js shows the failure panel if this never runs
   const T = window.THREE;
@@ -25,10 +38,26 @@
   // ---- Renderer, scene, camera ---------------------------------------------------------
 
   const canvas = $('view');
+  // three.js finds WebGL missing by trying, and writes that to the console before it throws: asked first, on a
+  // scratch canvas (its context let go at once, as a browser keeps only a few), the panel says so with no error
+  const webgl = () => {
+    try {
+      const c = document.createElement('canvas'), gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+      const lose = gl && gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      return !!gl;
+    } catch (err) { return false; }
+  };
+  if (!webgl()) { fail(); return; }
   let renderer;
   try {
     renderer = new T.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   } catch (err) { fail(); return; }
+  // A lost WebGL context (a tab left in the background on a phone, a GPU reset) draws nothing until it comes
+  // back: a picture drawn meanwhile would be black, so the picture queue waits, and the view is redrawn on return.
+  let contextLost = false;
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); contextLost = true; });
+  canvas.addEventListener('webglcontextrestored', () => { contextLost = false; requestRender(); pumpThumbs(); });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputEncoding = T.sRGBEncoding;
   renderer.shadowMap.enabled = true;
@@ -107,6 +136,7 @@
   scene.add(beam);
 
   const light = { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 };
+  const LIGHT_OPTIONS = { dist: light.dist, soft: light.soft, fill: light.fill };      // what Simple, which hides their sliders, keeps them at
   const LIGHTS = [
     { id: 'front', name: 'Front', az: 0, el: 12, lesson: 'Light from the front shows the least shadow. The figure looks <b>flat</b>: there is little light and shadow to turn its form.' },
     { id: 'rembrandt', name: 'Rembrandt', az: 45, el: 30, lesson: 'Light <b>high and to one side</b>, the classic portrait light. One side of the head is lit, the other turns into shadow, and the form looks round.' },
@@ -122,15 +152,18 @@
     const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
     return inside(TARGET, az, Math.max(el, minEl), light.dist, LAMP_CLEAR);
   }
-  // raise the height until the lamp really sits at the distance and height the sliders say
-  function reachable() {
-    for (let k = 0; k < 120 && light.el < 85; k++) {
+  // the height the lamp needs to really sit at the distance and height the sliders say, raised from `el` as far as
+  // that takes: only returned, the light itself is not changed (reachable() does that)
+  function reachableEl(az, el) {
+    for (let k = 0; k < 120 && el < 85; k++) {
       const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
-      if (light.el < minEl) { light.el = Math.ceil(minEl); continue; }
-      if (lampAt(light.az, light.el).distanceTo(TARGET) >= light.dist - 0.01) return;
-      light.el = Math.floor(light.el) + 1;
+      if (el < minEl) { el = Math.ceil(minEl); continue; }
+      if (lampAt(az, el).distanceTo(TARGET) >= light.dist - 0.01) return el;
+      el = Math.floor(el) + 1;
     }
+    return el;
   }
+  function reachable() { light.el = reachableEl(light.az, light.el); }
   function placeLamp() {
     lamp.position.copy(lampAt(light.az, light.el));
     lamp.angle = clamp(Math.atan(1.6 / light.dist) * 1.5, 24 * DEG, 70 * DEG);   // wide enough to spill onto the backdrop
@@ -566,10 +599,12 @@
       footShown[s] = null;
     }
   }
-  // the foot keeps its turn in the room (flat on the floor stays flat) as the shin moves
+  // the foot keeps its turn in the room (flat on the floor stays flat) as the shin moves; true when the
+  // ankle's limits stop it
   function footTurn(s, q) {
-    setTurn('ankle' + s, worldQuat('knee' + s).invert().multiply(q));
+    const stopped = setTurn('ankle' + s, worldQuat('knee' + s).invert().multiply(q));
     J['ankle' + s].obj.updateMatrixWorld(true);
+    return stopped;
   }
   const planted = () => $('plantFeet').checked;
   const CHAIN_LEGS = ['hipR', 'kneeR', 'ankleR', 'hipL', 'kneeL', 'ankleL'];
@@ -713,17 +748,52 @@
     save(s);
     markLibrary();
   }
+  // a step as Undo brings it back: in Simple without the light's options, which have no sliders there
+  const undoStep = (s) => { const v = JSON.parse(s); if (simple) Object.assign(v.light, LIGHT_OPTIONS); return v; };
+  // steps that would bring back nothing to see (one that differed only in those options, before Simple put them
+  // back) are dropped, so no press of Undo seems to do nothing
+  function dropBlankSteps() {
+    while (history.length && JSON.stringify(undoStep(history[history.length - 1])) === last) history.pop();
+    $('undo').disabled = !history.length;
+  }
   $('undo').addEventListener('click', () => {
+    letGo();          // a drag, a held arrow, the lamp or a view turn in flight ends first, or it goes on from the pose Undo replaces
     if (!history.length) return;
-    const s = JSON.parse(history.pop());
+    const s = undoStep(history.pop());
     last = JSON.stringify(s);
     setPose(s.pose); Object.assign(light, s.light); lightChanged(false);
-    $('undo').disabled = !history.length;
+    dropBlankSteps();
     save(last);
     markLibrary();
   });
   const KEY = 'pose-and-light.v2';
-  function save(s) { try { localStorage.setItem(KEY, s); } catch (err) { /* not kept */ } }
+  // Forget my work on this device, pressed in the app (this page's frame reloads with it) or in another tab
+  // of the site: nothing more is written, and a page of its own starts over
+  let forgotten = false;
+  window.addEventListener('storage', (e) => { if (e.key === 'portrait-value-studio.forget' && e.newValue) { forgotten = true; if (window.parent === window) setTimeout(() => location.reload(), 300); } });
+  // a write refused because the storage is full, told apart from a browser that lets the site keep nothing (site
+  // data blocked: localStorage throws SecurityError on access), where freeing room would not help
+  const isFull = (err) => !!err && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22 || err.code === 1014);
+  // a pose that cannot be stored stays for this visit but not the next: the rail says so until a write goes through.
+  // A full storage also lets go of the pose stored before (a removal frees room), so the next visit does not offer
+  // an older pose as Where you left off.
+  let keepSay = '';
+  function save(s) {
+    if (forgotten) return;
+    try { localStorage.setItem(KEY, s); keepSay = ''; } catch (err) {
+      if (isFull(err)) { try { localStorage.removeItem(KEY); } catch (e) { /* nothing freed */ } }
+      keepSay = isFull(err) ? 'This pose could not be kept for next time: browser storage is full.' : 'This pose cannot be kept for next time: this browser does not let the site keep it.';
+    }
+    sayKeep();
+  }
+  // the note is a status line, said only once the rail can be read: while the pose library is open the rail is
+  // inert, so a note that comes then (a pose picked there) is written as the library closes
+  function sayKeep() {
+    const n = $('keepNote');
+    if (!keepSay) { n.hidden = true; return; }
+    if (!$('library').hidden) return;
+    n.textContent = keepSay; n.hidden = false;
+  }
   function restore() { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (!v || typeof v !== 'object' || Array.isArray(v)) return null; if (v.pose != null && (typeof v.pose !== 'object' || Array.isArray(v.pose))) return null; if (v.light != null && (typeof v.light !== 'object' || Array.isArray(v.light))) return null; return v; } catch (err) { return null; } } // a saved pose of the wrong shape is ignored
 
   // ---- Picking a part: a yellow outline and arrows ------------------------------------------------
@@ -731,6 +801,7 @@
   // The outline: each picked mesh gets a copy pushed out along its normals by a few pixels and
   // drawn from behind, so only a rim shows around the part. It writes alpha 0, which the gray and
   // three-value views read as "keep this yellow".
+  const OUTLINE_RGB = '1.0, 0.824, 0.247';         // the picked part's yellow, which the looks keep
   const outlineMat = new T.ShaderMaterial({
     uniforms: { px: { value: 4.5 }, size: { value: new T.Vector2(800, 600) } },
     side: T.BackSide,
@@ -744,7 +815,7 @@
         if (len > 1e-5) clip.xy += dir / len * px * 2.0 / size * clip.w;
         gl_Position = clip;
       }`,
-    fragmentShader: 'void main() { gl_FragColor = vec4(1.0, 0.824, 0.247, 0.0); }',
+    fragmentShader: `void main() { gl_FragColor = vec4(${OUTLINE_RGB}, 0.0); }`,
   });
   let outlines = [];
   let picked = null;
@@ -770,12 +841,20 @@
     $('partDepth').hidden = true;
     $('partButtons').hidden = !picked;
     $('picked').hidden = !picked;
+    $('partPick').value = picked || '';
     if (!picked) { $('partName').textContent = 'Nothing picked'; return; }
     const spec = SPEC[picked];
     $('partName').textContent = spec.name;
     $('picked').textContent = spec.name;
     $('mirror').hidden = !/[RL]$/.test(picked);
   }
+  // Pick a part, in the Pose card: every part by name, head to feet, so a keyboard picks what a tap picks (its
+  // arrows, which take Enter and Space, then move it); Nothing picked lets go, as a tap on the background does.
+  // (The list is SPEC's parts in that order, the arms before the legs and right before left: a part added to SPEC
+  // goes in it too.)
+  [['', 'Nothing picked'], ...['neck', 'waist', 'root', 'shoulderR', 'elbowR', 'wristR', 'shoulderL', 'elbowL', 'wristL', 'hipR', 'kneeR', 'ankleR', 'hipL', 'kneeL', 'ankleL'].map((n) => [n, SPEC[n].name])]
+    .forEach(([value, text]) => $('partPick').add(new Option(text, value)));
+  $('partPick').addEventListener('change', () => pick($('partPick').value || null));
 
   // Where each part's end is (its arrows sit there) and where it turns from.
   const TIP = {
@@ -794,11 +873,16 @@
     return { x: (p.x + 1) / 2 * canvas.clientWidth, y: (1 - p.y) / 2 * canvas.clientHeight, z: p.z };
   }
   const STEP = 6;               // degrees a tap moves; holding keeps going
-  const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5"/></svg>';
-  const TURN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M18 2.8v4h-4"/></svg>';
-  const TOWARD = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.8" fill="currentColor"/></svg>';
-  const AWAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8"/></svg>';
+  // the arrow icons, as the shapes setSvg draws (a 24 × 24 view box)
+  const ARROW = [['path', { d: 'M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5' }]];
+  const TURN = [['path', { d: 'M20 12a8 8 0 1 1-2.6-5.9' }], ['path', { d: 'M18 2.8v4h-4' }]];
+  const TOWARD = [['circle', { cx: 12, cy: 12, r: 8 }], ['circle', { cx: 12, cy: 12, r: 2.8, fill: 'currentColor' }]];
+  const AWAY = [['circle', { cx: 12, cy: 12, r: 8 }], ['path', { d: 'M8.6 8.6l6.8 6.8M15.4 8.6l-6.8 6.8' }]];
   let arrows = [];
+  const holds = new Set();                   // the stop() of every arrow held right now (a rebuild lets go first)
+  // the keyboard repeats a key thirty times a second: the pose is remembered once the key rests
+  let keyTimer = 0;
+  const rememberSoon = () => { clearTimeout(keyTimer); keyTimer = setTimeout(remember, 250); };
   function arrowAt(label, run) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -806,12 +890,13 @@
     b.setAttribute('aria-label', label);
     b.title = label;
     let timer = null, wait = null;
-    const stop = () => { clearTimeout(wait); clearInterval(timer); wait = timer = null; if (b.classList.contains('is-held')) { b.classList.remove('is-held'); remember(); } };
+    const stop = () => { holds.delete(stop); clearTimeout(wait); clearInterval(timer); wait = timer = null; if (b.classList.contains('is-held')) { b.classList.remove('is-held'); remember(); } };
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       b.setPointerCapture(e.pointerId);
       $('hint').hidden = true;
       b.classList.add('is-held');
+      holds.add(stop);
       run(1);
       // held: keep going at a steady speed (about 70 degrees a second), however fast the screen draws
       wait = setTimeout(() => {
@@ -822,12 +907,13 @@
     b.addEventListener('pointerup', stop);
     b.addEventListener('pointercancel', stop);
     b.addEventListener('lostpointercapture', stop);
-    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(1); remember(); } });
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(1); rememberSoon(); } });
     $('arrows').appendChild(b);
     return b;
   }
   // one arrow per direction of every way the picked part moves
   function buildArrows() {
+    holds.forEach((stop) => stop());          // an arrow held through a rebuild would keep moving the part
     $('arrows').textContent = '';
     arrows = [];
     if (!picked || simple) return;
@@ -845,10 +931,37 @@
     placeArrows();
   }
   function nudge(a, f) {
-    const v = pose[a.name][a.ax.axis] + a.dir * a.ax.sign * STEP * f;
-    pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max);
+    const from = { ...pose[a.name] }, v = from[a.ax.axis] + a.dir * a.ax.sign * STEP * f;
     // leaning or tilting the hips bends the legs, so the feet stay planted; turning around turns it all
-    if (a.name === 'root' && a.ax.axis !== 'y') keepFeet(); else applyPose();
+    if (a.name === 'root' && a.ax.axis !== 'y') { pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max); keepFeet(); return; }
+    const onFloor = lowestPoint() < 0.01;
+    pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max);
+    fk();
+    keepOnFloor(onFloor);
+    // only where the figure can rise no higher does the part stop at the floor
+    if (lowestPoint() < -0.002) { floorStop(a.name, from); applyPose(); }
+  }
+  // A figure standing on the floor stays on it as a part moves: it rises onto a foot that dips and comes down
+  // again once that foot is clear, so a press that dips on its way to a pose does not stop there. One in the
+  // air is only kept out of the floor.
+  function keepOnFloor(onFloor) {
+    if (onFloor) ground();
+    else { aboveFloor(); applyPose(); }
+  }
+  // A part moved by Straighten (or an arrow, where the figure can rise no higher) stops where it would go into
+  // the floor, as a dragged leg does: its angles go from `from` toward the ones asked for only as far as nothing
+  // goes into the floor (or deeper than it already was)
+  function floorStop(name, from) {
+    const to = { ...pose[name] };
+    const put = (t) => { pose[name] = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t }; fk(); };
+    put(0);
+    const floor = Math.min(-0.002, lowestPoint());
+    pose[name] = to;
+    fk();
+    if (lowestPoint() >= floor) return;
+    let a = 0, b = 1;
+    for (let k = 0; k < 8; k++) { const t = (a + b) / 2; put(t); if (lowestPoint() < floor) b = t; else a = t; }
+    put(a);
   }
   // Each arrow shows where the part's end goes when it is pressed, as seen from here:
   //  - a straight arrow when the end moves across the screen, pointing that way;
@@ -967,21 +1080,25 @@
     });
     $('partDepth').hidden = !depthShown;
   }
+  // these buttons (as Undo) end a drag or a held arrow in flight first: its next move would undo their change
   $('straighten').addEventListener('click', () => {
+    letGo();
     if (!picked) return;
+    const from = { ...pose[picked] };
     pose[picked] = { x: 0, y: 0, z: 0 };
-    if (picked === 'root') { pose.height = 0; applyPose(); ground(); } else applyPose();
+    if (picked === 'root') { pose.height = 0; applyPose(); ground(); } else { floorStop(picked, from); applyPose(); }
     remember();
   });
   $('mirror').addEventListener('click', () => {
+    letGo();
     if (!picked || !/[RL]$/.test(picked)) return;
     const other = picked.slice(0, -1) + (picked.endsWith('R') ? 'L' : 'R');
-    const a = pose[picked];
+    const a = pose[picked], onFloor = lowestPoint() < 0.01;
     pose[other] = { x: a.x, y: -a.y, z: -a.z };
     // the rest of the limb follows, so the whole arm or leg matches
     const chain = { shoulder: ['elbow', 'wrist'], hip: ['knee', 'ankle'], elbow: ['wrist'], knee: ['ankle'] }[picked.slice(0, -1)] || [];
     chain.forEach((c) => { const b = pose[c + picked.slice(-1)]; pose[c + other.slice(-1)] = { x: b.x, y: -b.y, z: -b.z }; });
-    applyPose(); remember();
+    fk(); keepOnFloor(onFloor); remember();                // a copied leg that would reach into the floor lifts the figure onto it
   });
 
   // ---- Light controls ----------------------------------------------------------------------
@@ -999,8 +1116,10 @@
     const asked = light.el;
     reachable();
     if (fromSlider && light.el !== asked) fromSlider = false;          // show the height the lamp can really reach
-    LF.forEach(([id, k, f]) => { if (!fromSlider) $(id).value = light[k]; $(id + 'Out').textContent = f(light[k]); });
-    const match = LIGHTS.find((l) => Math.abs(wrapAz(l.az - light.az)) < 6 && Math.abs(l.el - light.el) < 6);
+    // a slider whose own value was wrapped or clamped (180° around reads as -180°) is moved to what it reads
+    LF.forEach(([id, k, f]) => { if (!fromSlider || +$(id).value !== light[k]) $(id).value = light[k]; $(id + 'Out').textContent = f(light[k]); });
+    // a preset the lamp cannot reach at this distance (From below, far away) is the lowest height it can reach
+    const match = LIGHTS.find((l) => Math.abs(wrapAz(l.az - light.az)) < 6 && Math.abs(reachableEl(light.az, l.el) - light.el) < 6);
     $('lightName').textContent = match ? match.name : 'Your own';
     setRich($('lightLesson'), match ? match.lesson : 'Move the light and watch the <b>shadow side</b> and the <b>cast shadow</b> on the backdrop change shape.');
     document.querySelectorAll('#lights .btn').forEach((b) => b.setAttribute('aria-pressed', String(!!match && b.dataset.id === match.id)));
@@ -1015,7 +1134,7 @@
   LIGHTS.forEach((l) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'btn'; b.textContent = l.name; b.dataset.id = l.id;
-    b.addEventListener('click', () => { light.az = l.az; light.el = l.el; lightChanged(false); remember(); });
+    b.addEventListener('click', () => { letGo(); light.az = l.az; light.el = l.el; lightChanged(false); remember(); });   // a lamp drag in flight ends first
     $('lights').appendChild(b);
   });
   // the lowest point of the whole figure
@@ -1039,7 +1158,7 @@
     const low = lowestPoint();
     if (low < 0.002) { pose.height = clamp(pose.height + 0.002 - low, LOW, HIGH); fk(); }
   }
-  $('ground').addEventListener('click', () => { ground(); remember(); });
+  $('ground').addEventListener('click', () => { letGo(); ground(); remember(); });   // a drag in flight ends first, as for Undo
 
   // ---- Pose library: a picture of the figure in each pose ------------------------------------------
 
@@ -1062,6 +1181,9 @@
   // [across, down] from 0 to 1, and how much nearer than the middle of the body it is; `tilts` gives the
   // shoulders' and hips' tilt.
   function shoot(entry, w, h, snug) {
+    // a lost context would draw black: the event that says so arrives a moment after the loss, so the
+    // context is asked as well
+    if (contextLost || (renderer && renderer.getContext().isContextLost())) return null;
     const W2 = w * 2, H2 = h * 2;
     const keep = copyPose(pose), keepLight = Object.assign({}, light), keepTarget = TARGET.clone();
     const vis = [bulb.visible, beam.visible, stand.visible, outlineMat.visible];
@@ -1156,9 +1278,15 @@
       [bulb.visible, beam.visible, stand.visible, outlineMat.visible] = vis;
     }
   }
-  function drawThumb(entry) {
+  function drawThumb(entry) {            // a JPEG data string: what Figure study's frame is sent (it re-wraps it)
     const shot = shoot(entry, THUMB.w, THUMB.h, false);
     return shot ? shot.canvas.toDataURL('image/jpeg', 0.86) : null;
+  }
+  // This page shows its pictures as Blob URLs, kept for the visit: the policy allows blob: pictures, not data:.
+  function drawThumbUrl(entry, done) {
+    const shot = shoot(entry, THUMB.w, THUMB.h, false);
+    if (!shot) { done(null); return; }
+    shot.canvas.toBlob((blob) => done(blob ? URL.createObjectURL(blob) : null), 'image/jpeg', 0.86);
   }
   // pictures are drawn one at a time after the page is up, so it opens quickly
   const thumbQueue = [];
@@ -1166,14 +1294,21 @@
   function thumbLater(entry, btn, first) {
     if (RENDER) return;                      // nobody sees the buttons; Figure study asks for the pictures it needs
     if (first) thumbQueue.unshift([entry, btn]); else thumbQueue.push([entry, btn]);
-    if (thumbBusy) return;
+    pumpThumbs();
+  }
+  function pumpThumbs() {
+    if (thumbBusy || !thumbQueue.length || contextLost) return;
     thumbBusy = true;
     const next = () => {
+      if (contextLost) { thumbBusy = false; return; }   // the queue waits for the context to come back
       const job = thumbQueue.shift();
       if (!job) { thumbBusy = false; requestRender(); return; }
       if (job[1].isConnected) {
-        const url = drawThumb(job[0]);
-        if (url) { job[1].querySelector('img').src = url; job[1].classList.add('has-img'); if (job[0].id) thumbs.set(job[0].id, url); }
+        drawThumbUrl(job[0], (url) => {
+          if (!url || !job[1].isConnected) return;
+          job[1].querySelector('img').src = url; job[1].classList.add('has-img');
+          if (job[0].id) thumbs.set(job[0].id, url);
+        });
       }
       setTimeout(next, 16);
     };
@@ -1198,7 +1333,7 @@
     else thumbLater(entry, b, first);
     return item;
   }
-  const thumbs = new Map();                  // pictures already drawn, by pose id
+  const thumbs = new Map();                  // pictures already drawn, by pose id (Blob URLs on this page; data strings in the hidden frame that draws for Figure study)
   // the library's pose now on the figure: its button stays pressed until the pose changes
   let chosen = null;
   function choose(id, name) {
@@ -1208,7 +1343,7 @@
   function markLibrary() {
     const on = chosen && chosen.pose === JSON.stringify(pose) ? chosen.id : null;
     document.querySelectorAll('#poses .pose-btn, #mine .pose-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === on)));
-    if (!sheetStart) $('libNote').textContent = on ? `On the figure now: ${chosen.name}` : 'Tap a pose to start from it';
+    if (!sheetStart) $('libNote').textContent = notStored || (on ? `On the figure now: ${chosen.name}` : 'Tap a pose to start from it');
   }
   // the library in groups, so 30 pictures are easy to look through
   const GROUPS = [['standing', 'Standing'], ['moving', 'Moving and sport'], ['low', 'Low to the floor'], ['dance', 'Dance']];
@@ -1237,14 +1372,53 @@
     $('poses').appendChild(sec);
   });
 
-  // your own poses, kept in this browser
+  // your own poses, kept in this browser. Pose and light can be open twice (the app's tab and pose.html in
+  // another), so each change reads the stored list again and makes just its own change to it (this page's list
+  // written back whole would drop a pose the other page saved), and a change made there shows here.
   const MINE_KEY = 'pose-and-light.mine.v1', MINE_MAX = 12;
-  let mine = [];
-  try {
-    const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
-    if (Array.isArray(m)) mine = m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX);
-  } catch (err) { /* none kept */ }
-  const keepMine = () => { try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); return true; } catch (err) { const n = document.getElementById('libNote'); if (n) n.textContent = 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.'; return false; } };
+  // the stored list (one of the wrong shape is none), or null where the storage cannot be read at all
+  function storedMine() {
+    let s;
+    try { s = localStorage.getItem(MINE_KEY); } catch (err) { return null; }
+    try { const m = JSON.parse(s || '[]'); return Array.isArray(m) ? uniqueIds(m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object')).slice(-MINE_MAX) : []; } catch (err) { return []; }
+  }
+  // × and Put back go by id: two poses an older page saved in the same millisecond share one, so a later one is
+  // told apart by its place among them (the same on every read, so a change to it still finds it)
+  function uniqueIds(list) {
+    const seen = new Map();
+    return list.map((q) => { const n = seen.get(q.id) || 0; seen.set(q.id, n + 1); return n ? { ...q, id: `${q.id}~${n}` } : q; });
+  }
+  // poses saved here that could not be stored: in the library for this visit only, and offered to the storage
+  // again with the next change; and the ids of poses removed here whose removal could not be stored, taken out
+  // again with the next change (or a pose removed would come back with it)
+  let unkept = [], ungone = [];
+  const withUnkept = (list) => list.filter((q) => !ungone.includes(q.id)).concat(unkept.filter((q) => !list.some((s) => s.id === q.id))).slice(-MINE_MAX);
+  let mine = storedMine() || [];
+  // a change to your poses that could not be stored is said in the library's note, and the note keeps saying
+  // it (over what the figure wears) until a write succeeds
+  let notStored = '';
+  // makes one change (change(list) gives the list back changed) to the stored list and the poses not yet stored,
+  // and writes the result: '' when it was stored, else why not ('full', or 'blocked' where nothing can be kept).
+  // The read and the write are two steps, not one: a pose the other page saves between them, before its storage
+  // event reaches this page, can still be written over.
+  function changeMine(change) {
+    if (forgotten) { mine = change(mine); return ''; }        // after Forget my work nothing more is written
+    const stored = storedMine() || [];
+    mine = change(withUnkept(stored));
+    try {
+      localStorage.setItem(MINE_KEY, JSON.stringify(mine));
+      unkept = []; ungone = []; notStored = '';
+      return '';
+    } catch (err) {
+      const full = isFull(err);
+      unkept = mine.filter((q) => !stored.some((s) => s.id === q.id));
+      ungone = stored.filter((s) => !mine.some((q) => q.id === s.id)).map((s) => s.id);
+      // nothing left that the storage lacks (the last pose removed with the storage off): no note
+      notStored = !unkept.length && !ungone.length ? '' : full ? 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.' : 'Your poses are kept for this visit only: this browser does not let the site keep them.';
+      const n = document.getElementById('libNote'); if (n && notStored) n.textContent = notStored;
+      return full ? 'full' : 'blocked';
+    }
+  }
   let removed = null;                        // the last pose taken away, until it is put back or another changes
   function showMine() {
     $('mine').textContent = '';
@@ -1261,8 +1435,7 @@
       x.title = `Remove ${name.toLowerCase()}`;
       x.addEventListener('click', () => {
         removed = { m, at: i };
-        mine = mine.filter((q) => q !== m);
-        keepMine();
+        changeMine((list) => list.filter((q) => q.id !== m.id));
         showMine();
         markLibrary();
         // focus stays in the list: the next pose's ×, or the way back
@@ -1276,26 +1449,47 @@
   }
   $('mineBack').addEventListener('click', () => {
     if (!removed) return;
-    mine.splice(Math.min(removed.at, mine.length), 0, removed.m);
-    if (mine.length > MINE_MAX) mine.shift();
+    const { m, at } = removed;
     removed = null;
-    keepMine();
+    changeMine((list) => (list.some((q) => q.id === m.id) ? list : [...list.slice(0, at), m, ...list.slice(at)].slice(-MINE_MAX)));
     showMine();
     markLibrary();
-    $('savePose').focus();
+    // (Save this pose sits in the rail, inert behind the open library)
+    focusFirst([...$('mine').querySelectorAll('.pose-btn')].find((b) => b.dataset.id === m.id), $('libClose'), $('poses').querySelector('.pose-btn'));
   });
-  let savedSay = 0;
+  // focus to the first of these that can take it (one hidden, or inert behind the open library, cannot)
+  const focusFirst = (...els) => els.some((el) => { if (el) el.focus({ preventScroll: true }); return !!el && document.activeElement === el; });
+  // a pose saved or removed in the other page shows here; the library is drawn again, with focus kept on its pose.
+  // Focus on a pose removed there goes on as this page's × hands it on: to the next pose, else the way back (Put
+  // back, Save this pose, the sheet's close button or its first pose). The hidden frame that draws for Figure study
+  // shows no library (and reads the store afresh for each request).
+  window.addEventListener('storage', (e) => {
+    if (RENDER || forgotten || (e.key !== MINE_KEY && e.key !== null)) return;
+    const f = document.activeElement, item = f && $('mine').contains(f) ? f.closest('.pose-item') : null;
+    const at = item ? [...$('mine').children].indexOf(item) : -1;
+    mine = withUnkept(storedMine() || []);
+    showMine();
+    markLibrary();
+    if (!item) return;
+    const items = [...$('mine').children];
+    const again = items.find((it) => it.firstChild.dataset.id === item.firstChild.dataset.id) || items[Math.min(at, items.length - 1)];
+    if (again) (f.classList.contains('pose-x') ? again.lastChild : again.firstChild).focus({ preventScroll: true });
+    else focusFirst($('mineBack'), $('savePose'), $('libClose'), $('library').querySelector('#continueWrap:not([hidden]) .pose-btn, #poses .pose-btn'));
+  });
+  let savedSay = 0, poseIdCount = 0;
   $('savePose').addEventListener('click', () => {
     clearTimeout(savedSay);
-    $('savePose').textContent = 'Saved in the pose library';
-    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, 2200);
     removed = null;
-    const id = 'mine-' + Date.now().toString(36);
-    mine.push({ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } });
-    if (mine.length > MINE_MAX) mine.shift();
-    keepMine();
+    // an id of its own even for two saves in one millisecond, or in two pages at once (ids saved before are kept as they are)
+    const id = 'mine-' + Date.now().toString(36) + (++poseIdCount).toString(36) + Math.random().toString(36).slice(2, 6);
+    let madeRoom = false;                    // the oldest goes once the twelve are full
+    const lost = changeMine((list) => { madeRoom = list.length >= MINE_MAX; return list.concat([{ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } }]).slice(-MINE_MAX); });
     showMine();
     choose(id, `Your pose ${mine.length}`);
+    // the button says what happened: a pose that could not be stored is still in the library for this visit (the
+    // library's note says why at more length)
+    $('savePose').textContent = lost ? `In the library for this visit only: ${lost === 'full' ? 'storage is full' : 'storage is off'}` : madeRoom ? 'Saved in the pose library; the oldest of your twelve made room' : 'Saved in the pose library';
+    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, !lost && !madeRoom ? 2200 : 6000);
   });
   showMine();
 
@@ -1303,8 +1497,11 @@
   // after Start over) to choose a pose to start from: then it has no close button and the rest of the
   // page waits until a pose is picked. Picking a pose closes it.
   const sheet = $('library');
+  // (not the page's own header above the sheet: its Simple / Advanced switch stays usable, as the app's own does while the
+  // sheet shows in the app's frame; the keyboard's Tab goes round inside the sheet, below, so the focus does not leave it)
   const behindSheet = () => [canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
   function openLibrary(start) {
+    letGo();                                   // a pose picked here must not be posed on by a pointer still down
     sheetStart = !!start;
     sheet.classList.toggle('is-start', sheetStart);
     $('libTitle').textContent = sheetStart ? 'Choose a pose to start' : 'Pose library';
@@ -1330,6 +1527,7 @@
     $('posesBtn').setAttribute('aria-expanded', 'false');
     document.querySelector('.tool').classList.remove('choosing');
     behindSheet().forEach((el) => el && el.removeAttribute('inert'));
+    sayKeep();                                 // a note that came while the rail was inert
     $('hint').hidden = !wasStart;              // the tips show once a first pose is chosen
     markLibrary();
     $('posesBtn').focus({ preventScroll: true });
@@ -1338,6 +1536,15 @@
   $('posesBtn').addEventListener('click', () => openLibrary(false));
   $('libClose').addEventListener('click', closeLibrary);
   sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheetStart) { e.preventDefault(); closeLibrary(); } });
+  // the sheet is modal, so Tab and Shift+Tab go round inside it (its last button to its first, and back) rather than
+  // off the page; inside the app the frame is one part of the app's page, so there they go on to the app around it
+  sheet.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey || EMBEDDED) return;
+    const stops = [...sheet.querySelectorAll('button')].filter((b) => !b.disabled && b.getClientRects().length);
+    if (!stops.length || document.activeElement !== (e.shiftKey ? stops[0] : stops[stops.length - 1])) return;
+    e.preventDefault();
+    (e.shiftKey ? stops[stops.length - 1] : stops[0]).focus();
+  });
   // the pose from last time, as the first choice on the start screen
   function offerContinue() {
     $('continue').textContent = '';
@@ -1369,8 +1576,9 @@
           vec3 c = s.rgb;
           float L = lstar(dot(vec3(toLin(c.r), toLin(c.g), toLin(c.b)), vec3(0.2126, 0.7152, 0.0722)));
           if (mode == 2) L = L < t1 ? 20.0 : (L < t2 ? 50.0 : 85.0);
-          // the picked part's outline (written with alpha 0) stays yellow
-          gl_FragColor = vec4(mix(c, vec3(toSrgb(yOf(L))), s.a), 1.0);
+          // the picked part's outline (written with alpha 0) stays yellow; its soft edge blends that yellow with the
+          // gray, never with the color under it, so no trace of the figure's own color is left in a gray look
+          gl_FragColor = vec4(mix(vec3(${OUTLINE_RGB}), vec3(toSrgb(yOf(L))), s.a), 1.0);
         }`,
     }),
   };
@@ -1480,9 +1688,11 @@
     outlineMat.uniforms.size.value.set(Math.max(1, r.width), Math.max(1, r.height));
     camera.aspect = Math.max(1, r.width) / Math.max(1, r.height);
     camera.updateProjectionMatrix();
+    if (!r.width) letGo();                     // the frame was hidden: a pointer let go meanwhile never reaches the page
     requestRender();
   }
-  new ResizeObserver(resize).observe(canvas.parentElement);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas.parentElement);
+  else window.addEventListener('resize', resize); // an old browser opening pose.html itself
   // moving to another screen changes the pixel ratio without a resize
   (function watchRatio() {
     if (!window.matchMedia) return;
@@ -1770,7 +1980,13 @@
           if (a > 0) reach(last.clone().lerp(target, a));
           d.last = last.clone().lerp(target, a);
         } else d.last = target;
-      } else reach(target);
+      } else {
+        // a fast drag is followed in short steps, as a slow one is, so the arm keeps up with the pointer (at most
+        // ten: a very long jump eases as before)
+        const last = d.last || d.from, n = Math.min(10, Math.max(1, Math.ceil(last.distanceTo(target) / 0.04)));
+        for (let i = 1; i <= n; i++) reach(last.clone().lerp(target, i / n));
+        d.last = target;
+      }
       applyPose(ch.leg);               // a foot that moved is planted where it is put
     } else if (c.kind === 'pole') {
       swivel(d, e);
@@ -1822,13 +2038,26 @@
     if (Math.abs(best - d.swing) < 0.05) return;
     const keep = [ch.upper, ch.mid, ch.end].map((n) => ({ ...pose[n] }));
     const floor = ch.leg && Math.min(-0.002, legLow(ch.side));
-    solveChain(ch, d.end, spotAt(best));
-    if (ch.leg) footTurn(ch.side, d.turn);
-    // a limit stopped it (the hand or foot would move), or the leg would go into the floor: stay as it was
-    if (worldPos(ch.end).distanceTo(d.end) > 0.003 || (ch.leg && legLow(ch.side) < floor)) {
-      [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = keep[i]; });
+    // false when a limit stops it (the hand or foot would move, or the ankle could not keep the foot's
+    // turn), or the leg would go into the floor
+    const swingTo = (deg) => {
+      [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = { ...keep[i] }; });
       fk();
-      return;
+      solveChain(ch, d.end, spotAt(deg));
+      const ankleStopped = ch.leg && footTurn(ch.side, d.turn);
+      return worldPos(ch.end).distanceTo(d.end) <= 0.003 && !ankleStopped && !(ch.leg && legLow(ch.side) < floor);
+    };
+    // stopped: it swings as far as it goes, or stays as it was
+    if (!swingTo(best)) {
+      let a = 0, b = 1;
+      for (let k = 0; k < 6; k++) { const t = (a + b) / 2; if (swingTo(d.swing + (best - d.swing) * t)) a = t; else b = t; }
+      if (!a) {
+        [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = keep[i]; });
+        fk();
+        return;
+      }
+      best = d.swing + (best - d.swing) * a;
+      swingTo(best);
     }
     d.swing = best;
     applyPose(ch.leg);
@@ -1881,6 +2110,20 @@
     lightChanged(false);
   }
   function lampEnd(e) { if (lampDrag && e.pointerId === lampDrag.id) { lampDrag = null; remember(); } }
+  // The stage is taken from under the pointers (the library opens over it, Undo replaces the figure, the
+  // frame is hidden): what they were doing ends as a release ends it, and they are let go of, so one still
+  // down moves nothing after. A tap picks nothing.
+  function letGo() {
+    if (!drag && !lampDrag && !pointers.size && !holds.size) return;
+    holds.forEach((stop) => stop());
+    if (lampDrag) { if (handle.hasPointerCapture(lampDrag.id)) handle.releasePointerCapture(lampDrag.id); lampDrag = null; remember(); }
+    if (drag && (drag.kind === 'pose' || drag.kind === 'turn' || (drag.kind === 'ctrl' && drag.moved))) remember();
+    [...pointers.keys()].forEach((id) => { if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id); });
+    pointers.clear();
+    drag = hot = null;
+    canvas.classList.remove('is-dragging');
+    requestRender();
+  }
 
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
@@ -1984,22 +2227,24 @@
     if (!move) return;
     e.preventDefault();
     light.az += move[0]; light.el = clamp(light.el + move[1], -20, 85);
-    lightChanged(false); remember();
+    lightChanged(false); rememberSoon();
   });
 
   $('resetView').addEventListener('click', () => { Object.assign(view, { az: 0, el: 8, dist: 5.2 }); placeCamera(); requestRender(); });
   $('resetAll').addEventListener('click', () => {
     Object.assign(view, { az: 32, el: 8, dist: 5.2 }); placeCamera();
-    Object.assign(light, { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 }); lightChanged(false);
+    Object.assign(light, { az: 45, el: 30 }, LIGHT_OPTIONS); lightChanged(false);
     setPose(POSES[0].p); ground(); pick(null); remember();
     openLibrary(true);
   });
 
   // ---- Snapshot ------------------------------------------------------------------------------
 
+  let snapsAsked = 0;
   $('snap').addEventListener('click', () => {
     render();
-    canvas.toBlob((blob) => { if (!blob) return; const img = $('snapImg'); if (img.dataset.blobUrl) URL.revokeObjectURL(img.dataset.blobUrl); const url = URL.createObjectURL(blob); img.dataset.blobUrl = url; img.src = url; }, 'image/png');
+    const asked = ++snapsAsked;              // an earlier picture still being encoded must not land over this one
+    canvas.toBlob((blob) => { if (!blob || asked !== snapsAsked) return; const img = $('snapImg'); if (img.dataset.blobUrl) URL.revokeObjectURL(img.dataset.blobUrl); const url = URL.createObjectURL(blob); img.dataset.blobUrl = url; img.src = url; }, 'image/png');
     $('snapDialog').showModal();
   });
   $('snapClose').addEventListener('click', () => $('snapDialog').close());
@@ -2013,12 +2258,28 @@
   // its own, remembered in this browser. Simple is where it starts.
   const MODE_KEY = 'pose-and-light.mode';
   const EMBEDDED = document.documentElement.classList.contains('embed');
+  // Simple has no sliders for the light's options or the value splits, so they go back to how they start: the light
+  // kept for next time (`store`), but no step of Undo of its own (Undo in Simple leaves those options as they are)
+  function lightAsSimple(store) {
+    const splits = [$('t1'), $('t2')];
+    // (t1's input event refreshes t2 too: both readouts and the picture)
+    if (splits.some((r) => r.value !== r.defaultValue)) { splits.forEach((r) => { r.value = r.defaultValue; }); splits[0].dispatchEvent(new Event('input')); }
+    if (!Object.keys(LIGHT_OPTIONS).some((k) => light[k] !== LIGHT_OPTIONS[k])) { if (last !== null) dropBlankSteps(); return; }
+    if (last !== null) remember();
+    Object.assign(light, LIGHT_OPTIONS);
+    lightChanged(false);
+    if (last !== null) { last = snapshot(); dropBlankSteps(); }      // (a page starting takes its first step after this)
+    if (store) save(snapshot());
+  }
   function setMode(mode, keep) {
     simple = mode !== 'advanced';
     document.documentElement.classList.toggle('simple', simple);
     document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === (simple ? 'simple' : 'advanced'))));
     // Simple has no switches for these, so they go back to how they start
-    if (simple) ['showRig', 'plantFeet', 'showStand', 'showLamp'].forEach((id) => { if (!$(id).checked) { $(id).checked = true; $(id).dispatchEvent(new Event('change')); } });
+    if (simple) {
+      ['showRig', 'plantFeet', 'showStand', 'showLamp'].forEach((id) => { if (!$(id).checked) { $(id).checked = true; $(id).dispatchEvent(new Event('change')); } });
+      lightAsSimple(!RENDER);
+    }
     if (keep) { try { localStorage.setItem(MODE_KEY, simple ? 'simple' : 'advanced'); } catch (err) { /* not kept */ } }
     showPart();
     buildArrows();
@@ -2044,6 +2305,9 @@
     const range = { az: [-180, 180], el: [-20, 85], dist: [1.6, 4.6], soft: [0, 10], fill: [0, 100] };
     Object.entries(range).forEach(([k, [lo, hi]]) => { const v = num(saved.light[k], NaN); if (Number.isFinite(v)) light[k] = clamp(v, lo, hi); });
   }
+  // a page that starts in Simple puts back the options a visit in Advanced left (inside the app the app's mode
+  // message does that, as the page does not know its mode until then; the hidden frame keeps nothing)
+  if (simple && !EMBEDDED) lightAsSimple(false);
   placeCamera();
   lightChanged(false);
   showPart();
@@ -2064,13 +2328,18 @@
       const list = POSES.map((ps) => ({ entry: ps, id: ps.id, name: ps.name, group: ps.group || 'standing' }));
       let saved = [];
       try { const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]'); if (Array.isArray(m)) saved = m; } catch (err) { /* none */ }
-      saved.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX).forEach((m, i) => {
-        const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
-        list.push({ entry: { id: m.id, p: m.p, ground: false, thumbView: view }, id: m.id, name: `Your pose ${i + 1}`, group: 'mine' });
-      });
+      // one entry per id: a saved list of another shape (two poses under one id, or a built-in pose's id) would
+      // otherwise give the class two tiles that are one pose, and one tap would take both out
+      const seen = new Set(list.map((q) => q.id));
+      saved.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX)
+        .filter((m) => !seen.has(m.id) && seen.add(m.id))
+        .forEach((m, i) => {
+          const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
+          list.push({ entry: { id: m.id, p: m.p, ground: false, thumbView: view }, id: m.id, name: `Your pose ${i + 1}`, group: 'mine' });
+        });
       return list;
     };
-    const tell = (msg) => window.parent.postMessage(msg, location.origin);
+    const tell = (msg) => window.parent.postMessage(msg, APP_ORIGIN);
     let pictures = 0;                         // a newer list stops the pictures of the one before
     window.addEventListener('message', (e) => {
       const d = e.data;

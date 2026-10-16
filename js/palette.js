@@ -11,7 +11,7 @@
 
   // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
   if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
-    if (window.StudioGuard) StudioGuard.failed('palette.js: app.js did not finish loading');
+    if (window.StudioGuard) StudioGuard.failed('palette.js: app.js did not finish loading', 'palette');
     return;
   }
 
@@ -38,6 +38,7 @@
     dialogCount: $('paintDialogCount'),
     dialogDone: $('paintDialogDone'),
     search: $('paintSearch'),
+    noMatch: $('paintNoMatch'),
     addPreset: $('paintAddPreset'),
     none: $('paintNone'),
     cats: $('paintCats'),
@@ -63,11 +64,14 @@
   }
 
   const known = new Set(Paints.LIBRARY.map((p) => p.code));
-  const choice = Object.assign({ source: 'preset', preset: '', max: 6 }, load(CHOICE_KEY, {}));
-  // only values the drawer knows: anything else (an older version, a stray write) falls back to the default
-  if (choice.source !== 'mine') choice.source = 'preset';
-  if (typeof choice.preset !== 'string' || (choice.preset && !Paints.PRESETS.some((pr) => pr.id === choice.preset))) choice.preset = '';
-  if (!Number.isInteger(choice.max) || choice.max < 3 || choice.max > 10) choice.max = 6; // the range of #paintMax
+  // the saved choice, read field by field: only values the drawer knows, anything else (an older
+  // version, a stray write) falls back to the default, and a key it does not read is not kept
+  const saved = load(CHOICE_KEY, {}) || {};
+  const choice = {
+    source: saved.source === 'mine' ? 'mine' : 'preset',
+    preset: typeof saved.preset === 'string' && Paints.PRESETS.some((pr) => pr.id === saved.preset) ? saved.preset : '',
+    max: Number.isInteger(saved.max) && saved.max >= 3 && saved.max <= 10 ? saved.max : 6, // the range of #paintMax
+  };
   const mine = new Set(load(MINE_KEY, []).filter((c) => known.has(c)));
 
   // Paints ready to mix, made once each
@@ -119,7 +123,7 @@
     d.title = p.name;
     return d;
   }
-  const reachText = (cov, n) => `Mixes ${cov.reached} of ${n} colors`;
+  const reachText = (cov, n) => `Mixes ${cov.reached} of ${n} color${n === 1 ? '' : 's'}`;
 
   function setState(name) {
     els.drawerState.textContent = `${els.colors.value} per value${name ? ' · ' + name : ''}`;
@@ -158,8 +162,12 @@
     primary: 'A yellow, a red and a blue. Mix every color yourself.',
     rembrandt: 'Earth colors, for the old-master look.',
   };
+  const isSimple = () => document.body.classList.contains('mode-simple');
   function renderPresets(n) {
     els.presetList.replaceChildren();
+    // Simple mode shows three of the ten: its badge goes to the best of those (shown by the stylesheet
+    // in Simple mode only), unless the best overall is one of them
+    const simpleBest = ranking.find((x) => SIMPLE_WHY[x.preset.id]);
     ranking.forEach(({ preset, cov }, rank) => {
       const li = el('li');
       li.dataset.preset = preset.id;
@@ -170,6 +178,7 @@
       const head = el('span', 'preset-head');
       head.append(el('span', 'preset-name', preset.name));
       if (rank === 0) head.append(el('span', 'preset-best', 'Best match'));
+      else if (simpleBest && simpleBest.preset === preset) head.append(el('span', 'preset-best-simple', 'Best match'));
       const dots = el('span', 'paint-dots');
       preset.paints.forEach((c) => dots.append(dot(c)));
       const meter = el('span', 'preset-meter');
@@ -204,26 +213,40 @@
     els.mineCount.textContent = n
       ? `${n} paint${n === 1 ? '' : 's'} ticked`
       : 'No paints ticked yet: suggestions come from the whole library.';
-    els.maxOut.textContent = `${els.max.value} + white`;
+    // "+ white" only where the suggestion will have one: a white ticked, or none ticked (the whole library)
+    const hasWhite = !n || [...mine].some((c) => (Paints.byCode(c) || {}).category === 'white');
+    els.maxOut.textContent = hasWhite ? `${els.max.value} + white` : `${els.max.value}`;
     els.dialogCount.textContent = n ? `${n} ticked` : '';
   }
 
   let suggested = null; // { codes, cov } for the current study
+  let suggestRunning = null; // the running suggestion's checker, from runJob
+  // a suggestion cut short (the source switched, the study changed) gives the button back
+  function cancelSuggest() {
+    cancel('suggest');
+    suggestRunning = null;
+    els.suggest.disabled = false;
+    els.suggest.textContent = suggested ? 'Suggest again' : 'Suggest a palette';
+  }
   function suggest() {
     const r = Studio.result();
     if (!r) return;
+    const forResult = r;
     const codes = mine.size ? [...mine] : Paints.LIBRARY.map((p) => p.code);
     const pool = codes.map(paintFor);
     const colors = studyColors();
     const task = Mixing.suggestTask(pool, colors, +els.max.value + (pool.some((p) => p.white) ? 1 : 0));
     els.suggest.disabled = true;
-    runJob('suggest', () => {
+    suggestRunning = runJob('suggest', () => {
       const done = task.step(12);
       els.suggest.textContent = done ? 'Suggest a palette' : `Choosing paints… ${Math.round(task.progress * 100)}%`;
       return done;
     }, () => {
+      suggestRunning = null;
       els.suggest.disabled = false;
       els.suggest.textContent = 'Suggest again';
+      // B: the study moved on while this ran: these picks are for the old colors, so choose again
+      if (Studio.result() !== forResult) { suggestedFor = Studio.result(); suggest(); return; }
       const picks = task.result.picks.map((i) => codes[i]);
       suggested = { codes: picks, cov: task.result, from: mine.size ? 'your paints' : 'the whole library' };
       announce();
@@ -323,7 +346,7 @@
     els.minePane.hidden = choice.source !== 'mine';
     if (!els.drawer.open) { setState(choice.source === 'preset' ? presetName(choice.preset) : suggested ? 'Suggested palette' : ''); return; }
     if (choice.source === 'preset') {
-      cancel('suggest');
+      cancelSuggest();
       rankPresets();
       if (ranking && rankedFor === Studio.result() && choice.preset) showPreset(choice.preset);
       else if (!choice.preset) { els.result.hidden = true; setState(''); }
@@ -357,8 +380,30 @@
   els.colors.addEventListener('input', () => setState(choice.source === 'preset' ? presetName(choice.preset) : suggested ? 'Suggested palette' : ''));
   window.addEventListener('studio:result', () => {
     cancel('mix');
+    // a suggestion still running was for the colors before: start again for these, or give the button back
+    if (suggestRunning && suggestRunning()) { cancelSuggest(); if (choice.source === 'mine' && els.drawer.open) { suggestedFor = Studio.result(); suggest(); return; } }
     refresh();
   });
+
+  // Simple offers its three palettes and hides My paints (README, Simple and Advanced): Simple reached
+  // from My paints, or from a palette Simple does not list, moves to the best of the three (the first of
+  // them before the study has been ranked) and says so, at the switch and at load alike
+  function fitSimple() {
+    if (!isSimple()) return;
+    const simpleIds = Object.keys(SIMPLE_WHY);
+    // none chosen stays none (the best of the three is shown for it), so a fresh visit writes nothing
+    if (choice.source === 'preset' && (!choice.preset || simpleIds.includes(choice.preset))) return;
+    const best = (ranking || []).map((x) => x.preset.id).find((id) => simpleIds.includes(id)) || simpleIds[0];
+    const was = choice.source === 'mine' ? 'My paints' : (choice.preset ? presetName(choice.preset) : '');
+    choice.source = 'preset'; choice.preset = best;
+    save(CHOICE_KEY, choice);
+    document.querySelectorAll('input[name="paintSource"]').forEach((i) => { i.checked = i.value === 'preset'; });
+    cancelSuggest();
+    refresh();
+    announce();
+    if (was) Studio.toast(`Simple mode uses ${presetName(best)} instead of ${was}`, 4000);
+  }
+  window.addEventListener('studio:mode', fitSimple);
 
   // ---- The paint library dialog ---------------------------------------------
 
@@ -397,6 +442,16 @@
   }
 
   let mineChanged = false;
+  // paints ticked in another open tab of this site: this tab's list (and its chooser, if open) follows,
+  // so a tick here adds to that list instead of writing an older one over it
+  window.addEventListener('storage', (e) => {
+    if (e.key !== MINE_KEY) return;
+    mine.clear();
+    load(MINE_KEY, []).filter((c) => known.has(c)).forEach((c) => mine.add(c));
+    els.cats.querySelectorAll('input[type="checkbox"]').forEach((b) => { b.checked = mine.has(b.value); });
+    renderMine();
+    mineChanged = true; // the suggestion from My paints is made again from the new list
+  });
   function saveMine() {
     save(MINE_KEY, [...mine]);
     mineChanged = true;
@@ -430,6 +485,7 @@
       });
       sec.hidden = !any;
     });
+    if (els.noMatch) els.noMatch.hidden = !q || [...els.cats.querySelectorAll('.paint-cat')].some((sec) => !sec.hidden);
   });
   els.mineEdit.addEventListener('click', () => {
     if (!els.cats.childElementCount) renderLibrary();
@@ -452,9 +508,10 @@
   /*
    * The palette chosen here: the known palette picked, or the suggested one from My paints. With
    * none chosen yet, the known palette that mixes this study's colors best (most within reach,
-   * then closest), as the list ranks them. { name, short, codes, chosen } or null.
+   * then closest), as the list ranks them; in Simple mode, the best of the three it shows.
+   * { name, short, codes, chosen } or null.
    */
-  let bestFor = null, best = null;
+  let bestFor = null, bestSimple = null, best = null;
   function current() {
     if (choice.source === 'preset' && choice.preset) {
       const pr = Paints.PRESETS.find((p) => p.id === choice.preset);
@@ -463,10 +520,10 @@
     if (choice.source === 'mine' && suggested) return { name: 'Suggested palette', codes: suggested.codes, chosen: true };
     const r = Studio.result();
     if (!r) return null;
-    if (bestFor !== r) {
+    if (bestFor !== r || bestSimple !== isSimple()) {
       const colors = studyColors();
-      bestFor = r;
-      best = Paints.PRESETS.map((pr) => ({ pr, cov: Mixing.coverage(pr.paints.map(paintFor), colors) }))
+      bestFor = r; bestSimple = isSimple();
+      best = Paints.PRESETS.filter((pr) => !bestSimple || SIMPLE_WHY[pr.id]).map((pr) => ({ pr, cov: Mixing.coverage(pr.paints.map(paintFor), colors) }))
         .sort((a, b) => b.cov.reached - a.cov.reached || a.cov.score - b.cov.score)[0].pr;
     }
     return { name: best.name, codes: best.paints, chosen: false };
@@ -477,5 +534,6 @@
 
   renderMine();
   refresh();
+  fitSimple();
   announce();
 })();
