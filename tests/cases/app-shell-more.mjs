@@ -43,9 +43,9 @@ const APP_FAILED = 'Something went wrong in the app. If a control stops respondi
 const shownPanels = (page) => page.evaluate(() => [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id));
 const notesOf = (page) => page.evaluate(() => {
   const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : 'missing'; };
-  return { cls: document.documentElement.className.trim(), nojs: d('.nojs-note'), part: d('.partfail-note'), old: d('.oldbrowser-note'), tabs: d('.tabs'), help: d('#tab-help'), study: d('#tab-study'), actions: d('.topbar-actions'), steps: d('.help-steps .btn'), forget: d('#forgetBtn'),
+  return { cls: document.documentElement.className.trim(), nojs: d('.nojs-note'), part: d('.partfail-note'), old: d('.oldbrowser-note'), tabs: d('.tabs'), help: d('#tab-help'), study: d('#tab-study'), actions: d('.topbar-actions'), steps: d('.help-steps .btn'), forget: d('#forgetBtn'), forgetShown: !!(document.getElementById('forgetBtn').getClientRects().length),
     hidden: [...document.querySelectorAll('[data-tab]')].filter((e) => e.hidden).map((e) => e.dataset.tab).sort(), groups: [...document.querySelectorAll('.tab-group')].filter((g) => g.hidden).map((g) => g.dataset.group),
-    goHidden: [...document.querySelectorAll('[data-go]')].filter((e) => e.hidden).map((e) => e.dataset.go).sort(), learnSub: document.getElementById('tabLearnSub').textContent, gamesSub: document.getElementById('tabGamesSub').textContent, shown: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id), fromStudio: !!document.getElementById('artFromStudio').hidden };
+    goHidden: [...document.querySelectorAll('[data-go]')].filter((e) => e.hidden).map((e) => e.dataset.go).sort(), learnSub: document.getElementById('tabLearnSub').textContent, gamesSub: document.getElementById('tabGamesSub').textContent, paintsOff: document.getElementById('paints').hidden, blockViewOff: document.querySelector('.block-view').hidden, colorsState: document.getElementById('colorsState').textContent.trim(), shown: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id), fromStudio: !!document.getElementById('artFromStudio').hidden };
 });
 const active = (page) => page.evaluate(() => { const a = document.activeElement; if (!a || a === document.body) return 'body'; return a.id || a.getAttribute('data-mode') || a.tagName.toLowerCase(); });
 const menuOf = (page, id) => page.evaluate((id) => { const m = document.getElementById(id); const b = document.querySelector(`[aria-controls="${id}"]`); return { hidden: m.hidden, expanded: b.getAttribute('aria-expanded') }; }, id);
@@ -287,7 +287,7 @@ function groupA(t, site) {
       await reloadWith(page, () => { delete window.ResizeObserver; });
       const s = await notesOf(page);
       t.check(/old-browser/.test(s.cls) && s.old === 'block' && s.nojs === 'none' && s.part === 'none', `${label} old browser: the "too old" note alone shows`, s);
-      t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.steps === 'none' && s.forget !== 'none', `${label} old browser: no tabs, no switch, the guide reads, its Try buttons are off, Forget stays`, s);
+      t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.steps === 'none' && s.forgetShown, `${label} old browser: no tabs, no switch, the guide reads, its Try buttons are off, Forget stays`, s);
       t.check((await hscroll(page)) <= 0, `${label} old browser: no horizontal scroll`, await hscroll(page));
       t.check(/too old/.test(await text(page, '.oldbrowser-note')) && /guide below still reads/i.test(await text(page, '.oldbrowser-note')), `${label} old browser: the note says what to do`, await text(page, '.oldbrowser-note'));
       if (label === 'desktop') {
@@ -676,7 +676,7 @@ const BLOCKED = [
   ['js/mixing.js', NOJS],
   ['js/paints.js', NOJS],
   ['js/app.js', NOJS],
-  ['js/palette.js', { note: 'part', hidden: [] }],
+  ['js/palette.js', { note: 'part', hidden: [], paints: true }],
   ['js/subjects.js', { note: 'part', hidden: ['game'], gamesSub: 'Value battle', url: '#game', menus: { tabGamesBtn: ['tabBattleBtn'] } }],
   ['js/game.js', { note: 'part', hidden: ['game'], gamesSub: 'Value battle', url: '#game', menus: { tabGamesBtn: ['tabBattleBtn'] } }],
   ['js/painting.js', { note: 'part', hidden: ['figure', 'loomis', 'paint'], url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
@@ -689,8 +689,8 @@ const PAIRS = [
   [['js/game.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'game'], groups: ['games'], url: '#battle' }],
   [['js/painting.js', 'js/subjects.js'], { note: 'part', hidden: ['figure', 'game', 'loomis', 'paint'], gamesSub: 'Value battle', url: '#figure', fromStudio: true }],
   [['js/loomis.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'loomis'], url: '#loomis', menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'], tabGamesBtn: ['tabGameBtn'] } }],
-  [['js/palette.js', 'js/figure.js'], { note: 'part', hidden: ['figure'], url: '#figure' }],
-  [['js/palette.js', 'js/subjects.js', 'js/game.js', 'js/painting.js', 'js/figure.js', 'js/loomis.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'figure', 'game', 'loomis', 'paint'], groups: ['games'], url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
+  [['js/palette.js', 'js/figure.js'], { note: 'part', hidden: ['figure'], paints: true, url: '#figure' }],
+  [['js/palette.js', 'js/subjects.js', 'js/game.js', 'js/painting.js', 'js/figure.js', 'js/loomis.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'figure', 'game', 'loomis', 'paint'], groups: ['games'], paints: true, url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
 ];
 const shortName = (f) => f.replace(/^js\//, '').replace(/\.js$/, '');
 const readSite = (site, f) => fs.readFileSync(path.join(site.root, f), 'utf8');
@@ -706,7 +706,7 @@ async function checkState(t, label, page, want) {
   const noteOk = want.note === 'nojs' ? s.nojs === 'block' && s.part === 'none' && s.old === 'none' : want.note === 'part' ? s.part === 'block' && s.nojs === 'none' && s.old === 'none' : s.part === 'none' && s.nojs === 'none' && s.old === 'none';
   t.check(noteOk, `${label}: the right note (${want.note})`, s);
   if (want.note === 'nojs') {
-    t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.study === 'none' && s.steps === 'none' && s.forget !== 'none', `${label}: only the guide shows (the Study panel is off), no tabs, no switch, no Try buttons, Forget stays`, s);
+    t.check(s.tabs === 'none' && s.actions === 'none' && s.help === 'block' && s.study === 'none' && s.steps === 'none' && !s.forgetShown, `${label}: only the guide shows (the Study panel is off), no tabs, no switch, no Try buttons, no Forget row (it needs the app)`, s);
     return s;
   }
   const hidden = want.hidden || [], groups = want.groups || [];
@@ -716,6 +716,10 @@ async function checkState(t, label, page, want) {
   if (!groups.includes('learn')) t.check(s.learnSub === (want.learnSub || 'Study the photo'), `${label}: the Learning tools button names ${want.learnSub || 'Study the photo'}`, s.learnSub);
   if (!groups.includes('games')) t.check(s.gamesSub === (want.gamesSub || 'Paint by numbers'), `${label}: the Games button names ${want.gamesSub || 'Paint by numbers'}`, s.gamesSub);
   t.check(s.fromStudio === !!want.fromStudio, `${label}: Use my Studio painting ${want.fromStudio ? 'goes with the Studio' : 'stays'}`, s.fromStudio);
+  // palette.js plans the paints (the guard's rule for it is "palette", a part of the Study tab and no tab): without it
+  // the Paints to use block and the block study's Palette switch go, and the drawer's header still says what it is set to
+  t.check(s.paintsOff === !!want.paints && s.blockViewOff === !!want.paints, `${label}: the Paints to use block and the Palette switch ${want.paints ? 'go with palette.js' : 'stay'}`, { paintsOff: s.paintsOff, blockViewOff: s.blockViewOff });
+  t.check(want.paints ? /^\d per value$/.test(s.colorsState) : s.colorsState !== '', `${label}: the Colors and paints drawer ${want.paints ? 'says "N per value"' : 'says what it is set to'}`, s.colorsState);
   return s;
 }
 // every tab a visitor can still reach opens; one the guard took off stays off (its click lands on Study). Pose and
@@ -754,6 +758,7 @@ function groupD(t, site) {
       const rule = Object.prototype.hasOwnProperty.call(tabOf, shortName(f)) ? tabOf[shortName(f)] : undefined;
       if (rule === 'all') t.check(want.note === 'nojs', `${f}: TAB_OF says "all", the table expects the standing note and the guide alone`);
       else if (rule === '') t.check(want.note === 'part' && want.hidden.length === 0, `${f}: TAB_OF says no tab, the table expects the part note and nothing taken off`);
+      else if (rule === 'palette') t.check(want.note === 'part' && want.paints === true && want.hidden.length === 0, `${f}: TAB_OF says palette, the table takes the paints part off and no tab`);
       else if (rule) t.check(want.note === 'part' && want.hidden.includes(rule), `${f}: TAB_OF says ${rule}, the table takes that tab off`);
     }
   });

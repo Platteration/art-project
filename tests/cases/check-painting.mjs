@@ -325,6 +325,11 @@ const PILL_LOG = () => {
 };
 const pillsOverlapping = (ps) => { const out = []; ps.forEach((a, i) => ps.slice(i + 1).forEach((b) => { const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y); if (ix > 0.5 && iy > 0.5) out.push({ labels: [a.text, b.text], at: [Math.round(a.x), Math.round(a.y), Math.round(b.x), Math.round(b.y)], by: [+ix.toFixed(1), +iy.toFixed(1)] }); })); return out; };
 const pillInside = (p, W, H) => p.x >= 0 && p.y >= 0 && p.x + p.w <= W && p.y + p.h <= H;
+// a 600 × 750 picture of seeded random pixels, the same on every run (makeImage's noise differs each time)
+async function noiseImage(page, name, seed = 7) {
+  const url = await page.evaluate((seed) => { const c = document.createElement('canvas'); c.width = 600; c.height = 750; const g = c.getContext('2d'); const d = g.createImageData(600, 750); let x = seed >>> 0; const rnd = () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x >>> 24; }; for (let i = 0; i < d.data.length; i += 4) { d.data[i] = rnd(); d.data[i + 1] = rnd(); d.data[i + 2] = rnd(); d.data[i + 3] = 255; } g.putImageData(d, 0, 0); return c.toDataURL('image/png'); }, seed);
+  return { name, mimeType: 'image/png', buffer: Buffer.from(url.split(',')[1], 'base64') };
+}
 
 export default async function checkPainting(t, site) {
   let exampleBadge = null; // the example's badge on the #check route, for the Palette block view below
@@ -1333,5 +1338,119 @@ export default async function checkPainting(t, site) {
     await screenshot(page, 'check-painting-dark');
     await clean(t, page, 'palette view and axe');
     await page.context().close();
+  }
+
+  // ---- the map's labels as drawn: numbered as the list, inside the picture, none on another, on the example, with
+  // the photo made smaller, and on a reference of slivers; Rotate's and Size's keyboard steps; a half-faded reference ----
+  {
+    const page = await openPage(site, { url: '#check' });
+    await countResults(page);
+    await busyHidden(page);
+    await page.evaluate(PILL_LOG);
+    // the labels of the next check run (Reset position reruns the check as it stands)
+    const labels = async (act) => { await act(); await busyHidden(page); await sleep(150); return page.evaluate(() => ({ list: window.__pills.slice(), W: document.getElementById('cv-diff').width, H: document.getElementById('cv-diff').height, shapes: window.Study.shapeCount(window.Studio.result()) })); };
+    let r = await labels(() => click(page, '#alignReset'));
+    let s = await state(page);
+    const white = r.list.filter((p) => /^\d · \d{1,3}%$/.test(p.text)), dark = r.list.filter((p) => /^\d{1,3}%$/.test(p.text));
+    const want = fixesOf(s).map((f, i) => `${i + 1} · ${f.pct}%`);
+    t.check(same(white.map((p) => p.text), want), 'the example\'s white labels read 1 to 5 with each entry\'s own match, as the list numbers them', { labels: white.map((p) => p.text), list: want });
+    t.check(dark.length >= 3 && white.length + dark.length === r.list.length && r.list.length <= r.shapes && r.list.every((p) => pillInside(p, r.W, r.H)), 'the example\'s map: the zones\' percentages and the numbered labels, no more labels than shapes, every label inside the picture', { white: white.length, dark: dark.length, shapes: r.shapes, outside: r.list.filter((p) => !pillInside(p, r.W, r.H)) });
+    const over = pillsOverlapping(r.list);
+    if (!t.check(over.length === 0, 'the example\'s map: no label lies on another', over)) {
+      const o = over[0];
+      t.finding({ title: 'On the example\'s accuracy map a numbered white label is drawn over the end of a zone\'s percentage label', severity: 'low', steps: 'Open index.html#check (the built-in example, nothing moved). Look at the accuracy map (Accuracy by shape) around the lower middle, where the white label "5 · …%" sits beside a dark "…%" label; zoom the page or Save PNG and look at the file to see it plainly. Twice: the example is drawn the same each time.', expected: 'Each label stands clear of the others, as the README\'s "Zones too small to hold a label stay unlabelled" implies: a label goes where its zone has room for it.', actual: `The white label "${o.labels[1]}" overlaps the dark "${o.labels[0]}" by ${o.by[0]} × ${o.by[1]} px (boxes at ${o.at.slice(0, 2).join(', ')} and ${o.at.slice(2).join(', ')} on the 600 × 750 map) and covers its rounded end; ${over.length} overlap${over.length === 1 ? '' : 's'} in all.`, cause: 'js/app.js drawLabels (lines 2443-2450): a white label\'s font is room / 1.9 floored at minFont (line 2448), but the pill is about 5 × font wide ("5 · 81%" plus 0.9 × font of padding), so its half-width is about 2.5 × font against the 1.9 × font of room its zone has, and it spills about 8 px into the next zone; neither loop looks at the boxes already drawn (cmp.labelBoxes is kept for the measures only).' });
+    }
+    // Rotate and Size from the keyboard: their own steps (0.25°, 0.5%) and their outputs, Home and End
+    await openAlign(page);
+    await page.focus('#alignRot'); await page.keyboard.press('ArrowRight'); await busyHidden(page); await sleep(80);
+    s = await state(page);
+    const rot = { out: s.outs.alignRot, note: s.alignState };
+    await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await busyHidden(page); await sleep(80);
+    s = await state(page);
+    t.check(same(rot.out, ['0.25', '+0.25°']) && /^moved/.test(rot.note) && same(s.outs.alignRot, ['-0.25', '-0.25°']), 'Rotate from the keyboard: one arrow turns it 0.25° (+0.25°), two back read −0.25°, and the panel says moved', { one: rot, back: s.outs.alignRot });
+    await page.keyboard.press('Home'); await busyHidden(page); await sleep(80);
+    t.check(same((await state(page)).outs.alignRot, ['-15', '-15°']), 'Home takes Rotate to −15°', (await state(page)).outs.alignRot);
+    await click(page, '#alignReset'); await busyHidden(page);
+    await page.focus('#alignScale'); await page.keyboard.press('ArrowLeft'); await busyHidden(page); await sleep(80);
+    const sizeStep = (await state(page)).outs.alignScale;
+    await page.keyboard.press('Home'); await busyHidden(page); await sleep(80);
+    const home = await state(page);
+    await page.keyboard.press('End'); await busyHidden(page); await sleep(80);
+    const end = await state(page);
+    t.check(same(sizeStep, ['99.5', '99.5%']) && same(home.outs.alignScale, ['80', '80%']) && home.alignState === 'moved, 36% of picture left out' && same(end.outs.alignScale, ['125', '125%']) && end.alignState === 'moved', 'Size from the keyboard: an arrow is 0.5% (99.5%), Home 80% with 36% left out, End 125%', { step: sizeStep, home: [home.outs.alignScale, home.alignState], end: [end.outs.alignScale, end.alignState] });
+    await click(page, '#alignReset'); await busyHidden(page);
+    // Show reference on top half way: a blend of the two pictures, the score untouched
+    const before = await state(page);
+    const artPx = await px(page, 'cv-art', 300, 400), origPx = await px(page, 'cv-orig', 300, 400);
+    await setRange(page, 'onion', 50);
+    s = await state(page);
+    const half = await px(page, 'cv-art', 300, 400);
+    t.check(same(s.outs.onion, ['50', '50%']) && half.every((v, i) => Math.abs(v - (artPx[i] + origPx[i]) / 2) <= 2) && s.badge === before.badge, 'Show reference on top at 50%: Your painting shows half way between itself and the reference, and the score does not move', { out: s.outs.onion, shown: half, painting: artPx, reference: origPx, badge: [before.badge, s.badge] });
+    await setRange(page, 'onion', 0);
+    await clean(t, page, 'labels and keyboard steps');
+    // the photo made smaller (Size 80%): every label stays on the part still covered and inside the picture
+    r = await labels(() => setRange(page, 'alignScale', 80));
+    const [W, H] = [r.W, r.H], inCover = (p) => { const cx = p.x + p.w / 2, cy = p.y + p.h / 2; return cx >= 0.1 * W && cx <= 0.9 * W && cy >= 0.1 * H && cy <= 0.9 * H; };
+    t.check(r.list.length >= 5 && r.list.every((p) => pillInside(p, W, H) && inCover(p)), 'Size at 80%: every label is centred on the part of the picture still covered (none on the hatched border) and inside the picture', { labels: r.list.length, off: r.list.filter((p) => !pillInside(p, W, H) || !inCover(p)).map((p) => [p.text, Math.round(p.x), Math.round(p.y)]) });
+    const overHatch = r.list.filter((p) => p.x < 0.1 * W || p.x + p.w > 0.9 * W || p.y < 0.1 * H || p.y + p.h > 0.9 * H);
+    if (overHatch.length) t.note(`Size at 80%: ${overHatch.length} label${overHatch.length === 1 ? '' : 's'} (${overHatch.map((p) => p.text).join(', ')}) centred on the covered part reach over onto the hatched border.`);
+    await click(page, '#alignReset'); await busyHidden(page);
+    // a reference of slivers (noise): a few big shapes and many crumbs; the labels must not become a thicket
+    t.check(await afterResult(page, async () => page.setInputFiles('#file', await noiseImage(page, 'noise.png'))), 'a reference of noise loads with the drawer open');
+    t.check(await loadArt(page, await makeImage(page, { width: 600, height: 750, name: 'portrait.png' })), 'a painting loads against it');
+    await sleep(150);
+    r = await page.evaluate(() => ({ list: window.__pills.slice(), W: document.getElementById('cv-diff').width, H: document.getElementById('cv-diff').height, shapes: window.Study.shapeCount(window.Studio.result()) }));
+    const minFont = Math.round(Math.max(r.W, r.H) / 60);
+    t.check(r.list.length >= 1 && r.list.length <= r.shapes && r.list.every((p) => pillInside(p, r.W, r.H)) && pillsOverlapping(r.list).length === 0, 'a reference of slivers: a few labels, no more than shapes, every one inside the picture and none on another', { labels: r.list.map((p) => `${p.text}@${p.font}px`), shapes: r.shapes, overlapping: pillsOverlapping(r.list) });
+    const forced = r.list.filter((p) => /·/.test(p.text) && p.font === minFont);
+    if (forced.length) t.note(`On a reference of noise (${r.shapes} shapes) ${forced.length} of the numbered white labels are drawn at the smallest size (${minFont} px) on shapes of about 0.4% of the picture, too small to hold them: the numbered differences are always labelled, while "Zones too small to hold a label stay unlabelled" holds for the percentages only.`);
+    await clean(t, page, 'labels on a reference of slivers');
+    await page.context().close();
+  }
+
+  // ---- Save PNG on the two check panels inside another site's sandboxed frame: the save-by-hand dialog ----
+  {
+    const page = await openPage(site, { sandbox: {}, url: 'index.html#check' });
+    const fr = page.app;
+    const scored = await fr.waitForFunction(() => document.getElementById('drawer-check').open && /^Color \d+ · Value \d+$/.test(document.getElementById('checkState').textContent) && document.getElementById('busy').hidden, null, { timeout: 30000 }).then(() => true).catch(() => false);
+    for (const [id, name] of [['diff', 'sample-study-accuracy-map.png'], ['artblock', 'sample-study-my-painting-blocks.png']]) {
+      await fr.evaluate((id) => document.querySelector(`[data-save="${id}"]`).click(), id);
+      const shown = await fr.waitForFunction(() => { const d = document.getElementById('saveDialog'), i = document.getElementById('saveImg'); return d.open && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).then(() => true).catch(() => false);
+      const got = await fr.evaluate(() => { const i = document.getElementById('saveImg'); return { open: document.getElementById('saveDialog').open, name: document.getElementById('saveName').textContent, src: (i.getAttribute('src') || '').slice(0, 5), size: [i.naturalWidth, i.naturalHeight] }; });
+      t.check(scored && shown && got.open && got.name === name && got.src === 'blob:' && same(got.size, [600, 750]), `inside another site's sandboxed frame, Save PNG on ${id} opens the save dialog with ${name}, 600 × 750`, { scored, shown, ...got });
+      await fr.evaluate(() => document.getElementById('saveClose').click());
+      const closed = await fr.waitForFunction(() => !document.getElementById('saveDialog').open && !document.getElementById('saveImg').getAttribute('src'), null, { timeout: 3000 }).then(() => true).catch(() => false);
+      t.check(closed, `sandboxed: Close shuts the dialog of ${id} and lets its picture go`);
+    }
+    await clean(t, page, 'sandboxed save');
+    await page.context().close();
+  }
+
+  // ---- Forget with a painting in the drawer, and a second tab of the site open beside it ----
+  {
+    const a = await openPage(site);
+    await countResults(a);
+    await busyHidden(a);
+    const b = await newTab(site, a);
+    await b.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
+    await a.locator('#drawer-check > summary').scrollIntoViewIfNeeded(); await a.locator('#drawer-check > summary').click();
+    await a.waitForFunction(() => /^Color \d+ · Value \d+$/.test(document.getElementById('checkState').textContent) && document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
+    t.check(await loadArt(a, await makeImage(a, { width: 640, height: 800, type: 'image/jpeg', name: 'tab-a.jpg' })), 'tab A: the drawer opened from its summary, a painting loads');
+    let sa = await state(a);
+    await b.reload({ waitUntil: 'load' });
+    await b.waitForFunction(() => document.getElementById('busy').hidden && /^Color \d+ · Value \d+$/.test(document.getElementById('checkState').textContent), null, { timeout: 30000 }).catch(() => null);
+    const sb = await state(b);
+    t.check(sb.open && sb.section && sb.body && sb.label === EXAMPLE_LABEL && sb.badge === exampleBadge && sa.label === 'tab-a.jpg · 640 × 800 px', 'tab B reloaded: the drawer A opened is open there too, scoring the example (A\'s painting stays in A)', { b: { open: sb.open, label: sb.label.slice(0, 30), badge: sb.badge }, a: sa.label });
+    // Forget in A (two presses): both tabs start over, the drawer closed, the example back and not scored yet
+    await tab(a, 'help'); await click(a, '#forgetBtn'); await sleep(200);
+    await Promise.all([a.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), b.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), click(a, '#forgetBtn')]);
+    for (const p of [a, b]) await p.waitForFunction(() => window.Studio && document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
+    await sleep(400);
+    sa = await state(a); const sb2 = await state(b);
+    const keyA = await storageGet(a, 'portrait-value-studio.drawers');
+    for (const [name, x] of [['A', sa], ['B', sb2]]) t.check(!x.open && !x.section && x.badge === 'Not scored yet' && x.label === EXAMPLE_LABEL && same(x.tab, ['tab-study']), `after Forget in tab A, tab ${name} starts over: the drawer closed, the example back, its badge Not scored yet`, { open: x.open, section: x.section, badge: x.badge, label: x.label.slice(0, 30), tab: x.tab });
+    t.check(keyA === null, 'after Forget the open drawers are no longer remembered', keyA);
+    await clean(t, a, 'forget: tab A'); await clean(t, b, 'forget: tab B');
+    await a.context().close();
   }
 }
