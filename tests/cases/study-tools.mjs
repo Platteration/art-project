@@ -1383,11 +1383,19 @@ export default async function studyTools(t, site) {
     const r1 = await app(ph).evaluate(() => { const l = document.getElementById('loupe').getBoundingClientRect(); return { shown: !document.getElementById('loupe').hidden, l: l.left, r: l.right, t: l.top, b: l.bottom, w: innerWidth, h: innerHeight }; });
     t.check(r1.shown && r1.r <= r1.w - 8 && r1.b <= r1.h - 8 && r1.l >= 8 && r1.t >= 8, 'the loupe at a photo\'s bottom-right corner stays inside the phone window', r1);
     const cdp = await ph.context().newCDPSession(ph);
-    await app(ph).evaluate(() => { const c = document.getElementById('cv-orig'); window.scrollBy(0, c.getBoundingClientRect().top - 60); }); await sleep(200);
+    // the photo's top just below the tool row a phone pins to the top of the window (a touch on the row is not a
+    // touch on the photo), so the finger is near the photo's top with no room for the loupe above it
+    await app(ph).evaluate(() => {
+      const c = document.getElementById('cv-orig'), strip = document.querySelector('.toolstrip');
+      const pinned = strip ? Math.max(0, strip.getBoundingClientRect().bottom) : 0;
+      window.scrollBy(0, c.getBoundingClientRect().top - Math.max(60, pinned + 12));
+    }); await sleep(200);
     const pb = await box(ph);
     const fy = pb.y + pb.height * 0.02, fx = pb.x + pb.width * 0.5;
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx, y: fy }] }); await sleep(80);
-    const r2 = await app(ph).evaluate(() => { const l = document.getElementById('loupe').getBoundingClientRect(); return { shown: !document.getElementById('loupe').hidden, top: l.top, bottom: l.bottom, h: innerHeight }; });
+    const under = await app(ph).evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? (e.id || e.className || e.tagName) : null; }, [fx, fy]);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx, y: fy }] });
+    await app(ph).waitForFunction(() => !document.getElementById('loupe').hidden, null, { timeout: 1500 }).catch(() => null);
+    const r2 = { ...(await app(ph).evaluate(() => { const l = document.getElementById('loupe').getBoundingClientRect(); return { shown: !document.getElementById('loupe').hidden, top: l.top, bottom: l.bottom, h: innerHeight }; })), under };
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     t.check(r2.shown && r2.top >= fy && r2.top >= 8 && r2.bottom <= r2.h - 8, 'a touch near the top of the photo puts the loupe below the finger, inside the window', { ...r2, finger: fy });
     await clean(t, ph, 'loupe at the edges');
