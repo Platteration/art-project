@@ -159,7 +159,7 @@ How to use, under Learning tools, is a guide to the whole app, one part at a tim
 
 The switch at the top of the page chooses how much to show. **Simple**, the default, is for beginners and classrooms: the Study tab shows a Detail preset (Soft, Normal, Sharp) instead of the Simplify, Smoothing and Merge sliders, hides the value splits, gray values, the lighter-tones lean and My paints, and offers three palettes with a reason for each (Zorn, Three primaries and Rembrandt's earths), the best of them for the study marked Best match and used until you choose one. The scoring hints say what the numbers mean in plain words, with the formulas behind **Show the details**. **Advanced** shows every setting. The choice is remembered.
 
-The Studio keeps your work: the paper, the underdrawing, the ground and texture and which way the paper is turned are saved in the browser a moment after each change (in IndexedDB, as the pictures are too big for localStorage) and come back on the next visit. **Clear the paper** takes two taps, and Undo brings a cleared paper back.
+The Studio keeps your work: the paper, the underdrawing, the ground and texture and which way the paper is turned are saved in the browser a moment after each change (in IndexedDB, as the pictures are too big for localStorage) and come back on the next visit (a saved paper the page cannot read back, such as an SVG with a `foreignObject` left by some other tool, is dropped and the paper starts fresh; an unreadable underdrawing alone is dropped while the paper comes back; a line says which). **Clear the paper** takes two taps, and Undo brings a cleared paper back.
 
 ## Running it
 
@@ -173,7 +173,7 @@ That development server lists folders and serves the `.git` directory, so never 
 
 Opened from disk, the page works too, Pose and light and Figure study included: their frames talk to the page at any origin there, because a file has none, and at the page's own origin once served. Before a push, run `npm run check` (after `npm install` once, and `npx playwright install chromium`): `scripts/check-policy.mjs` fails if any copy of the Content Security Policy differs from the others, or if a page or script holds something the policy refuses (an inline style or script, a string turned into markup); then the tests in `tests/` drive the real site in headless Chromium with the policy enforced (see `tests/README.md`). The GitHub Actions workflow runs the same on every pull request, the smoke case against a `git archive` export as well.
 
-To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray.
+To load a photo, use **Load photo**, drag it onto the page, or paste it. Transparent parts of a PNG, such as the background of a cut-out portrait, are placed on mid gray. A picture the browser draws but will not let the page read back, such as an SVG that holds text or HTML laid out by the browser (a `foreignObject`, as Figma, draw.io and Inkscape export), is refused in words wherever it comes in (Load photo, a drop, a paste, Check my painting), and the photo on show, its label and its studies stay; save it as a PNG or JPG first.
 
 ## Publishing
 

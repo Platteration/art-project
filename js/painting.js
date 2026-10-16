@@ -488,7 +488,9 @@
       saving = false;
       if (saveAgain) { saveAgain = false; saveSoon(); }
     }
-    const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(img); }; img.onerror = () => resolve(null); img.src = url; });
+    // a picture the page cannot read back (an SVG with a foreignObject: the Studio itself only writes PNGs) would
+    // taint the paper it is drawn on, and every save and export after that would throw: it counts as unreadable
+    const loadBlob = (blob) => new Promise((resolve) => { const img = new Image(); const url = URL.createObjectURL(blob); img.onload = () => { URL.revokeObjectURL(url); resolve(Study.readable(img) ? img : null); }; img.onerror = () => resolve(null); img.src = url; });
     let restored = false, dbOk = false, restoreFailed = false, badRecord = false, sketchLost = false; // dbOk: the database answered, so saving works here
     async function restore() {
       if (!hasDb) return;

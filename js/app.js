@@ -398,12 +398,16 @@
       owed.prep = false;
       const reset = prepareReset;
       prepareReset = false;
-      state.prep = Study.prepare(state.source, +els.detail.value);
-      const { w, h, rgba } = state.prep;
-      paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
-      state.pixels.orig = rgba;
-      if (reset) autoSplit();
-      runSoon(0);
+      try {
+        state.prep = Study.prepare(state.source, +els.detail.value);
+        const { w, h, rgba } = state.prep;
+        paint(els.canvases.orig, new Uint8ClampedArray(rgba), w, h);
+        state.pixels.orig = rgba;
+        if (reset) autoSplit();
+        runSoon(0);
+      } finally {
+        settleBusy(); // a throw above is still reported, but "Updating…" does not stay up for good (work owed by runSoon keeps it)
+      }
     };
     if (immediate) { work(); return; }
     owed.prep = true;
@@ -501,6 +505,14 @@
       // that), and one under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
         refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
+        return;
+      }
+      // a picture the browser draws but will not let the page read back (an SVG with a foreignObject) would
+      // throw in every study: it is refused here, for every way in, and the photo on show stays as it is.
+      // Only an SVG can do that (a photo from the visitor's own files never does), so a JPG or PNG is not
+      // drawn an extra time here, before the Updating line can show
+      if ((!typed || /svg/i.test(file.type)) && !Study.readable(img)) {
+        refuse('That picture cannot be read here (an SVG that holds text or HTML laid out by the browser is one). Save it as a PNG or JPG first.', 6000);
         return;
       }
       const r = shrinkIfHuge(img, w, h);
