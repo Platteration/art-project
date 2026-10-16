@@ -69,6 +69,7 @@ async function runJob(t, j) {
   const t0 = Date.now();
   try { await j.fn(); } catch (e) { t.check(false, `${j.name}: the step ran to its end`, String(e && e.stack || e).slice(0, 400)); }
   timings.push(`${j.name} ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+  if (process.env.PVS_NOTES) process.stdout.write(`    STEP ${timings[timings.length - 1]}\n`);
 }
 async function reloadWith(page, script, arg) { await page.addInitScript(script, arg); await page.reload({ waitUntil: 'load' }); await sleep(500); }
 // the wait part of lib's tab() without the click: the Pose frame up (or its failure panel), Figure's pictures (or its note).

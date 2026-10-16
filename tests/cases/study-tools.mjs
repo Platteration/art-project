@@ -118,10 +118,13 @@ const hexOf = (px) => '#' + px.slice(0, 3).map((v) => v.toString(16).padStart(2,
 const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 // the nearest distance from a box to a segment, sampled along the segment (both in the same units)
 const distBoxSeg = (bx, [x1, y1, x2, y2]) => { let best = Infinity; for (let i = 0; i <= 60; i++) { const x = x1 + (x2 - x1) * i / 60, y = y1 + (y2 - y1) * i / 60; const dx = Math.max(bx.x - x, 0, x - (bx.x + bx.w)), dy = Math.max(bx.y - y, 0, y - (bx.y + bx.h)); best = Math.min(best, Math.hypot(dx, dy)); } return best; };
-// a saved PNG read in the page: pixels at points (fractions), white counts down columns (fraction x), the share of
-// white inside rectangles (fractions), and the picture's size
-async function pngRead(page, buf, { points = [], columns = [], rects = [] } = {}) {
-  return app(page).evaluate(async ([b64, pts, cols, rs]) => {
+// a saved PNG read in the page: pixels at points (fractions), white counts down columns (fraction x; the best of the
+// seven columns around it), the share of
+// white inside rectangles (fractions), the picture's size, and for label pills (rectangles, fractions) how well they
+// read: `ratio` is the contrast (WCAG) between what fills the rectangle (its median luminance) and its ink (the
+// extreme the other way: the 99th percentile on a dark pill, the 1st on a light one)
+async function pngRead(page, buf, { points = [], columns = [], rects = [], pills = [] } = {}) {
+  return app(page).evaluate(async ([b64, pts, cols, rs, pl]) => {
     const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))], { type: 'image/png' }));
     const img = new Image();
     img.src = url;
@@ -132,10 +135,21 @@ async function pngRead(page, buf, { points = [], columns = [], rects = [] } = {}
     const all = g.getImageData(0, 0, c.width, c.height).data;
     const at = (fx, fy) => { const x = Math.min(c.width - 1, Math.floor(fx * c.width)), y = Math.min(c.height - 1, Math.floor(fy * c.height)); const k = (y * c.width + x) * 4; return [all[k], all[k + 1], all[k + 2], all[k + 3]]; };
     const white = (k) => all[k] > 220 && all[k + 1] > 220 && all[k + 2] > 220;
-    const column = (fx) => { const x = Math.min(c.width - 1, Math.floor(fx * c.width)); let n = 0; for (let y = 0; y < c.height; y++) if (white((y * c.width + x) * 4)) n++; return n; };
+    // (a click lands on a whole css pixel, which is more than one picture pixel wide, so the best of the columns around it)
+    const column = (fx) => { let best = 0; for (let dx = -3; dx <= 3; dx++) { const x = Math.max(0, Math.min(c.width - 1, Math.floor(fx * c.width) + dx)); let n = 0; for (let y = 0; y < c.height; y++) if (white((y * c.width + x) * 4)) n++; best = Math.max(best, n); } return best; };
     const share = ([fx, fy, fw, fh]) => { const x0 = Math.floor(fx * c.width), y0 = Math.floor(fy * c.height), x1 = Math.min(c.width, Math.ceil((fx + fw) * c.width)), y1 = Math.min(c.height, Math.ceil((fy + fh) * c.height)); let n = 0, m = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { m++; if (white((y * c.width + x) * 4)) n++; } return m ? n / m : 0; };
-    return { size: [c.width, c.height], px: pts.map(([fx, fy]) => at(fx, fy)), cols: cols.map(column), rects: rs.map(share) };
-  }, [buf.toString('base64'), points, columns, rects]);
+    const lum = (r, gg, bb) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(gg) + 0.0722 * f(bb); };
+    const pill = ([fx, fy, fw, fh]) => {
+      const x0 = Math.floor(fx * c.width), y0 = Math.floor(fy * c.height), x1 = Math.min(c.width, Math.ceil((fx + fw) * c.width)), y1 = Math.min(c.height, Math.ceil((fy + fh) * c.height));
+      const L = [];
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const k = (y * c.width + x) * 4; L.push(lum(all[k], all[k + 1], all[k + 2])); }
+      L.sort((a, b) => a - b);
+      const q = (f) => L[Math.min(L.length - 1, Math.floor(f * L.length))];
+      const fill = q(0.5), ink = fill < 0.5 ? q(0.99) : q(0.01);
+      return { ratio: (Math.max(fill, ink) + 0.05) / (Math.min(fill, ink) + 0.05), fill, ink };
+    };
+    return { size: [c.width, c.height], px: pts.map(([fx, fy]) => at(fx, fy)), cols: cols.map(column), rects: rs.map(share), pills: pl.map(pill) };
+  }, [buf.toString('base64'), points, columns, rects, pills]);
 }
 
 export default async function studyTools(t, site) {
@@ -940,10 +954,20 @@ export default async function studyTools(t, site) {
     const hits = labels.filter((l) => boxes.some((b) => overlaps(l, b)));
     const dark = []; for (const b of boxes) dark.push(await darkInside(page, 'cv-diff', b));
     t.check(labels.length >= 4 && hits.length === 0 && dark.every((n) => n === 0), 'no measure label covers a percentage on the accuracy map, and no dark label ink lies inside one', { labels: labels.map((l) => l.text), hits: hits.length, darkPixels: dark });
-    // the PNG: each percentage still shows its white pill (a label over it would hide the score)
+    // the PNG draws the marks again at the map's own size, laid out afresh around the same percentages: the pills it
+    // draws on that picture are read off the recorder (a canvas with no id and no class), as the screen's were
+    await app(page).evaluate(() => { window.__pillRec[''] = []; });
     const dl = await download(page, () => click(page, '[data-save="diff"]'));
-    const png = dl ? await pngRead(page, dl.buf, { rects: boxes.map((b) => [b.x, b.y, b.w, b.h]) }) : null;
-    t.check(!!dl && !!png && JSON.stringify(png.size) === JSON.stringify([dims.w, dims.h]) && png.rects.every((f) => f >= 0.4), 'the saved accuracy map keeps every percentage legible (its pill mostly white)', { size: png && png.size, shares: png && png.rects.map((f) => +f.toFixed(2)) });
+    const savedLabels = (await pillsOf(page, '')).filter((p) => / U/.test(p.text || '')).map((p) => ({ x: p.x / dims.w, y: p.y / dims.h, w: p.w / dims.w, h: p.h / dims.h, text: p.text }));
+    const savedHits = savedLabels.filter((l) => boxes.some((b) => overlaps(l, b)));
+    t.check(!!dl && savedLabels.length >= 4 && savedHits.length === 0, 'in the saved accuracy map no measure label lies on a percentage either', { saved: !!dl, labels: savedLabels.map((l) => l.text), hits: savedHits.map((l) => l.text) });
+    // and the percentages stay legible in it. The plain ones are dark pills with white ink and the numbered ones white
+    // pills with dark ink (drawPill 'dark' and 'light'), so "legible" is the ink's contrast against its own pill
+    // (WCAG AA for text is 4.5 to 1), not how much white there is
+    const png = dl ? await pngRead(page, dl.buf, { pills: boxes.map((b) => [b.x, b.y, b.w, b.h]) }) : null;
+    t.check(!!png && JSON.stringify(png.size) === JSON.stringify([dims.w, dims.h]), 'the saved accuracy map is the size of the map on the page', { size: png && png.size, want: [dims.w, dims.h] });
+    const reads = png ? png.pills.map((p, i) => ({ text: boxes[i].text, ratio: +p.ratio.toFixed(1) })) : [];
+    t.check(reads.length === boxes.length && reads.every((r) => r.ratio >= 4.5), 'the saved accuracy map keeps every percentage legible: its ink against its pill is at least 4.5 to 1', reads);
     await clean(t, page, 'accuracy map labels');
     await page.context().close();
   }
@@ -1015,6 +1039,13 @@ export default async function studyTools(t, site) {
     const page = await openPage(site);
     await recordPills(page);
     await click(page, '[data-mode="advanced"]'); await sleep(100);
+    // the working size is a cap and never enlarges a photo (js/processing.js prepare), and the built-in sample is
+    // only 600 px on its long side: so a 1500 px photo is loaded, which every one of 600, 900 and 1400 can scale down
+    await loadPhoto(page, await makeImage(page, { width: 1500, height: 1200, name: 'wide.png' }), { settle: 300 });
+    const workW = () => app(page).evaluate(() => Studio.prep().w);
+    await click(page, '#drawer-values summary'); await sleep(100); // (Working size is inside this drawer)
+    const chooseSize = async (px) => { await page.selectOption('#detail', String(px)); await settled(page); };
+    t.check((await workW()) === 900, 'a 1500 px photo starts at the 900 px working size', await workW());
     await setTool(page, 'measure');
     const bo = await box(page);
     await dragPx(page, 0.08, 0.2, 100, 0);
@@ -1022,10 +1053,9 @@ export default async function studyTools(t, site) {
     expectText(t, r1.r.hex, '1.48 U ≈ 1½', 'at the first working size a 148 px measure reads 1.48 U ≈ 1½');
     await click(page, '#gridBtn'); await sleep(40);
     const hint1 = await text(page, '#toolHint');
-    await app(page).evaluate(() => { const e = document.getElementById('detail'); e.value = '1400'; e.dispatchEvent(new Event('change', { bubbles: true })); });
-    await settled(page);
-    const pw = await app(page).evaluate(() => Studio.prep().w);
-    t.check(pw >= 1000, 'the working size changes to 1400 px', pw);
+    await chooseSize(1400);
+    const pw = await workW();
+    t.check(pw === 1400, 'the working size changes to 1400 px', pw);
     const r2 = await dragPx(page, 0.03, 0.34, 148, 0, { during: () => loupe(page) });
     expectText(t, r2.r.hex, '1.48 U ≈ 1½', 'at 1400 px a 148 px drag still reads 1.48 U ≈ 1½');
     const labs = (await pillsOf(page, 'ov:cv-orig')).map((p) => p.text);
@@ -1033,10 +1063,11 @@ export default async function studyTools(t, site) {
     t.check(await overlayHas(page, 'cv-orig', 0.08 + 50 / bo.width, 0.2, UNIT_COLOR, 5) && (await overlayHas(page, 'cv-orig', 0.03 + 74 / bo.width, 0.26, MEASURE_COLOR, 5)), 'the earlier marks are still on their places at the new size');
     const hint2 = await text(page, '#toolHint');
     t.check(hint1 === hint2, 'the grid hint is the same at the new size', { hint1, hint2 });
-    await app(page).evaluate(() => { const e = document.getElementById('detail'); e.value = '600'; e.dispatchEvent(new Event('change', { bubbles: true })); });
-    await settled(page);
+    await chooseSize(600);
+    t.check((await workW()) === 600, 'the working size changes back to 600 px', await workW());
     const r3 = await dragPx(page, 0.03, 0.42, 148, 0, { during: () => loupe(page) });
     expectText(t, r3.r.hex, '1.48 U ≈ 1½', 'back at 600 px the same 148 px drag reads the same');
+    t.note('Working size is a cap, not a target: js/processing.js prepare scales a photo down to it and never up, so on the built-in 600 x 750 sample (or any photo under 1400 px) choosing 1400 px changes nothing. README.md only says the sizes are "600 / 900 / 1400 px on the long side"; the working-size block therefore loads a 1500 x 1200 photo.');
     await clean(t, page, 'working size with measures');
     await page.context().close();
   }
@@ -1085,8 +1116,9 @@ export default async function studyTools(t, site) {
     const cleared = await F.evaluate(() => ({ n: document.querySelectorAll('#swatches li').length, state: document.getElementById('swatchesState').textContent.trim(), toast: document.getElementById('toast').textContent.trim() }));
     t.check(cleared.n === 0 && cleared.state === 'None yet' && cleared.toast === 'Palette cleared', 'Clear (two taps) empties the list without storage', cleared);
     // the canvas length and a measure: the unit reads with its length, and no banner says storage could not be read
-    await F.locator('#canvasSize').click(); await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.type('10'); await page.keyboard.press('Tab'); await sleep(60);
+    // (the length field is in the Measure options row, which is hidden until Measure is on)
     await click(page, '[data-tool="measure"]'); await sleep(40);
+    await F.locator('#canvasSize').click(); await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.type('10'); await page.keyboard.press('Tab'); await sleep(60);
     const mb = await fb('#cv-orig');
     const ml = await fdrag('#cv-orig', [0.1, 0.3], [0.1 + 80 / mb.width, 0.3], floupe);
     t.check(ml && ml.hex === '1 U · 10 cm', 'a unit with a canvas length measures without storage', ml);
@@ -1145,8 +1177,8 @@ export default async function studyTools(t, site) {
     const ph = await openPage(site, { viewport: PHONE });
     await recordPills(ph);
     await loadPhoto(ph, await makeImage(ph, { width: 300, height: 200, name: 'small.png' }), { settle: 300 });
+    await setTool(ph, 'measure'); // (the length field is in the Measure options row, hidden until Measure is on)
     await setSize(ph, '10');
-    await setTool(ph, 'measure');
     await inView(ph, '#cv-orig');
     for (let k = 0; k < 9; k++) await dragPx(ph, 0.03 + (k % 3) * 0.3, 0.1 + k * 0.09, k === 0 ? 100 : 40 + k * 12, 0, { steps: 2 });
     const pl = await pillsOf(ph, 'ov:cv-orig');
@@ -1362,14 +1394,18 @@ export default async function studyTools(t, site) {
     await ph.context().close();
   }
 
-  // scrolling the page hides the loupe
+  // scrolling the page hides the loupe (at 1400 x 900 the page is exactly the window's height and has nothing to scroll,
+  // so this runs in the phone's window, where the page is more than twice as tall)
   {
-    const page = await openPage(site);
+    const page = await openPage(site, { viewport: PHONE });
+    await inView(page, '#cv-orig');
     await hover(page, 0.5, 0.5);
     const was = (await loupe(page)).shown;
-    await page.mouse.wheel(0, 200); await sleep(200);
-    const hidden = await app(page).evaluate(() => document.getElementById('loupe').hidden);
-    t.check(was && hidden, 'scrolling the page hides the loupe', { was, hidden });
+    const y0 = await app(page).evaluate(() => scrollY);
+    await page.mouse.wheel(0, 200);
+    const hidden = await app(page).waitForFunction(() => document.getElementById('loupe').hidden, null, { timeout: 3000 }).then(() => true).catch(() => false);
+    const y1 = await app(page).evaluate(() => scrollY);
+    t.check(was && y1 > y0 && hidden, 'scrolling the page hides the loupe', { was, scrolled: [y0, y1], hidden });
     await clean(t, page, 'loupe on scroll');
     await page.context().close();
   }
@@ -1449,8 +1485,8 @@ export default async function studyTools(t, site) {
   // a canvas length kept across a new photo, and a tool still on after a trip to How to use
   {
     const page = await openPage(site);
+    await setTool(page, 'measure'); // (the length field is in the Measure options row, hidden until Measure is on)
     await setSize(page, '10');
-    await setTool(page, 'measure');
     await loadPhoto(page, await makeImage(page, { width: 500, height: 600, name: 'kept.png' }), { settle: 300 });
     const size = await page.evaluate(() => document.getElementById('canvasSize').value);
     await dragPx(page, 0.1, 0.3, 100, 0);
@@ -1594,21 +1630,29 @@ export default async function studyTools(t, site) {
     const page = await openPage(site);
     await click(page, '#drawer-swatches summary'); await sleep(60);
     const other = await newTab(site, page);
+    const listed = (pg) => pg.evaluate(() => ({ n: document.querySelectorAll('#swatches li').length, state: document.getElementById('swatchesState').textContent.trim() }));
+    // the list in a tab reads n swatches (waited for: another tab's write arrives as an event)
+    const showsN = (pg, n) => pg.waitForFunction((n) => document.querySelectorAll('#swatches li').length === n, n, { timeout: 5000 }).then(() => true).catch(() => false);
     await other.evaluate(() => localStorage.setItem('portrait-value-studio.palette', '[{"r":1,"g":2,"b":3,"__proto__":{}}, null, "x"]'));
-    await sleep(300);
-    const a1 = await page.evaluate(() => ({ n: document.querySelectorAll('#swatches li').length, state: document.getElementById('swatchesState').textContent.trim() }));
+    await showsN(page, 1);
+    const a1 = await listed(page);
     t.check(a1.n === 1 && a1.state === '1 color', 'a junk palette written by another tab shows only its valid color, with no error', a1);
-    await other.evaluate(() => document.querySelector('#swatches .swatch-remove').click()); await sleep(300);
-    const a2 = await page.evaluate(() => document.querySelectorAll('#swatches li').length);
+    // (a tab does not hear its own write: opened again, the other tab reads the same junk and shows the valid color alone)
+    await other.reload({ waitUntil: 'load' }); await showsN(other, 1);
+    const o0 = await listed(other);
+    t.check(o0.n === 1 && o0.state === '1 color', 'a tab opened on that junk palette shows only its valid color too', o0);
+    await other.evaluate(() => document.querySelector('#swatches .swatch-remove').click()); await showsN(page, 0);
+    const a2 = (await listed(page)).n;
     t.check(a2 === 0, 'a remove in another tab empties this tab\'s list', a2);
-    await hover(page, 0.5, 0.42); await tapAt(page, 0.5, 0.42); await sleep(300);
-    const o1 = await other.evaluate(() => document.querySelectorAll('#swatches li').length);
+    await hover(page, 0.5, 0.42); await tapAt(page, 0.5, 0.42); await showsN(other, 1);
+    const o1 = (await listed(other)).n;
     t.check(o1 === 1, 'a pick here shows in the other tab, exactly one color', o1);
-    await other.evaluate(() => { document.getElementById('palClear').click(); }); await other.evaluate(() => document.getElementById('palClear').click()); await sleep(300);
-    const a3 = await page.evaluate(() => document.getElementById('swatchesState').textContent.trim());
+    await other.evaluate(() => { document.getElementById('palClear').click(); }); await other.evaluate(() => document.getElementById('palClear').click());
+    await page.waitForFunction(() => document.getElementById('swatchesState').textContent.trim() === 'None yet', null, { timeout: 5000 }).catch(() => null);
+    const a3 = (await listed(page)).state;
     t.check(a3 === 'None yet', 'a Clear (two taps) in another tab shows here as None yet', a3);
-    await hover(page, 0.3, 0.6); await tapAt(page, 0.3, 0.6); await sleep(300);
-    const both = { here: await page.evaluate(() => document.querySelectorAll('#swatches li').length), there: await other.evaluate(() => document.querySelectorAll('#swatches li').length) };
+    await hover(page, 0.3, 0.6); await tapAt(page, 0.3, 0.6); await showsN(other, 1);
+    const both = { here: (await listed(page)).n, there: (await listed(other)).n };
     t.check(both.here === 1 && both.there === 1, 'a pick after the clear shows in both tabs', both);
     await clean(t, other, 'other tab');
     await clean(t, page, 'cross-tab palette');
