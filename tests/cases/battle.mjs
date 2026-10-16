@@ -6,7 +6,11 @@
 // twice, the board pinned to one phone screen, thirty rounds closing in and never under the floor, every
 // saved key of a hostile shape, a palette that mixes nothing, and both widths. The game is read through
 // window.ValueBattle.state(), which battle.js exposes for tests, so a round can be answered right on purpose.
-import { openPage, clean, tab, click, text, visible, screenshot, storageGet, hscroll, axe, sleep, DESKTOP, PHONE } from '../lib.mjs';
+// The last part (gaps(), after the first pass) covers what the README promises that the first pass did not reach:
+// the windows between a phone and a wide screen, ties that read the same on the chips, every clock played to its
+// end, the star thresholds on their boundaries, a game left on another tab, a photo arriving mid-battle, two games
+// at once, palettes of one color, no game.js, the keyboard alone, and the odd corners.
+import { openPage, newTab, clean, violations, tab, click, text, visible, screenshot, storageGet, storageKeys, toastText, hscroll, axe, sleep, makeImage, textFile, loadPhoto, dropFiles, dropText, pasteFile, DESKTOP, PHONE } from '../lib.mjs';
 
 const K = { palette: 'portrait-value-studio.battlePalette', count: 'portrait-value-studio.battleCount', mode: 'portrait-value-studio.battleMode', best: 'portrait-value-studio.battleBest', mine: 'portrait-value-studio.myPaints' };
 const QUESTION = { darker: 'Which color is darker in value?', lighter: 'Which color is lighter in value?', cooler: 'Which color is cooler in tone?', warmer: 'Which color is warmer in tone?', darkest: 'Tap the color with the darkest value.', lightest: 'Tap the color with the lightest value.', order: 'Tap the colors in order, from darkest to lightest.' };
@@ -546,4 +550,697 @@ export default async function battle(t, site) {
     noError(t, page, 'markup and axe');
     await page.context().close();
   }
+  await gaps(t, site);
+}
+
+// ================================================================================================
+// The gaps: what the README promises and the first pass above did not reach.
+// ================================================================================================
+const want = (name) => { if (process.env.BATTLE_TIMES) { const now = Date.now(); console.log(`  [${((now - (globalThis.__last || now)) / 1000).toFixed(1)} s] before ${name}`); globalThis.__last = now; } return !process.env.BATTLE_ONLY || process.env.BATTLE_ONLY.split(',').includes(name); };
+// answers n rounds right inside the page, moving on with Next ▸ after each (after the last one too unless next is false):
+// the long runs the star thresholds need would otherwise cost a round trip per tap. Returns what each round held.
+const rightRounds = (page, n, { next = true } = {}) => page.evaluate(([n, next]) => {
+  const g = ValueBattle.state(), seen = [];
+  const tap = (i) => document.querySelector(`.vb-swatch[data-index="${i}"]`).click();
+  for (let k = 0; k < n; k++) {
+    if (g.over || g.answered) break;
+    const r = g.rounds[g.i];
+    seen.push({ i: g.i, key: r.q.key, kind: r.q.kind, n: r.n, answer: r.answer, L: r.colors.map((c) => c.L), warmth: r.colors.map((c) => c.warmth), chroma: r.colors.map((c) => c.chroma), band: r.band || null });
+    if (r.q.mode === 'pair') { if (r.answer === 'same') document.querySelector('.vb-choice[data-choice="same"]').click(); else tap(r.answer === 'left' ? 0 : 1); }
+    else if (r.q.mode === 'pick') tap(r.answer);
+    else r.answer.forEach(tap);
+    if (!g.answered) throw new Error('the page did not take round ' + (g.i + 1));
+    if (next || k < n - 1) document.getElementById('vb-next').click();
+  }
+  return seen;
+}, [n, next]);
+// the minute runs out now (the clock counts down from game.left, which battle-more also sets)
+const endClock = async (page) => {
+  await page.evaluate(() => { ValueBattle.state().left = 0.3; });
+  return page.waitForFunction(() => { const g = ValueBattle.state(); return g && g.over; }, null, { timeout: 5000 }).then(() => true).catch(() => false);
+};
+const waitShown = (page, sel, timeout = 5000) => page.waitForFunction((s) => { const e = document.querySelector(s); return !!e && !e.hidden && getComputedStyle(e).display !== 'none'; }, sel, { timeout }).then(() => true).catch(() => false);
+const quitTwice = async (page) => { await click(page, '#vb-quit'); await click(page, '#vb-quit'); await sleep(150); };
+// a page that is slow to load on a busy machine is not a defect: one more try before the case gives up
+const reopen = async (site, opts) => { try { return await openPage(site, opts); } catch (e) { if (!/Timeout/.test(String(e && e.message))) throw e; await sleep(2000); return openPage(site, opts); } };
+const reopenTab = async (site, page, opts) => { try { return await newTab(site, page, opts); } catch (e) { if (!/Timeout/.test(String(e && e.message))) throw e; await sleep(2000); return newTab(site, page, opts); } };
+const MINS = { 60: '1 minute', 120: '2 minutes', 300: '5 minutes' };
+
+export async function gaps(t, site) {
+  // ---- the windows between a phone and a wide screen: a tablet held upright, a half-screen window, a phone on its side ----
+  if (want('windows')) {
+    // where the pinned board is, whether it is the screen (or the tabs' width below them), and whether the controls can be tapped
+    const measure = () => {
+      const vw = innerWidth, vh = innerHeight, box = (e) => e.getBoundingClientRect();
+      const tabsEl = document.querySelector('.tabs'), tb = box(tabsEl), tabsShown = getComputedStyle(tabsEl).display !== 'none' && tb.width > 0 && tb.height > 0;
+      const p = box(document.getElementById('vb-play'));
+      const screenWide = p.left <= 1 && p.top <= 1 && Math.abs(p.width - vw) <= 2 && Math.abs(p.height - vh) <= 2;
+      const belowTabs = tabsShown && Math.abs(p.left - tb.left) <= 2 && Math.abs(p.width - tb.width) <= 2 && p.top >= tb.bottom - 1 && p.bottom <= vh + 1;
+      const targets = ['#vb-quit', '#vb-question', '.vb-choice', ...[...document.querySelectorAll('.vb-swatch')].map((_, i) => `.vb-swatch[data-index="${i}"]`)];
+      const dead = targets.filter((s) => { const e = document.querySelector(s), b = box(e); if (b.width <= 0 || b.height <= 0) return true; const x = b.left + b.width / 2, y = b.top + b.height / 2; if (x < 0 || y < 0 || x > vw || y > vh) return true; const h = document.elementFromPoint(x, y); return !(h && (h === e || e.contains(h))); });
+      return { vw, vh, play: [p.left, p.top, p.width, p.height].map(Math.round), board: Math.round(box(document.getElementById('vb-board')).width), fills: screenWide || belowTabs, tabsShown, dead, bodyOverflow: getComputedStyle(document.body).overflow };
+    };
+    const reach = (page) => page.evaluate(measure);
+    // the resize event reaches the page a frame after the window changes: wait for the board to be where it should be (or give up)
+    // (a string predicate would be refused by the page's policy, so this repeats the board's half of measure)
+    const refit = (page, timeout = 800) => page.waitForFunction(() => {
+      const vw = innerWidth, vh = innerHeight, tb = document.querySelector('.tabs').getBoundingClientRect(), p = document.getElementById('vb-play').getBoundingClientRect();
+      const shown = getComputedStyle(document.querySelector('.tabs')).display !== 'none' && tb.width > 0;
+      return (p.left <= 1 && p.top <= 1 && Math.abs(p.width - vw) <= 2 && Math.abs(p.height - vh) <= 2) || (shown && Math.abs(p.left - tb.left) <= 2 && Math.abs(p.width - tb.width) <= 2 && p.top >= tb.bottom - 1 && p.bottom <= vh + 1);
+    }, null, { timeout }).catch(() => null);
+    const broken = [];
+    const verdict = (r, label, what) => { const ok = t.check(r.fills && r.dead.length === 0 && r.board > 100, `${label}${what ? ` (${what})` : ''}: the pinned board fills its place and the ✕, the question, the colors and Both the same can all be tapped`, r); if (!ok) broken.push({ label, what, ...r }); return ok; };
+    // a visitor who opens the battle in a tablet held upright, and one who drags a desktop window narrower mid-round
+    {
+      const page = await reopen(site, { viewport: { width: 768, height: 1024 }, url: '#battle' });
+      await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page); await refit(page);
+      verdict(await reach(page), '768 × 1024 opened there', 'a tablet held upright');
+      await screenshot(page, 'battle-768x1024');
+      await clean(t, page, 'opened at 768 × 1024');
+      await page.context().close();
+    }
+    {
+      const page = await reopen(site, { url: '#battle' });
+      await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page); await refit(page);
+      verdict(await reach(page), '1400 × 900', 'the control');
+      for (const [width, height, what] of [[900, 600, 'a half-screen desktop window'], [844, 390, 'a phone on its side'], [912, 1368, 'a large tablet held upright'], [1024, 768, 'a tablet on its side'], [1400, 400, 'a short desktop window'], [1400, 900, 'back to the control']]) {
+        await page.setViewportSize({ width, height });
+        await refit(page);
+        verdict(await reach(page), `resized in a round to ${width} × ${height}`, what);
+      }
+      await clean(t, page, 'resized through the windows');
+      await page.context().close();
+    }
+    const band = broken.filter((b) => b.vw >= 760 && b.vw <= 999 && b.vh >= 560);
+    if (band.length) {
+      const b = band[0];
+      t.finding({ title: 'In a window 760 to 999 px wide (a tablet held upright, a half-screen desktop window) the battle\'s board is pinned at 0 px wide: the whole game, ✕ included, is invisible and untappable', severity: 'high',
+        steps: 'Open the site in a 768 × 1024 window (also 912 × 1368 or 900 × 600; 844 × 390 and 1024 × 768 are fine), Games → Value battle, Start the battle.',
+        expected: 'The README: while a game is on the board is pinned to the screen and fills one phone screen (the window below the sections on a wide screen); the colors, the question and ✕ are on it.',
+        actual: `${band.map((x) => x.label).join('; ')}: #vb-play is ${b.play.join(' × ').replace(/(\d+) × (\d+) × (\d+) × (\d+)/, 'left $1, top $2, $3 wide, $4 high')} and #vb-board ${b.board} px wide; the tabs and top bar are hidden and the page is scroll-locked (body overflow ${b.bodyOverflow}); document.elementFromPoint at ${b.dead.join(', ')} returns the page behind, and the board is clipped to its 20 px: nothing on it can be seen or tapped, and there is no way to quit but a reload (or resizing the window out of the band).`,
+        cause: 'js/painting.js:57-61: pin() takes its wide-screen branch from (min-width: 760px) and (min-height: 560px) and sizes the board to the .tabs rect, but styles.css:1042 hides .tabs under .battle-focus up to 999px, so the rect is 0 × 0 (left 0, width 0, top 14)' });
+    }
+  }
+
+  // ---- ties: "paired so the colors really are the same in what is asked" — and read the same on the chips ----
+  if (want('ties')) {
+    const page = await reopen(site, { url: '#battle' });
+    const sweep = await page.evaluate(() => {
+      const tLabel = (c) => (c.warmth > 0.35 ? 'warm' : c.warmth < -0.35 ? 'cool' : 'in between'), vLabel = (c) => `V ${(c.L / 10).toFixed(1)}`;
+      const out = { temp: 0, mismatch: 0, alike: 0, value: 0, notDifferent: 0, vMismatch: 0, byPalette: {}, example: null };
+      for (const pal of Paints.PRESETS) {
+        const pool = ValueBattle.mixPool(pal.paints, 220), mine = { temp: 0, mismatch: 0 };
+        for (const round of [0, 12, 24]) {
+          const lv = ValueBattle.levelAt(round);
+          for (const q of ValueBattle.QUESTIONS.filter((x) => x.mode === 'pair')) {
+            for (let k = 0; k < (q.kind === 'temp' ? 500 : 200); k++) {
+              const r = ValueBattle.makeRound(pool, lv, q, 2);
+              if (r.answer !== 'same') continue;
+              const [a, b] = r.colors;
+              if (q.kind === 'temp') {
+                out.temp++; mine.temp++;
+                if (tLabel(a) !== tLabel(b)) { out.mismatch++; mine.mismatch++; if (!out.example) out.example = { palette: pal.id, warmth: [+a.warmth.toFixed(3), +b.warmth.toFixed(3)], chips: [tLabel(a), tLabel(b)] }; }
+                if (!(Math.abs(a.L - b.L) > 8)) out.alike++;
+              } else {
+                out.value++;
+                if (!(Math.abs(a.warmth - b.warmth) > 0.4 || Math.abs(a.chroma - b.chroma) > 12)) out.notDifferent++;
+                if (vLabel(a) !== vLabel(b)) out.vMismatch++;
+              }
+            }
+          }
+          if (mine.mismatch) out.byPalette[pal.id] = `${mine.mismatch} of ${mine.temp}`;
+        }
+      }
+      return out;
+    });
+    t.check(sweep.temp > 500 && sweep.value > 500, 'ties: every palette deals ties for both kinds of question (the sweep is not empty)', { temp: sweep.temp, value: sweep.value });
+    if (!t.check(sweep.mismatch === 0, 'a temperature tie reads the same lean on both colors: the chips never say "in between" beside "cool" (or warm)', { ties: sweep.temp, mismatched: sweep.mismatch, by: sweep.byPalette, example: sweep.example })) {
+      t.finding({ title: 'A temperature tie can pair a color that reads "cool" (or "warm") with one that reads "in between": the line says "Both lean the same way" over chips that disagree', severity: 'medium',
+        steps: 'Three primaries, 2 colors, Streak or the clock. On a cooler or warmer round that is a tie (about one in thirty of the tie rounds), press a color instead of Both the same; read the pop-up. Or deal ValueBattle.makeRound(ValueBattle.mixPool(Paints.PRESETS.find((p) => p.id === "primary").paints, 220), ValueBattle.levelAt(12), ValueBattle.QUESTIONS[2], 2) a few hundred times and compare each tie\'s two colors with the page\'s own lean words (warmth above 0.35 is warm, below -0.35 cool, else in between).',
+        expected: 'The README: a tie is paired "so the colors really are the same in what is asked" (the same lean), and the line and the chips agree on it.',
+        actual: `${sweep.mismatch} of ${sweep.temp} temperature ties dealt across the ten palettes at rounds 1, 13 and 25 straddled a label boundary (${Object.entries(sweep.byPalette).map(([k, v]) => `${k} ${v}`).join(', ')}); for example ${sweep.example.palette}, warmth ${sweep.example.warmth.join(' and ')}: the chips say ${sweep.example.chips.join(' and ')} while the line names only the left color's lean ("Both lean the same way: ${sweep.example.chips[0]}").`,
+        cause: 'js/battle.js:132 accepts a tie on a warmth gap under 0.05 alone, however near the 0.35 line of tLabel (js/battle.js:282) the two colors sit; js/battle.js:349 then names tLabel of the left color for both' });
+    }
+    t.check(sweep.alike === 0, 'a temperature tie is the same lean but different values: the two colors are more than 8 L* apart', { alike: sweep.alike, ties: sweep.temp });
+    t.check(sweep.notDifferent === 0 && sweep.vMismatch === 0, 'a value tie is two different colors (warmth 0.4 or chroma 12 apart) that read the same V on the scale', { notDifferent: sweep.notDifferent, vMismatch: sweep.vMismatch, ties: sweep.value });
+    await clean(t, page, 'ties');
+    await page.context().close();
+  }
+
+  // ---- the 2 and 5 minute clocks played to their end, stars by right answers a minute on every boundary, Play again on the clock ----
+  if (want('clocks')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2' });
+    const plan = [['60', [0, 1, 2, 3, 4, 5, 7, 9, 10]], ['120', [5, 6, 10, 14, 19, 20]], ['300', [15, 24, 25, 35, 49, 50]]];
+    const rows = [], resets = [], bests = [];
+    for (const [mode, list] of plan) {
+      const secs = +mode;
+      await setup(page, { mode }); await start(page);
+      for (let k = 0; k < list.length; k++) {
+        const right = list[k];
+        await rightRounds(page, right);
+        const over = await endClock(page);
+        if (k === list.length - 1) await page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), right, { timeout: 4000 }).catch(() => null);
+        const u = await ui(page), s = await state(page);
+        rows.push({ mode, right, over, stars: u.stars, want: TIMED_STARS.filter((m) => right / (secs / 60) >= m).length, grade: u.grade, kicker: u.kicker, label: u.label, aria: u.starsLabel, pct: u.pct, popup: u.popup, newBest: u.newBest, missed: s.missed, count: s.right });
+        if (k < list.length - 1) {
+          await click(page, '#vb-again'); await waitRound(page, 0);
+          const v = await ui(page), sv = await state(page);
+          resets.push({ mode, time: v.time, round: v.round, score: v.score, left: sv.left, secs, popup: v.popup });
+        }
+      }
+      await click(page, '#vb-settings'); await sleep(100);
+      bests.push({ mode, line: (await ui(page)).best, want: `Your best here: ${Math.max(...list)} right in ${MINS[mode]}.` });
+    }
+    const wrongStars = rows.filter((r) => r.stars !== r.want || r.grade !== GRADES[r.want]).map((r) => `${r.mode}s ${r.right} right: ${r.stars} stars ${r.grade}, want ${r.want}`);
+    t.check(rows.length === 21 && wrongStars.length === 0, 'on the clock the stars go by right answers a minute: 1, 3, 5, 7 and 10 a minute and the step below each, for 1, 2 and 5 minutes', wrongStars.length ? wrongStars : rows.length);
+    const wrongWords = rows.filter((r) => !r.over || !r.popup || r.kicker !== "Time's up · none missed" || r.label !== 'right' || r.aria !== `${r.want} out of 5 stars, ${r.right} right` || r.count !== r.right || r.missed !== 0).map((r) => ({ mode: r.mode, right: r.right, kicker: r.kicker, label: r.label, aria: r.aria, count: r.count }));
+    t.check(wrongWords.length === 0, 'a clean game on the clock says "Time\'s up · none missed", counts the right answers and reads out its stars', wrongWords.slice(0, 3));
+    t.check(rows.every((r) => r.newBest === (r.right > 0)), 'New best! shows for each longer game on a clock (they are played in rising order) and not for a score of 0', rows.map((r) => `${r.mode}/${r.right}/${r.newBest}`).join(' '));
+    t.check(rows.filter((r, i) => (i === rows.length - 1 || rows[i + 1].mode !== r.mode)).every((r) => r.pct === String(r.right)), 'the time\'s-up score counts up to the right answers (last game of each clock)', rows.filter((r) => r.pct !== String(r.right)).map((r) => `${r.mode}/${r.right}/${r.pct}`));
+    const badReset = resets.filter((r) => r.popup || r.round !== '0 right' || r.score !== 'Round 1' || r.left !== r.secs || !(r.time === `${Math.floor(r.secs / 60)}:00` || r.time === `${Math.floor(r.secs / 60) - 1}:59`));
+    t.check(resets.length === 18 && badReset.length === 0, 'Play again after a time\'s up starts the clock from the full time: the full time, 0 right, Round 1, the pop-up gone', badReset.slice(0, 3));
+    t.check(bests.every((b) => b.line === b.want), 'the setup names the best on each clock: "N right in 1 minute", "in 2 minutes", "in 5 minutes"', bests);
+    await clean(t, page, 'the clocks played out');
+    await page.context().close();
+  }
+
+  // ---- stars by the streak on every boundary: 2, 5, 8, 12 and 20 in a row, and one short of each ----
+  if (want('stars')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+    const plan = [1, 2, 4, 5, 7, 8, 11, 12, 19, 20], rows = [];
+    for (let k = 0; k < plan.length; k++) {
+      const b = plan[k];
+      await rightRounds(page, b);
+      await answer(page, false); await click(page, '#vb-missNext'); await waitShown(page, '#vb-popup');
+      if (k === plan.length - 1) await page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), b, { timeout: 4000 }).catch(() => null);
+      const u = await ui(page);
+      rows.push({ b, stars: u.stars, want: STARS.filter((m) => b >= m).length, grade: u.grade, aria: u.starsLabel, kicker: u.kicker, label: u.label, pct: u.pct, newBest: u.newBest });
+      if (k < plan.length - 1) { await click(page, '#vb-again'); await waitRound(page, 0); }
+    }
+    const wrong = rows.filter((r) => r.stars !== r.want || r.grade !== GRADES[r.want] || r.aria !== `${r.want} out of 5 stars, ${r.b} in a row` || r.kicker !== `Streak over after round ${r.b + 1}` || r.label !== 'in a row').map((r) => `${r.b} in a row: ${r.stars} stars, ${r.grade}, "${r.aria}", "${r.kicker}"`);
+    t.check(rows.length === 10 && wrong.length === 0, 'stars by the streak on every boundary: one at 2, two at 5, three at 8, four at 12, five at 20, and not one short of any', wrong.length ? wrong : rows.map((r) => `${r.b}:${r.stars}`).join(' '));
+    t.check(rows.every((r) => r.newBest) && rows[rows.length - 1].pct === '20', 'each longer streak is a New best! and the last counts up to 20', rows.map((r) => `${r.b}/${r.newBest}`).join(' '));
+    await click(page, '#vb-settings'); await sleep(100);
+    t.check((await ui(page)).best === 'Your best streak here: 20 in a row.', 'the best streak after the ten games is the longest', (await ui(page)).best);
+    await clean(t, page, 'the star boundaries');
+    await page.context().close();
+  }
+
+  // ---- a clock game left on another tab: the minute can run out out of sight, and a miss left open keeps the clock paused ----
+  if (want('away')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: '60' }); await start(page);
+    await rightRounds(page, 3);
+    await tab(page, 'study');
+    const over = await endClock(page);
+    t.check(over, 'a minute that runs out while another tab is open still ends the game', over);
+    await tab(page, 'battle'); await sleep(200);
+    let u = await ui(page);
+    t.check(u.popup && u.pinned && u.focus && u.kicker === "Time's up · none missed" && u.stars === 2, 'back on the tab the score of the game that ended out of sight is up, pinned, with its kicker and stars', { popup: u.popup, pinned: u.pinned, kicker: u.kicker, stars: u.stars });
+    await page.waitForFunction(() => document.getElementById('vb-pct').textContent === '3', null, { timeout: 4000 }).catch(() => null);
+    t.check((await ui(page)).pct === '3' && JSON.parse(await storageGet(page, K.best) || '{}')['primary:2:60'] === 3, 'its score counts up to 3 and the best is kept', { pct: (await ui(page)).pct, best: await storageGet(page, K.best) });
+    t.note(`a game that ended on another tab: coming back, the focus is on "${u.active || 'the page'}" (Play again takes the focus only when the tab is shown)`);
+    // Play again, miss, and leave with the answer open: the clock stays paused, the answer is still there
+    await click(page, '#vb-again'); await waitRound(page, 0);
+    await answer(page, false);
+    const p0 = { time: (await ui(page)).time, left: (await state(page)).left };
+    await tab(page, 'study'); await sleep(1300);
+    const p1 = { time: await text(page, '#vb-time'), left: (await state(page)).left };
+    t.check(p0.time === p1.time && p0.left === p1.left, 'a miss left open while another tab is shown keeps the clock paused', { p0, p1 });
+    await tab(page, 'battle'); await sleep(200); u = await ui(page);
+    t.check(u.miss && u.pinned && u.missNext === 'Next ▸' && !u.popup, 'back on the tab the answer to the miss is still up, pinned, with Next ▸', { miss: u.miss, pinned: u.pinned, btn: u.missNext });
+    t.note(`a miss left open on another tab: coming back, the focus is on "${u.active || 'the page'}"`);
+    await click(page, '#vb-missNext'); await waitRound(page, 1);
+    await page.waitForFunction((was) => document.getElementById('vb-time').textContent !== was, p0.time, { timeout: 3000 }).catch(() => null);
+    t.check((await ui(page)).time !== p0.time && (await state(page)).i === 1, 'closing it deals the next round and the clock runs again', { time: (await ui(page)).time, was: p0.time });
+    await clean(t, page, 'a clock game left on another tab');
+    await page.context().close();
+  }
+
+  // ---- a new photo arriving mid-battle: dropped on the board, pasted, or chosen with Load photo in the top bar ----
+  if (want('photo')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+    await answer(page, true); await next(page);
+    const before = { s: await state(page), u: await ui(page) };
+    // the battle must come through each arrival with its round, its pin and its tab
+    const intact = async (label) => {
+      const s = await state(page), u = await ui(page);
+      const lay = await page.evaluate(() => ({ top: document.getElementById('vb-play').getBoundingClientRect().top, tabsBottom: document.querySelector('.tabs').getBoundingClientRect().bottom, tab: Studio.tab(), hint: !document.getElementById('dropHint').hidden, busy: !document.getElementById('busy').hidden, scrollY: scrollY }));
+      t.check(s && s.i === before.s.i && !s.answered && s.streak === before.s.streak && u.question === before.u.question && u.play && !u.setup && u.pinned && u.focus && lay.tab === 'battle' && !lay.hint && !lay.busy && lay.top >= lay.tabsBottom - 1 && lay.scrollY === 0, `${label}: the battle goes on: the same round and question, still pinned below the tabs, the tab not switched, no overlay left`, { i: s && s.i, streak: s && s.streak, question: u.question, pinned: u.pinned, lay });
+    };
+    const loaded = (size) => page.waitForFunction((z) => document.getElementById('source').textContent.includes(z), size, { timeout: 20000 }).then(() => true).catch(() => false);
+    const toastSaid = (re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 8000 }).then(() => true).catch(() => false);
+    await dropFiles(page, '#vb-board', [await makeImage(page, { width: 500, height: 700, name: 'dropped.png' })]);
+    t.check(await loaded('500 × 700'), 'a photo dropped on the pinned board is loaded', await text(page, '#source'));
+    t.check(await toastSaid(/The new photo is on Study the photo\./), 'the drop says where the photo went: "The new photo is on Study the photo."', await toastText(page));
+    await intact('after a drop on the board');
+    await pasteFile(page, await makeImage(page, { width: 600, height: 400, name: 'pasted.png' }));
+    t.check(await loaded('600 × 400'), 'a photo pasted during a battle is loaded', await text(page, '#source'));
+    await intact('after a paste');
+    t.check(await visible(page, 'label[for="file"]'), 'on a wide screen Load photo stays in the top bar during a battle');
+    await loadPhoto(page, await makeImage(page, { width: 420, height: 560, name: 'chosen.png' }), { settle: 300 });
+    t.check(await loaded('420 × 560'), 'a photo chosen with Load photo during a battle is loaded', await text(page, '#source'));
+    await intact('after Load photo');
+    await dropText(page, '#vb-board', 'just some words');
+    t.check(await toastSaid(/not a picture/), 'text dropped on the board gets the "not a picture" note', await toastText(page));
+    await dropFiles(page, '#vb-board', [textFile()]); await sleep(600);
+    await intact('after a text file dropped on the board');
+    t.check(await text(page, '#source') !== null && (await text(page, '#source')).includes('420 × 560'), 'a text file dropped on the board leaves the loaded photo alone', await text(page, '#source'));
+    await quitTwice(page); await tab(page, 'study');
+    t.check((await text(page, '#source')).includes('420 × 560'), 'on the Study tab the last photo is the one loaded', await text(page, '#source'));
+    await clean(t, page, 'a new photo mid-battle');
+    await page.context().close();
+  }
+
+  // ---- Paint by numbers and the battle both in progress, through the Games menu ----
+  if (want('both')) {
+    for (const [label, viewport] of [['desktop', DESKTOP], ['phone', PHONE]]) {
+      const page = await reopen(site, { viewport, url: '#game' });
+      await page.waitForFunction(() => !document.getElementById('gameStart').disabled, null, { timeout: 30000 }).catch(() => null);
+      await click(page, '#gameStart');
+      await page.waitForFunction(() => !document.getElementById('gamePlay').hidden && document.querySelectorAll('#gameNumbers .game-number').length > 0, null, { timeout: 30000 }).catch(() => null);
+      const seen = () => page.evaluate(() => {
+        const box = (e) => { const r = e.getBoundingClientRect(); return !e.hidden && r.width > 0 && r.height > 0; };
+        return { game: document.body.classList.contains('game-focus'), battle: document.body.classList.contains('battle-focus'), gamePlay: box(document.getElementById('gamePlay')), timer: document.getElementById('gameTimer').textContent, pinned: document.getElementById('vb-play').classList.contains('is-pinned'), battlePlay: box(document.getElementById('vb-play')), battleBoard: (() => { const r = document.getElementById('vb-play').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })(), tabs: getComputedStyle(document.querySelector('.tabs')).display, topbar: getComputedStyle(document.querySelector('.topbar')).display, overflow: getComputedStyle(document.body).overflow, vw: innerWidth, vh: innerHeight };
+      });
+      let c = await seen();
+      t.check(c.game && !c.battle && c.gamePlay, `${label}: Paint by numbers is on: its focus class set, its board shown`, c);
+      await tab(page, 'battle');
+      await setup(page, { palette: 'primary', count: '2', mode: 'streak' });
+      c = await seen();
+      t.check(!c.game && !c.battle && !c.battlePlay && c.tabs !== 'none' && c.topbar !== 'none', `${label}: on the battle's setup the other game's focus is off and the tabs and top bar are back`, c);
+      await start(page); await answer(page, true); await next(page);
+      const s1 = await state(page); c = await seen();
+      t.check(!c.game && c.battle && c.pinned && c.battlePlay && !c.gamePlay, `${label}: the battle is pinned and Paint by numbers is out of the way`, c);
+      if (label === 'phone') t.check(c.battleBoard[0] === 0 && c.battleBoard[1] === 0 && c.battleBoard[2] === c.vw && c.battleBoard[3] === c.vh && c.tabs === 'none', 'phone: the battle board fills the screen, the tabs away', c);
+      await tab(page, 'game'); await sleep(200); c = await seen();
+      t.check(c.game && !c.battle && !c.pinned && c.gamePlay && !c.battlePlay, `${label}: back on Paint by numbers its focus class is set and the battle is unpinned`, c);
+      const timer1 = c.timer;
+      t.check(await page.waitForFunction((was) => document.getElementById('gameTimer').textContent !== was, timer1, { timeout: 3000 }).then(() => true).catch(() => false), `${label}: Paint by numbers' clock is still counting`, { timer1 });
+      await tab(page, 'battle'); await sleep(200); c = await seen(); const s2 = await state(page);
+      t.check(c.battle && c.pinned && c.battlePlay && !c.game && s2 && s2.i === s1.i && !s2.answered, `${label}: back on the battle it is the same round, pinned, without Paint by numbers' focus`, { c, i: s2 && s2.i, was: s1.i });
+      if (label === 'desktop') t.check(c.battleBoard[1] >= 150 && c.overflow === 'hidden', 'desktop: the battle board sits below the sections again', c.battleBoard);
+      await quitTwice(page); c = await seen();
+      t.check(!c.battle && !c.game && !c.pinned && c.tabs !== 'none' && c.topbar !== 'none', `${label}: after quitting the battle neither focus class remains and the tabs are back`, c);
+      await tab(page, 'game'); await sleep(200);
+      c = await seen();
+      t.check(c.game && c.gamePlay, `${label}: Paint by numbers is still on when the battle is over`, c);
+      await click(page, '#gameQuit'); await click(page, '#gameQuit'); await sleep(200); c = await seen();
+      t.check(!c.game && !c.battle && c.tabs !== 'none' && c.topbar !== 'none', `${label}: after quitting both games no focus class remains`, c);
+      await clean(t, page, `${label}: both games`);
+      await page.context().close();
+    }
+  }
+
+  // ---- My paints of one color and white, of two with no white, of three: the questions the palette can really ask ----
+  if (want('mine')) {
+    const dealt = {};
+    for (const mine of [['TW', 'YO'], ['YO', 'IB'], ['TW', 'YO', 'IB']]) {
+      const tag = mine.join(' + ');
+      const page = await reopen(site, { storage: { [K.mine]: mine } });
+      await tab(page, 'battle'); await setup(page, { palette: 'mine', count: '2', mode: 'streak' }); await start(page);
+      const rounds = await rightRounds(page, 20), s = await state(page);
+      t.check(rounds.length === 20 && s.streak === 20 && page.log.pageerrors.length === 0, `My paints ${tag}: twenty rounds answered right, no error`, { played: rounds.length, streak: s.streak, errors: page.log.pageerrors.map((e) => e.split('\n')[0]) });
+      const temps = rounds.filter((r) => r.kind === 'temp'), values = rounds.filter((r) => r.kind === 'value');
+      const gapL = (r) => Math.abs(r.L[0] - r.L[1]);
+      t.check(rounds[0].key === 'darker' && (rounds[0].answer === 'same' || gapL(rounds[0]) >= 14 - 1e-6), `My paints ${tag}: the first value round (unless it is a tie) is the README's easy one, at least 14 L* apart`, { key: rounds[0].key, answer: rounds[0].answer, dL: +gapL(rounds[0]).toFixed(1) });
+      t.check(temps.length >= 8 && temps.every((r) => r.chroma.every((c) => c >= 10)), `My paints ${tag}: temperature questions are only ever asked of colors with a temperature`, temps.filter((r) => r.chroma.some((c) => c < 10)).map((r) => r.chroma));
+      const under = temps.filter((r) => r.answer !== 'same' && r.band && Math.abs(r.warmth[0] - r.warmth[1]) < r.band[0] - 1e-6).map((r) => ({ i: r.i, gap: +Math.abs(r.warmth[0] - r.warmth[1]).toFixed(3), lo: +r.band[0].toFixed(3) }));
+      t.check(under.length === 0, `My paints ${tag}: a temperature round that is not a tie is at least as far apart as its band asks`, under);
+      const alike = temps.filter((r) => r.answer === 'same' && !(gapL(r) > 8)).map((r) => ({ i: r.i, key: r.key, dL: +gapL(r).toFixed(1) }));
+      t.check(alike.length === 0, `My paints ${tag}: a temperature tie is the same lean but different values (more than 8 L* apart), never two look-alikes`, alike);
+      dealt[tag] = { temps: temps.length, ties: temps.filter((r) => r.answer === 'same').length, alike: alike.length, rounds: alike.map((r) => r.i + 1), dL: alike.map((r) => `round ${r.i + 1} ${r.key} ${r.dL}`) };
+      await clean(t, page, `My paints ${tag}`);
+      await page.context().close();
+    }
+    const d = dealt['YO + IB'];
+    if (d.alike) t.finding({ title: 'My paints of Yellow Ochre and Ivory Black (no white): from about round 12 every temperature question is a tie between two look-alike colors', severity: 'medium',
+      steps: 'Study → tick only Yellow Ochre and Ivory Black in Colors and paints (or save ["YO","IB"] under portrait-value-studio.myPaints). Value battle, palette My paints (2), 2 colors, Streak. Answer right through round 15 (Next ▸ each time) and read the third and fourth question of each four (cooler, warmer) from round 11 on.',
+      expected: 'The README: a tie is two colors "the same in what is asked (equal value but different colors, or the same lean but different values)"; the palette still asks real temperature questions at round 12 and later, or none at all.',
+      actual: `In 20 rounds ${d.temps} temperature questions came up and ${d.ties} were ties, ${d.alike} of them (rounds ${d.rounds.join(', ')}) between two colors under 8 L* apart (ΔL by round: ${d.dL.join('; ')}; a ΔL of 0 is the very same color twice, which the page can deal: pure Yellow Ochre, rgb 185,138,68, against itself). The pool's colorful mixes sit in two clusters (warmth about 0.60 to 0.65 and 0.95), so from round 12 on, when the band is 0.08 to 0.12 apart, no pair fits; the nearest-pair fallback then takes two look-alikes from one cluster, which is a tie on warmth alone. After that every cooler or warmer question is answered "Both the same" between swatches that cannot be told apart.`,
+      cause: 'js/battle.js:134-139: the nearest-pair fallback skips the "differs" test of js/battle.js:130 (and drops only the same object, so a duplicate mix of the same color qualifies), and js/battle.js:142 turns any pair under 0.05 apart into a tie' });
+  }
+
+  // ---- game.js missing: Paint by numbers leaves the menu, the battle must still play (silently, with no sound switch) ----
+  if (want('nogame')) {
+    const page = await reopen(site, { block: [site.base + 'js/game.js'], url: '#battle' });
+    await sleep(300);
+    await page.evaluate(() => { window.__vib = []; const v = navigator.vibrate; navigator.vibrate = function (p) { window.__vib.push(JSON.stringify(p)); return v ? v.apply(this, arguments) : true; }; });
+    const menu = await page.evaluate(() => ({ battle: !document.querySelector('[data-tab="battle"]').hidden, game: !document.querySelector('[data-tab="game"]').hidden, sound: typeof window.GameSound }));
+    t.check(menu.battle && !menu.game && menu.sound === 'undefined', 'game.js blocked: the battle stays on the menu, Paint by numbers goes, and there is no GameSound', menu);
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+    let u = await ui(page);
+    t.check(u.play && u.pinned && u.round === 'Streak 0' && u.score === 'Round 1' && u.swatches === 2, 'game.js blocked: the board starts as usual', { play: u.play, round: u.round, score: u.score });
+    await answer(page, true, 'mouse'); u = await ui(page);
+    t.check(u.answer.startsWith('Right!') && u.round === 'Streak 1' && u.next, 'game.js blocked: a tap on the right color answers it', { answer: u.answer, round: u.round });
+    t.check((await page.evaluate(() => window.__vib)).includes('[18,40,28]'), 'game.js blocked: a right answer still vibrates where the phone can', await page.evaluate(() => window.__vib));
+    await page.keyboard.press('Enter'); await waitRound(page, 1);
+    await answer(page, true, 'key'); await next(page);
+    t.check((await state(page)).streak === 2 && (await state(page)).i === 2, 'game.js blocked: a key answers and Enter moves on one round', await state(page));
+    await answer(page, false); u = await ui(page);
+    t.check(u.miss && /^(The (left|right) one is|Both)/.test(u.missWhy) && u.chips.length === 2, 'game.js blocked: a miss pops up the answer with the colors in order', { miss: u.miss, why: u.missWhy });
+    await click(page, '#vb-missNext'); await sleep(200); u = await ui(page);
+    t.check(u.popup && u.kicker === 'Streak over after round 3' && u.pct !== '' && u.active === 'vb-again', 'game.js blocked: the score pops up with Play again focused', { popup: u.popup, kicker: u.kicker, active: u.active });
+    await click(page, '#vb-again'); await waitRound(page, 0); u = await ui(page);
+    t.check(!u.popup && u.score === 'Round 1', 'game.js blocked: Play again starts over', { popup: u.popup, score: u.score });
+    await quitTwice(page); u = await ui(page);
+    t.check(u.setup && !u.focus, 'game.js blocked: ✕ twice leaves the battle', { setup: u.setup, focus: u.focus });
+    t.check(page.log.pageerrors.length === 0 && (await violations(page)).length === 0, 'game.js blocked: no page error and no policy violation through a whole game', { errors: page.log.pageerrors.map((e) => e.split('\n')[0]), csp: await violations(page) });
+    await page.context().close();
+  }
+
+  // ---- the keyboard alone: Start, Tab to a color, Space and Enter on it, Enter on Next ▸; the colors' names ----
+  if (want('keyboard')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' });
+    await page.focus('#vb-start'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => { const g = window.ValueBattle && ValueBattle.state(); return g && g.i === 0 && !document.getElementById('vb-play').hidden; }, null, { timeout: 3000 }).catch(() => null);
+    t.check((await ui(page)).play, 'keyboard: Enter on Start the battle starts it');
+    const where = () => page.evaluate(() => { const a = document.activeElement; return a ? (a.id ? '#' + a.id : a.tagName + '.' + String(a.className).split(' ')[0]) : null; });
+    t.note(`keyboard: with the focused Start button gone, the focus is on ${await where()}`);
+    // Tab to the right answer of each of three rounds (the swatch, or Both the same on a tie) and take it with Space, then Enter
+    const trail = [];
+    for (let round = 0; round < 3; round++) {
+      const s = await state(page);
+      const target = s.answer === 'same' ? '.vb-choice' : `.vb-swatch[data-index="${s.answer === 'left' ? 0 : 1}"]`;
+      let steps = 0, there = false;
+      for (; steps < 40 && !there; steps++) { await page.keyboard.press('Tab'); there = await page.evaluate((sel) => !!document.activeElement && document.activeElement.matches(sel), target); }
+      trail.push({ round: round + 1, target: s.answer === 'same' ? 'Both the same' : s.answer, tabs: steps, there });
+      if (!there) break;
+      await page.keyboard.press(round === 1 ? 'Enter' : 'Space');   // round 2 takes Enter, the others Space
+      await waitAnswered(page);
+      const a = await state(page);
+      t.check(a.answered && a.right + a.missed === round + 1 && a.streak === round + 1 && a.i === round, `keyboard: ${round === 1 ? 'Enter' : 'Space'} on the focused ${s.answer === 'same' ? 'Both the same' : 'color'} answers once`, { answered: a.answered, streak: a.streak, right: a.right, missed: a.missed, i: a.i });
+      await page.keyboard.press('Enter'); await waitRound(page, round + 1);
+      const b = await state(page);
+      t.check(b.i === round + 1 && !b.answered, 'keyboard: Enter on Next ▸ moves exactly one round', { i: b.i, answered: b.answered });
+    }
+    t.check(trail.length === 3 && trail.every((x) => x.there), 'keyboard: Tab reaches the right color (or Both the same) in each of three rounds', trail);
+    t.note(`keyboard: presses of Tab from the page's start to the right answer, by round: ${trail.map((x) => x.tabs).join(', ')}`);
+    // the colors' names in a pair round: a screen reader hears the buttons and the line, and the line says left and right
+    const names = await page.evaluate(() => [...document.querySelectorAll('.vb-swatch')].map((b) => b.getAttribute('aria-label')));
+    if (!t.check(names.length === 2 && names.every((n) => /left|right/i.test(n)), 'in a two-color round the colors\' accessible names match the words the answer uses: the left one and the right one', names)) t.finding({ title: 'In a two-color round the swatches are named "Color A" and "Color B" while the answer line and the pop-up say "the left one" and "the right one"', severity: 'low',
+      steps: 'Value battle, 2 colors, Start. Read the two color buttons\' accessible names (or open them in a screen reader), answer a round, then read "Right! The left one is darker: V 3.0 against V 4.0." and the Left/Right chips of a miss.',
+      expected: 'The names a screen-reader visitor can tap by match the words the page answers with (Left and Right for a pair; the letters shown on the swatches for three or four).',
+      actual: `The buttons are named ${names.map((n) => `"${n}"`).join(' and ')}; the letters are hidden in a two-color round (styles.css .vb-swatches[data-count="2"] .vb-letter), so nothing says which is the left one.`,
+      cause: 'js/battle.js:295 names every swatch "Color " + its letter, including a pair\'s, while js/battle.js:341-350 and :400 say left and right' });
+    await clean(t, page, 'keyboard');
+    await page.context().close();
+  }
+
+  // ---- keys that must do nothing: digits in a pair, arrows in a pick, and arrows meant for the Games menu or the mode switch ----
+  if (want('keys')) {
+    const open = async (count) => {
+      const page = await reopen(site, { url: '#battle' });
+      await setup(page, { palette: 'primary', count, mode: 'streak' }); await start(page);
+      return page;
+    };
+    let page = await open('2');
+    await page.keyboard.press('1'); await page.keyboard.press('2'); await sleep(150);
+    t.check(!(await state(page)).answered, 'the digits 1 and 2 do nothing in a two-color round', await state(page));
+    await page.context().close();
+    page = await open('3');
+    for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowDown', '=']) await page.keyboard.press(k);
+    await sleep(150);
+    let s = await state(page);
+    t.check(!s.answered && (await ui(page)).badges.every((b) => !b), 'ArrowLeft, ArrowRight, ArrowDown and = do nothing in a three-color round', { answered: s.answered });
+    await page.context().close();
+    // a keyboard visitor who opens the Games menu with ArrowDown, or moves along the Simple/Advanced switch with the arrows
+    page = await open('2');
+    await page.focus('#tabGamesBtn'); await page.keyboard.press('ArrowDown'); await sleep(200);
+    s = await state(page); let u = await ui(page);
+    const menuOpen = await page.evaluate(() => document.getElementById('tabGamesBtn').getAttribute('aria-expanded') === 'true');
+    const keyCase = [];
+    if (!t.check(!s.answered && menuOpen, 'ArrowDown on the focused Games menu button opens the menu and leaves the round alone', { answered: s.answered, missed: s.missed, miss: u.miss, menuOpen })) keyCase.push({ key: 'ArrowDown on the Games menu button', answered: s.answered, missed: s.missed, menuOpen });
+    await page.context().close();
+    page = await open('2');
+    await page.focus('[data-mode="advanced"]'); await page.keyboard.press('ArrowLeft'); await sleep(200);
+    s = await state(page);
+    if (!t.check(!s.answered, 'ArrowLeft on the focused Simple/Advanced switch leaves the round alone', { answered: s.answered, missed: s.missed })) keyCase.push({ key: 'ArrowLeft on the Advanced button', answered: s.answered, missed: s.missed });
+    if (keyCase.length) t.finding({ title: 'The battle answers the round from any arrow key or = pressed anywhere: ArrowDown on the Games menu button answers "Both the same" (a miss that ends the streak) instead of opening the menu', severity: 'medium',
+      steps: 'Value battle, 2 colors, Streak, Start. With the keyboard, Tab to the Games section button in the tab bar (or the Simple/Advanced switch in the top bar) and press ArrowDown (or ArrowLeft/ArrowRight).',
+      expected: 'The keys answer the round only when the board has the focus; ArrowDown on the Games button opens its menu, the arrows on the mode switch do nothing to the game.',
+      actual: keyCase.map((c) => `${c.key}: round answered ${c.answered}, ${c.missed} missed${c.menuOpen === false ? ', the menu did not open' : ''}`).join('; ') + '. A keyboard visitor leaving the battle by the menu loses the streak.',
+      cause: 'js/battle.js:423-431: the document keydown handler answers by key whatever has the focus (no check of e.target or e.defaultPrevented); the Games button\'s own ArrowDown handler (js/app.js:2274) calls preventDefault but not stopPropagation' });
+    await page.context().close();
+  }
+
+  // ---- axe on the phone, and in the dark: the setup, a round, a right answer and both pop-ups ----
+  if (want('axe')) {
+    const noted = new Set();
+    const states = async (page, label, serious) => {
+      const run = async (what) => { for (const v of await axe(page)) { if (v.impact === 'critical' || v.impact === 'serious') serious.push(`${label}, ${what}: ${v.id} ${v.help} e.g. ${v.nodes[0]}`); else if (!noted.has(label + v.id)) { noted.add(label + v.id); t.note(`axe battle ${label}: ${v.id} (${v.impact}) ${v.help} ×${v.count} e.g. ${v.nodes[0]}`); } } };
+      await run('the setup');
+      await setup(page, { palette: 'primary', count: '3', mode: 'streak' }); await start(page); await run('a round');
+      await answer(page, true); await run('a right answer'); await next(page); await answer(page, false); await run('the miss pop-up');
+      await click(page, '#vb-missNext'); await page.waitForFunction(() => document.getElementById('vb-pct').textContent === '1', null, { timeout: 3000 }).catch(() => null); await run('the score pop-up');
+    };
+    for (const [label, opts] of [['phone', { viewport: PHONE }], ['dark, desktop', { dark: true }]]) {
+      const page = await reopen(site, { ...opts, bypassCSP: true, url: '#battle' });
+      const serious = [];
+      await states(page, label, serious);
+      if (opts.dark) await screenshot(page, 'battle-dark-desktop');
+      t.check(serious.length === 0, `axe (${label}): nothing serious or critical on the battle in any state`, serious);
+      noError(t, page, `axe, ${label}`);
+      await page.context().close();
+    }
+  }
+
+  // ---- reduced motion: the score shown at once, the flourish still marked ----
+  if (want('motion')) {
+    const page = await reopen(site, { url: '#battle', reducedMotion: true });
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+    await rightRounds(page, 4); await answer(page, true);
+    let u = await ui(page);
+    t.check(u.milestone && u.round === 'Streak 5', 'reduced motion: the fifth right answer still marks the counter (is-milestone) and counts 5', { milestone: u.milestone, round: u.round });
+    await next(page); await answer(page, false);
+    const now = await page.evaluate(() => { document.getElementById('vb-missNext').click(); const r = document.getElementById('vb-pct').textContent; return { pct: r, popup: !document.getElementById('vb-popup').hidden, anim: getComputedStyle(document.getElementById('vb-round')).animationName }; });
+    t.check(now.pct === '5' && now.popup, 'reduced motion: the score pops up showing 5 at once, with no count-up', now);
+    u = await ui(page);
+    t.check(u.stars === 2 && u.grade === GRADES[2] && u.newBest && u.kicker === 'Streak over after round 6', 'reduced motion: two stars, Getting there, New best! all there', { stars: u.stars, grade: u.grade, newBest: u.newBest, kicker: u.kicker });
+    await clean(t, page, 'reduced motion');
+    await page.context().close();
+  }
+
+  // ---- a frame with no storage at all, and storage that refuses writes mid-game ----
+  if (want('storage')) {
+    {
+      const outer = await reopen(site, { sandbox: {}, url: '#battle' });
+      const fr = outer.app;
+      // the helpers above take a page: this one answers them from inside the embedded frame
+      const fp = Object.create(outer);
+      Object.assign(fp, { app: fr, evaluate: (...a) => fr.evaluate(...a), waitForFunction: (...a) => fr.waitForFunction(...a), selectOption: (...a) => fr.selectOption(...a), locator: (...a) => fr.locator(...a) });
+      await setup(fp, { palette: 'primary', count: '2', mode: 'streak' }); await start(fp);
+      await rightRounds(fp, 3);
+      await answer(fp, false); await click(fp, '#vb-missNext'); await sleep(300);
+      let u = await ui(fp);
+      t.check(u.popup && u.kicker === 'Streak over after round 4' && u.stars === 1, 'in a sandboxed frame (no storage) a whole streak plays through to the score pop-up', { popup: u.popup, kicker: u.kicker, stars: u.stars });
+      await click(fp, '#vb-settings'); await sleep(150); u = await ui(fp);
+      t.check(u.setup && !u.play, 'in a sandboxed frame Change settings returns to the setup', { setup: u.setup });
+      t.note(`in a sandboxed frame the best cannot be kept: after a streak of 3 (shown as New best!) the setup says "${u.best}" and nothing tells the visitor it was not saved`);
+      await clean(t, outer, 'sandboxed frame');
+      await outer.context().close();
+    }
+    {
+      const page = await reopen(site, { url: '#battle' });
+      await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+      await rightRounds(page, 2);
+      await page.evaluate(() => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; });
+      await answer(page, false); await click(page, '#vb-missNext'); await sleep(300);
+      let u = await ui(page);
+      t.check(u.popup && u.kicker === 'Streak over after round 3' && u.newBest && page.log.pageerrors.length === 0, 'storage that refuses writes: the streak still ends with its score pop-up, no page error', { popup: u.popup, newBest: u.newBest, errors: page.log.pageerrors.map((e) => e.split('\n')[0]) });
+      await click(page, '#vb-again'); await waitRound(page, 0); await rightRounds(page, 1);
+      t.check((await state(page)).streak === 1 && page.log.pageerrors.length === 0, 'storage that refuses writes: Play again plays on', await state(page));
+      await click(page, '#vb-quit'); await click(page, '#vb-quit'); await sleep(150); u = await ui(page);
+      await setup(page, { count: '3' });
+      t.check(u.setup && page.log.pageerrors.length === 0, 'storage that refuses writes: choosing another count and quitting raise no error', { setup: u.setup });
+      t.note(`storage that refuses writes: after a streak of 2 the setup says "${(await ui(page)).best}" (the page does not say the best could not be kept)`);
+      await clean(t, page, 'storage that refuses writes');
+      await page.context().close();
+    }
+  }
+
+  // ---- two tabs: a best made in one is on the other's setup; Forget in one reaches the other mid-battle ----
+  if (want('tabs')) {
+    const a = await reopen(site, { url: '#battle' });
+    const b = await reopenTab(site, a, { url: '#battle' });
+    await setup(a, { palette: 'primary', count: '2', mode: 'streak' });
+    await setup(b, { palette: 'primary', count: '2', mode: 'streak' });
+    t.check((await ui(b)).best === 'No streak yet for these settings.', 'two tabs: the second tab\'s setup starts with no streak yet', (await ui(b)).best);
+    await start(a); await rightRounds(a, 4); await answer(a, false); await click(a, '#vb-missNext'); await sleep(200);
+    t.check(JSON.parse(await storageGet(a, K.best) || '{}')['primary:2:streak'] === 4, 'two tabs: a streak of 4 in the first tab is kept', await storageGet(a, K.best));
+    await tab(b, 'study'); await tab(b, 'battle');
+    t.check((await ui(b)).best === 'Your best streak here: 4 in a row.', 'two tabs: the second tab\'s setup shows the first tab\'s best once its tab is shown again', (await ui(b)).best);
+    // both finish, on different settings, one after the other: each keeps its own best
+    await click(a, '#vb-settings'); await sleep(100);   // (the setup is read back from the one stored choice: count again)
+    await setup(a, { count: '3' }); await start(a); await rightRounds(a, 2); await answer(a, false); await click(a, '#vb-missNext'); await sleep(300);
+    await setup(b, { count: '4' }); await start(b); await rightRounds(b, 2); await answer(b, false); await click(b, '#vb-missNext'); await sleep(300);
+    const rec = JSON.parse(await storageGet(a, K.best) || '{}');
+    t.check(rec['primary:2:streak'] === 4 && rec['primary:3:streak'] === 2 && rec['primary:4:streak'] === 2, 'two tabs: games finished one after the other each keep their own best, and the earlier one stands', rec);
+    // Forget in A while B is mid-battle
+    await click(b, '#vb-settings'); await start(b); await b.evaluate(() => { window.__still = 1; });
+    await tab(a, 'help'); await click(a, '#forgetBtn'); await sleep(300);
+    await Promise.all([
+      a.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null),
+      b.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => 'B did not reload'),
+      click(a, '#forgetBtn'),
+    ]);
+    await sleep(800);
+    t.check((await b.evaluate(() => window.__still)) === undefined, 'two tabs: Forget in one tab reloaded the other, mid-battle', b.url());
+    t.check(!(await state(b)) && (await storageKeys(a)).length === 0, 'two tabs: the other tab\'s battle is gone and no key remains', { game: !!(await state(b)), keys: await storageKeys(a) });
+    await clean(t, a, 'two tabs: first'); await clean(t, b, 'two tabs: second');
+    await a.context().close();
+  }
+
+  // ---- the best is filed under palette:count:mode: changing the palette on the setup changes the line ----
+  if (want('palette')) {
+    const page = await reopen(site, { url: '#battle', storage: { [K.best]: { 'zorn:2:streak': 7, 'primary:2:streak': 12, 'primary:2:120': 9 } } });
+    await setup(page, { palette: 'zorn', count: '2', mode: 'streak' });
+    const seen = [];
+    for (const [palette, count, mode] of [['zorn', '2', 'streak'], ['primary', '2', 'streak'], ['monet', '2', 'streak'], ['primary', '2', '120'], ['primary', '3', '120'], ['zorn', '2', 'streak']]) {
+      await setup(page, { palette, count, mode }); seen.push((await ui(page)).best);
+    }
+    t.check(JSON.stringify(seen) === JSON.stringify(['Your best streak here: 7 in a row.', 'Your best streak here: 12 in a row.', 'No streak yet for these settings.', 'Your best here: 9 right in 2 minutes.', 'No score yet for these settings.', 'Your best streak here: 7 in a row.']), 'the best line follows the palette, the count and the mode on the setup (a best filed under one never shows for another)', seen);
+    t.check((await storageGet(page, K.palette)) === '"zorn"', 'the last palette chosen is the one saved', await storageGet(page, K.palette));
+    await clean(t, page, 'bests by palette');
+    await page.context().close();
+  }
+
+  // ---- a miss in a four-color round: red beside gold, all four chips in order; an order taken by tap with its badges, and the round started over ----
+  if (want('picks')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '4', mode: 'streak' }); await start(page);
+    const s = await state(page), r = await answer(page, false); let u = await ui(page);
+    const wrongIdx = (r.answer + 1) % 4;
+    t.check(r.key === 'darkest' && u.miss && u.rings[r.answer].includes('A') && u.rings[wrongIdx].includes('W') && u.rings.filter((x) => x.includes('A')).length === 1 && u.rings.filter((x) => x.includes('W')).length === 1, 'four colors: a wrong pick is ringed red beside the darkest in gold', { rings: u.rings, answer: r.answer, picked: wrongIdx });
+    const vals = u.chips.map((c) => +/V (\d\.\d)/.exec(c)[1]);
+    t.check(u.chips.length === 4 && u.chips.every((c) => /^[ABCD]V \d\.\d$/.test(c)) && nondecreasing(vals) && /^[ABCD] is the darkest\. The values: A V/.test(u.missWhy) && new Set(u.chips.map((c) => c[0])).size === 4, 'four colors: the miss lays all four out darkest to lightest with their letters and values', { chips: u.chips, why: u.missWhy });
+    await click(page, '#vb-missNext'); await click(page, '#vb-again'); await waitRound(page, 0);
+    await rightRounds(page, 2);
+    const o = await state(page);
+    t.check(o.key === 'order' && o.n === 4 && (await ui(page)).question === QUESTION.order, 'four colors: round 3 asks for the order', { key: o.key, n: o.n });
+    for (const i of o.answer.slice(0, 3)) await page.evaluate((i) => document.querySelector(`.vb-swatch[data-index="${i}"]`).click(), i);
+    await sleep(100); u = await ui(page);
+    t.check(o.answer.slice(0, 3).every((idx, k) => u.badges[idx] === String(k + 1)) && u.badges[o.answer[3]] === '' && u.undo && !(await state(page)).answered, 'four colors: three taps number three swatches 1, 2, 3 and Start the round over shows with the round still open', { badges: u.badges, undo: u.undo });
+    await click(page, '#vb-undo'); await sleep(100); u = await ui(page);
+    t.check(u.badges.every((b) => !b) && !u.undo && !(await state(page)).answered, 'four colors: Start the round over clears the three numbers', { badges: u.badges, undo: u.undo });
+    await answer(page, true); u = await ui(page);
+    t.check(o.answer.every((idx, k) => u.badges[idx] === String(k + 1)) && !u.undo && /^Right! Darkest to lightest: [ABCD], [ABCD], [ABCD], [ABCD]\. The values:/.test(u.answer), 'four colors: all four tapped right: the badges are the ranks, Start the round over gone, the line gives the order', { badges: u.badges, answer: u.answer });
+    await clean(t, page, 'four-color picks');
+    await page.context().close();
+  }
+
+  // ---- Both the same's pulse, the vibration pattern and the chime, as such ----
+  if (want('feel')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+    await page.evaluate(() => {
+      window.__calls = { vib: [], chime: 0, down: [] };
+      const v = navigator.vibrate; navigator.vibrate = function (p) { window.__calls.vib.push(JSON.stringify(p)); return v ? v.apply(this, arguments) : true; };
+      const c = GameSound.chime; GameSound.chime = function () { window.__calls.chime++; return c.apply(this, arguments); };
+      const d = GameSound.keyDown; GameSound.keyDown = function (i) { window.__calls.down.push(i); return d.apply(this, arguments); };
+    });
+    const calls = () => page.evaluate(() => window.__calls);
+    await answer(page, true, 'mouse');
+    let c = await calls();
+    t.check(c.chime === 1 && c.vib.length === 1 && c.vib[0] === '[18,40,28]' && c.down.length >= 1, 'a right answer: the Paint by numbers chime once, the vibration [18, 40, 28], and a key click', c);
+    // a round that is not a tie: Both the same is a miss, pressed with a real click
+    for (let k = 0; k < 8; k++) { await next(page); const s = await state(page); if (s.answer !== 'same') break; await answer(page, true); }
+    const s = await state(page);
+    if (s.answer === 'same') { t.note('feel: eight ties in a row, so Both the same was not pressed as a miss'); }
+    else {
+      const before = await calls();
+      await page.locator('.vb-choice').click();
+      c = await calls();
+      const pulsed = await page.evaluate(() => document.querySelector('.vb-choice').classList.contains('is-pulse'));
+      t.check(pulsed && c.down.length === before.down.length + 1 && c.down[c.down.length - 1] === 4, 'Both the same pulses and clicks like a key when pressed (key 4)', { pulsed, down: c.down.slice(-2) });
+      t.check(c.chime === before.chime && c.vib.length === before.vib.length + 1 && c.vib[c.vib.length - 1] === '60', 'a miss vibrates 60 ms and plays no chime', { chime: c.chime, vib: c.vib.slice(-2) });
+    }
+    await clean(t, page, 'pulse, vibration and chime');
+    await page.context().close();
+  }
+
+  // ---- the setup's own words: the lede, the hints and the About card say what the game does ----
+  if (want('words')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'zorn', count: 'mix', mode: 'streak' });
+    const read = () => page.evaluate(() => { const r = document.getElementById('vb-setup'); return { lede: r.querySelector('.game-lede').textContent, hints: [...r.querySelectorAll('.field .hint')].map((h) => h.textContent), about: r.querySelector('.vb-about').textContent, legends: [...r.querySelectorAll('legend, label[for="vb-palette"]')].map((l) => l.textContent.trim()), modes: [...r.querySelectorAll('input[name="vbMode"] + label')].map((l) => l.textContent), counts: [...r.querySelectorAll('input[name="vbCount"] + label')].map((l) => l.textContent), start: document.getElementById('vb-start').textContent }; });
+    const w = await read();
+    t.check(/darker/.test(w.lede) && /lighter/.test(w.lede) && /cooler/.test(w.lede) && /warmer/.test(w.lede) && /three or four/.test(w.lede) && /darkest/.test(w.lede) && /lightest/.test(w.lede) && /order/.test(w.lede) && /streak/.test(w.lede), 'the lede names the four questions, the three-or-four-color ones and the streak', w.lede);
+    t.check(JSON.stringify(w.modes) === JSON.stringify(['Streakuntil a miss', '1 minon the clock', '2 minon the clock', '5 minon the clock']) && JSON.stringify(w.counts) === JSON.stringify(['2', '3', '4', 'Mix']) && w.start === 'Start the battle', 'the setup offers 2, 3, 4 or Mix, Streak or 1, 2 or 5 minutes, and Start the battle', { modes: w.modes, counts: w.counts, start: w.start });
+    const [paletteHint, countHint, modeHint] = w.hints;
+    t.check(/same/.test(countHint) && /darkest or the lightest/.test(countHint) && /in order/.test(countHint), 'the count hint says Both the same and the darkest, lightest and order', countHint);
+    t.check(/first miss/.test(modeHint) && /clock/.test(modeHint) && /a miss only costs the time to read the answer/.test(modeHint), 'the mode hint says the streak ends at the first miss and a miss on the clock only costs the time to read', modeHint);
+    t.check(/Value/.test(w.about) && /Temperature/.test(w.about) && /orange and yellow/.test(w.about) && /blue/.test(w.about) && /Both the same/.test(w.about) && /One miss ends the streak/.test(w.about), 'the About card explains value, temperature, ties and that one miss ends the streak', w.about);
+    // the palette hint says "Both colors" whatever is chosen
+    const hints = {};
+    for (const count of ['2', '3', '4', 'mix']) { await setup(page, { count }); hints[count] = (await read()).hints[0]; }
+    const stale = ['3', '4', 'mix'].filter((c) => /\bBoth\b/.test(hints[c]));
+    if (!t.check(stale.length === 0, 'the palette hint does not say "Both colors" when three, four or a mix of colors is chosen', hints)) t.finding({ title: 'The palette hint says "Both colors are mixed from these paints." when 3, 4 or Mix is chosen', severity: 'low',
+      steps: 'Games → Value battle. Choose 3, 4 or Mix under Colors in a round and read the hint under Palette.',
+      expected: 'A hint that fits the choice (the README: two, three or four colors "mixed from the chosen palette").',
+      actual: `The hint reads "${hints.mix}" for Mix (the default) and for 3 and 4, and only fits 2.`,
+      cause: 'index.html:888 (the hint is static; js/battle.js renderSetup never rewrites it)' });
+    await clean(t, page, 'the setup\'s words');
+    await page.context().close();
+  }
+
+  // ---- a resize with a pop-up up: the miss and the score stay inside the board, desktop to phone and back ----
+  if (want('popresize')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+    await rightRounds(page, 1);
+    await answer(page, false);
+    const settle = (vp) => page.waitForFunction((w) => { const p = document.getElementById('vb-play').getBoundingClientRect(), tb = document.querySelector('.tabs').getBoundingClientRect(); return w === 390 ? Math.abs(p.width - innerWidth) <= 2 && p.top <= 1 : Math.abs(p.width - tb.width) <= 2 && p.top >= tb.bottom - 1; }, vp.width, { timeout: 3000 }).catch(() => null);
+    const inside = (sel) => page.evaluate((s) => { const b = document.getElementById('vb-board').getBoundingClientRect(), p = document.querySelector(s).getBoundingClientRect(); return { in: p.width > 0 && p.left >= b.left - 1 && p.right <= b.right + 1 && p.top >= b.top - 1 && p.bottom <= b.bottom + 1, pop: [p.left, p.top, p.right, p.bottom].map(Math.round), board: [b.left, b.top, b.right, b.bottom].map(Math.round) }; }, sel);
+    for (const [what, sel, open] of [['the miss pop-up', '#vb-miss', null], ['the score pop-up', '#vb-popup', () => click(page, '#vb-missNext')]]) {
+      if (open) { await open(); await sleep(300); }
+      for (const vp of [PHONE, DESKTOP, PHONE]) {
+        await page.setViewportSize(vp); await settle(vp);
+        const r = await inside(sel);
+        t.check(r.in, `${what} stays inside the board after a resize to ${vp.width} × ${vp.height}`, r);
+      }
+    }
+    const u = await ui(page);
+    t.check(u.popup && !u.miss && u.pinned && u.focus, 'after the resizes the score is still up and the board still pinned', { popup: u.popup, miss: u.miss, pinned: u.pinned });
+    await clean(t, page, 'a resize with a pop-up up');
+    await page.context().close();
+  }
+
+  // ---- the sound switch remembered from an earlier visit applies to the battle without visiting Paint by numbers ----
+  if (want('sound')) {
+    for (const on of [false, true]) {
+      const page = await reopen(site, { url: '#battle', storage: { 'portrait-value-studio.gameSound': on } });
+      await page.evaluate(() => { window.__snd = 0; window.__vib = 0; for (const name of ['createOscillator', 'createBufferSource']) { const f = AudioContext.prototype[name]; AudioContext.prototype[name] = function () { window.__snd++; return f.call(this); }; } const v = navigator.vibrate; navigator.vibrate = function () { window.__vib++; return v ? v.apply(this, arguments) : true; }; });
+      await setup(page, { palette: 'primary', count: '2', mode: 'streak' }); await start(page);
+      await answer(page, true, 'mouse'); await sleep(200);
+      const snd = await page.evaluate(() => [window.__snd, window.__vib, GameSound.on()]);
+      t.check(on ? snd[2] === true && snd[0] >= 5 && snd[1] >= 1 : snd[2] === false && snd[0] === 0 && snd[1] === 0, `a saved sound switch of ${on ? 'on' : 'off'} from an earlier visit: the battle's first tap is ${on ? 'heard and felt' : 'silent and still'}`, snd);
+      await clean(t, page, `saved sound ${on ? 'on' : 'off'}`);
+      await page.context().close();
+    }
+  }
+
+  // ---- ✕ twice from the miss pop-up, and ✕ twice on the clock with the next round already on its way ----
+  if (want('quit')) {
+    const page = await reopen(site, { url: '#battle' });
+    await setup(page, { palette: 'primary', count: '2', mode: '60' }); await start(page);
+    await answer(page, false);
+    t.check((await ui(page)).miss, 'on the clock a miss has the answer up (the clock paused)');
+    await quitTwice(page);
+    let u = await ui(page);
+    t.check(u.setup && !u.play && !u.miss && !u.popup && !u.focus && !u.pinned && !(await state(page)), '✕ twice from the miss pop-up leaves for the setup: no pop-up, no game, the board unpinned', { setup: u.setup, miss: u.miss, popup: u.popup, focus: u.focus });
+    await sleep(500);
+    await start(page); await answer(page, true);
+    await quitTwice(page);
+    await sleep(900);
+    u = await ui(page);
+    t.check(u.setup && !u.play && !(await state(page)) && !u.miss && !u.popup, '✕ twice just after a right answer on the clock: the round that was on its way is never dealt', { setup: u.setup, play: u.play });
+    await clean(t, page, 'quitting from a miss and with a round on its way');
+    await page.context().close();
+  }
+
 }
