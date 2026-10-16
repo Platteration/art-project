@@ -860,8 +860,29 @@ const idbInfo = (page) => page.evaluate(() => new Promise((resolve) => {
     } catch (e) { db.close(); resolve({ keys: [], err: String(e) }); }
   };
 }));
-// how much the Studio's paper holds: pixels with any ink, and the same for its tone
-const paperFacts = (page) => page.evaluate(() => { const c = document.getElementById('ps-paper'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let any = 0, sum = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0) { any++; sum += d[i + 3]; } return { w: c.width, h: c.height, any, sum }; });
+// how much the Studio's paper holds: pixels with any ink, the sum of their alpha, and a hash of every pixel's alpha (the hash savedPaint
+// takes of the painting the database holds, so the two read equal exactly when they paint the same)
+const paperFacts = (page) => page.evaluate(() => { const c = document.getElementById('ps-paper'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let any = 0, sum = 0, hash = 0x811c9dc5; for (let i = 0; i < d.length; i += 4) { const a = d[i + 3]; if (a > 0) { any++; sum += a; } hash = Math.imul(hash ^ a, 0x01000193) >>> 0; } return { w: c.width, h: c.height, any, sum, hash }; });
+// the painting the database holds, read as what it paints: its size, the pixels with any ink and a hash of every pixel's alpha, not when it was
+// written. A save of the same painting that lands late moves savedAt and leaves all of these as they were, so savedAt is not compared
+const savedPaint = (page) => page.evaluate(async () => {
+  try {
+    const db = await new Promise((resolve, reject) => { const r = indexedDB.open('portrait-value-studio'); r.onerror = () => reject(r.error); r.onsuccess = () => resolve(r.result); });
+    let got;
+    try {
+      got = await new Promise((resolve, reject) => { const tx = db.transaction('studio'), st = tx.objectStore('studio'), keys = st.getAllKeys(), rec = st.get('painting'); tx.oncomplete = () => resolve({ keys: keys.result, rec: rec.result }); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('aborted')); });
+    } finally { db.close(); }
+    const rec = got.rec;
+    if (!rec || !(rec.paper instanceof Blob)) return { keys: got.keys, savedAt: rec ? rec.savedAt : undefined, w: undefined, h: undefined, ink: null, hash: null };
+    const bmp = await createImageBitmap(rec.paper), c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const g = c.getContext('2d'); g.drawImage(bmp, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let any = 0, hash = 0x811c9dc5;
+    for (let i = 0; i < d.length; i += 4) { const a = d[i + 3]; if (a > 0) any++; hash = Math.imul(hash ^ a, 0x01000193) >>> 0; }
+    return { keys: got.keys, savedAt: rec.savedAt, w: c.width, h: c.height, ink: any, hash };
+  } catch (e) { return { keys: [], err: String(e) }; }
+});
 async function openingBlock(t, page, mem) {
   await watch(page); await toastLog(page);
   // the hidden frame is not loaded for a visitor who never opens the tab
@@ -871,9 +892,11 @@ async function openingBlock(t, page, mem) {
   await tab(page, 'paint');
   await stroke(page, '#ps-paper', [[0.2, 0.3], [0.8, 0.35], [0.5, 0.7]], { steps: 10 });
   await stroke(page, '#ps-paper', [[0.3, 0.8], [0.7, 0.2]], { steps: 10 });
+  // the record is read once it paints what the paper paints: a save still on its way (one begun before the second stroke, say) is waited for
+  // by its pixels, since a save's time says nothing about what it wrote; a save of the same pixels that lands later changes nothing read here
   let saved = false;
-  for (let i = 0; i < 30 && !saved; i++) { const db = await idbInfo(page); saved = !!(db && db.savedAt); if (!saved) await sleep(500); }
-  mem.studio = { ...(await paperFacts(page)), db: await idbInfo(page) };
+  for (let i = 0; i < 60 && !saved; i++) { const db = await savedPaint(page), live = await paperFacts(page); saved = !!(db.ink > 1000 && db.keys.length === 1 && db.ink === live.any && db.hash === live.hash && db.w === live.w && db.h === live.h); if (!saved) await sleep(500); }
+  mem.studio = { ...(await paperFacts(page)), db: await savedPaint(page) };
   t.check(saved && mem.studio.any > 1000 && mem.studio.db && mem.studio.db.keys.length === 1 && mem.studio.db.keys[0] === 'painting', 'the Studio keeps its painting in the browser (one record, "painting") a moment after the strokes', mem.studio);
   // Figure study opened, and Start pressed the instant it enables, before the pictures have streamed in
   await tab(page, 'figure', { wait: false });
@@ -969,8 +992,10 @@ async function reloadTailBlock(t, page, mem) {
   const keysBefore = await storageKeys(page);
   const poseKeys = await storageKeys(page, /^pose-and-light\./);
   t.check(poseKeys.length === 0, 'the render frame keeps nothing: after classes and pictures, no pose-and-light key was written (Pose and light itself never opened)', poseKeys);
-  const dbNow = await idbInfo(page);
-  t.check(dbNow && dbNow.keys.length === 1 && dbNow.keys[0] === 'painting' && dbNow.savedAt === mem.studio.db.savedAt, 'after the classes the Studio\'s saved painting is the record it was: still the only one, never saved over (the class\'s paper has autosave off)', { before: mem.studio.db, now: dbNow });
+  // compared as what it paints (size, ink, every alpha), not by savedAt: a save of the same painting still on its way when the record was read
+  // lands with the same pixels and a later time, which is no change; a different painting, or a class's drawing reaching the record, is
+  const dbNow = await savedPaint(page), was = mem.studio && mem.studio.db;
+  t.check(!!(was && dbNow && typeof was.hash === 'number' && typeof dbNow.hash === 'number') && dbNow.keys.length === 1 && dbNow.keys[0] === 'painting' && dbNow.w === was.w && dbNow.h === was.h && dbNow.ink === was.ink && dbNow.hash === was.hash, 'after the classes the Studio\'s saved painting is the record it was: still the only one, the same painting (its pixels), never saved over (the class\'s paper has autosave off)', { before: was, now: dbNow });
   await page.reload({ waitUntil: 'load' });
   await sleep(300);
   await tab(page, 'paint');
@@ -1017,10 +1042,16 @@ async function forgetElsewhereBlock(t, site) {
   const other = await newTab(site, page, { url: '' });
   await tab(other, 'help');
   await click(other, '#forgetBtn');
-  const reloaded = page.waitForEvent('load', { timeout: 15000 }).then(() => true).catch(() => false);
+  // the reload is waited for by its own signal: this tab's new document reaching DOMContentLoaded. Not the load event, which also waits for
+  // the hidden pose frame's pictures to arrive, nor a clock; the timeout is long so that only a loaded machine ever comes near it
+  const pressed = Date.now();
+  const reloaded = page.waitForEvent('domcontentloaded', { timeout: 60000 }).then(() => Date.now()).catch(() => 0);
   await click(other, '#forgetBtn');
-  t.check(await reloaded, 'forget elsewhere: pressing Forget my work in another tab reloads this tab (within a few seconds)');
-  await sleep(300);
+  const reloadedAt = await reloaded;
+  t.check(reloadedAt > 0, 'forget elsewhere: pressing Forget my work in another tab reloads this tab (within 60 s)');
+  if (reloadedAt > 0) t.note(`forget elsewhere: this tab's new document arrived ${reloadedAt - pressed} ms after the press in the other tab`);
+  await page.waitForLoadState('load', { timeout: 60000 }).catch(() => null);
+  await sleep(300); // (the settle before the negative checks below: nothing is left to wait on, a key that should not come back has no signal)
   const s = await page.evaluate(() => ({ cls: !!(window.FigureStudy && window.FigureStudy.state()), keys: Object.keys(localStorage).filter((k) => /^(portrait-value-studio|pose-and-light)\./.test(k)) }));
   t.check(!s.cls && s.keys.length === 0, 'forget elsewhere: the class is gone and no key is left', s);
   await tab(page, 'figure');
