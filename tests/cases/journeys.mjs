@@ -78,15 +78,16 @@ const shows = (page) => page.evaluate(() => {
     battlePalette: $('vb-palette').value, battleBest: $('vb-best').textContent,
   };
 });
-// two canvases of the page compared pixel by pixel (a sample of them): their sizes and the mean difference per channel
+// two canvases of the page compared pixel by pixel (a sample of them): their sizes, the mean difference per channel and the
+// share of pixels more than 10 levels off in a channel
 const samePicture = (page, a, b) => page.evaluate(([a, b]) => {
   const A = document.getElementById(a), B = document.getElementById(b);
   if (!A || !B || !A.width || !B.width) return { size: [A && A.width, A && A.height, B && B.width, B && B.height], diff: null };
   if (A.width !== B.width || A.height !== B.height) return { size: [A.width, A.height, B.width, B.height], diff: null };
   const da = A.getContext('2d').getImageData(0, 0, A.width, A.height).data, db = B.getContext('2d').getImageData(0, 0, B.width, B.height).data;
-  let d = 0, n = 0;
-  for (let i = 0; i < da.length; i += 4 * 37) { d += Math.abs(da[i] - db[i]) + Math.abs(da[i + 1] - db[i + 1]) + Math.abs(da[i + 2] - db[i + 2]); n++; }
-  return { size: [A.width, A.height], diff: +(d / n / 3).toFixed(2) };
+  let d = 0, n = 0, off = 0;
+  for (let i = 0; i < da.length; i += 4 * 37) { const e = [0, 1, 2].map((k) => Math.abs(da[i + k] - db[i + k])); d += e[0] + e[1] + e[2]; if (Math.max(...e) > 10) off++; n++; }
+  return { size: [A.width, A.height], diff: +(d / n / 3).toFixed(2), off10: +(off / n).toFixed(3) };
 }, [a, b]);
 // the Studio's ground in the middle of the paper, and how much of the paint and underdrawing layers is marked
 const groundAt = (page) => page.evaluate(() => { const c = document.getElementById('ps-ground'); const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data; return [d[0], d[1], d[2]]; });
@@ -361,7 +362,7 @@ async function photoToNextVisit(t, site, pages) {
   await click(page, '#ps-refFig [data-ref-view="original"]');
   t.check(refOrig.diff === 0 && refValues.diff === 0, `${L} Studio: the reference's Original and Values are the Study tab's photo and its value study (the splits moved)`, { refOrig, refValues });
   t.check(refBlocks.diff !== null && refBlocks.diff < 1, `${L} Studio: the reference's Blocks are the color shapes the Study tab shows (as Rembrandt mixes them)`, refBlocks);
-  if (!(refBlocks.diff !== null && refBlocks.diff < 1)) seen.blocks = { palette: 'Rembrandt (earths)', diff: refBlocks.diff };
+  if (!(refBlocks.diff !== null && refBlocks.diff < 1)) seen.blocks = { diff: refBlocks.diff, off: refBlocks.off10 };
   // a toned ground of Light Red, a mix locked in, a stroke
   const wash = await studioWash(page, 'LR');
   t.check(wash === 'Light Red', `${L} Studio: a wash of Light Red, one of Rembrandt's paints, can be laid`, wash);
@@ -457,7 +458,7 @@ async function photoToNextVisit(t, site, pages) {
   const zornBlocks = await samePicture(page, 'ps-refCanvas', 'cv-block');
   await click(page, '#ps-refFig [data-ref-view="original"]');
   t.check(zornBlocks.diff !== null && zornBlocks.diff < 1, `${L} Zorn on the Study tab: the reference's Blocks are the color shapes the Study tab shows (as Zorn mixes them)`, zornBlocks);
-  if (!(zornBlocks.diff !== null && zornBlocks.diff < 1)) seen.blocks = { ...(seen.blocks || {}), zorn: zornBlocks.diff };
+  if (!(zornBlocks.diff !== null && zornBlocks.diff < 1)) seen.blocks = { ...(seen.blocks || {}), zorn: zornBlocks.diff, zornOff: zornBlocks.off10 };
   await screenshot(page, 'journey-1-studio-after-zorn');
   await steady(t, page, `${L} Zorn`);
 }
@@ -883,7 +884,7 @@ function findings(t) {
     severity: 'low',
     steps: '1. Load a photo. 2. Colors and paints: pick Rembrandt (earths). 3. Above Big color shapes, press Rembrandt (the switch beside Photo). 4. Studio, Reference: Show it as Blocks.',
     expected: 'README, Studio: the reference shows "the original, the three-value study or the color-block study, as the Study tab makes them"; the Studio\'s hint: "Blocks shows the big color shapes. Both come from the Study tab." With the Study tab set to show the shapes as the palette mixes them, the Studio\'s Blocks show the same picture (the colors the painter can actually mix).',
-    actual: `The Studio's Blocks are the photo's own block colors: the reference canvas differs from the Study tab's Big color shapes, both at the photo's working size, by ${[seen.blocks.diff != null && `${seen.blocks.diff} levels per channel on average with Rembrandt (earths)`, seen.blocks.zorn != null && `${seen.blocks.zorn} with Zorn`].filter(Boolean).join(' and ')} (sampled pixel by pixel), while its Original and Values match the Study tab's pictures exactly.`,
+    actual: `The Studio's Blocks are the photo's own block colors: the reference canvas differs from the Study tab's Big color shapes, both at the photo's working size, by ${[seen.blocks.diff != null && `${seen.blocks.diff} levels per channel on average with Rembrandt (earths), ${Math.round(seen.blocks.off * 100)}% of the pixels more than 10 levels off`, seen.blocks.zorn != null && `${seen.blocks.zorn} levels with Zorn, ${Math.round(seen.blocks.zornOff * 100)}% of the pixels more than 10 off`].filter(Boolean).join(', and ')} (a sample of the pixels, compared one by one), while its Original and Values match the Study tab's pictures exactly.`,
     cause: 'js/painting.js drawReference (598-605) draws ref.res.blockImage (Studio.result().blockImage), the photo-colored study; the palette view the Study tab draws (js/app.js showBlocks, about 355-370, with blockView "palette") is not offered to the Studio.',
   });
 }
