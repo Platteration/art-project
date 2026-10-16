@@ -1519,3 +1519,471 @@ async function mineExtremes(t, site) {
     await page.context().close();
   }
 }
+
+// ================================================================================================
+// 20. The generated portraits keep the README's promises, and the rare ones make boards
+// ================================================================================================
+async function generatedPortraits(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page);
+  // in the page: fixed pseudo-random ids (so a run is repeatable), their looks, the same portrait drawn twice, the seams
+  const m = await page.evaluate(() => {
+    let seed = 20240607; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const ids = Array.from({ length: 3000 }, () => `${Subjects.PAINTERS[Math.floor(rnd() * Subjects.PAINTERS.length)]}-${Math.floor(rnd() * 1e6)}`);
+    const looks = ids.map((id) => Subjects.entry(id));
+    const count = (f) => looks.filter(f).length;
+    const tally = (f) => looks.reduce((o, e) => { const k = f(e); o[k] = (o[k] || 0) + 1; return o; }, {});
+    const draw = (e, size, layer) => Subjects.drawPortrait(e.painter, e.seed, layer ? Object.assign({}, e.look, { _layer: layer }) : e.look, size);
+    let same = 0;
+    for (const e of looks.slice(0, 20)) if (draw(e, 1).toDataURL() === draw(e, 1).toDataURL()) same++;
+    // a seam: a pixel well inside the figure's own silhouette that the finished layer leaves see-through
+    const seams = [];
+    const seamCount = (e, size, R) => {
+      const raw = draw(e, size, 'raw'), closed = draw(e, size, true), w = raw.width, h = raw.height;
+      const ra = raw.getContext('2d').getImageData(0, 0, w, h).data, ca = closed.getContext('2d').getImageData(0, 0, w, h).data;
+      const inside = new Uint8Array(w * h);
+      for (let k = 0; k < w * h; k++) inside[k] = ra[k * 4 + 3] >= 8 ? 1 : 0;
+      let n = 0;
+      for (let y = R; y < h - R; y++) for (let x = R; x < w - R; x++) {
+        let ok = true;
+        for (let dy = -R; dy <= R && ok; dy++) for (let dx = -R; dx <= R; dx++) if (!inside[(y + dy) * w + x + dx]) { ok = false; break; }
+        if (ok && ca[(y * w + x) * 4 + 3] < 250) n++;
+      }
+      return n;
+    };
+    for (const e of looks.slice(0, 150)) { const n = seamCount(e, 0.5, 2); if (n) seams.push([e.id, n]); }
+    for (const e of looks.slice(150, 162)) { const n = seamCount(e, 1, 3); if (n) seams.push([e.id, n, 'full size']); }
+    const pick = (f) => (looks.find(f) || {}).id || null;
+    return {
+      n: looks.length, same, seams,
+      woman: count((e) => e.look.woman) / looks.length, old: count((e) => e.look.age === 'old') / looks.length,
+      profile: count((e) => e.look.view === 'profile') / looks.length, front: count((e) => e.look.view === 'front') / looks.length,
+      painters: tally((e) => e.painter), lights: tally((e) => e.look.light), bgs: tally((e) => e.look.bg), collars: tally((e) => e.look.collar), clothes: tally((e) => e.look.clothes || 'plain'), deep: count((e) => e.look.deep),
+      picks: {
+        'a woman with long hair and a pearl, in profile': pick((e) => e.look.woman && e.look.hair === 'long' && e.look.pearl && e.look.view === 'profile'),
+        'Velázquez deep-skinned': pick((e) => e.painter === 'velazquez' && e.look.deep),
+        'Vermeer in black': pick((e) => e.painter === 'vermeer' && e.look.clothes === 'black'),
+        'an old Hals sitter in a ruff, full face': pick((e) => e.painter === 'hals' && e.look.collar === 'ruff' && e.look.age === 'old' && e.look.view === 'front'),
+        'an old Rembrandt under a raking light on a plain wall': pick((e) => e.painter === 'rembrandt' && e.look.age === 'old' && e.look.light === 'dramatic' && e.look.bg === 'plain'),
+        'a bearded Zorn with a moustache': pick((e) => e.painter === 'zorn' && e.look.beard && e.look.moustache),
+        'a Sargent woman in white with a bun': pick((e) => e.painter === 'sargent' && e.look.woman && e.look.hair === 'bun' && e.look.clothes === 'white'),
+        'a Sorolla lit from above': pick((e) => e.painter === 'sorolla' && e.look.light === 'top'),
+      },
+    };
+  });
+  t.check(m.same === 20, 'the same id draws the same portrait, twenty times out of twenty', m.same);
+  t.check(m.seams.length === 0, 'no background shows through inside a figure: 150 portraits at half size and 12 at full size, none with a see-through pixel more than two or three pixels inside the silhouette', m.seams.slice(0, 4));
+  t.check(m.woman > 0.45 && m.woman < 0.55, 'about half are women', m.woman);
+  t.check(m.old > 0.21 && m.old < 0.31, 'roughly a quarter are old', m.old);
+  t.check(m.profile > 0.08 && m.profile < 0.18 && m.front > 0.12 && m.front < 0.23 && m.profile + m.front < 0.4, 'most heads are turned three-quarters, some are nearly full face or in profile', [m.profile, m.front]);
+  t.check(Object.keys(m.painters).length === 7 && Object.values(m.painters).every((n) => n / m.n > 0.10 && n / m.n < 0.18), 'all seven painters turn up, evenly', m.painters);
+  t.check(['side', 'soft', 'dramatic', 'top'].every((k) => m.lights[k] > 100) && ['block', 'wedge', 'band', 'window', 'plain'].every((k) => m.bgs[k] > 100) && ['flat', 'open', 'none', 'ruff'].every((k) => m.collars[k] > 50) && m.deep > 20 && Object.keys(m.clothes).length >= 8, 'every lamp, wall, collar and clothes color comes up', [m.lights, m.bgs, m.collars, m.clothes, m.deep]);
+  // a board from each of the rare looks
+  let n = 0;
+  await click(page, '#gameFromPainting'); await ready(page);
+  for (const [what, id] of Object.entries(m.picks)) {
+    if (!id) { t.note(`no portrait of the kind "${what}" among the 3,000 ids tried`); continue; }
+    await page.evaluate((id) => { Subjects.random = () => id; }, id);
+    await click(page, '#gameReroll'); await ready(page);
+    const s = await setup(page);
+    const levels = n < 2 ? ['medium', 'easy', 'hard'] : ['medium'];
+    for (const lv of levels) {
+      if (lv !== 'medium') { await setLevel(page, lv); await ready(page); }
+      const sl = await setup(page);
+      t.check(sl.painting === JSON.stringify(id) && PAINTERS.test(sl.paintingName) && numbersOf(sl.note) >= 3 && !sl.start && sl.preview[0] > 0, `${what} (${id}) at ${lv}: a board with at least three numbers, named, Start enabled`, [sl.painting, sl.note, sl.paintingName]);
+    }
+    if (n < 2) { await setLevel(page, 'medium'); await ready(page); }
+    void s;
+    n++;
+  }
+  await click(page, '#gameStart'); await playing(page);
+  t.check((await play(page)).numbers >= 3, 'the last of them plays', (await play(page)).numbers);
+  await clean(t, page, 'generated portraits');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 21. A portrait dealt by the Studio becomes the Study's reference through Check my painting, and so the game's My photo
+// ================================================================================================
+async function dealtThroughStudio(t, site) {
+  const id = 'hals-48213';
+  const page = await openPage(site, { url: '#paint' });
+  await page.waitForFunction(() => !!window.PaintStudio && !!window.Subjects, null, { timeout: 15000 }).catch(() => null);
+  await page.evaluate((id) => { Subjects.random = () => id; document.querySelector('#tab-paint [data-ref-kind="painting"]').click(); }, id);
+  const ref = await page.evaluate(() => { const r = PaintStudio.reference(); return { kind: r.kind, id: r.id, title: r.title }; });
+  t.check(ref.kind === 'painting' && ref.id === id && /after Frans Hals$/.test(ref.title), 'the Studio dealt the portrait as its reference', ref);
+  await tab(page, 'study');
+  await page.evaluate(() => { document.getElementById('drawer-check').open = true; });
+  await click(page, '#artFromStudio');
+  await page.waitForFunction((k) => Studio.sourceKey() === k, `${id}:600x750`, { timeout: 15000 }).catch(() => null);
+  t.check((await page.evaluate(() => Studio.sourceKey())) === `${id}:600x750`, 'Check my painting makes the dealt portrait the Study’s reference', await page.evaluate(() => Studio.sourceKey()));
+  await tab(page, 'game'); await ready(page);
+  const s = await setup(page);
+  t.check(s.subject === 'photo' && s.preview[0] === 600 && s.preview[1] === 750 && numbersOf(s.note) >= 3 && !s.start, 'the game’s My photo paints from that reference: a board, Start enabled', [s.subject, s.preview, s.note]);
+  const named = t.check(!/[a-z]+-\d{3,}/.test(s.photoName) && /Hals|ruff/i.test(s.photoName), 'and the photo pane names it in words (the portrait’s title or its painter), not by an internal id', s.photoName);
+  if (!named) t.finding({
+    title: 'The game names a dealt portrait by its internal id when it comes through Check my painting',
+    severity: 'low',
+    steps: '1. On the Studio tab open the Reference sheet and choose "A portrait" (a portrait is dealt). 2. On the Study tab open Check my painting and press the button that scores the Studio painting. 3. Open Paint by numbers.',
+    expected: 'The photo pane names what is loaded the way the Study does (the sitter and painter, such as "Man in a ruff, after Frans Hals"), or says it is the portrait dealt in the Studio.',
+    actual: `The pane reads "${s.photoName}": the portrait’s random id (a painter and a seed), which means nothing to a visitor.`,
+    cause: 'js/app.js 2651 passes the dealt portrait’s id as the reference’s file name (useSource(r.picture, r.title, r.id)), and js/game.js 354-357 prints the source key for any photo that is not the sample.',
+  });
+  // the same portrait reached as A painting is another board with another best
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  const viaStudio = Object.keys(await bests(page));
+  await toSetup(page);
+  await click(page, '#gameFromPainting'); await ready(page);
+  await page.evaluate((id) => { Subjects.random = () => id; }, id);
+  await click(page, '#gameReroll'); await ready(page);
+  const p = await setup(page);
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  const both = Object.keys(await bests(page));
+  t.check(p.painting === JSON.stringify(id) && both.length === 2, 'the same portrait dealt in the game is played and kept too', [p.painting, both]);
+  t.note(`The same portrait reaches the game two ways with two boards and two bests: through the Study's reference it is simplified as a photo (${numbersOf(s.note)} numbers on ${s.preview.join(' x ')}, best kept under "${viaStudio[0]}"), dealt by the game it is simplified as a painting (${numbersOf(p.note)} numbers on ${p.preview.join(' x ')}, best kept under "${both.find((k) => /^painting:/.test(k))}"). The README promises a best "for each painting" and says My photo uses the reference loaded in the app, so neither is wrong; left as a note.`);
+  await clean(t, page, 'a dealt portrait through Check my painting');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 22. Mystery palette: the hand across Deal again, a level change, Another painting and Play again
+// ================================================================================================
+async function mysteryHands(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page);
+  await click(page, '#gameFromPainting'); await ready(page);
+  await setMode(page, 'mystery'); await ready(page);
+  const closeOf = (hint) => { const m = /which mix (\d+) of its (\d+) colors closely/.exec(hint); return m && [+m[1], +m[2]]; };
+  const hands = [], close = [];
+  const note = async () => { const s = await setup(page); hands.push(s.dots.join('|')); close.push(closeOf(s.hint)); return s; };
+  const first = await note();
+  t.check(first.dots.length === 4 && /^titanium white$/i.test(first.dots[0]) && new Set(first.dots).size === 4, 'Mystery on a painting: white and three different paints', first.dots);
+  for (let i = 0; i < 5; i++) { await click(page, '#gameDeal'); await ready(page); await note(); }
+  t.check(new Set(hands).size === hands.length, 'Deal again: six deals, six different hands', hands);
+  t.check(close.every((c) => c && c[1] >= 3) && close.filter((c) => c[0] >= 1).length >= 4, 'a hand that mixes the portrait’s colors reasonably well is kept: at least four of the six mix some of the colors closely', close);
+  // a new level is a new board: the hand it shows
+  const before = hands[hands.length - 1];
+  await setLevel(page, 'easy'); await ready(page);
+  const atEasy = (await setup(page)).dots.join('|');
+  t.note(`Mystery: changing the level builds a new board and deals a new hand (${atEasy === before ? 'this time the same hand came back' : 'the hand changed'}); the README says only that a new portrait deals a new hand.`);
+  await setLevel(page, 'medium'); await ready(page);
+  const shown = await setup(page);
+  // the hand shown is the hand played, and Play again keeps it for the same portrait and deals anew for a new one
+  const codesOfNames = (names) => page.evaluate((names) => names.map((n) => Paints.LIBRARY.find((p) => p.name.toLowerCase() === n.toLowerCase()).code), names);
+  const wantCodes = await codesOfNames(shown.dots);
+  await click(page, '#gameStart'); await playing(page);
+  const played = (await play(page)).paints;
+  t.check(same(played, wantCodes), 'Start paints with the hand the setup shows', [played, wantCodes]);
+  await lockIn(page);
+  await playAgain(page);
+  t.check(same((await play(page)).paints, wantCodes), 'Play again, Same portrait: the same hand', [(await play(page)).paints, wantCodes]);
+  await lockIn(page);
+  await click(page, '#gamePopup [data-game="again"]'); await sleep(200); await click(page, '#againNew'); await playing(page);
+  const next = (await play(page)).paints;
+  t.check(next.length === 4 && next[0] === 'TW' && !same(next, wantCodes), 'Play again, New portrait: a new hand is dealt', [next, wantCodes]);
+  await clean(t, page, 'mystery hands');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 23. Game feel: the chime and the vibration follow the speaker, a hold at the cap, a right-click, a pointer that leaves,
+//     the amount changed mid-hold, Spot on through a paste and again after an undo, Lock in while copying
+// ================================================================================================
+async function gameFeel(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  // count what the page asks of the speaker and the vibration motor
+  await page.evaluate(() => {
+    window.__vib = []; window.__nodes = { osc: 0, buf: 0 };
+    navigator.vibrate = (p) => { window.__vib.push(JSON.stringify(p)); return true; };
+    const A = window.AudioContext || window.webkitAudioContext;
+    const co = A.prototype.createOscillator, cb = A.prototype.createBufferSource;
+    A.prototype.createOscillator = function (...a) { window.__nodes.osc++; return co.apply(this, a); };
+    A.prototype.createBufferSource = function (...a) { window.__nodes.buf++; return cb.apply(this, a); };
+  });
+  const feel = () => page.evaluate(() => ({ vib: window.__vib.slice(), osc: window.__nodes.osc, buf: window.__nodes.buf }));
+  await click(page, '#gameStart'); await playing(page);
+  const recipes = await recipesOfBoard(page);
+  await playAgain(page);
+  // sound on: a number mixed exactly rings the chime (4 oscillators: two bells, each with an overtone) and vibrates once
+  await pickNumber(page, 0); await mixExact(page, recipeOf(recipes[0][1]));
+  let f = await feel();
+  const chimes = f.osc - f.buf / 2; // every tap makes one thock (an oscillator) and two clicks (buffer sources)
+  t.check(f.vib.length === 1 && f.vib[0] === '[18,40,28]' && chimes === 4 && (await play(page)).spot === 'Spot on! Number 1', 'Spot on with the sound on: one chime of four oscillators and one vibration [18,40,28]', f);
+  // the speaker off: nothing sounds, nothing vibrates, on a new Spot on
+  await click(page, '#gameSound');
+  const quiet = await feel();
+  await click(page, '#gameClear'); await mixExact(page, recipeOf(recipes[0][1]));
+  f = await feel();
+  t.check((await play(page)).spot === 'Spot on! Number 1' && same([f.vib.length, f.osc, f.buf], [quiet.vib.length, quiet.osc, quiet.buf]), 'Spot on with the speaker off: the badge shows, no vibration, no sound', [quiet, f]);
+  // the speaker on again plays its test click
+  await click(page, '#gameSound'); await sleep(300);
+  f = await feel();
+  t.check(f.osc === quiet.osc + 1 && f.buf >= quiet.buf + 2, 'the speaker switched on plays a test click', [quiet, f]);
+
+  // a held paint at the cap: refused on every repeat, said, nothing added
+  await pickNumber(page, 1); await click(page, '#gameClear');
+  await setAmount(page, 4); await tapPaint(page, 'TW', 14);
+  await setAmount(page, 2); await tapPaint(page, 'TW', 3);
+  await setAmount(page, 0); await tapPaint(page, 'TW', 3);
+  t.check((await play(page)).parts === 'TW 59¾', 'a mix brought to 59¾ parts', (await play(page)).parts);
+  await setAmount(page, 2);
+  const pb = await box(page, '.game-paint');
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.evaluate(() => { document.getElementById('toast').textContent = ''; });
+  await page.mouse.down(); await sleep(900); await page.mouse.up();
+  let p = await play(page);
+  t.check(p.parts === 'TW 59¾' && p.toast === 'A mix holds up to 60 parts', 'holding a paint at the cap adds nothing and says why', [p.parts, p.toast]);
+  // a right-click adds nothing and opens no menu
+  await click(page, '#gameClear'); await setAmount(page, 2);
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.mouse.down({ button: 'right' }); await sleep(600); await page.mouse.up({ button: 'right' });
+  const menu = await page.evaluate(() => { const b = document.querySelector('.game-paint'); const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); b.dispatchEvent(e); return e.defaultPrevented; });
+  t.check((await play(page)).parts.startsWith('Empty') && menu, 'a right-click on a paint adds nothing and its context menu is prevented', [(await play(page)).parts, menu]);
+  // a pointer that leaves the paint stops the hold
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.mouse.down(); await sleep(800);
+  const held = parts((await play(page)).parts.replace(/^TW /, ''));
+  await page.mouse.move(pb.x + pb.width / 2, pb.y - 60); await sleep(100);
+  const atLeave = parts((await play(page)).parts.replace(/^TW /, ''));
+  await sleep(500);
+  const later = parts((await play(page)).parts.replace(/^TW /, ''));
+  await page.mouse.up();
+  t.check(held >= 3 && later === atLeave, 'a pointer that leaves a held paint stops the adding', [held, atLeave, later]);
+  // the amount changed mid-hold applies from the next repeat
+  await click(page, '#gameClear'); await setAmount(page, 2);
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.mouse.down(); await sleep(700);
+  await page.evaluate(() => { window.__seen = []; window.__poll = setInterval(() => window.__seen.push(document.getElementById('gameMixParts').textContent), 30); });
+  await setAmount(page, 3); await sleep(700);
+  await page.mouse.up();
+  const trail = await page.evaluate(() => { clearInterval(window.__poll); return window.__seen.map((x) => x.replace(/ /g, ' ')); });
+  const totals = trail.map((x) => parts(x.replace(/^TW /, ''))).filter((x) => !Number.isNaN(x));
+  const steps = new Set(totals.slice(1).map((x, i) => x - totals[i]).filter((d) => d > 0));
+  t.check(steps.has(2) && [...steps].every((d) => d === 1 || d === 2), 'the amount changed during a hold applies from the next repeat (1 part, then 2)', [...steps]);
+
+  // Lock in while copying: the score has no copy bar, and Esc on the score does nothing
+  await click(page, '#gameClear'); await tapPaint(page, 'TW');
+  await click(page, '#gameCopy');
+  await click(page, '#gameLock'); await scored(page);
+  const lk = await page.evaluate(() => ({ bar: !document.getElementById('gameCopyBar').hidden, copying: document.getElementById('gamePlay').classList.contains('is-copying') }));
+  await page.keyboard.press('Escape'); await sleep(150);
+  const rs = await result(page);
+  t.check(!lk.bar && !lk.copying && rs.popup, 'Lock in while copying: the score has no copy bar, and Esc on it changes nothing', [lk, rs.popup]);
+  await playAgain(page);
+  t.check(!(await play(page)).copying && (await play(page)).copyText === 'Copy mix', 'and the next game does not start copying', (await play(page)).copyText);
+  await clean(t, page, 'game feel');
+  await page.context().close();
+
+  // no audio at all: the game plays
+  const mute = await openPage(site, { url: '#game' });
+  await mute.addInitScript(() => { delete window.AudioContext; delete window.webkitAudioContext; });
+  await mute.reload({ waitUntil: 'load' }); await sleep(500);
+  await ready(mute); await click(mute, '#gameStart'); await playing(mute);
+  await tapPaint(mute, (await play(mute)).paints[0], 3);
+  t.check(!(await play(mute)).parts.startsWith('Empty'), 'a browser with no Web Audio: the game plays and taps add parts', (await play(mute)).parts);
+  await click(mute, '#gameSound'); await click(mute, '#gameSound');
+  await clean(t, mute, 'no Web Audio');
+  await mute.context().close();
+}
+
+// ================================================================================================
+// 24. Spot on through a paste and again after an undo; a paste over a painted number
+// ================================================================================================
+async function spotThroughPaste(t, site) {
+  // two paints that make few colors, so several numbers share a recipe
+  const page = await openPage(site, { url: '#game', storage: { [MINE]: ['CRL', 'YO'] } });
+  await ready(page); await setPalette(page, 'mine'); await ready(page);
+  await page.evaluate(() => { window.__vib = []; navigator.vibrate = (p) => { window.__vib.push(1); return true; }; });
+  await click(page, '#gameStart'); await playing(page);
+  const recipes = await recipesOfBoard(page);
+  await playAgain(page);
+  const a = recipes[0], twin = recipes.slice(1).find((r) => r[1] === a[1]), other = recipes.slice(1).find((r) => r[1] !== a[1]);
+  t.check(!!twin && !!other, 'two paints and no white: some numbers share a recipe and some do not', recipes.map((r) => r[1]));
+  if (!twin || !other) { await page.context().close(); return; }
+  const vib = () => page.evaluate(() => window.__vib.length);
+  await pickNumber(page, a[0] - 1); await mixExact(page, recipeOf(a[1]));
+  t.check((await play(page)).spot === `Spot on! Number ${a[0]}` && (await vib()) === 1, 'number 1 mixed to its recipe is Spot on, once', [(await play(page)).spot, await vib()]);
+  // Undo takes it below the 95% line; putting the part back is Spot on again
+  await click(page, '#gameUndo');
+  t.check((await play(page)).parts.startsWith('Empty') && (await vib()) === 1, 'Undo takes the mix away', (await play(page)).parts);
+  await mixExact(page, recipeOf(a[1]));
+  t.check((await vib()) === 2, 'and the mix put back is Spot on again (a second chime)', await vib());
+  // a paste into a number whose color the same mix reaches
+  await click(page, '#gameCopy'); await pickNumber(page, twin[0] - 1);
+  const afterPaste = await play(page);
+  t.check(afterPaste.toast === `Number ${a[0]}’s mix pasted into number ${twin[0]}` && (await vib()) === 3, `a paste into number ${twin[0]}, whose recipe is the same, is Spot on too`, [afterPaste.toast, await vib()]);
+  // ...and into a number it does not reach: no chime. A paste over a painted number replaces its parts.
+  await pickNumber(page, other[0] - 1); // still copying: this pastes
+  const wasOff = await vib();
+  await click(page, '#gameCopyDone');
+  await pickNumber(page, other[0] - 1);
+  const mixed = (await play(page)).parts;
+  t.check(mixed === a[1].replace(/^Mix: /, '') && wasOff === 3, `a paste into number ${other[0]}, whose recipe differs, copies the parts and does not chime`, [mixed, a[1], wasOff]);
+  await pickNumber(page, other[0] - 1); await click(page, '#gameClear'); await tapPaint(page, 'YO', 3);
+  await pickNumber(page, a[0] - 1); await click(page, '#gameCopy'); await pickNumber(page, other[0] - 1); await click(page, '#gameCopyDone');
+  await pickNumber(page, other[0] - 1);
+  t.check((await play(page)).parts === a[1].replace(/^Mix: /, ''), 'a paste over a painted number replaces its parts', (await play(page)).parts);
+  await clean(t, page, 'spot on through a paste');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 25. After a game: an equal score is no New best!, the score survives a tab switch and the best survives a reload,
+//     the keys a game writes, where focus goes when a game or its score is left, the Analysis's own buttons
+// ================================================================================================
+const GAME_KEYS = ['gameLevel', 'gamePalette', 'gameMode', 'gameSubject', 'gamePainting', 'gameRefView', 'gameAmount', 'gameSound', 'gameBest'].map(K);
+const focusOf = (page) => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.tagName.toLowerCase()) : null; });
+async function afterTheGame(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page);
+  // the panels at the side step aside on the desktop while the game is the tab
+  const panels = (sel) => page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => getComputedStyle(e).display), sel);
+  const onGame = await panels('.rail, .toolstrip');
+  await tab(page, 'study'); const onStudio = await panels('.rail, .toolstrip'); await tab(page, 'game');
+  t.check(onGame.length > 0 && onGame.every((d) => d === 'none') && onStudio.some((d) => d !== 'none'), 'the side panels are shown on the Study tab and step aside on Paint by numbers', [onGame, onStudio]);
+  const before = await storageKeys(page, /^portrait-value-studio\./);
+  await setPalette(page, 'zorn'); await setMode(page, 'relaxed'); await ready(page);
+  await click(page, '#tab-game [data-ref-view="blocks"]'); await setAmount(page, 3); await click(page, '#gameSound'); await click(page, '#gameSound');
+  await click(page, '#gameStart'); await playing(page);
+  const recipes = await recipesOfBoard(page);
+  await playAgain(page); await mixAll(page, recipes); await lockIn(page);
+  let r = await result(page);
+  const key = `${await page.evaluate(() => Studio.sourceKey())}|medium|zorn|relaxed`;
+  t.check(r.pct === '100' && r.points === 1000 && r.newBest && (await bests(page))[key] === 1000, 'Relaxed, every number exact: 1,000 points and a New best! over the 0 of the first game', [r.pct, r.points, r.newBest]);
+  const after = await storageKeys(page, /^portrait-value-studio\./);
+  const added = after.filter((k) => !before.includes(k));
+  t.check(added.length > 0 && added.every((k) => GAME_KEYS.includes(k)) && after.every((k) => before.includes(k) || GAME_KEYS.includes(k)), 'a full game writes only the game’s own keys', { added, before });
+  // the same score again is not a best
+  await playAgain(page); await mixAll(page, recipes); await lockIn(page);
+  r = await result(page);
+  t.check(r.points === 1000 && !r.newBest && (await bests(page))[key] === 1000, 'the same 1,000 again is no New best!, and the best stays', [r.points, r.newBest, await bests(page)]);
+  // the score and its closed state survive a visit to another tab
+  await click(page, '#gamePopupClose');
+  await tab(page, 'study'); await tab(page, 'game');
+  r = await result(page);
+  t.check(!(await page.evaluate(() => document.getElementById('gameResult').hidden)) && !r.popup && r.showBar && r.pct === '100', 'a tab switch with the score closed keeps the score where it was left', [r.popup, r.showBar, r.pct]);
+  // the Analysis has its own Play again and Change settings
+  await click(page, '#gameShowScore'); await click(page, '#gameAnalyze');
+  await page.evaluate(() => document.querySelector('#gameAnalysis [data-game="again"]').click()); await sleep(250);
+  const dlg = await page.evaluate(() => ({ open: document.getElementById('againDialog').open, focus: document.activeElement.id }));
+  t.check(dlg.open && dlg.focus === 'againSame', 'the Analysis’s own Play again asks the same question', dlg);
+  await click(page, '#againCancel');
+  await page.evaluate(() => document.querySelector('#gameAnalysis [data-game="new"]').click());
+  await ready(page);
+  const toSetupFocus = await focusOf(page);
+  t.check((await setup(page)).shown, 'the Analysis’s own Change settings returns to the setup', await setup(page));
+  const keepsFocus = t.check(toSetupFocus !== 'body', 'Change settings leaves focus on a control, not on the page', toSetupFocus);
+  // a reload with the score on screen: the setup, with the best
+  await page.reload({ waitUntil: 'load' }); await sleep(500); await ready(page);
+  await setPalette(page, 'zorn'); await ready(page); // (a new board takes its suggested palette: back to the one played)
+  const st = await setup(page);
+  t.check(st.shown && st.mode === 'relaxed' && st.best === 'Your best on this portrait at this level in Relaxed mode: 1000 points', 'a reload comes back to the setup with the best of 1,000 named', [st.mode, st.best]);
+  // ✕ twice: where focus lands
+  await click(page, '#gameStart'); await playing(page);
+  await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
+  const quitFocus = await focusOf(page);
+  const quitOk = t.check(quitFocus !== 'body', '✕ twice leaves focus on a control of the setup, not on the page', quitFocus);
+  if (!(keepsFocus && quitOk)) t.finding({
+    title: 'Focus is lost to the page when a game is quit or the score is left for the setup',
+    severity: 'low',
+    steps: '1. Open Paint by numbers with the keyboard and Start painting. 2. Press the ✕ in the bar twice (or Lock in portrait, then Change settings). 3. Read which element has focus (press Tab).',
+    expected: 'Focus lands on a control of the setup (Start painting, say), as it lands on Lock in portrait when a game starts, on Analyze when the score comes and on Show score when it is closed.',
+    actual: `After ✕ twice focus is on "${quitFocus}", after Change settings on "${toSetupFocus}": the control that had it was hidden, so a keyboard user starts again from the top of the page.`,
+    cause: 'js/game.js 1175-1191 (the quit) and 1617-1623 (toSetup) hide the play and result sections without moving focus; compare startGame (609), showScore (1386) and the Show score button (1389-1393), which do.',
+  });
+  await clean(t, page, 'after the game');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 26. Inputs the first sections left out: a shape tapped in the value stage, taps during Memory's look, a look that
+//     ends while away, a photo pasted or dropped on a painting's setup, the file picker cancelled or given a bad file
+// ================================================================================================
+async function otherInputs(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  const tapSpot = async () => {
+    const spot = await paperSpot(page), cb = await box(page, '#gameCanvas');
+    if (!spot || !cb) return false;
+    await page.mouse.click(cb.x + (spot.x + 0.5) * cb.width / spot.w, cb.y + (spot.y + 0.5) * cb.height / spot.h);
+    return true;
+  };
+  // Value first: a shape tapped on the board chooses its number, and the slider greys every shape of it
+  await setMode(page, 'value'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  await pickNumber(page, 4);
+  t.check(await tapSpot(), 'the value stage has a bare shape to tap');
+  let p = await play(page);
+  const k = +(/^Number (\d+)$/.exec(p.valueTitle) || [])[1];
+  t.check(k > 0 && k !== 5 && same(p.pressed, [k - 1]), 'a shape tapped in the value stage chooses its number', [p.valueTitle, p.pressed]);
+  const area = await washCount(page);
+  await setValue(page, 30);
+  const g = greyOf(30);
+  const greys = (await colorsOf(page, '#gameCanvas'))[`#${[g, g, g].map((x) => x.toString(16).padStart(2, '0')).join('')}`] || 0;
+  t.check(area > 100 && greys >= area * 0.85, 'and every shape with that number takes the grey (the whole area of its shapes, the numerals apart)', [area, greys]);
+  await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
+
+  // Memory: during the look a number or a shape can be chosen, 'Memorize this' does nothing, and a look that ends while away
+  await setMode(page, 'memory'); await ready(page);
+  await page.clock.install();
+  await click(page, '#gameStart'); await playing(page);
+  await pickNumber(page, 2);
+  await tapSpot();
+  p = await play(page);
+  t.check(p.looking && /^Number \d+$/.test(p.title) && p.parts.startsWith('Empty'), 'during the look a shape can be tapped to choose its number; nothing is painted', [p.looking, p.title, p.parts]);
+  await click(page, '#gameRefToggle');
+  p = await play(page);
+  t.check(p.looking && p.toggle === 'Memorize this' && !p.collapsed, '"Memorize this" does nothing during the look', [p.looking, p.toggle, p.collapsed]);
+  await tab(page, 'study');
+  await page.clock.fastForward(11000); await sleep(400);
+  await tab(page, 'game');
+  p = await play(page);
+  t.check(!p.looking && p.lock === 'Lock in portrait' && p.collapsed && p.toggle === 'Peek · 3 left (−10 s)' && p.timer === '5:00', 'a look that ends while away on another tab is over on return: the clock at 5:00 and all three peeks left', [p.looking, p.lock, p.toggle, p.timer]);
+  await click(page, '#tab-game [data-ref-view="blocks"]');
+  p = await play(page);
+  t.check(p.collapsed && (await page.evaluate(() => document.querySelector('#tab-game [data-ref-view="blocks"]').getAttribute('aria-pressed'))) === 'true', 'Blocks pressed while the reference is hidden changes the view and leaves it hidden', [p.collapsed]);
+  await click(page, '#gameRefToggle'); await sleep(100);
+  const peeking = await page.evaluate(() => ({ label: document.getElementById('gameRef').getAttribute('aria-label'), toggle: document.getElementById('gameRefToggle').textContent }));
+  t.check(peeking.toggle === 'Peeking…' && peeking.label === 'The reference as a color-block study', 'and the peek then shows the blocks', peeking);
+  await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
+  await setMode(page, 'classic'); await ready(page);
+  await clean(t, page, 'other inputs: value stage and memory');
+  await page.context().close();
+
+  // A painting is chosen: a photo pasted or dropped on the page is what the visitor means to paint
+  const q = await openPage(site, { url: '#game' });
+  await ready(q);
+  await click(q, '#gameFromPainting'); await ready(q);
+  await pasteFile(q, await makeImage(q, { width: 500, height: 640, type: 'image/jpeg', name: 'pasted-a.jpg' }));
+  await ready(q);
+  let s = await setup(q);
+  t.check(s.subject === 'photo' && s.photoPane && s.photoName === 'Painting from pasted-a.' && s.preview[0] === 500, 'a photo pasted while A painting is chosen switches the setup to My photo and names it', [s.subject, s.photoName, s.preview]);
+  await click(q, '#gameFromPainting'); await ready(q);
+  await dropFiles(q, 'body', [await makeImage(q, { width: 440, height: 600, type: 'image/jpeg', name: 'dropped-b.jpg' })]);
+  await q.waitForFunction(() => document.getElementById('gamePhotoName').textContent === 'Painting from dropped-b.', null, { timeout: 15000 }).catch(() => null);
+  await ready(q);
+  s = await setup(q);
+  t.check(s.subject === 'photo' && s.photoName === 'Painting from dropped-b.' && s.preview[0] === 440, 'a photo dropped while A painting is chosen does the same', [s.subject, s.photoName, s.preview]);
+
+  // New photo (Play again) opens the file picker; cancelling keeps the setup; a file that is not a picture is refused and said
+  await click(q, '#gameStart'); await playing(q); await lockIn(q);
+  const pickFile = async (files) => {
+    const chooser = q.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null);
+    await click(q, '#gamePopup [data-game="again"]'); await sleep(200); await click(q, '#againNew');
+    const fc = await chooser;
+    if (fc && files) await fc.setFiles(files);
+    await sleep(files ? 1500 : 500);
+    return !!fc;
+  };
+  const opened = await pickFile(null);
+  s = await setup(q);
+  t.check(opened && s.shown && s.photoName === 'Painting from dropped-b.' && !s.start, 'New photo opens the picker; cancelling it leaves the setup with the same photo and Start enabled', [opened, s.shown, s.photoName, s.start]);
+  await click(q, '#gameStart'); await playing(q); await lockIn(q);
+  await pickFile(textFile());
+  s = await setup(q);
+  const refusal = await text(q, '#toast');
+  t.check(s.shown && s.photoName === 'Painting from dropped-b.' && !s.start && /image|photo|picture/i.test(refusal || ''), 'a text file chosen in the picker is refused with a word, and the setup keeps the photo', [s.shown, s.photoName, refusal]);
+  await clean(t, q, 'other inputs: paste, drop and the picker');
+  await q.context().close();
+}
