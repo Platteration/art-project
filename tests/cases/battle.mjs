@@ -30,7 +30,9 @@ const state = (page) => page.evaluate(() => {
   else if (r.q.mode === 'order') gap = Math.min(...byL.slice(1).map((c, k) => c.L - byL[k].L));
   else gap = r.q.dir < 0 ? byL[1].L - byL[0].L : byL[r.n - 1].L - byL[r.n - 2].L;
   const lv = ValueBattle.levelAt(g.i);
-  return { ...out, n: r.n, mode: r.q.mode, kind: r.q.kind, key: r.q.key, answer: r.answer, gap, lv: { lo: r.n === 2 ? lv[r.q.kind][0] : lv.gap, hi: r.n === 2 ? lv[r.q.kind][1] : Infinity }, L: r.colors.map((c) => c.L), labels: r.colors.map((c) => `V ${(c.L / 10).toFixed(1)}`), chroma: r.colors.map((c) => c.chroma) };
+  // a pair's band is the round's own (r.band): the temperature ladder is scaled to the palette's reach, so a warm-only
+  // palette deals temperature pairs below the level's nominal gap
+  return { ...out, n: r.n, mode: r.q.mode, kind: r.q.kind, key: r.q.key, answer: r.answer, gap, lv: { lo: r.n === 2 ? (r.band ? r.band[0] : lv[r.q.kind][0]) : lv.gap, hi: r.n === 2 ? (r.band ? r.band[1] : lv[r.q.kind][1]) : Infinity }, L: r.colors.map((c) => c.L), labels: r.colors.map((c) => `V ${(c.L / 10).toFixed(1)}`), chroma: r.colors.map((c) => c.chroma) };
 });
 const ui = (page) => page.evaluate(() => {
   const $ = (id) => document.getElementById('vb-' + id);
