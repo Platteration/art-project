@@ -1497,8 +1497,9 @@
   // after Start over) to choose a pose to start from: then it has no close button and the rest of the
   // page waits until a pose is picked. Picking a pose closes it.
   const sheet = $('library');
-  // (the page's own header too, with its Simple / Advanced switch: the sheet is modal, so nothing behind it takes the focus)
-  const behindSheet = () => [document.querySelector('.top'), canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
+  // (not the page's own header above the sheet: its Simple / Advanced switch stays usable, as the app's own does while the
+  // sheet shows in the app's frame; the keyboard's Tab goes round inside the sheet, below, so the focus does not leave it)
+  const behindSheet = () => [canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
   function openLibrary(start) {
     letGo();                                   // a pose picked here must not be posed on by a pointer still down
     sheetStart = !!start;
