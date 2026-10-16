@@ -2116,10 +2116,15 @@
       const list = POSES.map((ps) => ({ entry: ps, id: ps.id, name: ps.name, group: ps.group || 'standing' }));
       let saved = [];
       try { const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]'); if (Array.isArray(m)) saved = m; } catch (err) { /* none */ }
-      saved.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX).forEach((m, i) => {
-        const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
-        list.push({ entry: { id: m.id, p: m.p, ground: false, thumbView: view }, id: m.id, name: `Your pose ${i + 1}`, group: 'mine' });
-      });
+      // one entry per id: a saved list of another shape (two poses under one id, or a built-in pose's id) would
+      // otherwise give the class two tiles that are one pose, and one tap would take both out
+      const seen = new Set(list.map((q) => q.id));
+      saved.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX)
+        .filter((m) => !seen.has(m.id) && seen.add(m.id))
+        .forEach((m, i) => {
+          const view = m.view && typeof m.view === 'object' ? { az: num(m.view.az, 30), el: clamp(num(m.view.el, 8), -8, 80) } : { az: 30, el: 8 };
+          list.push({ entry: { id: m.id, p: m.p, ground: false, thumbView: view }, id: m.id, name: `Your pose ${i + 1}`, group: 'mine' });
+        });
       return list;
     };
     const tell = (msg) => window.parent.postMessage(msg, APP_ORIGIN);

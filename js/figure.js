@@ -89,7 +89,8 @@
     if (d.type === 'pose-and-light:ready') tellFrame({ type: 'pose-and-light:list' });
     else if (d.type === 'pose-and-light:failed') noPictures();
     else if (d.type === 'pose-and-light:list' && Array.isArray(d.poses)) {
-      poses = d.poses.filter((q) => q && typeof q.id === 'string' && typeof q.name === 'string').map((q) => ({ id: q.id, name: q.name, group: String(q.group || 'standing') }));
+      const ids = new Set(); // one tile per pose id, whatever the list sent
+      poses = d.poses.filter((q) => q && typeof q.id === 'string' && typeof q.name === 'string' && !ids.has(q.id) && ids.add(q.id)).map((q) => ({ id: q.id, name: q.name, group: String(q.group || 'standing') }));
       groups = (Array.isArray(d.groups) ? d.groups : []).filter((g) => Array.isArray(g) && typeof g[0] === 'string' && typeof g[1] === 'string');
       failed = false;
       buildLibrary();
