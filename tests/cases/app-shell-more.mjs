@@ -55,10 +55,11 @@ const luminance = (fr) => fr.evaluate(() => { const m = /rgba?\((\d+), (\d+), (\
 const toastOf = (page) => app(page).evaluate(() => { const e = document.getElementById('toast'); const b = e.querySelector('button'); return { show: e.classList.contains('show'), text: e.textContent.trim(), button: b ? b.textContent : null, disabled: !!(b && b.disabled) }; });
 const isSimple = (page) => app(page).evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), pressed: [...document.querySelectorAll('[data-mode]')].map((b) => b.dataset.mode + '=' + b.getAttribute('aria-pressed')).join(' ') }));
 const frameMode = (page) => { const f = poseFrame(page); return f ? f.evaluate(() => window.PoseAndLight ? PoseAndLight.mode() : null).catch(() => null) : null; };
+const poseUp = (page) => { const f = poseFrame(page); return f ? f.evaluate(() => !!window.__poseStarted && document.getElementById('fail').hidden).catch(() => false) : false; };
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const timings = [];
 // what a step cost when measured on a busy machine, in seconds (longest first keeps the workers even); the default is 15
-const COSTS = [[/^heavy route/, 65], [/^modes/, 50], [/live resize/, 45], [/^pose\.html alone/, 40], [/storage blocked/, 36], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 25], [/hostile keys/, 24], [/forget during a figure/, 21], [/^route #/, 15], [/three|pose scripts/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20], [/sandboxed frame/, 35], [/guard and a module/, 24]];
+const COSTS = [[/^heavy route/, 45], [/^modes of/, 30], [/^modes$/, 35], [/live resize/, 35], [/^pose\.html alone/, 30], [/storage blocked/, 28], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 22], [/hostile keys/, 30], [/forget during a figure/, 21], [/^route #/, 18], [/pose scripts/, 28], [/three/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20], [/sandboxed frame/, 30], [/guard and a module/, 24]];
 const jobs = [];
 let sharedIdFinding = false;
 // a step registers itself; the pool at the end of the case runs them
@@ -70,19 +71,21 @@ async function runJob(t, j) {
   timings.push(`${j.name} ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 }
 async function reloadWith(page, script, arg) { await page.addInitScript(script, arg); await page.reload({ waitUntil: 'load' }); await sleep(500); }
-// the wait part of lib's tab() without the click: the Pose frame up (or its failure panel), Figure's pictures (or its note)
-async function settle(page, name, timeout = 15000) {
-  if (name === 'pose') { const t0 = Date.now(); while (Date.now() - t0 < timeout) { const f = poseFrame(page); if (f) { const up = await f.evaluate(() => (!!window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30) || !document.getElementById('fail').hidden).catch(() => false); if (up) return true; } await sleep(250); } return false; }
-  if (name === 'figure') return !!(await app(page).waitForFunction(() => { const b = document.querySelectorAll('#tab-figure [data-pose-id]'); return (b.length > 0 && [...b].every((x) => { const i = x.querySelector('img'); return i && i.src.startsWith('blob:'); })) || /could not be drawn/.test(document.getElementById('fig-libNote').textContent); }, null, { timeout }).catch(() => null));
+// the wait part of lib's tab() without the click: the Pose frame up (or its failure panel), Figure's pictures (or its note).
+// light: only that the Pose page has started, and that Figure's list is there (the pictures are drawn by software WebGL here and
+// cost seconds each on a busy machine; a step that has no saved pose to draw does not need them)
+async function settle(page, name, timeout = 15000, light = false) {
+  if (name === 'pose') { const t0 = Date.now(); while (Date.now() - t0 < timeout) { const f = poseFrame(page); if (f) { const up = await f.evaluate((light) => (!!window.__poseStarted && (light || document.querySelectorAll('#poses button.has-img').length >= 30)) || !document.getElementById('fail').hidden, light).catch(() => false); if (up) return true; } await sleep(250); } return false; }
+  if (name === 'figure') return !!(await app(page).waitForFunction((light) => { const b = document.querySelectorAll('#tab-figure [data-pose-id]'); return (b.length > 0 && (light || [...b].every((x) => { const i = x.querySelector('img'); return i && i.src.startsWith('blob:'); }))) || /could not be drawn/.test(document.getElementById('fig-libNote').textContent); }, light, { timeout }).catch(() => null));
   await sleep(300); return true;
 }
 // every tab in turn, the way a visitor opens them; heavy = wait for Pose and Figure to finish; each(name) runs on
 // every tab once it is up
-async function tour(page, { heavy = true, timeout = 15000, each = null, tabs = TABS } = {}) {
+async function tour(page, { heavy = true, light = false, timeout = 15000, each = null, tabs = TABS } = {}) {
   const out = {};
   for (const name of tabs) {
     await tab(page, name, { wait: false });
-    if (heavy && (name === 'pose' || name === 'figure')) await settle(page, name, timeout); else await sleep(250);
+    if (heavy && (name === 'pose' || name === 'figure')) await settle(page, name, timeout, light); else await sleep(250);
     out[name] = (await shownPanels(page)).join(',');
     if (each) await each(name);
   }
@@ -225,7 +228,7 @@ function groupA(t, site) {
     await tab(page, 'pose', { wait: false });
     await page.locator('[data-mode="simple"]').click();
     await page.locator('[data-mode="advanced"]').click();
-    await settle(page, 'pose', 30000);
+    await settle(page, 'pose', 30000, true);
     const f = poseFrame(page);
     await f.waitForFunction(() => window.PoseAndLight && PoseAndLight.mode() === 'advanced', null, { timeout: 5000 }).catch(() => null);
     t.check((await frameMode(page)) === 'advanced', 'the Pose frame follows the app: Advanced after the switch moved while it loaded', await frameMode(page));
@@ -238,6 +241,8 @@ function groupA(t, site) {
     t.check((await frameMode(page)) === 'advanced', 'and back to Advanced', await frameMode(page));
     await clean(t, page, 'modes in the app');
     await page.context().close();
+  });
+  step(t, 'modes of pose.html alone and hostile mode values', async () => {
     // pose.html on its own: a switch of its own, remembered under its own key, apart from the app's
     const alone = await openPage(site, { url: 'pose.html', storage: { [PVS('mode')]: 'advanced' } });
     await alone.waitForFunction(() => window.__poseStarted && window.PoseAndLight, null, { timeout: 30000 }).catch(() => null);
@@ -365,7 +370,7 @@ function groupB(t, site) {
       const bad = [];
       for (const name of TABS) {
         await tab(page, name, { wait: false });
-        if (name === 'pose' || name === 'figure') await settle(page, name, label === 'desktop' ? 30000 : 12000);
+        if (name === 'pose' || name === 'figure') await settle(page, name, label === 'desktop' ? 30000 : 12000, true);
         const lum = await luminance(page);
         if (!(lum >= 0 && lum < 0.25)) bad.push(`${name}: ${lum}`);
         if (name === 'pose') { const f = poseFrame(page); const fl = f ? await luminance(f).catch(() => -1) : -1; if (!(fl >= 0 && fl < 0.25)) bad.push(`pose frame: ${fl}`); }
@@ -386,7 +391,7 @@ function groupB(t, site) {
     for (const name of TABS) {
       await page.setViewportSize(DESKTOP); await frames(page);
       await tab(page, name, { wait: false });
-      if (name === 'pose' || name === 'figure') await settle(page, name, 30000);
+      if (name === 'pose' || name === 'figure') await settle(page, name, 30000, true);
       const h0 = name === 'pose' ? await page.evaluate(() => document.getElementById('poseFrame').style.height) : null;
       const seen = [];
       for (const w of widths) {
@@ -538,8 +543,9 @@ function groupB(t, site) {
     const page = await openPage(site);
     await clean(t, page, 'before storage was blocked');
     await reloadWith(page, () => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; Object.defineProperty(window, 'indexedDB', { value: undefined, configurable: true }); });
-    const out = await tour(page, { heavy: true, timeout: 30000 });
+    const out = await tour(page, { heavy: true, light: true, timeout: 30000 });
     t.check(tourOk(out), 'writes blocked and no IndexedDB: every tab opens', out);
+    t.check(await poseUp(page), 'writes blocked and no IndexedDB: the Pose page starts, with no failure panel', await poseUp(page));
     await page.locator('[data-mode="advanced"]').click(); await sleep(200);
     t.check(!(await isSimple(page)).simple, 'writes blocked: the switch still works for this visit', await isSimple(page));
     await tab(page, 'paint'); await sleep(1500);
@@ -556,8 +562,9 @@ function groupB(t, site) {
     const page = await openPage(site);
     await clean(t, page, 'before storage access was blocked');
     await reloadWith(page, () => { Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Access is denied for this document.', 'SecurityError'); }, configurable: true }); });
-    const out = await tour(page, { heavy: true, timeout: 30000 });
+    const out = await tour(page, { heavy: true, light: true, timeout: 30000 });
     t.check(tourOk(out), 'localStorage throws on access: every tab opens', out);
+    t.check(await poseUp(page), 'localStorage throws on access: the Pose page starts, with no failure panel', await poseUp(page));
     await tab(page, 'help');
     await forgetTwice(page);
     t.check((await shownPanels(page)).join() === 'tab-study', 'localStorage throws on access: Forget still reloads the page', await shownPanels(page));
@@ -594,12 +601,15 @@ const EXTRA_SHAPES = [
   ['an empty array', () => '[]'], ['JSON cut off', () => '{"a":'], ['a 100 KB string', () => JSON.stringify('x'.repeat(100000))], ['objects holding null and Infinity', () => '{"id":null,"p":null,"x":1e999,"view":-5,"length":1e9}'],
 ];
 const VARIANT_BASE = VARIANTS.concat(EXTRA_SHAPES);
+// (a boolean is a value of the wrong type like the JSON string; it is in the deal, and has no tour or route of its own)
+VARIANTS.splice(VARIANTS.findIndex(([label]) => label === 'a boolean'), 1);
 VARIANTS.push(['a different shape in every key', (k) => VARIANT_BASE[ALL_KEYS.indexOf(k) % VARIANT_BASE.length][1]()]);
 // the routes are opened with the states that differ in kind: a value that is not JSON, a string where a number or an object is read,
-// prototype names, 5000 entries, nested wrong types, and the deal. (The NaN variant reads as the plain string does and a boolean as
-// the JSON string does, neither being an object or a number; every tour of the hostile keys above opens every tab with both.)
-const ROUTE_STATES = [0, 2, 3, 4, 5, 7];
-const HEAVY_ROUTE_STATES = [0, 3, 4, 5, 7];
+// prototype names, 5000 entries, nested wrong types, and the deal. (The NaN variant reads as the plain string does, a boolean as
+// the JSON string does; every tour of the hostile keys above opens every tab with the NaN one.)
+const stateIndex = (re) => VARIANTS.findIndex(([label]) => re.test(label));
+const ROUTE_STATES = [/plain string/, /JSON string/, /prototype/, /5000/, /nested/, /different/].map(stateIndex);
+const HEAVY_ROUTE_STATES = [/plain string/, /prototype/, /5000/, /nested/, /different/].map(stateIndex);
 
 // words a bad saved value turns up on the page when something reads it as text: NaN, undefined, [object Object],
 // a function's source (the text on show, and what is in a field)
@@ -688,13 +698,13 @@ function groupC(t, site) {
   for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#battle', '#study']) {
     step(t, `route ${h} with every hostile state`, async () => { for (const vi of ROUTE_STATES) await openRoute(h, vi, false); });
   }
-  step(t, 'route #nonsense with hostile state', async () => { for (const vi of [3, 4, 7]) await openRoute('#nonsense', vi, false); });
+  step(t, 'route #nonsense with hostile state', async () => { for (const vi of [/prototype/, /5000/, /different/].map(stateIndex)) await openRoute('#nonsense', vi, false); });
   for (const h of ['#pose', '#figure']) {
     step(t, `heavy route ${h} with every hostile state`, async () => { for (const vi of HEAVY_ROUTE_STATES) await openRoute(h, vi, true); });
   }
   // pose.html on its own (the Pose page opened as a page): its three keys hostile, and the app's mode key beside them
   step(t, 'pose.html alone with hostile state', async () => {
-    for (const [label, make] of VARIANTS) {
+    for (const [label, make] of VARIANTS.filter((v, i) => HEAVY_ROUTE_STATES.includes(i) || /NaN/.test(v[0]))) {
       const page = await openPage(site, { url: 'pose.html', storage: seedAll(make) });
       await page.waitForFunction(() => window.__poseStarted || !document.getElementById('fail').hidden, null, { timeout: 20000 }).catch(() => null);
       await sleep(800);
@@ -711,7 +721,7 @@ function groupC(t, site) {
   // an address written by hand: any case, a trailing slash, a query, a name that is a property of Object, a bare #;
   // opened at load, and then changed in place (an unknown one leaves the open tab as it is)
   step(t, 'hash spellings', async () => {
-    const make = VARIANTS[3][1];
+    const make = VARIANTS[stateIndex(/prototype/)][1];
     for (const [h, want] of [['#Help', 'help'], ['#loomis?x=1', 'loomis'], ['#__proto__', 'study'], ['#hasOwnProperty', 'study']]) {
       const page = await openPage(site, { url: h, storage: seedAll(make) });
       t.check((await shownPanels(page)).join() === 'tab-' + want, `opened at ${h}: ${want} shows`, await shownPanels(page));
@@ -848,7 +858,7 @@ function groupD(t, site) {
       await frames(page);
       await checkState(t, label, page, want);
       if (want.note !== 'nojs') {
-        if (want.heavy) { const out = await tour(page, { heavy: true, timeout: 40000 }); t.check(tourOk(out), `${label}: every tab opens (Pose and Figure up)`, out); }
+        if (want.heavy) { const out = await tour(page, { heavy: true, light: true, timeout: 40000 }); t.check(tourOk(out), `${label}: every tab opens (Pose and Figure up)`, out); }
         else await clickTabs(t, label, page, want);
         for (const [btn, ids] of Object.entries(want.menus || {})) await walkMenu(t, label, page, btn, ids);
       }
@@ -964,8 +974,8 @@ function groupD(t, site) {
   });
 
   // the frame's own scripts and three.js: the Pose page says it could not start, the app and Figure study say nothing wrong
-  step(t, 'pose scripts blocked', async () => {
-    for (const file of ['js/pose.js', 'js/pose-embed.js', 'js/vendor/three.min.js']) {
+  for (const file of ['js/pose.js', 'js/pose-embed.js', 'js/vendor/three.min.js']) step(t, `pose scripts blocked: ${file}`, async () => {
+    {
       const page = await openPage(site, { block: [site.base + file] });
       await tab(page, 'pose', { wait: false });
       await settle(page, 'pose', 15000);
@@ -1088,7 +1098,7 @@ function groupD(t, site) {
     t.check(fonts.loaded >= 1 && /Bricolage/i.test(fonts.font), 'sandboxed frame: the site\'s typefaces load', fonts);
     const s0 = await notesOf(page);
     t.check(s0.nojs === 'none' && s0.part === 'none' && s0.old === 'none' && s0.shown.join() === 'tab-study' && s0.hidden.length === 0, 'sandboxed frame: the app starts with all its tabs and no note', s0);
-    const out = await tour(page, { heavy: true, timeout: 40000 });
+    const out = await tour(page, { heavy: true, light: true, timeout: 40000 });
     t.check(tourOk(out), 'sandboxed frame: every tab opens (Pose and Figure study too)', out);
     const f = poseFrame(page);
     t.check(!!f && (await f.evaluate(() => !!window.__poseStarted && document.getElementById('fail').hidden).catch(() => false)), 'sandboxed frame: the Pose page inside the sandboxed app starts');
