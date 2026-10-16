@@ -54,8 +54,9 @@
     if (H > devH + 2) H = devH;
     // a short window (a phone turned on its side) has no height to spare for the header and tabs: the studio
     // takes the whole screen there too, as on a phone held upright (styles.css steps the header and tabs aside)
-    if (matchMedia('(min-width: 760px) and (min-height: 560px)').matches) {
-      const tabs = document.querySelector('.tabs').getBoundingClientRect();
+    // (a game's focus mode hides the tabs below 1000 px: with no tabs to sit under, it takes the screen as well)
+    const tabs = document.querySelector('.tabs').getBoundingClientRect();
+    if (matchMedia('(min-width: 760px) and (min-height: 560px)').matches && tabs.width > 0) {
       const inset = Math.max(0, Math.round(tabs.bottom + 14 - top));
       el.style.left = `${Math.round(tabs.left)}px`; el.style.top = `${Math.round(top + inset)}px`;
       el.style.width = `${Math.round(tabs.width)}px`; el.style.height = `${Math.max(240, Math.round(H - inset - 16))}px`;
