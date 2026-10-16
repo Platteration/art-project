@@ -1028,9 +1028,11 @@ function groupD(t, site) {
       const page = await openPage(site, { block: block.map((b) => site.base + b) });
       await frames(page);
       const s = await page.evaluate(() => ({ status: document.fonts.status, loaded: [...document.fonts].filter((f) => f.status === 'loaded').length, font: getComputedStyle(document.querySelector('h1')).fontFamily }));
-      const out = await tour(page, { heavy: false, tabs: TABS.filter((n) => n !== 'figure') });
+      // (the Pose frame has its own page and fonts: it is opened with the font files and fonts.css gone, not for the icons)
+      const here = TABS.filter((n) => n !== 'figure' && (n !== 'pose' || label !== 'the manifest and the icons'));
+      const out = await tour(page, { heavy: false, tabs: here });
       const shell = await notesOf(page);
-      t.check(TABS.filter((n) => n !== 'figure').every((n) => out[n] === 'tab-' + n) && shell.nojs === 'none' && shell.part === 'none' && shell.old === 'none', `${label} blocked: every tab opens, no note (the typefaces fall back, the page does not need the rest)`, { ...s, out });
+      t.check(here.every((n) => out[n] === 'tab-' + n) && shell.nojs === 'none' && shell.part === 'none' && shell.old === 'none', `${label} blocked: every tab opens, no note (the typefaces fall back, the page does not need the rest)`, { ...s, out });
       if (label !== 'the manifest and the icons') t.check(s.loaded === 0, `${label} blocked: none of the three typefaces is in use`, s);
       // the browser logs each blocked request itself, and the guard says nothing more
       t.check(page.log.console.every((m) => /Failed to load resource/.test(m)), `${label} blocked: the console holds only the browser's own lines for the blocked requests`, page.log.console);

@@ -859,4 +859,809 @@ export default async function studyTools(t, site) {
     await clean(t, page, 'keyboard');
     await page.context().close();
   }
+
+  // ==== coverage additions: the gaps a critic found against the README (see the gaps file's titles) ============
+
+  // ---- Check my painting: the Study's marks on its four panels, their own drags and hovers, and their PNGs -----
+  {
+    const page = await openPage(site, { url: '#check' });
+    await recordPills(page);
+    t.check(await scored(page), 'the example painting is scored on the #check route, for the panels to show');
+    await inView(page, '#cv-orig');
+    await setTool(page, 'line'); await dragFrac(page, [0.2, 0.25], [0.8, 0.25]);
+    await setTool(page, 'measure');
+    const bo = await box(page);
+    await dragPx(page, 0.1, 0.4, 100, 0);
+    await dragPx(page, 0.1, 0.55, 60, 0);
+    await setTool(page, 'plumb'); await tapAt(page, 0.6, 0.7);
+    await click(page, '#gridBtn'); await sleep(30);
+    const unitX = 0.1 + 50 / bo.width, measX = 0.1 + 30 / bo.width;
+    const panels = ['cv-refblock', 'cv-art', 'cv-artblock', 'cv-diff'];
+    const seen = {};
+    for (const id of panels) seen[id] = { line: await overlayHas(page, id, 0.5, 0.25, COLORS.lcRed), unit: await overlayHas(page, id, unitX, 0.4, UNIT_COLOR, 5), measure: await overlayHas(page, id, measX, 0.55, MEASURE_COLOR, 5), plumb: await overlayHas(page, id, 0.6, 0.05, MEASURE_COLOR, 6), grid: await overlayHas(page, id, 1 / 3, 0.9, MEASURE_COLOR, 3) };
+    t.check(panels.every((id) => Object.values(seen[id]).every(Boolean)), 'the lines, unit, measure, plumb line and grid show on all four Check my painting panels', seen);
+    // a line dragged on each panel that shows your painting is counted, and shows on the photo and the value study
+    await setTool(page, 'line');
+    for (const sel of ['#cv-art', '#cv-diff']) {
+      await inView(page, sel);
+      const before = await count(page, 'line');
+      const r = await dragPx(page, 0.3, sel === '#cv-art' ? 0.8 : 0.85, 90, -30, { sel });
+      const fx = (r.x0 - r.b.x) / r.b.width, fy = (r.y0 - r.b.y) / r.b.height;
+      const on = { orig: await overlayHas(page, 'cv-orig', fx, fy, COLORS.lcRed), value: await overlayHas(page, 'cv-value', fx, fy, COLORS.lcRed) };
+      t.check((await count(page, 'line')) === before + 1 && on.orig && on.value, `a line dragged on ${sel} is counted and shows on the photo and the three-value study`, { before, after: await count(page, 'line'), on });
+    }
+    // the magnifier on Your painting reads the pixel under the pointer
+    await setTool(page, 'sample');
+    await inView(page, '#cv-art'); await hover(page, 0.5, 0.6, '#cv-art');
+    let lo = await loupe(page);
+    let want = await hexAt(page, 'cv-art', 0.5, 0.6);
+    t.check(lo.shown && lo.hex === want, 'the magnifier on Your painting reads the pixel under the pointer', { loupe: lo, want });
+    // Size and Rotate repaint Your painting; the marks stay where they were (they are in the reference's coordinates)
+    await setRange(page, 'alignScale', 110); await settled(page);
+    await setRange(page, 'alignRot', 5); await settled(page);
+    const still = {};
+    for (const id of panels) still[id] = { line: await overlayHas(page, id, 0.5, 0.25, COLORS.lcRed), unit: await overlayHas(page, id, unitX, 0.4, UNIT_COLOR, 5) };
+    t.check(panels.every((id) => still[id].line && still[id].unit), 'after Size and Rotate the marks stay where they were on every panel', still);
+    await hover(page, 0.5, 0.6, '#cv-art'); lo = await loupe(page); want = await hexAt(page, 'cv-art', 0.5, 0.6);
+    t.check(lo.shown && lo.hex === want, 'after Size and Rotate the magnifier reads the repainted Your painting', { loupe: lo, want });
+    // Save PNG of Your blocks and of the accuracy map carry the marks too
+    const dA = await download(page, () => click(page, '[data-save="artblock"]'));
+    const pA = dA ? await pngRead(page, dA.buf, { points: [[0.5, 0.25], [unitX, 0.4]], columns: [1 / 3] }) : null;
+    t.check(!!dA && dA.name === 'sample-study-my-painting-blocks.png' && !!pA && near(pA.px[0], RED) && near(pA.px[1], YELLOW, 40) && pA.cols[0] > 50, 'Save PNG of Your blocks carries the line, the unit and the grid', { name: dA && dA.name, px: pA && pA.px, cols: pA && pA.cols });
+    const dD = await download(page, () => click(page, '[data-save="diff"]'));
+    const pD = dD ? await pngRead(page, dD.buf, { points: [[0.5, 0.25], [unitX, 0.4]] }) : null;
+    t.check(!!dD && dD.name === 'sample-study-accuracy-map.png' && !!pD && near(pD.px[0], RED) && near(pD.px[1], YELLOW, 40), 'Save PNG of the accuracy map carries the line and the unit', { name: dD && dD.name, px: pD && pD.px });
+    await clean(t, page, 'check panels');
+    await page.context().close();
+  }
+
+  // ---- the accuracy map's percentages: no measure label covers one, and the PNG keeps them legible --------------
+  {
+    const page = await openPage(site, { url: '#check' });
+    await recordPills(page);
+    t.check(await scored(page), '#check: the example is scored, so the percentages are drawn');
+    await app(page).evaluate(() => { window.__pillRec['cv-diff'] = []; });
+    await setRange(page, 'alignRot', 0.5); await settled(page);
+    const dims = await sizeOf(page, 'cv-diff');
+    const boxes = (await pillsOf(page, 'cv-diff')).filter((p) => /%$/.test(p.text || '')).map((p) => ({ x: p.x / dims.w, y: p.y / dims.h, w: p.w / dims.w, h: p.h / dims.h, text: p.text }));
+    t.check(boxes.length >= 4, 'the accuracy map has percentage labels to keep clear', boxes.length);
+    // a measure through the middle of each of the four biggest percentages, after a unit at the top left
+    const targets = boxes.slice().sort((a, b) => b.w * b.h - a.w * a.h).slice(0, 4);
+    await setTool(page, 'measure');
+    await inView(page, '#cv-orig');
+    await dragPx(page, 0.02, 0.03, 100, 0);
+    for (const b of targets) {
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      await dragFrac(page, [Math.max(0, cx - 0.07), cy], [Math.min(1, cx + 0.07), cy]);
+    }
+    await inView(page, '#cv-diff');
+    const od = await sizeOf(page, 'cv-diff', true);
+    const labels = (await pillsOf(page, 'ov:cv-diff')).map((p) => ({ x: p.x / od.w, y: p.y / od.h, w: p.w / od.w, h: p.h / od.h, text: p.text }));
+    const hits = labels.filter((l) => boxes.some((b) => overlaps(l, b)));
+    const dark = []; for (const b of boxes) dark.push(await darkInside(page, 'cv-diff', b));
+    t.check(labels.length >= 4 && hits.length === 0 && dark.every((n) => n === 0), 'no measure label covers a percentage on the accuracy map, and no dark label ink lies inside one', { labels: labels.map((l) => l.text), hits: hits.length, darkPixels: dark });
+    // the PNG: each percentage still shows its white pill (a label over it would hide the score)
+    const dl = await download(page, () => click(page, '[data-save="diff"]'));
+    const png = dl ? await pngRead(page, dl.buf, { rects: boxes.map((b) => [b.x, b.y, b.w, b.h]) }) : null;
+    t.check(!!dl && !!png && JSON.stringify(png.size) === JSON.stringify([dims.w, dims.h]) && png.rects.every((f) => f >= 0.4), 'the saved accuracy map keeps every percentage legible (its pill mostly white)', { size: png && png.size, shares: png && png.rects.map((f) => +f.toFixed(2)) });
+    await clean(t, page, 'accuracy map labels');
+    await page.context().close();
+  }
+
+  // ---- the three-value and color-block studies take drags and hovers; the loupe reads their pixels --------------
+  {
+    const page = await openPage(site);
+    await inView(page, '#cv-value');
+    await setTool(page, 'line');
+    await dragFrac(page, [0.2, 0.3], [0.8, 0.3], { sel: '#cv-value' });
+    await dragFrac(page, [0.2, 0.5], [0.8, 0.5], { sel: '#cv-block' });
+    t.check((await count(page, 'line')) === 2 && (await overlayHas(page, 'cv-orig', 0.5, 0.3, COLORS.lcRed)) && (await overlayHas(page, 'cv-orig', 0.5, 0.5, COLORS.lcRed)) && (await overlayHas(page, 'cv-block', 0.5, 0.3, COLORS.lcRed)) && (await overlayHas(page, 'cv-value', 0.5, 0.5, COLORS.lcRed)), 'a line drawn on the three-value study or the color blocks lands on every image', await count(page, 'line'));
+    const bv0 = await box(page, '#cv-value');
+    const r = await dragPx(page, 0.2, 0.7, 100, 0, { sel: '#cv-value', during: () => loupe(page) });
+    const endHex = await hexAt(page, 'cv-value', (r.x0 + 100 - bv0.x) / bv0.width, (r.y0 - bv0.y) / bv0.height);
+    t.check(r.r.shown && r.r.hex === endHex && /^#([0-9A-F]{2})\1\1$/.test(endHex), 'while a line is drawn on the three-value study, the loupe shows its gray at the end of the line', { loupe: r.r, endHex });
+    await setTool(page, 'measure');
+    const bb = await box(page, '#cv-block');
+    const u = await dragPx(page, 0.05, 0.2, 100, 0, { sel: '#cv-block', during: () => loupe(page) });
+    t.check(u.r.hex === '1 U', 'a unit drawn on the color blocks reads 1 U', u.r);
+    const bo = await box(page, '#cv-orig');
+    const m = await dragPx(page, 0.05, 0.4, 140, 0, { sel: '#cv-orig', during: () => loupe(page) });
+    const wantU = (140 / bo.width) / (100 / bb.width);
+    const got = /^(\d+\.\d\d) U/.exec(m.r.hex);
+    t.check(!!got && Math.abs(+got[1] - wantU) <= 0.011, 'a 140 px measure on the photo, against a 100 px unit drawn on the color blocks, reads the same length in units', { loupe: m.r.hex, want: wantU.toFixed(3) });
+    await setTool(page, 'sample');
+    for (const id of ['cv-value', 'cv-block']) {
+      await hover(page, 0.4, 0.6, '#' + id);
+      const l = await loupe(page), w = await hexAt(page, id, 0.4, 0.6);
+      t.check(l.shown && l.hex === w, `the magnifier on ${id} reads the pixel under the pointer`, { loupe: l, want: w });
+    }
+    await clean(t, page, 'value and block studies');
+    await page.context().close();
+  }
+
+  // ---- the color-block study in a palette's mixes: the magnifier reads the mix, a click keeps it, the PNG has it ---
+  {
+    const page = await openPage(site);
+    await click(page, '#blockViewPalette');
+    await app(page).waitForFunction(() => !document.getElementById('blockViewPalette').classList.contains('is-busy'), null, { timeout: 60000 }).catch(() => null);
+    await sleep(150);
+    await setTool(page, 'sample');
+    const spots = [[0.5, 0.42], [0.3, 0.7], [0.62, 0.3]];
+    const inPal = [];
+    for (const [fx, fy] of spots) { await hover(page, fx, fy, '#cv-block'); inPal.push({ hex: (await loupe(page)).hex, want: await hexAt(page, 'cv-block', fx, fy) }); }
+    t.check(inPal.every((x) => x.hex === x.want), 'the palette view: the magnifier reads the mix on the block under the pointer', inPal);
+    await click(page, '[data-block-view="photo"]'); await sleep(120);
+    const inPhoto = [];
+    for (const [fx, fy] of spots) { await hover(page, fx, fy, '#cv-block'); inPhoto.push((await loupe(page)).hex); }
+    t.check(inPal.some((x, i) => x.hex !== inPhoto[i]), 'the mixes differ from the photo colors at some of the same spots', { palette: inPal.map((x) => x.hex), photo: inPhoto });
+    await click(page, '#blockViewPalette');
+    await app(page).waitForFunction(() => !document.getElementById('blockViewPalette').classList.contains('is-busy'), null, { timeout: 60000 }).catch(() => null);
+    await sleep(150);
+    await hover(page, 0.5, 0.42, '#cv-block');
+    const lh = (await loupe(page)).hex;
+    await resetToast(page);
+    await tapAt(page, 0.5, 0.42, '#cv-block');
+    const said = await toastShown(page);
+    t.check(said === `Added ${lh}` || said === `${lh} is already in Picked colors`, 'a click on the palette view keeps the mix the magnifier showed', { lh, said });
+    const dl = await download(page, () => click(page, '[data-save="block"]'));
+    const px = dl ? await pngRead(page, dl.buf, { points: [[0.5, 0.42]] }) : null;
+    t.check(!!px && hexOf(px.px[0]) === lh, 'the saved color-block PNG has the same mix at that spot', { png: px && hexOf(px.px[0]), lh });
+    await clean(t, page, 'palette block view');
+    await page.context().close();
+  }
+
+  // ---- the working size with measures on the page: lengths are read from the reference, so a new size keeps them ----
+  {
+    const page = await openPage(site);
+    await recordPills(page);
+    await click(page, '[data-mode="advanced"]'); await sleep(100);
+    await setTool(page, 'measure');
+    const bo = await box(page);
+    await dragPx(page, 0.08, 0.2, 100, 0);
+    const r1 = await dragPx(page, 0.03, 0.26, 148, 0, { during: () => loupe(page) });
+    expectText(t, r1.r.hex, '1.48 U ≈ 1½', 'at the first working size a 148 px measure reads 1.48 U ≈ 1½');
+    await click(page, '#gridBtn'); await sleep(40);
+    const hint1 = await text(page, '#toolHint');
+    await app(page).evaluate(() => { const e = document.getElementById('detail'); e.value = '1400'; e.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settled(page);
+    const pw = await app(page).evaluate(() => Studio.prep().w);
+    t.check(pw >= 1000, 'the working size changes to 1400 px', pw);
+    const r2 = await dragPx(page, 0.03, 0.34, 148, 0, { during: () => loupe(page) });
+    expectText(t, r2.r.hex, '1.48 U ≈ 1½', 'at 1400 px a 148 px drag still reads 1.48 U ≈ 1½');
+    const labs = (await pillsOf(page, 'ov:cv-orig')).map((p) => p.text);
+    t.check(labs.includes('1 U') && labs.includes('1.48 U ≈ 1½'), 'the labels at 1400 px still read the same lengths', labs);
+    t.check(await overlayHas(page, 'cv-orig', 0.08 + 50 / bo.width, 0.2, UNIT_COLOR, 5) && (await overlayHas(page, 'cv-orig', 0.03 + 74 / bo.width, 0.26, MEASURE_COLOR, 5)), 'the earlier marks are still on their places at the new size');
+    const hint2 = await text(page, '#toolHint');
+    t.check(hint1 === hint2, 'the grid hint is the same at the new size', { hint1, hint2 });
+    await app(page).evaluate(() => { const e = document.getElementById('detail'); e.value = '600'; e.dispatchEvent(new Event('change', { bubbles: true })); });
+    await settled(page);
+    const r3 = await dragPx(page, 0.03, 0.42, 148, 0, { during: () => loupe(page) });
+    expectText(t, r3.r.hex, '1.48 U ≈ 1½', 'back at 600 px the same 148 px drag reads the same');
+    await clean(t, page, 'working size with measures');
+    await page.context().close();
+  }
+
+  // ---- inside another site's sandboxed frame: Save PNG's dialog, and the picks, sort, clear and length without storage ----
+  {
+    const page = await openPage(site, { sandbox: { attrs: 'allow-scripts allow-modals' } });
+    const F = page.app;
+    const fb = async (sel) => { await F.evaluate((s) => document.querySelector(s).scrollIntoView({ block: 'center' }), sel); await sleep(120); return F.locator(sel).first().boundingBox(); };
+    const fdrag = async (sel, [fx0, fy0], [fx1, fy1], during = null) => { const b = await fb(sel); const x0 = Math.round(b.x + fx0 * b.width), y0 = Math.round(b.y + fy0 * b.height); await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(Math.round(b.x + fx1 * b.width), Math.round(b.y + fy1 * b.height), { steps: 6 }); await sleep(30); const r = during ? await during() : null; await page.mouse.up(); await sleep(60); return r; };
+    const ftap = async (sel, fx, fy) => { const b = await fb(sel); await page.mouse.move(Math.round(b.x + fx * b.width), Math.round(b.y + fy * b.height)); await page.mouse.down(); await page.mouse.up(); await sleep(60); };
+    const fhover = async (sel, fx, fy) => { const b = await fb(sel); await page.mouse.move(Math.round(b.x + fx * b.width), Math.round(b.y + fy * b.height)); await sleep(60); };
+    const floupe = () => F.evaluate(() => ({ shown: !document.getElementById('loupe').hidden, hex: document.getElementById('loupeHex').textContent.trim() }));
+    const fdialog = () => F.evaluate(() => { const d = document.getElementById('saveDialog'), img = document.getElementById('saveImg'); return { open: d.open, src: (img.getAttribute('src') || '').slice(0, 5), name: document.getElementById('saveName').textContent }; });
+    const fcount = () => F.evaluate(() => document.querySelectorAll('#swatches li').length);
+    const storage = await F.evaluate(() => { try { localStorage.getItem('x'); return 'readable'; } catch (e) { return 'refused'; } });
+    t.check(storage === 'refused', 'inside a sandboxed frame without same-origin the browser refuses storage (the case below depends on it)', storage);
+    await click(page, '#drawer-swatches summary'); await sleep(80);
+    await fhover('#cv-orig', 0.5, 0.42); await ftap('#cv-orig', 0.5, 0.42);
+    t.check((await fcount()) === 1, 'inside the frame a click keeps a color, with storage refused', await fcount());
+    await click(page, '[data-tool="line"]'); await sleep(40);
+    await fdrag('#cv-orig', [0.2, 0.3], [0.8, 0.3]);
+    const dl = await download(page, () => click(page, '[data-save="orig"]'), 3000);
+    await F.waitForFunction(() => document.getElementById('saveDialog').open, null, { timeout: 5000 }).catch(() => null);
+    const d1 = await fdialog();
+    t.check(d1.open && d1.src === 'blob:' && d1.name === 'sample-study-original.png', 'Save PNG inside a sandboxed frame opens the picture in its dialog', { d1, downloadArrived: !!dl });
+    await click(page, '#saveClose'); await sleep(80);
+    const d2 = await fdialog();
+    t.check(!d2.open && d2.src === '', 'closing that dialog removes its picture', d2);
+    await click(page, '#palSave'); await F.waitForFunction(() => document.getElementById('saveDialog').open, null, { timeout: 5000 }).catch(() => null);
+    const d3 = await fdialog();
+    t.check(d3.open && d3.name === 'sample-study-palette.png', 'the picked colors\' Save as PNG opens its dialog in the frame too', d3);
+    await click(page, '#saveClose'); await sleep(80);
+    // the rest of the picks with no storage: they live in memory for this visit
+    await click(page, '[data-tool="sample"]'); await sleep(40);
+    await fhover('#cv-orig', 0.1, 0.1); await ftap('#cv-orig', 0.1, 0.1);
+    await fhover('#cv-orig', 0.9, 0.9); await ftap('#cv-orig', 0.9, 0.9);
+    const n3 = await fcount();
+    t.check(n3 >= 2, 'more picks in memory, with no storage', n3);
+    await click(page, '#palSort'); await sleep(60);
+    const vs = await F.evaluate(() => [...document.querySelectorAll('#swatches .v')].map((e) => +e.textContent.replace('V ', '')));
+    t.check(vs.every((v, i) => !i || v >= vs[i - 1]), 'Sort dark to light works without storage', vs);
+    await click(page, '#swatches .swatch-remove'); await sleep(60);
+    t.check((await fcount()) === n3 - 1, 'a × removes one without storage', { before: n3, after: await fcount() });
+    await click(page, '#palClear'); await click(page, '#palClear'); await sleep(80);
+    const cleared = await F.evaluate(() => ({ n: document.querySelectorAll('#swatches li').length, state: document.getElementById('swatchesState').textContent.trim(), toast: document.getElementById('toast').textContent.trim() }));
+    t.check(cleared.n === 0 && cleared.state === 'None yet' && cleared.toast === 'Palette cleared', 'Clear (two taps) empties the list without storage', cleared);
+    // the canvas length and a measure: the unit reads with its length, and no banner says storage could not be read
+    await F.locator('#canvasSize').click(); await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.type('10'); await page.keyboard.press('Tab'); await sleep(60);
+    await click(page, '[data-tool="measure"]'); await sleep(40);
+    const mb = await fb('#cv-orig');
+    const ml = await fdrag('#cv-orig', [0.1, 0.3], [0.1 + 80 / mb.width, 0.3], floupe);
+    t.check(ml && ml.hex === '1 U · 10 cm', 'a unit with a canvas length measures without storage', ml);
+    const banner = await F.evaluate(() => !!document.querySelector('#toast .toast-action'));
+    t.check(!banner, 'no banner says saved settings could not be read in the frame');
+    await clean(t, page, 'the embedded copy, with storage refused');
+    await page.context().close();
+  }
+
+  // ==== the label layout: pills, the unit's yellow, a drag that leaves the rest where they are, and a crowded phone ====
+  {
+    const page = await openPage(site);
+    await recordPills(page);
+    await setTool(page, 'measure');
+    const bo = await box(page);
+    await dragPx(page, 0.08, 0.12, 100, 0);
+    await dragPx(page, 0.03, 0.3, 148, 0);
+    await dragPx(page, 0.03, 0.42, 60, 0);
+    await dragPx(page, 0.03, 0.6, 210, 0);
+    await dragPx(page, 0.03, 0.75, 100, 0);
+    const od = await sizeOf(page, 'cv-orig', true);
+    const lab = await pillsOf(page, 'ov:cv-orig');
+    const yellow = lab.filter((p) => p.fill === UNIT_COLOR), dark = lab.filter((p) => p.fill === DARK_FILL);
+    t.check(yellow.length === 1 && dark.length === 4, 'five measures: one yellow unit label and four dark ones', { yellow: yellow.length, dark: dark.length, texts: lab.map((p) => p.text) });
+    const clash = []; for (let i = 0; i < lab.length; i++) for (let j = i + 1; j < lab.length; j++) if (overlaps(lab[i], lab[j])) clash.push([i, j]);
+    t.check(clash.length === 0, 'no two labels overlap', clash);
+    const unitSeg = [0.08 * od.w, 0.12 * od.h, (0.08 + 100 / bo.width) * od.w, 0.12 * od.h];
+    const dU = yellow.length ? distBoxSeg(yellow[0], unitSeg) : Infinity;
+    t.check(dU <= 2.5 * (yellow[0] ? yellow[0].h : 0), 'the unit\'s label sits beside the unit line', { dU: +dU.toFixed(1), h: yellow[0] && yellow[0].h });
+    // a later measure along the unit's path: the unit keeps its yellow where they share it
+    await dragPx(page, 0.08, 0.12, 100, 0);
+    const mid = await ovPixel(page, 'cv-orig', 0.08 + 50 / bo.width, 0.12);
+    t.check(near(mid, YELLOW, 40), 'the unit keeps its yellow where a later measure shares its path', mid);
+    // while one measure is dragged out, nothing outside a 60 px band around it changes on the photo's overlay
+    await app(page).evaluate(() => { const o = document.getElementById('cv-orig').nextElementSibling; window.__snap = o.getContext('2d').getImageData(0, 0, o.width, o.height).data.slice(); });
+    const x0 = Math.round(bo.x + 0.5 * bo.width), y0 = Math.round(bo.y + 0.9 * bo.height);
+    await page.mouse.move(x0, y0); await page.mouse.down();
+    const x1 = x0 + Math.round(0.3 * bo.width), y1 = y0 - Math.round(0.1 * bo.height);
+    await page.mouse.move(x1, y1, { steps: 6 }); await sleep(30);
+    const changed = await app(page).evaluate(([fx0, fy0, fx1, fy1, bandCss]) => {
+      const o = document.getElementById('cv-orig').nextElementSibling; const W = o.width, H = o.height, s = o.width / (o.offsetWidth || o.width);
+      const cur = o.getContext('2d').getImageData(0, 0, W, H).data, snap = window.__snap;
+      const ax = fx0 * W, ay = fy0 * H, bx = fx1 * W, by = fy1 * H, L2 = ((bx - ax) ** 2 + (by - ay) ** 2) || 1, band = bandCss * s;
+      let n = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const k = (y * W + x) * 4;
+        if (cur[k] === snap[k] && cur[k + 1] === snap[k + 1] && cur[k + 2] === snap[k + 2] && cur[k + 3] === snap[k + 3]) continue;
+        const u = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / L2));
+        if (Math.hypot(x - (ax + (bx - ax) * u), y - (ay + (by - ay) * u)) > band) n++;
+      }
+      return n;
+    }, [(x0 - bo.x) / bo.width, (y0 - bo.y) / bo.height, (x1 - bo.x) / bo.width, (y1 - bo.y) / bo.height, 60]);
+    await page.mouse.up(); await sleep(40);
+    t.check(changed === 0, 'while a measure is dragged out, nothing more than 60 px from it changes on the photo', { changedPixels: changed });
+    // on a phone, a 300 x 200 photo with a canvas length: where the room runs out, a label shows the units alone
+    const ph = await openPage(site, { viewport: PHONE });
+    await recordPills(ph);
+    await loadPhoto(ph, await makeImage(ph, { width: 300, height: 200, name: 'small.png' }), { settle: 300 });
+    await setSize(ph, '10');
+    await setTool(ph, 'measure');
+    await inView(ph, '#cv-orig');
+    for (let k = 0; k < 9; k++) await dragPx(ph, 0.03 + (k % 3) * 0.3, 0.1 + k * 0.09, k === 0 ? 100 : 40 + k * 12, 0, { steps: 2 });
+    const pl = await pillsOf(ph, 'ov:cv-orig');
+    const brief = pl.filter((p) => /^\d+\.\d\d U$/.test(p.text || ''));
+    t.check(brief.length >= 1, 'on a small crowded picture a label with no room for the whole reading shows the length in units alone', { labels: pl.map((p) => p.text), brief: brief.length });
+    await clean(t, page, 'labels');
+    await clean(t, ph, 'labels on a phone');
+    await page.context().close();
+    await ph.context().close();
+  }
+
+  // ---- Copy the Study lines: the grid, plumb lines and measures reach the Studio's underdrawing ---------------------
+  {
+    const page = await openPage(site);
+    const bw = (await box(page)).width;
+    await setTool(page, 'measure'); await dragPx(page, 0.08, 0.2, 100, 0);
+    await setTool(page, 'plumb'); await tapAt(page, 0.3, 0.7);
+    const segs = await app(page).evaluate(() => Studio.marks());
+    const same = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 0.01);
+    const has = (want) => segs.some((s) => same(s, want));
+    t.check(segs.length === 3 && has([0.3, 0, 0.3, 1]) && has([0, 0.7, 1, 0.7]) && has([0.08, 0.2, 0.08 + 100 / bw, 0.2]), 'the marks the Studio copies: a measure is one segment, a plumb point two edge to edge', segs);
+    await tab(page, 'paint');
+    await click(page, '#ps-brushBtn'); await sleep(150);
+    await click(page, '[data-brush="sketch"]'); await sleep(150);
+    await click(page, '#ps-sketchFromStudy');
+    const said = await toastSaid(page, /The Study lines are on the underdrawing/);
+    const ink = await app(page).evaluate((ux2) => {
+      const prep = Studio.prep(); const c = document.getElementById('ps-sketch'); const k = Math.min(c.width / prep.w, c.height / prep.h);
+      const w = prep.w * k, h = prep.h * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2;
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const inkAt = (x, y) => { for (let dx = -2; dx <= 2; dx++) { const i = (Math.round(y) * c.width + Math.round(x) + dx) * 4 + 3; if (d[i] > 8) return true; } return false; };
+      let vert = 0, horiz = 0, unit = 0, unitN = 0;
+      for (let y = Math.round(oy); y < oy + h; y++) if (inkAt(ox + 0.3 * w, y)) vert++;
+      for (let x = Math.round(ox); x < ox + w; x++) if (inkAt(x, oy + 0.7 * h)) horiz++;
+      for (let x = Math.round(ox + 0.08 * w); x < ox + ux2 * w; x++) { unitN++; if (inkAt(x, oy + 0.2 * h)) unit++; }
+      return { vert: vert / h, horiz: horiz / w, unit: unit / Math.max(1, unitN) };
+    }, 0.08 + 100 / bw);
+    t.check(said && ink.vert >= 0.9 && ink.horiz >= 0.9 && ink.unit >= 0.8, 'Copy the Study lines draws the plumb lines and the measure on the underdrawing, fitted to the paper', { said, ink });
+    await clean(t, page, 'copy the Study lines');
+    await page.context().close();
+  }
+
+  // ---- a turned phone or a resized window with the marks on the page: they stay on what they marked ----------------
+  {
+    const page = await openPage(site);
+    await setTool(page, 'line'); await dragFrac(page, [0.2, 0.3], [0.8, 0.3]);
+    await setTool(page, 'measure');
+    const b0 = await box(page);
+    await dragPx(page, 0.1, 0.5, 100, 0); await dragPx(page, 0.1, 0.62, 60, 0);
+    const um = 0.1 + 50 / b0.width;
+    await setTool(page, 'plumb'); await tapAt(page, 0.6, 0.8);
+    await page.setViewportSize(PHONE); await sleep(300);
+    await page.waitForFunction(() => { const c = document.getElementById('cv-orig'); const o = c.nextElementSibling; return o.width > 0 && o.width === Math.round(c.offsetWidth * (window.devicePixelRatio || 1)); }, null, { timeout: 5000 }).catch(() => null);
+    await sleep(150);
+    const views = ['cv-orig', 'cv-value', 'cv-block'];
+    const onAll = async () => { const r = {}; for (const id of views) r[id] = { line: await overlayHas(page, id, 0.5, 0.3, COLORS.lcRed), unit: await overlayHas(page, id, um, 0.5, UNIT_COLOR, 5), plumb: await overlayHas(page, id, 0.6, 0.05, MEASURE_COLOR, 6) }; return r; };
+    const onPhone = await onAll();
+    t.check(views.every((id) => Object.values(onPhone[id]).every(Boolean)), 'on a phone every mark is on its feature on all three images', onPhone);
+    const strip = await page.evaluate(() => { const r = document.querySelector('.toolstrip').getBoundingClientRect(); return [r.left, r.right]; });
+    t.check(strip[0] >= 0 && strip[1] <= 390 && (await hscroll(page)) <= 0, 'the tool bar fits the phone screen after the turn', strip);
+    await inView(page, '#cv-orig');
+    const bp = await box(page);
+    const rr = await dragPx(page, 0.6, 0.8, 0.1 * bp.width, 0, { during: () => loupe(page) });
+    t.check(rr.r.shown && (await overlayHas(page, 'cv-orig', 0.7, 0.05, MEASURE_COLOR, 6)) && !(await overlayHas(page, 'cv-orig', 0.6, 0.05, MEASURE_COLOR, 6)), 'a plumb ring dragged on the phone moves its point, and the loupe is up while it moves', { loupe: rr.r });
+    await page.setViewportSize(DESKTOP); await sleep(300);
+    await page.waitForFunction(() => { const c = document.getElementById('cv-orig'); const o = c.nextElementSibling; return o.width > 0 && o.width === Math.round(c.offsetWidth * (window.devicePixelRatio || 1)); }, null, { timeout: 5000 }).catch(() => null);
+    await sleep(150);
+    const back = {};
+    for (const id of views) back[id] = { line: await overlayHas(page, id, 0.5, 0.3, COLORS.lcRed), unit: await overlayHas(page, id, um, 0.5, UNIT_COLOR, 5) };
+    t.check(views.every((id) => back[id].line && back[id].unit), 'turned back to the window, the line and the unit are where they were on every image', back);
+    await clean(t, page, 'a resize with marks');
+    await page.context().close();
+  }
+
+  // ---- Save PNG draws the marks where they are: the line's color, the unit's yellow, the grid and the plumb line -----
+  {
+    const page = await openPage(site);
+    await setTool(page, 'line'); await dragFrac(page, [0.2, 0.2], [0.8, 0.2]);
+    await setTool(page, 'measure'); const bo = await box(page);
+    await dragPx(page, 0.1, 0.4, 100, 0); await dragPx(page, 0.1, 0.55, 60, 0);
+    await setTool(page, 'plumb'); await tapAt(page, 0.7, 0.7);
+    await click(page, '#gridBtn'); await sleep(30);
+    const dl = await download(page, () => click(page, '[data-save="orig"]'));
+    const px = dl ? await pngRead(page, dl.buf, { points: [[0.5, 0.2], [0.1 + 50 / bo.width, 0.4], [1 / 3, 0.95]], columns: [0.7] }) : null;
+    t.check(!!dl && dl.name === 'sample-study-original.png' && !!px && near(px.px[0], RED) && near(px.px[1], YELLOW, 40) && near(px.px[2], WHITE, 20), 'the saved photo has the red line, the yellow unit and the white grid where they were drawn', { name: dl && dl.name, px: px && px.px });
+    t.check(!!px && px.cols[0] >= 0.2 * px.size[1], 'the saved photo has the plumb line\'s white dashes down its column', { white: px && px.cols[0], height: px && px.size[1] });
+    await clean(t, page, 'saved PNG overlays');
+    await page.context().close();
+  }
+
+  // ---- Ctrl/⌘+Z takes back a moved or removed plumb point, and Ctrl/⌘+Z or Meta+Z says what it did ------------------
+  {
+    const page = await openPage(site);
+    await setTool(page, 'plumb'); await tapAt(page, 0.3, 0.3);
+    await dragFrac(page, [0.3, 0.3], [0.6, 0.5]);
+    await resetToast(page);
+    await page.keyboard.press('Control+z'); await sleep(40);
+    const moved = { toast: await toastShown(page), back: await overlayHas(page, 'cv-orig', 0.3, 0.05, MEASURE_COLOR, 6), notAtNew: !(await overlayHas(page, 'cv-orig', 0.6, 0.05, MEASURE_COLOR, 6)) };
+    t.check(moved.toast === 'Plumb line moved back' && moved.back && moved.notAtNew, 'Ctrl+Z takes back a moved plumb point and says so', moved);
+    await tapAt(page, 0.3, 0.3);
+    t.check((await count(page, 'plumb')) === 0, 'a click on the ring removes the point', await count(page, 'plumb'));
+    await resetToast(page);
+    await page.keyboard.press('Control+z'); await sleep(40);
+    const put = { toast: await toastShown(page), n: await count(page, 'plumb'), at: await overlayHas(page, 'cv-orig', 0.3, 0.05, MEASURE_COLOR, 6) };
+    t.check(put.toast === 'Plumb line put back' && put.n === 1 && put.at, 'Ctrl+Z puts a removed plumb point back and says so', put);
+    await resetToast(page);
+    await page.keyboard.press('Meta+z'); await sleep(40);
+    const gone = { toast: await toastShown(page), n: await count(page, 'plumb') };
+    t.check(gone.toast === 'Plumb line removed' && gone.n === 0, 'Meta+Z takes back the drop and says so', gone);
+    await clean(t, page, 'plumb undo by keyboard');
+    await page.context().close();
+  }
+
+  // ---- Make last line the unit moves the yellow label and relabels the rest; Ctrl/⌘+Z moves it back -----------------
+  {
+    const page = await openPage(site);
+    await recordPills(page);
+    await setTool(page, 'measure');
+    const bo = await box(page);
+    await dragPx(page, 0.08, 0.2, 100, 0);
+    await dragPx(page, 0.08, 0.32, 60, 0);
+    await dragPx(page, 0.08, 0.44, 130, 0);
+    const yellowOf = async () => (await pillsOf(page, 'ov:cv-orig')).find((p) => p.fill === UNIT_COLOR);
+    const darkN = async () => (await pillsOf(page, 'ov:cv-orig')).filter((p) => p.fill === DARK_FILL).length;
+    const od = await sizeOf(page, 'cv-orig', true);
+    const first = [0.08 * od.w, 0.2 * od.h, (0.08 + 100 / bo.width) * od.w, 0.2 * od.h];
+    const newest = [0.08 * od.w, 0.44 * od.h, (0.08 + 130 / bo.width) * od.w, 0.44 * od.h];
+    const yA = await yellowOf(), nA = await darkN();
+    await click(page, '#measureUnit'); await sleep(40);
+    const yB = await yellowOf(), nB = await darkN();
+    t.check(!!yA && !!yB && distBoxSeg(yB, newest) <= 2.5 * yB.h && distBoxSeg(yB, newest) < distBoxSeg(yB, first), 'Make last line the unit moves the yellow label beside the newest line', { atFirst: yA && +distBoxSeg(yA, first).toFixed(1), afterAtNewest: yB && +distBoxSeg(yB, newest).toFixed(1), h: yB && yB.h });
+    t.check(nA === 2 && nB === 2, 'the other labels stay in place (two dark ones before and after)', { nA, nB });
+    await resetToast(page);
+    await page.keyboard.press('Control+z'); await sleep(40);
+    const yC = await yellowOf();
+    t.check((await toastShown(page)) === 'Unit set back' && !!yC && distBoxSeg(yC, first) <= 2.5 * yC.h, 'Ctrl+Z moves the unit back to the first line and says so', { toast: await toastShown(page), near: yC && +distBoxSeg(yC, first).toFixed(1) });
+    const widthSum = async () => (await pillsOf(page, 'ov:cv-orig')).reduce((s, p) => s + p.w, 0);
+    const w0 = await widthSum();
+    await setSize(page, '10'); await sleep(40);
+    const w1 = await widthSum();
+    t.check(w1 > w0, 'with a unit on my canvas the labels grow, with no new drag', { before: w0, after: w1 });
+    await clean(t, page, 'make last line the unit');
+    await page.context().close();
+  }
+
+  // ---- the Measure and Plumb option rows on a 390 px phone; a canvas length tapped and typed there -----------------
+  {
+    const page = await openPage(site, { viewport: PHONE });
+    const cdp = await page.context().newCDPSession(page);
+    const rowFits = (sel) => page.evaluate((s) => { const row = document.querySelector(s); const r = row.getBoundingClientRect(); const kids = [...row.querySelectorAll('button, input, select')].map((e) => e.getBoundingClientRect()); const m = document.querySelector('#panels .matte').getBoundingClientRect(); return { inside: kids.every((k) => k.left >= 0 && k.right <= 390), bottomAbove: r.bottom <= m.top + 1, n: kids.length }; }, sel);
+    await setTool(page, 'measure');
+    const mrow = await rowFits('.measure-tools');
+    t.check(mrow.inside && mrow.bottomAbove && (await hscroll(page)) <= 0, 'Measure: its buttons, the number field and the unit select fit the 390 px screen, above the images', mrow);
+    await setTool(page, 'plumb');
+    const prow = await rowFits('.plumb-tools');
+    t.check(prow.inside && prow.bottomAbove && (await hscroll(page)) <= 0, 'Plumb: its buttons fit the 390 px screen, above the images', prow);
+    await setTool(page, 'measure');
+    const fb = await box(page, '#canvasSize');
+    const tp = { x: fb.x + fb.width / 2, y: fb.y + fb.height / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [tp] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await sleep(150);
+    const focused = await page.evaluate(() => document.activeElement && document.activeElement.id === 'canvasSize');
+    t.check(focused, 'a touch on the unit field gives it the focus', focused);
+    await page.keyboard.type('10'); await page.keyboard.press('Tab'); await sleep(60);
+    t.check((await page.evaluate(() => document.getElementById('canvasSize').value)) === '10', 'a length typed on the phone is taken');
+    await inView(page, '#cv-orig');
+    const ib = await box(page);
+    const a = { x: ib.x + ib.width * 0.2, y: ib.y + ib.height * 0.5 }, z = { x: a.x + 100, y: a.y };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [a] });
+    for (let i = 1; i <= 6; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x + (z.x - a.x) * i / 6, y: a.y }] });
+    await sleep(60);
+    const lo = await loupe(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await sleep(120);
+    t.check(lo.shown && lo.hex === '1 U · 10 cm' && (await count(page, 'measure')) === 1, 'a touch drag measures with the typed length: 1 U · 10 cm', { loupe: lo, count: await count(page, 'measure') });
+    await clean(t, page, 'phone option rows');
+    await page.context().close();
+  }
+
+  // ==== the lower-weight gaps: each small, each on its own page ===============================================
+
+  // the README's worked example on the sample: eye line to chin as the unit, the cheekbones 250 px over 178 px
+  {
+    const page = await openPage(site);
+    await setTool(page, 'measure');
+    const prep = await app(page).evaluate(() => { const p = Studio.prep(); return { w: p.w, h: p.h }; });
+    const b = await box(page);
+    await dragPx(page, 0.5, 0.2, 0, Math.round(178 * b.height / prep.h), { mid: false });
+    const r = await dragPx(page, 0.29, 0.5, Math.round(250 * b.width / prep.w), 0, { during: () => loupe(page) });
+    const got = /^(\d+\.\d\d) U/.exec(r.r.hex);
+    t.check(!!got && Math.abs(+got[1] - 1.4) <= 0.02, 'on the sample, 250 px over a 178 px unit reads 1.40 U (the README\'s example)', r.r);
+    await clean(t, page, 'worked example');
+    await page.context().close();
+  }
+
+  // the loupe stays inside the window: at the photo's bottom-right corner, and below a finger near the top of a phone
+  {
+    const ph = await openPage(site, { viewport: PHONE });
+    await inView(ph, '#cv-orig');
+    await hover(ph, 0.97, 0.9);
+    const r1 = await app(ph).evaluate(() => { const l = document.getElementById('loupe').getBoundingClientRect(); return { shown: !document.getElementById('loupe').hidden, l: l.left, r: l.right, t: l.top, b: l.bottom, w: innerWidth, h: innerHeight }; });
+    t.check(r1.shown && r1.r <= r1.w - 8 && r1.b <= r1.h - 8 && r1.l >= 8 && r1.t >= 8, 'the loupe at a photo\'s bottom-right corner stays inside the phone window', r1);
+    const cdp = await ph.context().newCDPSession(ph);
+    await app(ph).evaluate(() => { const c = document.getElementById('cv-orig'); window.scrollBy(0, c.getBoundingClientRect().top - 60); }); await sleep(200);
+    const pb = await box(ph);
+    const fy = pb.y + pb.height * 0.02, fx = pb.x + pb.width * 0.5;
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fx, y: fy }] }); await sleep(80);
+    const r2 = await app(ph).evaluate(() => { const l = document.getElementById('loupe').getBoundingClientRect(); return { shown: !document.getElementById('loupe').hidden, top: l.top, bottom: l.bottom, h: innerHeight }; });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    t.check(r2.shown && r2.top >= fy && r2.top >= 8 && r2.bottom <= r2.h - 8, 'a touch near the top of the photo puts the loupe below the finger, inside the window', { ...r2, finger: fy });
+    await clean(t, ph, 'loupe at the edges');
+    await ph.context().close();
+  }
+
+  // scrolling the page hides the loupe
+  {
+    const page = await openPage(site);
+    await hover(page, 0.5, 0.5);
+    const was = (await loupe(page)).shown;
+    await page.mouse.wheel(0, 200); await sleep(200);
+    const hidden = await app(page).evaluate(() => document.getElementById('loupe').hidden);
+    t.check(was && hidden, 'scrolling the page hides the loupe', { was, hidden });
+    await clean(t, page, 'loupe on scroll');
+    await page.context().close();
+  }
+
+  // a right-button press on an image draws nothing and picks nothing
+  {
+    const page = await openPage(site);
+    await setTool(page, 'line');
+    const b = await box(page);
+    await page.mouse.move(Math.round(b.x + b.width * 0.2), Math.round(b.y + b.height * 0.3)); await page.mouse.down({ button: 'right' });
+    await page.mouse.move(Math.round(b.x + b.width * 0.8), Math.round(b.y + b.height * 0.3), { steps: 6 }); await page.mouse.up({ button: 'right' }); await sleep(40);
+    t.check((await count(page, 'line')) === 0 && (await toastShown(page)) === '', 'a right-button drag with Lines on draws no line and says nothing', { lines: await count(page, 'line'), toast: await toastShown(page) });
+    await setTool(page, 'sample');
+    const n = (await swatches(page)).length;
+    await page.mouse.click(Math.round(b.x + b.width * 0.5), Math.round(b.y + b.height * 0.42), { button: 'right' }); await sleep(40);
+    t.check((await swatches(page)).length === n, 'a right-click with the magnifier picks nothing');
+    await clean(t, page, 'right button');
+    await page.context().close();
+  }
+
+  // a plumb press that is cancelled (Esc) before it lands drops nothing and says nothing
+  {
+    const page = await openPage(site);
+    await setTool(page, 'plumb');
+    const b = await box(page);
+    await page.mouse.move(Math.round(b.x + b.width * 0.5), Math.round(b.y + b.height * 0.5)); await page.mouse.down();
+    await page.mouse.move(Math.round(b.x + b.width * 0.5 + 40), Math.round(b.y + b.height * 0.5 + 10), { steps: 4 });
+    await resetToast(page);
+    await page.keyboard.press('Escape'); await sleep(30);
+    const mid = { loupe: (await loupe(page)).shown, ink: await overlayInk(page, 'cv-orig') };
+    await page.mouse.up(); await sleep(40);
+    t.check((await count(page, 'plumb')) === 0 && (await toastShown(page)) === '' && !mid.loupe && mid.ink === 0, 'Esc while a new plumb point is being dropped drops nothing and says nothing', { mid, count: await count(page, 'plumb'), toast: await toastShown(page) });
+    await clean(t, page, 'plumb Esc');
+    await page.context().close();
+  }
+
+  // Shift snapping near the edge: the line is shortened, not bent, and its tilt is a multiple of 15
+  {
+    const page = await openPage(site);
+    await setTool(page, 'line');
+    const b = await box(page);
+    const r = await dragPx(page, 0.9, 0.5, 300, -120, { shift: true, during: () => loupe(page) });
+    const tilt = +(/Tilt (-?\d+)°/.exec(r.r.val) || [])[1];
+    t.check(Number.isInteger(tilt) && tilt % 15 === 0, 'a shift-drag at the edge reads a tilt that is a multiple of 15°', r.r);
+    const th = (tilt * Math.PI) / 180;
+    const along = [0.9 + 0.02, 0.5 - 0.02 * (b.width / b.height) * Math.tan(th)];
+    t.check(await overlayHas(page, 'cv-orig', along[0], along[1], COLORS.lcRed, 4), 'the snapped line runs at that tilt from where it began', { along, tilt });
+    t.check((await count(page, 'line')) === 1, 'one line, not a bent pair', await count(page, 'line'));
+    await clean(t, page, 'shift at the edge');
+    await page.context().close();
+  }
+
+  // a ring is grabbed by a finger from 18 px and by a mouse from 12 px: a tap 15 px away removes on a phone, adds with a mouse
+  {
+    const page = await openPage(site);
+    await setTool(page, 'plumb'); await tapAt(page, 0.5, 0.5);
+    const b = await box(page);
+    await page.mouse.click(Math.round(b.x + b.width * 0.5 + 15), Math.round(b.y + b.height * 0.5));
+    await sleep(40);
+    t.check((await count(page, 'plumb')) === 2, 'a mouse click 15 px from a ring drops a new point', await count(page, 'plumb'));
+    await clean(t, page, 'hit radius with a mouse');
+    await page.context().close();
+  }
+  {
+    const ph = await openPage(site, { viewport: PHONE });
+    const cdp = await ph.context().newCDPSession(ph);
+    await setTool(ph, 'plumb'); await inView(ph, '#cv-orig'); await tapAt(ph, 0.5, 0.5);
+    const b = await box(ph);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: b.x + b.width * 0.5 + 15, y: b.y + b.height * 0.5 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await sleep(120);
+    t.check((await count(ph, 'plumb')) === 0, 'a finger 15 px from a ring removes it on a phone', await count(ph, 'plumb'));
+    await clean(t, ph, 'hit radius with a finger');
+    await ph.context().close();
+  }
+
+  // a canvas length kept across a new photo, and a tool still on after a trip to How to use
+  {
+    const page = await openPage(site);
+    await setSize(page, '10');
+    await setTool(page, 'measure');
+    await loadPhoto(page, await makeImage(page, { width: 500, height: 600, name: 'kept.png' }), { settle: 300 });
+    const size = await page.evaluate(() => document.getElementById('canvasSize').value);
+    await dragPx(page, 0.1, 0.3, 100, 0);
+    await dragPx(page, 0.1, 0.5, 100, 0, { during: () => loupe(page) }).then(() => null);
+    const kept = await page.evaluate(() => ({ on: document.querySelector('[data-tool="measure"]').getAttribute('aria-pressed'), size: document.getElementById('canvasSize').value }));
+    const r = await dragPx(page, 0.1, 0.7, 100, 0, { during: () => loupe(page) });
+    t.check(size === '10' && kept.size === '10' && kept.on === 'true' && r.r.hex === '1.00 U ≈ 1 · 10 cm', 'a new photo keeps the canvas length and the Measure tool on', { size, kept, loupe: r.r.hex });
+    await tab(page, 'help'); await tab(page, 'study');
+    t.check((await pressed(page, '[data-tool="measure"]')) === 'true' && (await visible(page, '#toolOptions')), 'after a trip to How to use Measure is still on, its options showing');
+    await clean(t, page, 'new photo keeps the length');
+    await page.context().close();
+  }
+
+  // the unit field updates the labels as it is typed (no Tab), a three-decimal length, and a length that rounds to 0
+  {
+    const page = await openPage(site);
+    await recordPills(page);
+    await setTool(page, 'measure');
+    await dragPx(page, 0.08, 0.2, 100, 0);
+    await dragPx(page, 0.08, 0.3, 100, 0);
+    await page.focus('#canvasSize'); await page.keyboard.type('1');
+    const typed1 = (await pillsOf(page, 'ov:cv-orig')).map((p) => p.text);
+    t.check(typed1.some((s) => /· 1 cm$/.test(s || '')), 'typing a length updates the labels before the field is left', typed1);
+    await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.type('12.345');
+    const r = await dragPx(page, 0.08, 0.4, 100, 0, { during: () => loupe(page) });
+    t.check(r.r.hex === '1.00 U ≈ 1 · 12.3 cm', 'a three-decimal length is read to a tenth: 12.345 reads 12.3 cm', r.r.hex);
+    await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace'); await page.keyboard.type('0.04');
+    const z = await dragPx(page, 0.08, 0.5, 50, 0, { during: () => loupe(page) });
+    const zeroOk = !/· 0 cm$/.test(z.r.hex);
+    t.check(zeroOk, 'a canvas length of 0.04 cm does not label every length as 0 cm', z.r.hex);
+    if (!zeroOk) t.finding({ title: 'A unit on my canvas of 0.04 cm labels a half-unit as "0 cm": the label gives no usable length', severity: 'low', steps: '1. Choose Measure and drag a 100 px unit, then a 50 px measure. 2. Click Unit on my canvas, select all, type 0.04 (cm), then press Tab. 3. Read the loupe while dragging a 50 px measure.', expected: 'A length the field accepts (step 0.1 allows 0.04) reads as a length the visitor can use, or the field says the length is too small to show.', actual: `The loupe reads "${z.r.hex}": formatSize rounds every cm value to one decimal, so each label reads 0 cm. Cause: js/app.js formatSize (Math.round(v * 10) / 10) with canvasSize() accepting any value above 0.` });
+    await clean(t, page, 'unit field while typing');
+    await page.context().close();
+  }
+
+  // the smallest unit the page accepts (10 css px), then a whole-image measure
+  {
+    const page = await openPage(site);
+    await setTool(page, 'measure');
+    const b = await box(page);
+    await dragPx(page, 0.2, 0.3, 10, 0);
+    const r = await dragPx(page, 0.01, 0.5, Math.round(b.width) - 4, 0, { during: () => loupe(page) });
+    t.check(/^\d+\.\d\d U/.test(r.r.hex) && (await count(page, 'measure')) === 2, 'a 10 px unit, then a whole-image measure, reads and lands', { loupe: r.r.hex, count: await count(page, 'measure') });
+    await clean(t, page, 'smallest unit');
+    await page.context().close();
+  }
+
+  // the grid cell in inches, rounded to the eighth as on a ruler
+  {
+    const page = await openPage(site);
+    await setTool(page, 'measure');
+    const b = await box(page);
+    await dragPx(page, 0.08, 0.2, 100, 0);
+    await setSize(page, '10'); await page.selectOption('#canvasSys', 'in'); await sleep(40);
+    await click(page, '#gridBtn'); await sleep(40);
+    const hint = await text(page, '#toolHint');
+    const m = /A grid cell is \d+\.\d\d U wide and \d+\.\d\d U tall \(([^)]*) on your canvas\)/.exec(hint);
+    const eighths = (v) => { const e = Math.round(v * 8), w = Math.floor(e / 8), rest = e % 8; return (w || !rest ? String(w) : '') + ['', '⅛', '¼', '⅜', '½', '⅝', '¾', '⅞'][rest] + ' in'; };
+    const wantW = eighths((b.width / 3 / 100) * 10);
+    t.check(!!m && m[1].startsWith(wantW), 'with the grid on, the cell\'s width in inches is rounded to the eighth', { hint, want: wantW });
+    await clean(t, page, 'grid cell in inches');
+    await page.context().close();
+  }
+
+  // Ctrl/⌘+Z after Clear measures takes back the older line, not nothing
+  {
+    const page = await openPage(site);
+    await setTool(page, 'line'); await dragFrac(page, [0.2, 0.2], [0.8, 0.2]);
+    await setTool(page, 'measure'); await dragPx(page, 0.1, 0.4, 100, 0);
+    await click(page, '#measureClear'); await sleep(30);
+    await resetToast(page);
+    await page.keyboard.press('Control+z'); await sleep(40);
+    const got = { toast: await toastShown(page), lines: await count(page, 'line'), measures: await count(page, 'measure'), plumbs: await count(page, 'plumb') };
+    t.check(got.toast === 'Line removed' && got.lines === 0 && got.measures === 0 && got.plumbs === 0, 'Ctrl+Z after Clear measures takes back the line drawn before it', got);
+    await clean(t, page, 'undo after a clear of another kind');
+    await page.context().close();
+  }
+
+  // Picking a neutral spot (Fix color cast) takes the pointer: a drag on the photo draws nothing and says so
+  {
+    const page = await openPage(site, { url: '#check' });
+    t.check(await scored(page), '#check: the example is scored, for Fix color cast to be offered');
+    await setTool(page, 'line');
+    await click(page, '#wbPick'); await sleep(60);
+    const before = await count(page, 'line');
+    await resetToast(page);
+    await dragFrac(page, [0.2, 0.2], [0.8, 0.2]);
+    const pickingSaid = await toastShown(page);
+    t.check((await count(page, 'line')) === before && /Click a white or gray spot on Your painting/.test(pickingSaid), 'while Fix color cast is picking, a drag on the photo draws no line and says to click a spot', { before, after: await count(page, 'line'), said: pickingSaid });
+    await page.keyboard.press('Escape'); await sleep(40);
+    const was = await count(page, 'line');
+    await dragFrac(page, [0.2, 0.4], [0.8, 0.4]);
+    t.check((await count(page, 'line')) === was + 1, 'Escape ends the picking: a drag draws a line again', { was, now: await count(page, 'line') });
+    await clean(t, page, 'picking and lines');
+    await page.context().close();
+  }
+
+  // the Picked colors header updates with the drawer closed, and the open drawer is open again after a reload
+  {
+    const page = await openPage(site);
+    const openAtStart = await app(page).evaluate(() => document.getElementById('drawer-swatches').open);
+    await hover(page, 0.5, 0.42); await tapAt(page, 0.5, 0.42);
+    const head = await text(page, '#swatchesState');
+    t.check(!openAtStart && head === '1 color', 'a pick with Picked colors closed updates its header to 1 color', { openAtStart, head });
+    await click(page, '#drawer-swatches summary'); await sleep(80);
+    await page.reload({ waitUntil: 'load' }); await sleep(400);
+    const after = await app(page).evaluate(() => ({ open: document.getElementById('drawer-swatches').open, n: document.querySelectorAll('#swatches li').length }));
+    t.check(after.open && after.n === 1, 'the drawer the visitor opened is open again after a reload, with its color', after);
+    await clean(t, page, 'drawer state');
+    await page.context().close();
+  }
+
+  // a second finger mid-stroke does not make a second line, and a cancelled touch leaves no half line and no loupe
+  {
+    const ph = await openPage(site, { viewport: PHONE });
+    const cdp = await ph.context().newCDPSession(ph);
+    await setTool(ph, 'line'); await inView(ph, '#cv-orig');
+    const b = await box(ph);
+    const P = (fx, fy) => ({ x: b.x + b.width * fx, y: b.y + b.height * fy });
+    const p1 = P(0.2, 0.3), p2 = P(0.6, 0.6), p3 = P(0.8, 0.4);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p1.x, y: p1.y, id: 0 }] });
+    for (let i = 1; i <= 4; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p1.x + (p2.x - p1.x) * i / 4, y: p1.y + (p2.y - p1.y) * i / 4, id: 0 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p2.x, y: p2.y, id: 0 }, { x: p3.x, y: p3.y, id: 1 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await sleep(120);
+    const afterTwo = await count(ph, 'line');
+    t.check(afterTwo <= 1, 'a second finger during a stroke leaves at most one line', afterTwo);
+    const ink0 = await overlayInk(ph, 'cv-orig');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p1.x, y: p1.y, id: 0 }] });
+    for (let i = 1; i <= 4; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p1.x + (p3.x - p1.x) * i / 4, y: p1.y, id: 0 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await sleep(120);
+    const cancel = { lines: await count(ph, 'line'), loupe: (await loupe(ph)).shown, ink: await overlayInk(ph, 'cv-orig'), ink0 };
+    t.check(cancel.lines === afterTwo && !cancel.loupe && cancel.ink === ink0, 'a cancelled touch adds no line and leaves no loupe', cancel);
+    await clean(t, ph, 'second finger and cancel');
+    await ph.context().close();
+  }
+
+  // the palette across two tabs: another tab's junk write is filtered, and its remove, picks and Clear reach this one
+  {
+    const page = await openPage(site);
+    await click(page, '#drawer-swatches summary'); await sleep(60);
+    const other = await newTab(site, page);
+    await other.evaluate(() => localStorage.setItem('portrait-value-studio.palette', '[{"r":1,"g":2,"b":3,"__proto__":{}}, null, "x"]'));
+    await sleep(300);
+    const a1 = await page.evaluate(() => ({ n: document.querySelectorAll('#swatches li').length, state: document.getElementById('swatchesState').textContent.trim() }));
+    t.check(a1.n === 1 && a1.state === '1 color', 'a junk palette written by another tab shows only its valid color, with no error', a1);
+    await other.evaluate(() => document.querySelector('#swatches .swatch-remove').click()); await sleep(300);
+    const a2 = await page.evaluate(() => document.querySelectorAll('#swatches li').length);
+    t.check(a2 === 0, 'a remove in another tab empties this tab\'s list', a2);
+    await hover(page, 0.5, 0.42); await tapAt(page, 0.5, 0.42); await sleep(300);
+    const o1 = await other.evaluate(() => document.querySelectorAll('#swatches li').length);
+    t.check(o1 === 1, 'a pick here shows in the other tab, exactly one color', o1);
+    await other.evaluate(() => { document.getElementById('palClear').click(); }); await other.evaluate(() => document.getElementById('palClear').click()); await sleep(300);
+    const a3 = await page.evaluate(() => document.getElementById('swatchesState').textContent.trim());
+    t.check(a3 === 'None yet', 'a Clear (two taps) in another tab shows here as None yet', a3);
+    await hover(page, 0.3, 0.6); await tapAt(page, 0.3, 0.6); await sleep(300);
+    const both = { here: await page.evaluate(() => document.querySelectorAll('#swatches li').length), there: await other.evaluate(() => document.querySelectorAll('#swatches li').length) };
+    t.check(both.here === 1 && both.there === 1, 'a pick after the clear shows in both tabs', both);
+    await clean(t, other, 'other tab');
+    await clean(t, page, 'cross-tab palette');
+    await other.close();
+    await page.context().close();
+  }
+
+  // the picked colors' name, the swatches' colors in the saved PNG, and the name after a photo
+  {
+    const page = await openPage(site);
+    await click(page, '#drawer-swatches summary'); await sleep(60);
+    await hover(page, 0.1, 0.1); await tapAt(page, 0.1, 0.1);
+    await hover(page, 0.9, 0.9); await tapAt(page, 0.9, 0.9);
+    const list = await swatches(page);
+    const dl = await download(page, () => click(page, '#palSave'));
+    const d = dl ? pngDims(dl.buf) : null;
+    const px = dl && d ? await pngRead(page, dl.buf, { points: [[114 / d.w, 114 / d.h], [310 / d.w, 114 / d.h]] }) : null;
+    t.check(!!dl && dl.name === 'sample-study-palette.png' && !!px && hexOf(px.px[0]) === list[0].hex && hexOf(px.px[1]) === list[1].hex, 'the palette PNG\'s first two tiles are the first two picked colors', { name: dl && dl.name, png: px && px.px.map(hexOf), list: list.map((c) => c.hex) });
+    await loadPhoto(page, await makeImage(page, { width: 900, height: 1200, type: 'image/jpeg', name: 'my portrait.jpg' }), { settle: 300 });
+    const named = await download(page, () => click(page, '#palSave'));
+    t.check(named && named.name === 'my portrait-palette.png', 'after a photo, the palette PNG takes the photo\'s name', named && named.name);
+    await clean(t, page, 'palette PNG');
+    await page.context().close();
+  }
+
+  // the dark theme: the loupe, the grid and the yellow unit show, and axe finds nothing with the tools open
+  {
+    const page = await openPage(site, { dark: true, bypassCSP: true });
+    await hover(page, 0.5, 0.42);
+    const l = await loupe(page);
+    t.check(l.shown && /^#[0-9A-F]{6}$/.test(l.hex) && /^V /.test(l.val), 'dark: the magnifier shows its hex and its value', l);
+    await click(page, '#gridBtn');
+    await setTool(page, 'measure');
+    const b = await box(page);
+    await dragPx(page, 0.1, 0.4, 100, 0);
+    await dragPx(page, 0.1, 0.55, 60, 0);
+    t.check(await overlayHas(page, 'cv-orig', 1 / 3, 0.9, MEASURE_COLOR, 3) && (await overlayHas(page, 'cv-orig', 0.1 + 50 / b.width, 0.4, UNIT_COLOR, 5)), 'dark: the grid and the yellow unit show on the photo');
+    const v = await axe(page);
+    t.check(v.length === 0, 'dark: axe finds no violation with the tools open', v.map((x) => x.id));
+    await clean(t, page, 'dark theme');
+    await page.context().close();
+  }
+
+  // axe-core with each tool's options row showing
+  {
+    const page = await openPage(site, { bypassCSP: true });
+    const found = {};
+    for (const tool of ['line', 'measure', 'plumb']) { await setTool(page, tool); found[tool] = (await axe(page)).map((x) => x.id); }
+    t.check(Object.values(found).every((ids) => ids.length === 0), 'axe finds no violation with the Lines, Measure or Plumb options showing', found);
+    await clean(t, page, 'axe with options');
+    await page.context().close();
+  }
+
+  t.note('Not covered here (deliberately): the device-pixel-ratio 2 and 3 run (needs its own browser context with deviceScaleFactor, which openPage cannot set); the over-200-color palette PNG at half size; a photo pasted while the check drawer is open.');
+  t.note('The "Save as PNG of a big picked-colors list" finding (the 1,573-color claim): palSave widens the columns past 60 colors (app.js 1118, cols = max(min(6, n), ceil(n / 60))), so the rows stay near 60 and the canvas is far from 65,535 px at that size; that finding\'s cause is stale, and only a width past 32,767 px would fail.');
 }
