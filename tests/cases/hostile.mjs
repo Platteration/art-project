@@ -378,6 +378,7 @@ export default async function hostile(t, site) {
     // An SVG with a foreignObject (text laid out by the browser, as drawing tools export it): Chromium marks the canvas
     // it is drawn on as tainted, and reading the pixels back throws. The photo slot and the painting slot are each tried on
     // a page of their own. Either the picture opens (its study drawn) or it is refused in words, and the page is left whole.
+    const foFailed = [];
     for (const [slot, where, selector, labelId, canvasId, mark] of [['the photo', '', '#file', 'source', 'cv-orig', 'with-text.svg'], ['Check my painting', '#check', '#artFile', 'artSource', 'cv-art', 'with-caption.svg']]) {
       const fo = await open({ url: where });
       const ff = app(fo);
@@ -390,17 +391,19 @@ export default async function hostile(t, site) {
       const opened = st.label.startsWith(mark), refusedInWords = st.label === lab0 && (NOT_OPENED.test(st.toast) || /SVG|picture|image/i.test(st.toast)) && !/Something went wrong/.test(st.toast);
       const whole = errs.length === 0 && !st.spinner && !/Something went wrong/.test(st.toast) && (opened || refusedInWords);
       t.check(whole, `formats: an SVG with a foreignObject given to ${slot} opens, or is refused in words, with no page error, no stuck "Updating…" and no "Something went wrong"`, { how: r.how, ...st, errors: errs.map((e) => e.split('\n')[0]) });
-      if (!whole) t.finding({
-        title: `An SVG with a foreignObject (text or HTML laid out by the browser, as Figma, draw.io and Inkscape export) breaks loading in ${slot}: a page error, "Something went wrong in the app", a spinner that never stops and a label that names a picture the studies do not show`,
-        severity: 'medium',
-        steps: `${slot === 'the photo' ? 'Study the photo: Load photo' : 'Open #check, Load a photo of your finished painting'} and choose an .svg file whose drawing holds a <foreignObject> (for example <svg xmlns="http://www.w3.org/2000/svg" width="100" height="120"><rect width="100" height="120" fill="red"/><foreignObject width="80" height="40"><div xmlns="http://www.w3.org/1999/xhtml">caption</div></foreignObject></svg>). Chromium; watch the page.`,
-        expected: 'README, "To load a photo, use Load photo, drag it onto the page, or paste it": the picture opens, or the site says in words that it cannot use it ("This image could not be opened. ..."), and the previous photo and its label stay.',
-        actual: `uncaught ${(errs[0] || '').split('\n')[0].slice(0, 130)}; toast "${st.toast.slice(0, 90)}"; the "Updating…" spinner ${st.spinner ? 'stays up for good' : 'is gone'}; the label reads "${st.label.slice(0, 40)}" while the ${canvasId} canvas is ${st.canvasW} px wide (the previous picture, not this one's 100). Loading any other photo recovers it.`,
-        cause: slot === 'the photo'
-          ? 'js/app.js:477 readImage accepts any image/* the browser decodes, SVG included, and hands the <img> on. js/app.js:566 useSource sets the label first; js/app.js:392-401 prepareAndRun calls Study.prepare inside requestAnimationFrame with no try/catch; js/processing.js:87-88 draws the SVG on a canvas and calls getImageData, which throws SecurityError because a foreignObject taints the canvas in Chromium. The throw leaves owed.prep set and els.busy shown (settleBusy is never reached), the label already changed and state.prep/the canvases still the old photo\'s.'
-          : 'js/app.js:588 loadArtFile takes the same image; js/app.js:2371 alignArt draws it on a canvas and reads it back with getImageData, which throws SecurityError for a tainted canvas; the run never finishes, so the spinner stays and the score never comes.',
-      });
+      if (!whole) foFailed.push({ slot, st, errs, canvasId });
       await clean(t, fo, `formats: an SVG with a foreignObject given to ${slot} (after what the check above took)`);
+    }
+    if (foFailed.length) {
+      const f0 = foFailed[0];
+      t.finding({
+        title: 'An SVG with a foreignObject (text or HTML laid out by the browser, as Figma, draw.io and Inkscape export) breaks loading: a page error, "Something went wrong in the app", a spinner that never stops and a label that names a picture the studies do not show',
+        severity: 'medium',
+        steps: 'Study the photo: Load photo, and choose an .svg whose drawing holds a <foreignObject> (e.g. <svg xmlns="http://www.w3.org/2000/svg" width="100" height="120"><rect width="100" height="120" fill="red"/><foreignObject width="80" height="40"><div xmlns="http://www.w3.org/1999/xhtml">caption</div></foreignObject></svg>), in Chromium. The same through "Load a photo of your finished painting" on #check. Reproduced three times in a row.',
+        expected: 'README, "To load a photo, use Load photo, drag it onto the page, or paste it": the picture opens, or the site says in words that it cannot use it ("This image could not be opened. ..."); the previous photo, its label and its studies stay, and no spinner is left up.',
+        actual: `${foFailed.map((f) => f.slot).join(' and ')}: uncaught ${(f0.errs[0] || '').split('\n')[0].slice(0, 120)}; toast "${f0.st.toast.slice(0, 80)}"; the "Updating…" spinner ${f0.st.spinner ? 'stays up for good' : 'is gone'}; the label reads "${f0.st.label.slice(0, 40)}" while the Photo canvas is still ${f0.st.canvasW} px wide (the sample, not this picture's 100). Loading any other photo recovers the page.`,
+        cause: 'js/app.js:477 readImage accepts any image/* the browser decodes, SVG included, and hands the <img> on. js/app.js:566 useSource sets the label first; js/app.js:392-401 prepareAndRun calls Study.prepare inside requestAnimationFrame with no try/catch; js/processing.js:87-88 draws the SVG on a canvas and calls getImageData, which throws SecurityError because a foreignObject taints the canvas in Chromium. The throw skips settleBusy (the spinner stays), and leaves the label and state.source the new picture\'s and state.prep and the canvases the old one\'s. For the painting slot js/app.js:588 loadArtFile takes the same image and js/app.js:2371 alignArt reads it back the same way. Fix: draw the picture once onto a canvas in readImage and read one pixel back inside a try/catch (refusing with the "could not be opened" words), or catch the SecurityError in Study.prepare and alignArt.',
+      });
     }
   });
 
@@ -501,6 +504,155 @@ export default async function hostile(t, site) {
     t.check(!crashed && rb.how === 'opened' && rb.label.endsWith('2800 × 2100 px') && /^A very large photo \(12000 × 9000\) was reduced to 2800 × 2100 for speed\.$/.test(rb.toast), 'sizes: a 12000 × 9000 photo is reduced to 2800 × 2100 and said so, and the tab does not crash', { crashed, how: rb.how, label: rb.label.slice(-16), toast: rb.toast });
     t.check(!crashed && (await busyDown(big, 20000)) && (await usable(big)), 'sizes: the page is usable after the 108-megapixel photo');
     await clean(t, big, 'sizes: 12000 × 9000');
+  });
+
+  // ====================================================================================================================
+  // textdrops: what a visitor pastes or drags that is not a picture, and what the page then says
+  // ====================================================================================================================
+  await seg.run('textdrops', async (open) => {
+    const page = await open();
+    const fr = app(page);
+    const lab0 = await labelOf(page);
+    const png = await quad(page, 80, 100, 'image/png', 'pasteme.png');
+
+    // pasted: nothing here is a picture, so nothing may load, nothing may run, and the page should say so, as a drop does
+    const NOT_A_PICTURE = [
+      ['plain text', [{ type: 'text/plain', data: 'hello there' }]],
+      ['the address of a picture', [{ type: 'text/plain', data: 'https://example.com/portrait.jpg' }, { type: 'text/uri-list', data: 'https://example.com/portrait.jpg' }]],
+      ['html holding an img and a script', [{ type: 'text/html', data: '<img src="https://evil.example/p.png" onerror="window.__pwn=1"><script>window.__pwn=2</script>' }, { type: 'text/plain', data: 'x' }]],
+      ['a javascript: link', [{ type: 'text/uri-list', data: 'javascript:window.__pwn=3' }, { type: 'text/plain', data: 'javascript:window.__pwn=3' }]],
+      ['a data: picture written as text', [{ type: 'text/plain', data: 'data:image/png;base64,iVBORw0KGgo=' }]],
+      ['2 MB of text', [{ type: 'text/plain', data: 'x'.repeat(2e6) }]],
+      ['a PDF file', [fileItem({ name: 'scan.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })]],
+      ['a text file', [fileItem(textFile('notes.txt', 'plain words'))]],
+    ];
+    const silent = [], loaded = [], voiced = [];
+    for (const [what, items] of NOT_A_PICTURE) {
+      await resetToast(page);
+      const claimed = await pasteItems(page, items);
+      await sleep(250);
+      const toast = await toastOf(page), label = await labelOf(page);
+      if (label !== lab0) loaded.push(`${what}: label became ${label.slice(0, 30)}`);
+      if (!toast) silent.push(what + (claimed ? ' (claimed)' : ''));
+      else if (GAVE_UP.test(toast)) voiced.push(`${what}: ${toast}`);
+    }
+    t.check(!loaded.length, 'textdrops: nothing pasted that is not a picture loads as one', loaded);
+    t.check(await fr.evaluate(() => window.__pwn === undefined && !document.querySelector('[onerror]')), 'textdrops: nothing pasted ran or became an element');
+    t.check(!voiced.length, 'textdrops: whatever the page says about a paste is in plain words', voiced);
+    t.check(!silent.length, 'textdrops: pasting something that is not a picture (text, a link, a PDF) gets a word back, as dropping it does', silent);
+    if (silent.length) t.finding({
+      title: 'Pasting a link, text or a file that is not a picture says nothing, while dropping the same says why it was not used',
+      severity: 'low',
+      steps: 'On Study the photo copy the address of a picture (or any text, or copy a PDF in the file manager) and press Ctrl/⌘+V with nothing focused. Then drop the same text, link or PDF on the page.',
+      expected: 'README: "To load a photo, use Load photo, drag it onto the page, or paste it". A paste that cannot be used is answered the way a drop is: "That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one." / "That file is not an image. Choose a JPG, PNG or WebP photo."',
+      actual: `no toast and no change for: ${silent.join('; ')}. The drop of the same text says "That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one." (which itself invites a paste), a dropped link says "Save the picture to your device first, then drop the file here.", a dropped PDF says "That file is not an image.". A visitor who copied a picture's address is left wondering whether the paste worked.`,
+      cause: 'js/app.js:655-660 the paste listener looks only for an image item (clipboardData.items with type image/*) and returns silently otherwise; js/app.js:639-648 gives the drop listener its three refusals (text/uri-list or text/html, text/plain, a non-image file) and the paste listener none of them.',
+    });
+    // a picture with text beside it (copying from a web page puts html and the picture on the clipboard together) loads
+    const mixed = await pasteItems(page, [{ type: 'text/html', data: '<img src="https://evil.example/a.png">' }, { type: 'text/plain', data: 'https://evil.example/a.png' }, fileItem({ ...png, name: 'beside-text.png' })]);
+    await fr.waitForFunction(() => document.getElementById('source').textContent.startsWith('beside-text.png') && document.getElementById('busy').hidden, null, { timeout: 15000 }).catch(() => null);
+    t.check((await labelOf(page)).startsWith('beside-text.png · 80 × 100 px'), 'textdrops: a picture pasted together with html and a link loads', await labelOf(page));
+    // pasting into a field is for the field, even with a picture on the clipboard
+    const lab1 = await labelOf(page);
+    const claimedField = await pasteItems(page, [fileItem({ ...png, name: 'into-the-field.png' }), { type: 'text/plain', data: '12' }], '#canvasSize');
+    await sleep(1200);
+    t.check(!claimedField && (await labelOf(page)) === lab1, 'textdrops: a paste into the canvas length field is left to the field (the photo is not replaced)', { claimedField, label: await labelOf(page) });
+    await clean(t, page, 'textdrops: pastes');
+
+    // dropped: each answered, each claimed (a drop that is not claimed would send the browser to the dropped address and lose the work)
+    const LINK = /^Save the picture to your device first, then drop the file here\.$/;
+    const TEXT = /^That was text, not a picture\. Drop a JPG, PNG or WebP photo, or paste one\.$/;
+    const DROPS = [
+      ['a link', [{ type: 'text/uri-list', data: 'https://example.com/a.jpg' }, { type: 'text/plain', data: 'https://example.com/a.jpg' }], LINK],
+      ['a javascript: link', [{ type: 'text/uri-list', data: 'javascript:window.__pwn=4' }, { type: 'text/plain', data: 'javascript:window.__pwn=4' }], LINK],
+      ['a data: link', [{ type: 'text/uri-list', data: 'data:text/html,<script>window.__pwn=5</script>' }], LINK],
+      ['html from another page', [{ type: 'text/html', data: '<img src="https://example.com/a.jpg" onerror="window.__pwn=6">' }], LINK],
+      ['plain text with a script', [{ type: 'text/plain', data: '<script>window.__pwn=7</script>' }], TEXT],
+      ['1 MB of text', [{ type: 'text/plain', data: 'y'.repeat(1e6) }], TEXT],
+      ['a PDF', [fileItem({ name: 'scan.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })], NOT_IMAGE],
+      ['a folder (a file of no size, no type)', [fileItem({ name: 'My Folder', mimeType: '', buffer: Buffer.alloc(0) })], EMPTY],
+      ['data of a type nobody knows', [{ type: 'application/x-evil', data: 'x' }], null],
+      ['nothing', [], null],
+    ];
+    const dropBad = [];
+    for (const [what, items, say] of DROPS) {
+      await resetToast(page);
+      const claimed = await dropItems(page, items);
+      await sleep(250);
+      const toast = await toastOf(page);
+      if (!claimed.drop || !claimed.dragover) dropBad.push(`${what}: not claimed ${JSON.stringify(claimed)}`);
+      if (say ? !say.test(toast) : toast) dropBad.push(`${what}: said "${toast.slice(0, 80)}"`);
+    }
+    t.check(!dropBad.length, 'textdrops: each drop of a link, html, text, a PDF or a folder is claimed (the browser does not navigate) and answered in the site\'s words', dropBad);
+    t.check((await labelOf(page)) === lab1 && (await fr.evaluate(() => window.__pwn === undefined)), 'textdrops: none of the drops changed the photo or ran anything');
+    // several files: the picture is taken, the others are said
+    await resetToast(page);
+    await dropItems(page, [fileItem(textFile('a-note.txt')), fileItem({ ...png, name: 'second-of-three.png' }), fileItem({ ...png, name: 'third-of-three.png' })]);
+    await fr.waitForFunction(() => document.getElementById('source').textContent.startsWith('second-of-three.png') && document.getElementById('busy').hidden, null, { timeout: 15000 }).catch(() => null);
+    t.check((await labelOf(page)).startsWith('second-of-three.png') && /^Of the 3 files dropped, only second-of-three\.png was taken\.$/.test(await toastOf(page)), 'textdrops: of three files dropped the first picture is taken and the page says which', { label: await labelOf(page), toast: await toastOf(page) });
+    await clean(t, page, 'textdrops: drops');
+  });
+
+  // ====================================================================================================================
+  // hashes: the address after the # names a tab; whatever else it holds is not an error
+  // ====================================================================================================================
+  await seg.run('hashes', async (open) => {
+    const shown = (page) => app(page).evaluate(() => [...document.querySelectorAll('[id^="tab-"]')].filter((p) => !p.hidden).map((p) => p.id.slice(4)).join());
+    const LOAD = [
+      ['#study?x', 'study'], ['#%00', 'study'], ['#../', 'study'], ['#__proto__', 'study'], ['#toString', 'study'],
+      ['#<script>window.__pwn=1</script>', 'study'], ['#help?x=<img src=x onerror=window.__pwn=1>', 'help'], ['#‮help', 'study'],
+      ['#' + 'a'.repeat(1000000), 'study'], ['#battle/' + 'x'.repeat(100000), 'battle'],
+    ];
+    const bad = [];
+    for (const [h, want] of LOAD) {
+      const page = await open({ url: h });
+      const got = await shown(page), pwn = await app(page).evaluate(() => window.__pwn);
+      const ok = await usable(page);
+      if (got !== want || pwn !== undefined || !ok) bad.push(`${h.slice(0, 30)}${h.length > 30 ? `… (${h.length} chars)` : ''}: opened ${got} (want ${want}) pwn ${pwn} usable ${ok}`);
+      if (!(await clean(t, page, `hashes: opened on ${h.slice(0, 24)}`))) { /* (recorded) */ }
+      await page.context().close();
+    }
+    t.check(!bad.length, 'hashes: pages opened on #study?x, #%00, #../, prototype names, a script, a bidi mark, a megabyte, and a tab with a hundred kB after it open the tab they name (or the first one) and are usable', bad);
+
+    // typed after the page is open, one after another (the tab is changed without a reload)
+    const page = await open();
+    const fr = app(page);
+    const CHANGES = [
+      ['#HELP', 'help'], ['#Loomis/', 'loomis'], ['#game?x=1&y=2', 'game'], ['#battle&x', 'battle'], ['#help/../../etc/passwd', 'help'],
+      ['#__proto__', null], ['#constructor', null], ['#hasOwnProperty', null], ['#%00', null], ['#../', null], ['#help#x', null], ['#%68elp', null], ['#help%20', null],
+      ['#<svg onload=window.__pwn=1>', null], ['#' + 'z'.repeat(500000), null],
+      ['#paint', 'paint'], ['#', 'study'], ['#study?x', 'study'], ['#check', 'study'], ['#loomis', 'loomis'], ['', 'study'],
+    ];
+    const changes = [];
+    let now = await shown(page);
+    for (const [h, want] of CHANGES) {
+      await fr.evaluate((h) => { location.hash = h; }, h);
+      const target = want || now;
+      await fr.waitForFunction((n) => { const p = document.getElementById('tab-' + n); return p && !p.hidden; }, target, { timeout: 4000 }).catch(() => null);
+      await sleep(want ? 250 : 120);
+      const got = await shown(page);
+      if (got !== target) changes.push(`${h.slice(0, 30)}: shows ${got}, wanted ${target}`);
+      now = got;
+    }
+    t.check(!changes.length, 'hashes: typed one after another, #HELP, #Loomis/, #game?x=1&y=2, #battle&x and #help/../.. open their tabs; prototype names, %00, #help#x, an escaped name and a script leave the open tab alone; # and an empty hash go to Study', changes);
+    t.check(await fr.evaluate(() => window.__pwn === undefined) && (await usable(page)), 'hashes: nothing in an address ran, and the page is usable after the sequence');
+    await clean(t, page, 'hashes: typed in sequence');
+
+    // the app with Pose and light's words in its own query, and the Pose page opened on its own with queries that mean something to it
+    const qpage = await open({ url: 'index.html?embed=1&render=1&x=<script>window.__pwn=1</script>#paint' });
+    t.check((await shown(qpage)) === 'paint' && (await qpage.evaluate(() => window.__pwn === undefined)) && !(await app(qpage).evaluate(() => document.documentElement.classList.contains('embed'))), 'hashes: index.html with ?embed=1&render=1 and a script in the query is the ordinary app (the Studio, not an embedded page)', await shown(qpage));
+    await clean(t, qpage, 'hashes: index.html with the Pose page\'s query words');
+    const POSE_URLS = ['pose.html?embed=1&render=1', 'pose.html?render=1', 'pose.html?x=embed=1', 'pose.html?embed=1%00&render=1#<img src=x onerror=window.__pwn=1>', 'pose.html?' + 'a'.repeat(100000) + '&render=1'];
+    const posed = [];
+    for (const url of POSE_URLS) {
+      const pp = await open({ url });
+      const up = await pp.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses .pose-btn').length >= 30, null, { timeout: 30000 }).then(() => true).catch(() => false);
+      const s = await pp.evaluate(() => ({ embed: document.documentElement.classList.contains('embed'), library: !document.getElementById('library').hidden, failed: !document.getElementById('fail').hidden, pwn: window.__pwn, header: !!document.querySelector('header') && getComputedStyle(document.querySelector('header')).display !== 'none' }));
+      if (!up || s.embed || !s.library || s.failed || s.pwn !== undefined) posed.push(`${url.slice(0, 40)}: up ${up} ${JSON.stringify(s)}`);
+      await clean(t, pp, `hashes: ${url.slice(0, 40)}`);
+      await pp.context().close();
+    }
+    t.check(!posed.length, 'hashes: pose.html opened on its own with ?embed=1&render=1, ?render=1, a query that only contains "embed=1", a NUL and a script, and a 100 kB query starts as the ordinary page: the library open, nothing hidden or failed', posed);
   });
 
   t.note(`segments: ${seg.timings.join('; ')}`);
