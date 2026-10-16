@@ -9,8 +9,8 @@
 // The last part (gaps(), after the first pass) covers what the README promises that the first pass did not reach:
 // the windows between a phone and a wide screen, ties that read the same on the chips, every clock played to its
 // end, the star thresholds on their boundaries, a game left on another tab, a photo arriving mid-battle, two games
-// at once, palettes of one color, no game.js, the keyboard alone, and the odd corners.
-import { openPage, newTab, clean, violations, tab, click, text, visible, screenshot, storageGet, storageKeys, toastText, hscroll, axe, sleep, makeImage, textFile, loadPhoto, dropFiles, dropText, pasteFile, DESKTOP, PHONE } from '../lib.mjs';
+// in progress, palettes of one color, no game.js, the keyboard alone, and the odd corners.
+import { openPage, newTab, clean, violations, tab, click, text, visible, screenshot, storageGet, toastText, hscroll, axe, sleep, makeImage, textFile, loadPhoto, dropFiles, dropText, pasteFile, DESKTOP, PHONE } from '../lib.mjs';
 
 const K = { palette: 'portrait-value-studio.battlePalette', count: 'portrait-value-studio.battleCount', mode: 'portrait-value-studio.battleMode', best: 'portrait-value-studio.battleBest', mine: 'portrait-value-studio.myPaints' };
 const QUESTION = { darker: 'Which color is darker in value?', lighter: 'Which color is lighter in value?', cooler: 'Which color is cooler in tone?', warmer: 'Which color is warmer in tone?', darkest: 'Tap the color with the darkest value.', lightest: 'Tap the color with the lightest value.', order: 'Tap the colors in order, from darkest to lightest.' };
