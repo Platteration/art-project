@@ -390,6 +390,9 @@ async function photoToNextVisit(t, site, pages) {
   await gameReady(page);
   s = await shows(page);
   t.check(s.gamePhoto === 'Painting from aunt.' && J(s.preview) === J(s.prep), `${L} game: the setup paints from the photo`, { gamePhoto: s.gamePhoto, preview: s.preview, prep: s.prep });
+  // Medium is the color-block study at three colors per value, with the splits as moved on the Study tab
+  const counts = await page.evaluate(() => ({ board: parseInt(document.getElementById('gamePreviewNote').textContent, 10), study: Studio.result().blockColors.filter((c) => c.share > 0).length, colors: +document.getElementById('colors').value }));
+  t.check(counts.colors === 3 && counts.board === counts.study, `${L} game: Medium's board has as many numbers as the Study tab's color shapes have colors (the splits moved)`, counts);
   const game1 = await playGame(page);
   t.check(game1.started && game1.ref && game1.ref.diff === 0, `${L} game: the reference beside the board is the Study photo`, game1.ref);
   t.check(game1.scored && game1.points > 0, `${L} game: locking in scores the portrait`, game1);
@@ -802,6 +805,16 @@ async function phoneMenus(t, site, pages) {
   await page.locator('#gameQuit').click(); await page.locator('#gameQuit').click();
   await gameReady(page);
   t.check((await tabsShown()) && (await menus()).tab === 'game' && (await hscroll(page)) <= 0, `${L} game: after ✕ twice the tabs are back on the setup, nothing spills sideways`);
+  // Load another photo from the game's setup: the game, the Study tab, the Studio and the Loomis head all take it
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null), page.locator('#gameFromPhotoPane [data-open-file]').click()]);
+  t.check(!!chooser, `${L} game: Load another photo opens the file picker`);
+  if (chooser) {
+    await chooser.setFiles(await makeImage(page, { width: 1000, height: 800, type: 'image/png', name: 'second-photo.png' }));
+    await until(page, () => /second-photo/.test(document.getElementById('gamePhotoName').textContent), null, 30000);
+    await gameReady(page);
+    s = await shows(page);
+    t.check(s.tab === 'game' && s.gamePhoto === 'Painting from second-photo.' && J(s.preview) === J(s.prep) && /^second-photo\.png · 1000 × 800 px/.test(s.source), `${L} game: the new photo is on the setup and on the Study tab`, { tab: s.tab, game: s.gamePhoto, preview: s.preview, prep: s.prep, source: s.source });
+  }
   await steady(t, page, `${L} game`);
 
   // Value battle from the same menu
@@ -821,6 +834,8 @@ async function phoneMenus(t, site, pages) {
   await until(page, () => Studio.tab() !== 'paint', null, 5000);
   const back = await menus();
   t.check((await tabsShown()) && back.tab === 'study' && J(back.current) === J(['tabLearnBtn']) && back.subs[0] === 'Study the photo', `${L} Studio: its exit leads back to the Study tab with the tabs`, back);
+  s = await shows(page);
+  t.check(s.refKind === 'studio' && J(s.ref) === J(s.prep) && J(s.prep) === J([900, 720]), `${L} Studio: its reference was the photo loaded from the game`, { ref: s.ref, prep: s.prep });
   await steady(t, page, `${L} Studio`);
 
   // the Loomis head: the photo, and its own exit
