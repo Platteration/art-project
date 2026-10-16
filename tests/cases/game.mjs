@@ -1397,3 +1397,125 @@ async function analysisWords(t, site) {
   await clean(t, page, 'analysis words');
   await page.context().close();
 }
+
+// ================================================================================================
+// 17. The phone turned on its side, and the value stage, copy bar, Mystery setup and Analysis on the phone
+// ================================================================================================
+const within = (r, w, h) => !!r && r.left >= -1 && r.right <= w + 1 && (h === undefined || (r.top >= -1 && r.bottom <= h + 1));
+const rectOf = (page, selector) => page.evaluate((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; }, selector);
+async function phoneLayouts(t, site) {
+  // 844 x 390: the rows are sized by the window's height
+  {
+    const page = await openPage(site, { url: '#game', viewport: { width: 844, height: 390 } });
+    await ready(page);
+    t.check((await hscroll(page)) <= 0, 'phone on its side: the setup has no horizontal scroll', await hscroll(page));
+    await click(page, '#gameStart'); await playing(page); await sleep(400);
+    const [vw, vh] = await page.evaluate(() => [innerWidth, innerHeight]);
+    const canvas = await rectOf(page, '#gameCanvas'), lock = await rectOf(page, '#gameLock'), paints = await rectOf(page, '#gamePaints'), bar = await rectOf(page, '.game-bar');
+    t.check(canvas.height >= 120 && canvas.top >= 0 && canvas.bottom <= vh && within(lock, vw, vh) && within(bar, vw), 'phone on its side: the painting is at least 120 px tall and on screen, with the clock and Lock in above it', [canvas, lock]);
+    t.check(within(paints, vw, vh) && (await hscroll(page)) <= 0, 'phone on its side: the paints are on the first screen and nothing scrolls sideways', [paints, await hscroll(page)]);
+    await tapPaint(page, (await play(page)).paints[0]);
+    t.check((await play(page)).parts.length > 0 && !(await play(page)).parts.startsWith('Empty'), 'phone on its side: a paint tapped adds a part');
+    await screenshot(page, 'game-phone-landscape');
+    await lockIn(page);
+    const r = await rectOf(page, '#gamePopup');
+    t.check(within(r, vw) && (await hscroll(page)) <= 0, 'phone on its side: the score fits the width', [r, await hscroll(page)]);
+    await clean(t, page, 'phone on its side');
+    await page.context().close();
+  }
+  // 390 x 844: Value first, Copy mix, Mystery's setup, the Analysis
+  {
+    const page = await openPage(site, { url: '#game', viewport: PHONE });
+    await ready(page);
+    await setMode(page, 'mystery'); await ready(page);
+    const deal = await rectOf(page, '#gameDeal'), label = await rectOf(page, '#gamePaletteLabel');
+    t.check(within(deal, 390) && deal.width > 20 && label && Math.abs(deal.top - label.top) < 40 && (await hscroll(page)) <= 0, 'phone: Mystery’s Deal again sits beside the Palette label, inside the width', [deal, label]);
+    await setMode(page, 'value'); await ready(page);
+    await click(page, '#gameStart'); await playing(page); await sleep(300);
+    const val = await rectOf(page, '#gameValue'), lockV = await rectOf(page, '#gameLock'), range = await rectOf(page, '#gameValueRange');
+    t.check(within(val, 390) && within(range, 390) && range.width > 150 && within(lockV, 390, 844) && (await hscroll(page)) <= 0, 'phone: the value stage’s slider fits the width and Done with values is on screen', [val, range, lockV]);
+    const canv = await rectOf(page, '#gameCanvas');
+    t.check(canv.height > 200 && canv.right <= 391, 'phone: the painting is still large in the value stage', canv);
+    await screenshot(page, 'game-phone-values');
+    await setValue(page, 40);
+    await click(page, '#gameLock');
+    await pickNumber(page, 0); await tapPaint(page, (await play(page)).paints[0], 2);
+    await click(page, '#gameCopy');
+    const bar = await rectOf(page, '#gameCopyBar'), copyText = await text(page, '#gameCopyText');
+    t.check(!!bar && within(bar, 390) && bar.height > 20 && /Copying number 1/.test(copyText) && (await hscroll(page)) <= 0, 'phone: the copy bar shows inside the width', [bar, copyText]);
+    await screenshot(page, 'game-phone-copy');
+    await click(page, '#gameCopyDone');
+    await lockIn(page); await click(page, '#gameAnalyze'); await sleep(300);
+    const cw = await page.evaluate(() => innerWidth);
+    const canvases = await Promise.all(['#gameYours', '#gameTarget', '#gamePhoto'].map((s) => rectOf(page, s)));
+    const zones = await rectOf(page, '#gameZones'), dl = await rectOf(page, '#gameBreakdown');
+    t.check(canvases.every((c) => within(c, cw) && c.width > 100) && within(zones, cw) && within(dl, cw) && (await hscroll(page)) <= 0, 'phone: the Analysis’s three pictures, breakdown and number list fit the width', [canvases.map((c) => [Math.round(c.left), Math.round(c.right)]), zones, await hscroll(page)]);
+    const buttons = await page.evaluate(() => [...document.querySelectorAll('#gameAnalysis .game-again .btn')].map((b) => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.left), Math.round(r.right), Math.round(r.height)]; }));
+    t.check(buttons.length === 3 && buttons.every((b) => b[1] >= 0 && b[2] <= cw && b[3] >= 24), 'phone: the Analysis’s Play again, Share card and Change settings fit the width and are at least 24 px tall', buttons);
+    await screenshot(page, 'game-phone-analysis');
+    await clean(t, page, 'phone: value stage, copy bar, mystery, analysis');
+    await page.context().close();
+  }
+}
+
+// ================================================================================================
+// 18. Forget my work, pressed in another tab while a game is on here
+// ================================================================================================
+async function forgetOtherTab(t, site) {
+  const forgetHere = async (other) => { await click(other, '#forgetBtn'); await click(other, '#forgetBtn'); };
+  for (const [name, race] of [['a game on, nothing else happens', false], ['a score arriving as the other tab forgets (the clock running out)', true]]) {
+    const a = await openPage(site, { url: '#game' });
+    await ready(a); await setPalette(a, 'zorn'); await ready(a);
+    await setAmount(a, 3);
+    await click(a, '#gameStart'); await playing(a);
+    await tapPaint(a, 'TW');
+    t.check((await storageKeys(a, /^portrait-value-studio\./)).length >= 3, `${name}: the game has left its settings in storage`, await storageKeys(a, /^portrait-value-studio\./));
+    // (the score, if the page is made to lock in during the 300 ms before it reloads, as a clock running out would)
+    if (race) await a.evaluate(() => window.addEventListener('studio:forget', () => setTimeout(() => document.getElementById('gameLock').click(), 60)));
+    const b = await newTab(site, a, { url: '#help' });
+    const reloaded = a.waitForEvent('load', { timeout: 8000 }).then(() => true).catch(() => false);
+    await forgetHere(b);
+    const did = await reloaded;
+    await sleep(800);
+    const keys = await storageKeys(a, /^portrait-value-studio\./);
+    t.check(did, `${name}: the other tab’s Forget reloads this one`, did);
+    const onSetup = await a.evaluate(() => !document.getElementById('gameSetup').hidden && document.getElementById('gamePlay').hidden);
+    t.check(onSetup, `${name}: this tab comes back to the game’s setup`, onSetup);
+    const stay = t.check(keys.length === 0, `${name}: nothing the site kept is left in storage once both tabs have reloaded`, keys);
+    if (!stay) t.finding({
+      title: 'A score that arrives while another tab forgets everything is written back after the wipe',
+      severity: 'low',
+      steps: '1. Open Paint by numbers in one tab and Start painting. 2. In a second tab open How to use and press "Forget my work on this device" twice. 3. In the first tab, let the portrait lock in within the 300 ms before it reloads (the clock running out does; here its Lock in is pressed 60 ms after the Forget is heard).',
+      expected: 'Forget leaves nothing of the site in the browser: no best score survives.',
+      actual: `Both tabs reload and storage holds ${JSON.stringify(keys)}: the best score of a game ended after the wipe stays.`,
+      cause: 'js/guard.js 159-163: the other tabs reload 300 ms after the storage event and neither stop the game nor its saves; js/game.js lockIn (1307-1315) saves the best whenever it runs, and the game has no studio:forget listener.',
+    });
+    await clean(t, a, name);
+    await clean(t, b, name + ' (the tab that forgot)');
+    await a.context().close();
+  }
+}
+
+// ================================================================================================
+// 19. My paints at its extremes: two whites, no white, two paints that cannot make most colors
+// ================================================================================================
+async function mineExtremes(t, site) {
+  for (const [name, codes] of [['two whites (Titanium and Lead)', ['TW', 'LW']], ['no white (Cadmium Red Light and Yellow Ochre)', ['CRL', 'YO']], ['a black and a blue (Ivory Black and Ultramarine)', ['IB', 'UB']]]) {
+    const page = await openPage(site, { url: '#game', storage: { [MINE]: codes } });
+    await ready(page);
+    await setPalette(page, 'mine'); await ready(page);
+    const s = await setup(page);
+    t.check(s.palette === 'mine' && s.dots.length === 2 && !s.start && /^(Suggested for this portrait\.|Suggested for this portrait: .+\.) 2 paints, which mix \d+ of its \d+ colors closely\./.test(s.hint), `${name}: chosen, two dots and the hint, Start enabled`, [s.dots, s.hint]);
+    await click(page, '#gameStart'); await playing(page);
+    const recipes = await recipesOfBoard(page);
+    const parts = recipes.map(([, mix]) => Object.values(recipeOf(mix)).reduce((a, b) => a + b, 0));
+    t.check(recipes.length >= 1 && parts.every((n) => n > 0 && n <= 60), `${name}: every number has a recipe of at most 60 parts`, [recipes.length, Math.max(...parts)]);
+    await playAgain(page);
+    await mixAll(page, recipes);
+    await lockIn(page);
+    const r = await result(page);
+    t.check(r.pct === '100' && r.stars === 5, `${name}: every number mixed to its recipe scores 100%`, [r.pct, r.stars]);
+    await clean(t, page, name);
+    await page.context().close();
+  }
+}

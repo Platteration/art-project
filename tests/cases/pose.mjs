@@ -5,7 +5,15 @@
 // Snapshot, Undo past sixty steps, Save this pose past twelve, remove and Put back, a full storage,
 // Simple and Advanced from the app's switch and the page's own (remembered), the window resized while
 // open, Where you left off after a reload (one mid-drag), hostile saved state for every key the page
-// reads, and the render protocol flooded from the app page; at 1400 × 900 and 390 × 844.
+// reads, and the render protocol flooded from the app page; at 1400 × 900 and 390 × 844. Then, from the
+// coverage review: the library's groups and pictures read back, the wrist and the arm under the pointer, the
+// poles holding the hand and the foot, the heels lifting, the hips by arrows with the feet planted, the floor
+// after Straighten and the arrows, a part dragged by itself, the view walked around and zoomed, a drag cut short
+// or overtaken by the library, Simple's diamonds and what it resets, the lamp's light read from the stage's
+// pixels, its handle behind the figure and behind the camera, gray snapshots, the frame's drawers, height and
+// mode messages, an arrow held through a tab switch, the reference pictures' framing and tilts, a lost context
+// in the render frame, a finger (tap, drag, pinch, swipe), two Pose and light pages and Forget my work, and
+// WebGL turned off.
 import { openPage, newTab, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot } from '../lib.mjs';
 
 // the page is up: started, with all 30 pictures drawn
@@ -125,22 +133,6 @@ const looks = (fr, selector) => fr.evaluate((sel) => {
 const differs = (a, b) => a.gray.filter((v, i) => Math.abs(v - b.gray[i]) > 24).length / a.gray.length;
 // the README's library, group by group
 const LIBRARY = [['Standing', ['Stand', 'Weight on one leg', 'Wave', 'Reach', 'Think', 'Hands on hips', 'Point']], ['Moving and sport', ['Walk', 'Run', 'Lunge', 'Jump', 'Throw', 'Kick', 'Box']], ['Low to the floor', ['Crouch', 'Kneel', 'Sit']], ['Dance', ['Arabesque', 'Attitude', 'À la seconde', 'Passé', 'Penché', 'Cambré', 'Grand jeté', 'Révérence', 'Flamenco', 'Jazz', 'Floor reach', 'Spiral', 'Hip-hop']]];
-// a page in a context of its own (for options openPage does not take), recorded as openPage records
-async function openOwn(site, contextOpts, url, init) {
-  const context = await site.browser.newContext(contextOpts);
-  if (init) await context.addInitScript(init);
-  const page = await context.newPage();
-  const log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
-  page.log = log;
-  page.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
-  page.on('console', (m) => { const x = m.text(); if (/GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i.test(x)) return; if (m.type() === 'error') log.console.push(x.slice(0, 300)); });
-  page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) log.offsite.push(u); });
-  page.on('requestfailed', (r) => { const u = r.url(); const why = (r.failure() || {}).errorText || ''; if (u.startsWith('blob:') || why === 'net::ERR_ABORTED') return; log.failed.push(u + ' ' + why); });
-  await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)} ${(e.sourceFile || '').split('/').pop()}:${e.lineNumber}`); }); });
-  await page.goto(site.base + url, { waitUntil: 'load' });
-  return page;
-}
-
 export default async function pose(t, site) {
   const started = Date.now();
   const lap = (what) => t.note(`${what}: ${((Date.now() - started) / 1000).toFixed(0)} s in`);
@@ -1167,7 +1159,7 @@ export default async function pose(t, site) {
       await post({ type: 'pose-and-light:render', req: 'x-back', id: 'walk', w: 300, h: 300 });
       await page.waitForFunction(() => window.__full['x-back'], null, { timeout: 15000 }).catch(() => null);
       const back = await page.evaluate(() => { const d = window.__full['x-back']; return d && { error: !!d.error, url: (d.url || '').slice(0, 15), joints: !!d.joints }; });
-      t.check(lost && lost.error === true && !lost.url && back && !back.error && back.url === 'data:image/jpe' && back.joints, 'the render frame\'s WebGL context lost: a render is answered with an error and no picture; once the context is back, with a picture and its joints', { lost, back });
+      t.check(lost && lost.error === true && !lost.url && back && !back.error && back.url === 'data:image/jpeg' && back.joints, 'the render frame\'s WebGL context lost: a render is answered with an error and no picture; once the context is back, with a picture and its joints', { lost, back });
     }
     await clean(t, page, 'render protocol');
     await page.context().close();
