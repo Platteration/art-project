@@ -288,7 +288,10 @@ export default async function battleMore(t, site) {
     await start(page, { count: '2' });
     const log = [];
     let tieDiffers = null;
-    for (let k = 0; k < 30; k++) {
+    // thirty rounds, and on until two plain value rounds have come from round 25 on (the kind is dealt at random,
+    // so six late rounds can all be temperature or ties)
+    const lateValues = () => log.filter((x) => x.i >= 24 && x.kind === 'value' && x.answer !== 'same').length;
+    for (let k = 0; k < 30 || (lateValues() < 2 && k < 48); k++) {
       r = await round(page);
       await answer(page, true);
       b = await board(page);
@@ -298,7 +301,7 @@ export default async function battleMore(t, site) {
       await next(page); await waitRound(page, k + 2);
     }
     const value = log.filter((x) => x.kind === 'value' && x.answer !== 'same'), temp = log.filter((x) => x.kind === 'temp' && x.answer !== 'same');
-    t.check(log.every((x) => x.ok), 'every one of the thirty lines says Right! with the values the page holds', log.filter((x) => !x.ok).slice(0, 3));
+    t.check(log.every((x) => x.ok), 'every one of the lines (thirty or more) says Right! with the values the page holds', log.filter((x) => !x.ok).slice(0, 3));
     t.check(value.every((x) => x.d >= x.lo - 1e-6 && x.d <= x.hi + 1e-6), 'every value round sits in its round\'s L* band', value.filter((x) => !(x.d >= x.lo - 1e-6 && x.d <= x.hi + 1e-6)));
     t.check(value.every((x) => x.d >= 1.6) && temp.every((x) => x.d >= 0.08), 'no round is closer than the floor (1.6 L*, 0.08 in warmth)', { minValue: Math.min(...value.map((x) => x.d)), minTemp: Math.min(...temp.map((x) => x.d)) });
     const early = value.filter((x) => x.i < 6).map((x) => x.d), late = value.filter((x) => x.i >= 24).map((x) => x.d);
@@ -309,10 +312,11 @@ export default async function battleMore(t, site) {
     const tempShort = temp.filter((x) => x.d < x.lo - 1e-6);
     if (tempShort.length) t.note(`with Zorn the early temperature rounds cannot meet the README's "clearly different in temperature": the whole usable pool spans about 0.44 in warmth while the first rounds ask for 0.6 (battle.js EASY.temp, line 98), so makePair's fallback (lines 125-130) deals the nearest pair (${JSON.stringify(tempShort.map((x) => [x.i + 1, x.d, x.lo]))}); the same holds for Rembrandt's earths; a palette with a blue meets the band. The pairs are still a yellow against a red, so the eye can tell them apart; noted, not failed`);
     b = await board(page);
-    t.check(b.round === 'Streak 30' && b.milestone, 'thirty in a row, with the flourish at thirty', { round: b.round, milestone: b.milestone });
-    await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 30);
+    const streak = log.length;   // thirty, or a few more when the late value rounds were slow to come
+    t.check(b.round === `Streak ${streak}` && b.milestone, 'thirty (or more) in a row, with the flourish at thirty', { round: b.round, milestone: b.milestone });
+    await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, streak);
     b = await board(page);
-    t.check(b.stars === 5 && b.grade === GRADES[5] && b.newBest && b.kicker === 'Streak over after round 31', 'thirty in a row: five stars, Eagle eye!, New best', { stars: b.stars, grade: b.grade, newBest: b.newBest, kicker: b.kicker });
+    t.check(b.stars === 5 && b.grade === GRADES[5] && b.newBest && b.kicker === `Streak over after round ${streak + 1}`, 'thirty (or more) in a row: five stars, Eagle eye!, New best', { stars: b.stars, grade: b.grade, newBest: b.newBest, kicker: b.kicker });
     // a tie whose two values read differently on the 0-10 scale: measured on the dealt rounds (makeRound is
     // pure and exposed), so the check does not depend on the dice of this one game
     const sweep = await page.evaluate(() => { const VB = ValueBattle; const pool = VB.mixPool(Paints.PRESETS[0].paints, 220); const v = (c) => (c.L / 10).toFixed(1); let same = 0, differ = 0; const ex = []; for (const rd of [0, 12, 24, 40]) { const lv = VB.levelAt(rd); for (let k = 0; k < 600; k++) { const r = VB.makeRound(pool, lv, VB.QUESTIONS[k % 2], 2); if (r.answer !== 'same') continue; same++; if (v(r.colors[0]) !== v(r.colors[1])) { differ++; if (ex.length < 3) ex.push(`V ${v(r.colors[0])} and V ${v(r.colors[1])} (${Math.abs(r.colors[0].L - r.colors[1].L).toFixed(2)} L* apart)`); } } } return { same, differ, ex }; });
