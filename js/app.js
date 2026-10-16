@@ -2567,11 +2567,15 @@
   function pickNeutral(s) {
     const data = state.art.prep && state.art.prep.photo;
     if (!data) return;
+    // a moved photo leaves a gray fill where the painting is not: a spot there is not the painting's
+    const mask = state.art.prep.mask;
+    if (mask && !mask[s.y * s.w + s.x]) { toast('That spot is outside your painting, where the photo was moved off. Pick a white or gray area of the painting.', 4000); return; }
     let r = 0, g = 0, b = 0, k = 0;
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
         const x = s.x + dx, y = s.y + dy;
         if (x < 0 || y < 0 || x >= s.w || y >= s.h) continue;
+        if (mask && !mask[y * s.w + x]) continue; // only the painting's own pixels
         const p = (y * s.w + x) * 4;
         r += data[p]; g += data[p + 1]; b += data[p + 2]; k++;
       }
@@ -2622,11 +2626,20 @@
   els.artFromStudio.addEventListener('click', () => {
     const ps = window.PaintStudio;
     if (!ps) { toast('The Studio did not start, so there is no Studio painting to check. Load a photo of your painting instead.', 5000); return; }
-    const r = ps.reference();
-    if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
-    setArt(ps.composite(), 'Studio painting', false);
-    els.drawers.check.open = true;
-    runSoon(0);
+    // the Studio may still be reading its saved painting back: the press scores it once it is there (and says
+    // so if that takes a moment), never the blank sheet before it
+    const go = () => {
+      const r = ps.reference();
+      if (r.kind === 'painting' && r.id && Studio.sourceKey() !== `${r.id}:${r.width}x${r.height}`) useSource(r.picture, r.title, r.id);
+      setArt(ps.composite(), 'Studio painting', false);
+      els.drawers.check.open = true;
+      runSoon(0);
+    };
+    const ready = ps.ready ? ps.ready() : null;
+    if (!ready || typeof ready.then !== 'function') { go(); return; }
+    let done = false;
+    ready.then(() => { done = true; go(); });
+    setTimeout(() => { if (!done) toast('Reading your Studio painting back…', 2500); }, 150);
   });
   els.artFit.addEventListener('change', () => { state.art.key = ''; if (checking()) runSoon(0); });
 
