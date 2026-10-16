@@ -90,7 +90,6 @@ const download = (page, selector) => Promise.all([page.waitForEvent('download', 
 // the gesture's four colours (#e8590c, #1c6dd0, #2b8a3e, #c2255c) as they land on a light sheet: each line is laid at 0.75 or 0.95 opacity over a pale edge
 const PIX = { action: [238, 130, 73], bones: [39, 116, 210], tilt: [54, 144, 71], miss: [197, 48, 99] };
 const POOL_ALL = ['stand', 'relaxed', 'wave', 'reach', 'think', 'hips', 'point', 'walk', 'run', 'lunge', 'jump', 'throw', 'kick', 'box', 'crouch', 'kneel', 'sit', 'dance', 'attitude', 'seconde', 'passe', 'penche', 'cambre', 'jete', 'reverence', 'flamenco', 'jazz', 'contemporary', 'spiral', 'hiphop'];
-const pngSize = (buf) => (buf && buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47 ? { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) } : null);
 // one block's failure is one failed check, not the end of the case; the time each took goes in the notes
 async function segment(t, name, fn) {
   const t0 = Date.now();
@@ -636,8 +635,8 @@ async function clockBlock(t, page) {
   const c2b = await clockState(page);
   const runs = s2 && s2.running && c2.pauseText === 'Pause';
   t.check(runs || c2.pauseText === 'Resume', 'ordering: the held clock is shown as held (Resume offered), not left running or silently stopped', { s2, c2: c2.clock, pause: c2.pauseText });
-  t.check(runs, 'ordering: after Done on a held pose, Next pose starts the next pose\'s clock', { running: s2 && s2.running, held: s2 && s2.held, clock: c2.clock, after1500ms: c2b.clock, pause: c2.pauseText });
-  if (!runs) t.finding({ title: 'A Timed pose that was held (Pause, or leaving the tab) and finished with Done starts the next pose with its clock stopped', severity: 'low', steps: 'Figure study > Timed > 30 s > Start drawing. Open another tab (Study) and come back, or press Pause: the button reads Resume. Do not press Resume: press Done, then Next pose.', expected: 'Pose 2 is a new pose with its own 30 s: Pause shows "Pause" and the clock counts down (README: Timed gives each pose 30 s; Pause holds it, leaving the tab pauses it).', actual: `Pose 2 is shown with the clock at ${c2.clock} not running, the button still reading "${c2.pauseText}" and no time passing (${c2b.clock} 1.5 s later) until the visitor presses Resume; the pose is untimed meanwhile.`, cause: 'js/figure.js:281 showPose starts the clock with run(!c.held && ...), and cls.held (set by hold(true) in onTab, :1036, or by the Pause button, :320) is cleared only in startClass (:233), never when Next pose begins a new pose.' });
+  t.check(runs, 'ordering: after Done on a held pose, Next pose starts the next pose\'s clock (README: Next pose starts the next pose\'s clock)', { running: s2 && s2.running, held: s2 && s2.held, clock: c2.clock, after1500ms: c2b.clock, pause: c2.pauseText });
+  if (!runs) t.finding({ title: 'Next pose on a Timed pose that was held (Pause, or leaving the tab) starts the next pose with its clock stopped', severity: 'low', steps: 'Figure study > Timed > 30 s > Start drawing. Open another tab (Study) and come back, or press Pause: the button reads Resume. Do not press Resume: press Done, then Next pose.', expected: 'README: "Next pose starts the next pose\'s clock": pose 2 shows Pause and counts down from its own 30 s.', actual: `Pose 2 is shown with the clock at ${c2.clock} not running, the button still reading "${c2.pauseText}" and no time passing (${c2b.clock} 1.5 s later) until the visitor presses Resume; the pose is untimed meanwhile.`, cause: 'js/figure.js: the Next pose click handler no longer clears cls.held (hold(false)), which showPose reads in run(!c.held && ...); cls.held is otherwise cleared only in startClass.' });
   await toSetup(page);
   await clean(t, page, 'clock orderings');
 }
@@ -978,7 +977,6 @@ async function forgetElsewhereBlock(t, site) {
 // ================= P. pages of their own: assistive tech and the dark theme, a frame that never answers, game.js missing, a sandbox =================
 // README "Accessibility"/page behaviour: aria-live, role=dialog, role=timer, aria-pressed throughout; prefers-reduced-motion skips the count-up
 const quiet = (page) => page.waitForFunction(() => !document.getAnimations().some((a) => a.playState === 'running' && a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest('#fig-result')), null, { timeout: 4000 }).catch(() => null);
-const inView = (page, sel) => page.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.left >= -1 && r.top >= -1 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1; }, sel);
 async function accessibilityBlock(t, site) {
   const page = await openPage(site, { bypassCSP: true, url: '#figure' });
   try {
@@ -1677,4 +1675,6 @@ export default async function figure(t, site) {
   await segment(t, 'Forget my work pressed in another tab', () => forgetElsewhereBlock(t, site));
   await segment(t, 'game.js missing', () => noGameBlock(t, site));
   await segment(t, 'inside a sandboxed frame', () => sandboxBlock(t, site));
+  t.note('Left out of the blocks above, with the reason: (1) hostile answers from the render frame (a duplicate id, an unknown group, a long name, NaN joints): only the page\'s own frame can post them (the receiver checks the sender window), so they would guard against pose.js itself, and pose.js dedupes and validates before it answers; (2) ✕ while the card is up: the strip is inert there, which the card checks above already pin (a click that cannot happen); (3) ✕ armed on one pose and tapped again on the next: a second tap within 3 s of the first stops the class whichever pose it falls on, by design; (4) the one-drawing "0 stars" review sentence is not asserted on its own (a scribble\'s 0-star card is in the review of block B, and the half-star and one-star sentences are); (5) hostile pose-list answers were not sent for the same reason as (1).');
+  t.note('Where a gap\'s "how" did not hold, the block says what it measured instead: a head and a spine alone leave 2 or 3 of the limbs dashed, not 4, because the fit shrinks the gesture onto their tall thin box; a drawing moved sideways is simply fitted where it is (score unchanged), so "Off the figure" is driven by marks away from the body (two bars either side); the next pose\'s picture being ready is read from the render requests the frame received (the request for pose 2 left while pose 1 was on screen, and was not repeated), not from a stopwatch.');
 }
