@@ -678,7 +678,7 @@ async function gaps(t, site) {
         steps: 'Three primaries, 2 colors, Streak or the clock. On a cooler or warmer round that is a tie (about one in thirty of the tie rounds), press a color instead of Both the same; read the pop-up. Or deal ValueBattle.makeRound(ValueBattle.mixPool(Paints.PRESETS.find((p) => p.id === "primary").paints, 220), ValueBattle.levelAt(12), ValueBattle.QUESTIONS[2], 2) a few hundred times and compare each tie\'s two colors with the page\'s own lean words (warmth above 0.35 is warm, below -0.35 cool, else in between).',
         expected: 'The README: a tie is paired "so the colors really are the same in what is asked" (the same lean), and the line and the chips agree on it.',
         actual: `${sweep.mismatch} of ${sweep.temp} temperature ties dealt across the ten palettes at rounds 1, 13 and 25 straddled a label boundary (${Object.entries(sweep.byPalette).map(([k, v]) => `${k} ${v}`).join(', ')}); for example ${sweep.example.palette}, warmth ${sweep.example.warmth.join(' and ')}: the chips say ${sweep.example.chips.join(' and ')} while the line names only the left color's lean ("Both lean the same way: ${sweep.example.chips[0]}").`,
-        cause: 'js/battle.js:132 accepts a tie on a warmth gap under 0.05 alone, however near the 0.35 line of tLabel (js/battle.js:282) the two colors sit; js/battle.js:349 then names tLabel of the left color for both' });
+        cause: 'js/battle.js:132 accepts a tie on a warmth gap under 0.05 alone, however near the 0.35 line of tLabel (js/battle.js:283) the two colors sit; js/battle.js:350 then names tLabel of the left color for both' });
     }
     t.check(sweep.alike === 0, 'a temperature tie is the same lean but different values: the two colors are more than 8 L* apart', { alike: sweep.alike, ties: sweep.temp });
     t.check(sweep.notDifferent === 0 && sweep.vMismatch === 0, 'a value tie is two different colors (warmth 0.4 or chroma 12 apart) that read the same V on the scale', { notDifferent: sweep.notDifferent, vMismatch: sweep.vMismatch, ties: sweep.value });
@@ -948,7 +948,7 @@ async function gaps(t, site) {
       steps: 'Value battle, 2 colors, Start. Read the two color buttons\' accessible names (or open them in a screen reader), answer a round, then read "Right! The left one is darker: V 3.0 against V 4.0." and the Left/Right chips of a miss.',
       expected: 'The names a screen-reader visitor can tap by match the words the page answers with (Left and Right for a pair; the letters shown on the swatches for three or four).',
       actual: `The buttons are named ${names.map((n) => `"${n}"`).join(' and ')}; the letters are hidden in a two-color round (styles.css .vb-swatches[data-count="2"] .vb-letter), so nothing says which is the left one.`,
-      cause: 'js/battle.js:295 names every swatch "Color " + its letter, including a pair\'s, while js/battle.js:341-350 and :400 say left and right' });
+      cause: 'js/battle.js:296 names every swatch "Color " + its letter, including a pair\'s, while js/battle.js:342-351 and :401 say left and right' });
     await clean(t, page, 'keyboard');
     await page.context().close();
   }
@@ -980,7 +980,7 @@ async function gaps(t, site) {
       steps: 'Value battle, 2 colors, Streak, Start. With the keyboard, Tab to the Games section button in the tab bar (or the Simple/Advanced switch in the top bar) and press ArrowDown (or ArrowLeft/ArrowRight).',
       expected: 'The keys answer the round only when the board has the focus; ArrowDown on the Games button opens its menu, the arrows on the mode switch do nothing to the game.',
       actual: keyCase.map((c) => `${c.key}: round answered ${c.answered}, ${c.missed} missed${c.menuOpen === false ? ', the menu did not open' : ''}`).join('; ') + '. A keyboard visitor leaving the battle by the menu loses the streak.',
-      cause: 'js/battle.js:423-431: the document keydown handler answers by key whatever has the focus (no check of e.target or e.defaultPrevented); the Games button\'s own ArrowDown handler (js/app.js:2274) calls preventDefault but not stopPropagation' });
+      cause: 'js/battle.js:424-433: the document keydown handler answers by key whatever has the focus (no check of e.target or e.defaultPrevented); the Games button\'s own ArrowDown handler (js/app.js:2274) calls preventDefault but not stopPropagation' });
     await clean(t, page, 'keys that must do nothing');
     await page.context().close();
   }
@@ -1229,4 +1229,8 @@ async function gaps(t, site) {
     await page.context().close();
   }
 
+
+  // ---- what this pass did not cover, and what was already fixed when it ran ----
+  t.note('gaps left out of the added blocks (the coverage list\'s lows, for time): a hand-seeded best of 0 (only edited storage makes one; the hostile-state checks above and battle-more accept the line); the pinch-zoom (visualViewport scale) variant of the resize check; the cross-tab Forget while the other tab is mid-battle (multitab.mjs and battle-more cover the reload and the cleared keys, and it costs two page loads and two navigations); the dark scheme on a phone and a saved sound switch of on (dark desktop, a light phone and a saved off are covered; on is the default the first pass plays); Paint by numbers with the battle on a desktop window (the phone pass covers the focus classes and the tabs, the first pass the pin below the sections); ✕ while the toast shows another message. Two tabs finishing a game in the same instant lost one of the two bests in two of two tries (finish() reads and writes the whole record, and the other tab\'s write had not reached this one yet): a window of a few milliseconds, so it was left as an observation, not a check.');
+  t.note('already fixed when the added blocks ran, and kept as passing checks: the board pinned at 0 px wide between 760 and 999 px (js/painting.js pin(), commit 4f0fc86), and the nearest-pair fallback dealing two look-alikes as a temperature tie for My paints of Yellow Ochre and Ivory Black (the fallback now prefers a partner at least the band\'s low end apart, commit a9ef8b0). Both checks stay, with their findings written to fire again if either returns. No check of the first pass was changed or removed.');
 }
