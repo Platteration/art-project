@@ -383,6 +383,21 @@ export default async function checkPainting(t, site) {
     const ringExample = await countExact(page, 'cv-diff', LABEL_INK);
     const ringRef = await countExact(page, 'cv-refblock', LABEL_INK);
     t.check(ringExample > 500 && ringRef === 0, 'the accuracy map carries the white numbered labels the reference blocks do not have', { onMap: ringExample, onBlocks: ringRef });
+    // each white label sits on a shape the list names: hovered at its centre, the loupe gives that entry's match
+    // and its two colors, and every entry of the list has its own label
+    {
+      const fx = fixesOf(s);
+      const found = await clusters(page, 'cv-diff', LABEL_INK);
+      const read = [];
+      for (const b of found.boxes) {
+        const l = await hoverAt(page, '#cv-diff', (b.x0 + b.x1 + 1) / 2 / found.W, (b.y0 + b.y1 + 1) / 2 / found.H);
+        read.push({ at: [Math.round((b.x0 + b.x1) / 2), Math.round((b.y0 + b.y1) / 2)], pct: +(/^(\d{1,3})% match$/.exec(l.hex) || [])[1], colors: chipHexes(l.chip) });
+      }
+      await page.mouse.move(5, 5);
+      const owner = read.map((r) => fx.findIndex((f) => f.pct === r.pct && same(r.colors, [f.ref, f.art])));
+      t.check(read.length === fx.length && owner.every((i) => i >= 0) && new Set(owner).size === fx.length, 'every white label sits on the shape of one entry of the list (its match and both colors under it), one label per entry', { labels: read, entry: owner.map((i) => i + 1) });
+      t.note('The white labels\' digits are not read (the page draws them on a canvas); each label is tied to its list entry by the match and the two colors under it.');
+    }
     let l = await hoverAt(page, '#cv-diff', 0.5, 0.45);
     t.check(l.shown && /^\d{1,3}% match$/.test(l.hex) && /^ΔE \d+\.\d$/.test(l.val) && /^linear-gradient\(90deg, rgb\(\d+, \d+, \d+\) 50%, rgb\(\d+, \d+, \d+\) 50%\)$/.test(l.chip), 'hovering a zone shows its match, its ΔE and the reference color next to yours', l);
     const onArt = await hoverAt(page, '#cv-art', 0.5, 0.45);
@@ -501,6 +516,16 @@ export default async function checkPainting(t, site) {
     t.check(!s.picking && s.wbPick === NOT_PICKING && s.wbUndo, 'Esc cancels picking and leaves the fix in place', { picking: s.picking, wbUndo: s.wbUndo });
     await click(page, '#wbPick'); await click(page, '#wbPick'); await sleep(50);
     t.check(!(await state(page)).picking, 'a double tap on Fix color cast ends where it started (off)');
+    // the keyboard alone: Enter arms the pick, Tab moves on (the focus is not held), Esc disarms
+    {
+      await page.focus('#wbPick'); await page.keyboard.press('Enter'); await sleep(60);
+      const armed = (await state(page)).picking;
+      await page.keyboard.press('Tab'); await sleep(60);
+      const focus = await page.evaluate(() => document.activeElement && (document.activeElement.id || document.activeElement.tagName));
+      await page.keyboard.press('Escape'); await sleep(60);
+      t.check(armed && focus !== 'wbPick' && !(await state(page)).picking, 'keyboard: Enter arms Fix color cast, Tab moves the focus on, Esc disarms', { armed, focus });
+      t.note('A keyboard-only visitor can arm Fix color cast but cannot choose the spot: the pictures take no focus and no key picks one. The README asks for a click, so this is recorded here rather than failed.');
+    }
     await click(page, '#wbPick'); await resetToast(page);
     {
       const b = await box(page, '#cv-art');
@@ -606,6 +631,17 @@ export default async function checkPainting(t, site) {
       if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
       if (s.wbUndo) { await click(page, '#wbUndo'); await busyHidden(page); await sleep(80); }
     }
+    // at the canvas's corners and edge (the paper edge the README suggests): the five-by-five patch is clipped there
+    for (const [fx, fy, where] of [[0.001, 0.001, 'top-left corner'], [0.999, 0.999, 'bottom-right corner'], [0.5, 0.999, 'bottom edge']]) {
+      await resetToast(page);
+      if (!(await state(page)).picking) { await click(page, '#wbPick'); await sleep(50); }
+      await clickAt(page, '#cv-art', fx, fy);
+      s = await state(page);
+      t.check(/^(#[0-9A-F]{6} is (too colorful|already neutral)|Color cast removed|That spot is too dark)/.test(s.toast), `a pick at the ${where} (a clipped patch) is answered`, s.toast);
+      if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
+      if (s.wbUndo) { await click(page, '#wbUndo'); await busyHidden(page); await sleep(80); }
+    }
+    await clean(t, page, 'picks at the edges');
     // the bright orange and the yellow: a strong color with one weak channel must be refused as a color, not as dark
     const wrongReason = ['bright orange', 'bright yellow'].filter((n) => results[n] && TOO_DARK.test(results[n].toast));
     if (wrongReason.length) {
