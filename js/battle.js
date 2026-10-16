@@ -248,6 +248,7 @@
     game = { pool, hasTemp: pool.filter((c) => c.chroma >= 10).length >= 2, count: count(), seconds, left: seconds, rounds: [], i: -1, streak: 0, right: 0, missed: 0, answered: false, over: false, picked: [], dealt: { pair: 0, many: 0 }, bag: [] };
     els.setup.hidden = true; els.play.hidden = false; els.popup.hidden = true; els.miss.hidden = true;
     els.time.hidden = !seconds;
+    els.round.classList.remove('is-milestone', 'is-pulse');   // the last game's flourish (its chip) does not carry over
     setFocus(true);
     nextRound();
     swatch(0).focus({ preventScroll: true });   // the Start button just went; without this the focus falls to the page
@@ -292,6 +293,9 @@
     showRound();
   }
   const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  // a swatch's letter is black on a light paint and white on a dark one: the two meet at L* 49.4, where each is 4.6:1,
+  // so one of them reaches 4.5:1 on any paint (the palette's own inks do not: about 3.6:1 on the middle values)
+  const darkInk = (c) => c.L > 49.4;
   const vLabel = (c) => `V ${(c.L / 10).toFixed(1)}`;
   const tLabel = (c) => (c.warmth > 0.35 ? 'warm' : c.warmth < -0.35 ? 'cool' : 'in between');
   function showRound() {
@@ -308,6 +312,7 @@
       b.style.background = css(c.rgb);
       b.setAttribute('aria-label', r.n === 2 ? SIDE[i ? 'right' : 'left'] : `Color ${LETTERS[i]}`);   // a pair shows no letters: its colors are the left one and the right one
       const letter = document.createElement('span'); letter.className = 'vb-letter'; letter.textContent = LETTERS[i];
+      letter.classList.toggle('is-dark', darkInk(c));
       const badge = document.createElement('span'); badge.className = 'vb-badge'; badge.hidden = true;
       b.append(letter, badge);
       b.addEventListener('click', () => tapSwatch(i));

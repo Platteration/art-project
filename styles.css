@@ -16,6 +16,7 @@
   --danger: #93341f;
   --well: #8b8c8e;         /* mid-gray matte behind images: kept neutral so values and colors read true */
   --shadow: rgba(40, 32, 18, 0.18);
+  --star: #8a6a1f;         /* the figure ratings' gold: 4.6:1 on the cream card (--surface) */
 
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -38,6 +39,7 @@
     --danger: #ee9c82;
     --well: #3b3c3f;
     --shadow: rgba(0, 0, 0, 0.45);
+    --star: #d9a441;
     color-scheme: dark;
   }
 }
@@ -53,6 +55,7 @@
   --danger: #ee9c82;
   --well: #3b3c3f;
   --shadow: rgba(0, 0, 0, 0.45);
+  --star: #d9a441;
   color-scheme: dark;
 }
 
@@ -1128,6 +1131,14 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   .game-numbers { grid-area: numbers; }
   .game-mix > .hint { grid-area: hint; }
 }
+/* on a narrow phone the buttons (with Lock in portrait) leave the progress line too little room beside them (about 9 px
+   at 320 px), and Memory's longest line ("Memorize the colors. ...") still spills out of a one-row bar up to 411 px, so up
+   to 430 px it takes a row of its own under them; wider keeps the one row */
+@media (max-width: 430px) {
+  .game-play { --bar-h: 66px; }
+  .game-bar { flex-wrap: wrap; }
+  .game-progress { order: 1; flex: 1 0 100%; }
+}
 
 /* ---- Paint by numbers: the arcade score over the finished portrait ---- */
 .game-final-matte { position: relative; overflow: hidden; }
@@ -1250,15 +1261,17 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 @keyframes lock-nudge { 0%, 100% { transform: none; } 30% { transform: scale(1.12); } 60% { transform: scale(0.96); } }
 
 /* the reveal: drag the divider to wipe between your portrait and the colors to match */
-.game-final-wrap { position: relative; display: grid; max-width: 100%; line-height: 0; --cut: 50%; }
+.game-final-wrap { position: relative; display: grid; max-width: 100%; line-height: 0; --cut: 50%; --show-gap: 60px; }   /* --show-gap: the Show score row's band at the foot */
 .game-final-target { display: none; position: absolute; inset: 0; width: 100%; height: 100%; clip-path: inset(0 0 0 var(--cut)); }
 .is-comparing .game-final-target { display: block; }
 .game-final-wrap.is-comparing { touch-action: none; cursor: ew-resize; }
-.game-final-handle { display: none; position: absolute; top: 0; bottom: 0; left: var(--cut); width: 48px; translate: -50% 0; cursor: ew-resize; touch-action: none; z-index: 2; }
+/* the handle's box ends above the Show score row, so it and its focus ring stay clear of the buttons, while its line and
+   grip still run the portrait's whole height; a drag starts anywhere on the portrait (the pointerdown is on .game-final-wrap) */
+.game-final-handle { display: none; position: absolute; top: 0; bottom: var(--show-gap); left: var(--cut); width: 48px; translate: -50% 0; cursor: ew-resize; touch-action: none; z-index: 2; }
 .is-comparing .game-final-handle { display: block; }
-.game-final-handle span { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; translate: -50% 0; background: #faf5ea; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.game-final-handle span { position: absolute; left: 50%; top: 0; bottom: calc(-1 * var(--show-gap)); width: 3px; translate: -50% 0; background: #faf5ea; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .game-final-handle span::after {
-  content: "\2194"; position: absolute; top: 50%; left: 50%; translate: -50% -50%;
+  content: "\2194"; position: absolute; top: 50%; left: 50%; translate: -50% -50%;   /* 50% of the line: the portrait's middle */
   width: 38px; height: 38px; border-radius: 50%;
   display: grid; place-items: center;
   background: #faf5ea; color: #1e2b22; font: 700 20px/1 var(--body);
@@ -1585,7 +1598,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .fig-card figcaption { width: 100%; display: flex; justify-content: space-between; gap: 8px; font: 700 0.95rem var(--display); }
 .fig-card figcaption span { font: 500 0.8rem var(--mono); color: var(--muted); }
 .fig-rating { margin: 0; font: 600 0.82rem var(--body); color: var(--muted); }
-.fig-rating-stars { font-size: 1.05rem; letter-spacing: 1px; color: #d9a441; }
+.fig-rating-stars { font-size: 1.05rem; letter-spacing: 1px; color: var(--star); }
 
 /* ---- Simple and advanced modes: Simple hides the fine controls and shows presets instead ---- */
 .mode-simple .advanced { display: none !important; }
@@ -1660,15 +1673,17 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-bar { justify-self: stretch; display: flex; align-items: center; gap: 12px; padding: 6px 4px 6px 10px; border-bottom: 1px solid rgba(28, 26, 23, 0.25); color: #1c1a17; } /* dark on the primer gray: 4.9:1 */
 .vb-round { font: 700 1.15rem/1 var(--mono); font-variant-numeric: tabular-nums; }
 .vb-round.is-pulse { animation: vb-pulse-btn 0.3s ease-out; display: inline-block; }
-.vb-round.is-milestone { animation: vb-milestone 0.9s ease-out; display: inline-block; color: #e8c47a; }
+.vb-round.is-milestone { animation: vb-milestone 0.9s ease-out; display: inline-block; color: #e8c47a; background: #1c1a17; border-radius: 6px; box-shadow: 0 0 0 4px #1c1a17; }
 @keyframes vb-milestone { 0% { transform: scale(1); } 30% { transform: scale(1.35); } 60% { transform: scale(0.95); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .vb-round.is-pulse, .vb-round.is-milestone { animation: none; } }
-.vb-score { flex: 1; font-size: 0.82rem; opacity: 0.8; }
+.vb-score { flex: 1; font-size: 0.82rem; }
 .vb-time { font: 600 1.3rem/1 var(--mono); font-variant-numeric: tabular-nums; }
-.vb-time.is-low { color: #f0a28a; }
-.vb-quit { appearance: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(243, 238, 226, 0.4); background: none; color: #f3eee2; cursor: pointer; display: grid; place-items: center; padding: 0; }
+/* the last ten seconds, and a milestone, sit on a dark chip: the salmon and gold alone are under 2.1:1 on the primer gray.
+   The chip is a shadow, not padding, so the bar's row keeps its width at 320 px */
+.vb-time.is-low { color: #f0a28a; background: #1c1a17; border-radius: 6px; box-shadow: 0 0 0 4px #1c1a17; }
+.vb-quit { appearance: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(28, 26, 23, 0.55); background: none; color: #1c1a17; cursor: pointer; display: grid; place-items: center; padding: 0; }
 .vb-quit svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.vb-question { margin: 0; font: 700 clamp(1.15rem, 1rem + 1vw, 1.5rem)/1.2 var(--display); color: #f3eee2; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.vb-question { margin: 0; font: 700 clamp(1.15rem, 1rem + 1vw, 1.5rem)/1.2 var(--display); color: #faf5ea; text-align: center; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
 .vb-swatches { display: grid; gap: clamp(12px, 3vw, 28px); justify-content: center; grid-template-columns: repeat(2, auto); }
 .vb-swatches[data-count="3"] { grid-template-columns: repeat(3, auto); }
 .vb-swatches[data-count="4"] { grid-template-columns: repeat(2, auto); }
@@ -1680,7 +1695,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .vb-swatch:focus-visible { outline: 3px solid #faf5ea; outline-offset: 4px; }
 .vb-swatch.is-answer { border-color: #d9a441; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px #d9a441, 0 6px 18px rgba(0, 0, 0, 0.3); }
 .vb-swatch.is-wrong { border-color: #93341f; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px rgba(147, 52, 31, 0.9), 0 6px 18px rgba(0, 0, 0, 0.3); }
-.vb-letter { position: absolute; left: 6px; top: 4px; font: 700 0.8rem var(--mono); color: #faf5ea; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.vb-letter { position: absolute; left: 6px; top: 4px; font: 700 0.8rem var(--mono); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.vb-letter.is-dark { color: #000; text-shadow: none; }   /* on a light paint (js/battle.js: L* over 49.4) */
 .vb-swatches[data-count="2"] .vb-letter { display: none; }
 .vb-badge { position: absolute; right: 6px; bottom: 6px; min-width: 26px; height: 26px; padding: 0 6px; display: grid; place-items: center; border-radius: 13px; background: #1e2b22; color: #faf5ea; font: 700 0.85rem var(--mono); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
 .vb-answered .vb-swatch { cursor: default; }
@@ -1697,7 +1713,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 @keyframes vb-pulse { 0% { transform: scale(1); } 40% { transform: scale(1.09); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 8px rgba(250, 245, 234, 0.35), 0 8px 22px rgba(0, 0, 0, 0.35); } 100% { transform: scale(1); } }
 @keyframes vb-pulse-btn { 0% { transform: scale(1); } 40% { transform: scale(1.05); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .vb-swatch.is-pulse, .vb-choice.is-pulse { animation: none; } }
-.vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #f3eee2; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+.vb-answer { margin: 0; min-height: 2.8em; max-width: 46ch; text-align: center; font-size: 0.95rem; color: #1c1a17; }   /* the bar's ink: 5:1 on the primer gray (body text needs 4.5:1) */
 .vb-answer.is-right::first-line { font-weight: 700; }
 /* the answer row inside the board: one button for a pair, a reset once an order has begun, Next after a right answer */
 .vb-controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; min-height: 52px; }
