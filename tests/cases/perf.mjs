@@ -119,9 +119,11 @@ function summarise(r, floor = 100) {
   const lt = r.lt.filter((l) => l.s >= r.t0 - 1);
   const ev = r.busy.slice().sort((a, b) => a.t - b.t);
   if (r.busyAtStart) ev.unshift({ t: r.t0, hidden: false });
-  const covered = (l) => { let since = null; for (const e of ev) { if (e.t > l.s) break; since = e.hidden ? null : (since === null ? e.t : since); } return since !== null && r.raf.some((x) => x >= since && x <= l.s); };
+  const shownBefore = (l) => { let since = null; for (const e of ev) { if (e.t > l.s) break; since = e.hidden ? null : (since === null ? e.t : since); } return since; };
+  const covered = (l) => { const since = shownBefore(l); return since !== null && r.raf.some((x) => x >= since && x <= l.s); };
   const lens = lt.map((l) => Math.round(l.d));
-  return { tasks: lens, max: lens.length ? Math.max(...lens) : 0, uncovered: lt.filter((l) => l.d >= floor && !covered(l)).map((l) => Math.round(l.d)), shown: ev.some((e) => !e.hidden) };
+  const first = lt.find((l) => l.d >= floor), since0 = first ? shownBefore(first) : null;
+  return { gap: first && since0 !== null ? Math.round(first.s - since0) : null, tasks: lens, max: lens.length ? Math.max(...lens) : 0, uncovered: lt.filter((l) => l.d >= floor && !covered(l)).map((l) => Math.round(l.d)), shown: ev.some((e) => !e.hidden) };
 }
 // runs act() with the CPU slowed by `rate`, and returns its wall time and the long tasks it caused
 async function measure(page, rate, act, { settle = 450 } = {}) {
@@ -350,8 +352,17 @@ export default async function perf(t, site) {
         // of 100 ms or more began with no painted pill
         const zero = {};
         const zeroTrial = async (label, act) => {
+          // a try is conclusive when a task of the floor's size began, and either no frame was drawn between the pill and the task (bare)
+          // or one was and the pill had been up for less than a frame's time (painted first by design); a frame that fell in because the
+          // machine was busy (the task began more than 14 ms after the pill) says nothing about the page and is not counted
           const tries = [];
-          for (let i = 0; i < 3; i++) { const r = await measure(page, 1, async () => { await act(i); await busyDone(page); }, { settle: 300 }); tries.push({ max: r.max, bare: r.uncovered.length > 0 }); }
+          let sure = 0;
+          for (let i = 0; i < 9 && sure < 3; i++) {
+            const r = await measure(page, 1, async () => { await act(i); await busyDone(page); }, { settle: 300 });
+            const bareTry = r.uncovered.length > 0, slipped = !bareTry && r.gap !== null && r.gap > 14;
+            tries.push({ max: r.max, gap: r.gap, bare: bareTry, slipped });
+            if (r.max >= S(100) && !slipped) sure++;
+          }
           zero[label] = tries;
         };
         await zeroTrial('the Draw an outline checkbox', () => fr.evaluate(() => document.getElementById('outlines').click()));
@@ -361,20 +372,22 @@ export default async function perf(t, site) {
         await zeroTrial('the Simple / Advanced switch', (i) => fr.evaluate((i) => document.querySelector(`[data-mode="${i % 2 ? 'advanced' : 'simple'}"]`).click(), i));
         await click(page, '[data-mode="advanced"]'); await busyDone(page); await sleep(300);
         note(`controls that re-run the study at once, per try (longest task, whether it began with no painted pill): ${JSON.stringify(zero)}`);
-        const bare = {};
+        const bare = {}, sure = {};
         for (const [label, tries] of Object.entries(zero)) {
-          bare[label] = tries.filter((x) => x.bare).length;
-          t.check(bare[label] <= 1, `${label} shows Updating… (painted) before its re-run starts (at least two tries of three)`, tries);
+          const real = tries.filter((x) => !x.slipped && x.max >= S(100));
+          bare[label] = real.filter((x) => x.bare).length; sure[label] = real.length;
+          if (real.length >= 2) t.check(bare[label] * 2 < real.length, `${label} shows Updating… (painted) before its re-run starts (in most tries)`, tries);
+          else note(`${label}: only ${real.length} conclusive tries of ${tries.length} (the machine was too busy to tell); not checked`);
         }
-        const bareLabels = Object.keys(bare).filter((k) => bare[k] >= 2);
-        if (bareLabels.length >= 3) {
-          const worstOf = Math.max(...Object.values(zero).flat().map((x) => x.max)), all = Object.values(zero).flat().filter((x) => x.max >= 100).map((x) => x.max);
+        const bareLabels = Object.keys(bare).filter((k) => sure[k] >= 2 && bare[k] * 2 >= sure[k]);
+        if (bareLabels.length >= 2) {
+          const worstOf = Math.max(...Object.values(zero).flat().map((x) => x.max)), all = Object.values(zero).flat().filter((x) => x.bare).map((x) => x.max);
           t.finding({
             severity: 'medium',
             title: `${bareLabels.length} of 4 controls that re-run the study at once (outline, smoothing, Auto split, Simple / Advanced) start a ${(Math.min(...all) / 1000).toFixed(1)}-${(worstOf / 1000).toFixed(1)} s task before the "Updating…" pill or the tapped control can be painted`,
-            steps: '1. Load a photo (here 4000 × 3000) and choose Advanced. 2. Tap "Draw an outline around every shape", or Soft / Edge-aware under Smoothing, or Auto split, or switch Simple / Advanced. 3. Watch the control and the "Updating…" pill. (Timed in the page: a requestAnimationFrame callback logged between the pill being shown and the first task of 100 ms or more beginning, three tries each.)',
+            steps: '1. Load a photo (here 4000 × 3000) and choose Advanced. 2. Tap "Draw an outline around every shape", or Soft / Edge-aware under Smoothing, or Auto split, or switch Simple / Advanced. 3. Watch the control and the "Updating…" pill. (Timed in the page: a requestAnimationFrame callback logged between the pill being shown and the first task of 100 ms or more beginning, three conclusive tries each.)',
             expected: 'Work that takes longer than a moment shows progress first: the Updating… pill must be on screen (a frame drawn) before a task of several hundred ms blocks the page, as it is for the sliders, which wait 90 ms (js/app.js:274-280), and for a new photo, which waits two frames (js/app.js:392-410). The tapped control should also look pressed at once.',
-            actual: `Tries in which the pill was shown but no frame was drawn before a task of 100 ms or more began: ${bareLabels.map((k) => `${k} ${bare[k]} of 3 (tasks ${zero[k].map((x) => x.max).join(', ')} ms)`).join('; ')}. The pill is shown and hidden inside one stretch of blocked main thread, so the visitor sees the page stop with nothing said and the tapped control not yet changed. Loading a painting into Check my painting takes the same path (see the notes). ${under()}`,
+            actual: `Conclusive tries in which the pill was shown but no frame was drawn before a task of 100 ms or more began: ${bareLabels.map((k) => `${k} ${bare[k]} of ${sure[k]} (tasks ${zero[k].filter((x) => x.bare).map((x) => x.max).join(', ')} ms, ${zero[k].filter((x) => x.bare).map((x) => x.gap).join(', ')} ms after the pill)`).join('; ')}. The pill is shown and hidden inside one stretch of blocked main thread, so the visitor sees the page stop with nothing said and the tapped control not yet changed. Loading a painting into Check my painting takes the same path (see the notes). ${under()}`,
             cause: 'js/app.js:274-280: runSoon(delay) raises the pill and then calls setTimeout(run, delay); these four call runSoon(0) (js/app.js:675 outlines, 701 smoothing, 688 Auto split, 2720 setMode; also 693 the gray mode, 591 a painting loaded, 2665 its Fit choice), and a 0 ms timer fires before the next frame is drawn, so run() (Study.process, js/app.js:284) starts with the pill still unpainted. prepareAndRun (js/app.js:392-410) shows the right pattern (a frame, then another, then the work); runSoon(0) does not.',
           });
         }

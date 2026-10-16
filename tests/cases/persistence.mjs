@@ -742,9 +742,9 @@ for (const kind of ['full', 'blocked']) {
       title: 'Paint by numbers shows "New best!" with no sign that the best could not be kept (storage full or blocked), where Value battle says "(this visit only)"',
       severity: 'low',
       steps: '1. Make the browser\'s storage full (another site or tab has used the quota), or unavailable (site data blocked). 2. Open Games, Paint by numbers, tap every number and every paint once, and lock in the portrait. 3. Read the score card, then reload and open the setup.',
-      expected: 'The score card tells the visitor the best is not kept, as Value battle\'s does ("New best! (this visit only)", js/battle.js 475) and as the Studio and Pose and light say what they cannot keep; the README says "best scores" are kept in the browser.',
+      expected: 'The score card tells the visitor the best is not kept, as Value battle\'s does ("New best! (this visit only)", js/battle.js finish(), the line that sets els.newBest) and as the Studio and Pose and light say what they cannot keep; the README says "best scores" are kept in the browser.',
       actual: `The card reads "${g.newBest}" and nothing else about storage; after a reload the setup shows no best for the portrait.`,
-      cause: 'js/game.js 1345 calls save(BEST_KEY, bests) and drops its result (save, line 108, returns nothing on a refused write, unlike battle.js save, line 35, which returns false and finish() shows in els.newBest).',
+      cause: 'js/game.js 1345 calls save(BEST_KEY, bests) and drops its result (save, line 108, returns nothing on a refused write, unlike battle.js save (line 35), which returns false and finish() shows in els.newBest).',
     });
     await gameBack(page);
     // -- Figure study: the class setup
