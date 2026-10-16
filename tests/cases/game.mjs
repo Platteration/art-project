@@ -13,7 +13,7 @@
 // portrait, level, palette and mode and pruned to fifty; hostile saved state for every game key and myPaints;
 // and tiny, flat and transparent pictures. Both widths.
 import fs from 'node:fs';
-import { openPage, clean, tab, DESKTOP, PHONE, click, text, visible, hscroll, sleep, makeImage, loadPhoto, storageGet, screenshot } from '../lib.mjs';
+import { openPage, newTab, clean, tab, DESKTOP, PHONE, click, text, visible, hscroll, sleep, makeImage, loadPhoto, dropFiles, pasteFile, textFile, storageGet, storageKeys, screenshot } from '../lib.mjs';
 
 const K = (s) => 'portrait-value-studio.' + s;
 const PRESETS = ['zorn', 'zorn-blue', 'primary', 'cmy', 'split', 'reilly', 'schmid', 'rembrandt', 'sorolla', 'monet'];
@@ -115,6 +115,35 @@ const pngSize = (file) => { const b = fs.readFileSync(file); return b.slice(0, 8
 const paperSpot = (page) => page.evaluate(() => { const c = document.getElementById('gameCanvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const paper = (x, y) => { const i = (y * c.width + x) * 4; return d[i] === 245 && d[i + 1] === 240 && d[i + 2] === 230; }; for (let y = 8; y < c.height - 8; y += 5) for (let x = 8; x < c.width - 8; x += 5) { if ([[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, -3]].every(([dx, dy]) => paper(x + dx, y + dy))) return { x, y, w: c.width, h: c.height }; } return null; });
 const pixel = (page, selector, x, y) => page.evaluate(([s, x, y]) => [...document.querySelector(s).getContext('2d').getImageData(x, y, 1, 1).data].slice(0, 3), [selector, x, y]);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// ---- helpers of the second half (the sections after the first seven) ---------------------------------------
+const MINE = K('myPaints');
+// a page opened in Advanced with the Colors and paints drawer open and the Study's palette source on My paints,
+// so the My paints dialog's button is on view and ticking in it changes the ticked paints and nothing else
+const ADV = { [K('mode')]: 'advanced', [K('drawers')]: '["colors"]', [K('paintChoice')]: '{"source":"mine","preset":"","max":4}' };
+// ticks and unticks paints in the My paints dialog on the Study tab, the way a visitor does, then lets the Study settle
+async function tickMine(page, add, remove = []) {
+  await tab(page, 'study');
+  await click(page, '#mineEdit');
+  await page.waitForFunction(() => document.getElementById('paintDialog').open && document.querySelectorAll('#paintCats input').length > 0, null, { timeout: 5000 }).catch(() => null);
+  await page.evaluate(([add, remove]) => {
+    for (const c of add) { const b = document.querySelector(`#paintCats input[value="${c}"]`); if (b && !b.checked) b.click(); }
+    for (const c of remove) { const b = document.querySelector(`#paintCats input[value="${c}"]`); if (b && b.checked) b.click(); }
+  }, [add, remove]);
+  await click(page, '#paintDialogDone');
+  await page.waitForFunction(() => !document.getElementById('paintDialog').open, null, { timeout: 5000 }).catch(() => null);
+  await page.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 20000 }).catch(() => null);
+}
+// Play again, then Same photo (or Same portrait): the board just played, a fresh game
+const playAgain = async (page) => { await click(page, '#gamePopup [data-game="again"]'); await sleep(200); await click(page, '#againSame'); await playing(page); };
+// Lock in and wait for the score
+const lockIn = async (page) => { await click(page, '#gameLock'); await scored(page); };
+// from the score back to the setup
+const toSetup = async (page) => { await click(page, '#gamePopup [data-game="new"]'); await ready(page); };
+// the recipe of every number, from an Analysis with nothing painted: [[number, "Mix: ..."], ...]
+const recipesOfBoard = async (page) => { await lockIn(page); await click(page, '#gameAnalyze'); return (await result(page)).zones.map((z) => [z.n, z.mix]).sort((a, b) => a[0] - b[0]); };
+// every number mixed to the recipe the Analysis gave it (a game is on)
+async function mixAll(page, recipes) { for (const [n, mix] of recipes) { await pickNumber(page, n - 1); await mixExact(page, recipeOf(mix)); } }
 
 export default async function game(t, site) {
   // ================================================================================================
@@ -254,7 +283,7 @@ export default async function game(t, site) {
     t.check(r.kicker === 'Portrait locked in' && r.pct === '0' && r.stars === 0 && r.starsLabel === '0 out of 5 stars, 0% color match' && r.grade === 'Keep mixing', 'nothing painted: 0%, no stars, Keep mixing', r);
     t.check(r.popup && !r.showBar && r.focus === 'gameAnalyze' && !r.analysis && r.analyzeText === 'Analyze', 'nothing painted: the score pops up, Analyze focused', [r.popup, r.focus]);
     t.check(!r.newBest, 'nothing painted: no New best! for 0 points (the README: it flashes when you beat your score)', r.newBest);
-    t.note('A first lock-in with nothing painted (0 points) flashes "New best!": the first score is always a best. Arguably a stale word on a 0; left as is.');
+    t.note('A first lock-in with nothing painted (0 points) is recorded at 0 and flashes no "New best!" (the rule settled for this game); the section on a first game at 0 below plays on from that record.');
     t.check(same(await bests(page), { [bestKey]: 0 }), 'nothing painted: the best is kept under portrait|level|palette as 0', await bests(page));
     await click(page, '#gameAnalyze');
     r = await result(page);
@@ -861,4 +890,291 @@ export default async function game(t, site) {
     }
     await page.context().close();
   }
+}
+
+
+// ================================================================================================
+// 8. A first game at 0: recorded without a New best!, and the next game has something to beat
+// ================================================================================================
+async function firstGameAtZero(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  const key = `${await page.evaluate(() => Studio.sourceKey())}|medium|zorn`;
+  await click(page, '#gameStart'); await playing(page);
+  const recipes = await recipesOfBoard(page);
+  let r = await result(page);
+  t.check(r.pct === '0' && r.points === 0 && !r.newBest, 'a first game that scores 0: no New best!', [r.pct, r.points, r.newBest]);
+  t.check(same(await bests(page), { [key]: 0 }), 'a first game that scores 0 is recorded at 0, so the next has something to beat', await bests(page));
+  await toSetup(page);
+  t.check((await setup(page)).best === '', 'the setup shows no best of 0 after a game that scored 0', (await setup(page)).best);
+  await click(page, '#gameStart'); await playing(page);
+  await pickNumber(page, 0); await mixExact(page, recipeOf(recipes[0][1]));
+  await lockIn(page);
+  r = await result(page);
+  t.check(r.points > 0 && r.newBest && (await bests(page))[key] === r.points, 'the next game beats the recorded 0: New best! and the points kept', [r.points, r.newBest, await bests(page)]);
+  await toSetup(page);
+  t.check((await setup(page)).best === `Your best on this portrait at this level in Classic mode: ${r.points} points`, 'and the setup then shows that best', (await setup(page)).best);
+  await clean(t, page, 'first game at 0');
+  await page.context().close();
+}
+
+
+// ================================================================================================
+// 9. My paints changed on the Study between two setups of the same board
+// ================================================================================================
+async function staleMyPaints(t, site) {
+  const lower = (list) => list.map((d) => d.toLowerCase());
+  const page = await openPage(site, { url: '#game', storage: { ...ADV, [MINE]: ['TW', 'IB'] } });
+  await ready(page); await setPalette(page, 'mine'); await ready(page);
+  const first = await setup(page);
+  t.check(first.palette === 'mine' && same(lower(first.dots), ['titanium white', 'ivory black']) && / 2 paints, which mix /.test(first.hint), 'My paints (white and black) chosen on the sample: its two paints and a hint', [first.palette, first.dots, first.hint]);
+  // the hand changes on the Study tab (the board is the same one: nothing about the photo changed)
+  await tickMine(page, ['CRL', 'YO'], ['IB']);
+  t.check(same(JSON.parse(await storageGet(page, MINE)), ['TW', 'CRL', 'YO']), 'the dialog saved the new hand', await storageGet(page, MINE));
+  await tab(page, 'game'); await ready(page);
+  const after = await setup(page);
+  // a page opened on that hand from the start is the control
+  const control = await openPage(site, { url: '#game', storage: { ...ADV, [MINE]: ['TW', 'CRL', 'YO'] } });
+  await ready(control); await setPalette(control, 'mine'); await ready(control);
+  const want = await setup(control);
+  t.check(after.palette === 'mine' && same(lower(after.dots), ['titanium white', 'cadmium red light', 'yellow ochre']) && / 3 paints, which mix /.test(after.hint) && /My paints \(3\)$/.test((after.options.find((o) => o[0] === 'mine') || [])[1]), 'the new hand: the menu says 3 paints and the dots show them', [after.options, after.dots, after.hint]);
+  const hintOk = t.check(after.hint === want.hint, 'the hint counts the colors the new hand mixes closely, as a page opened on that hand does', [after.hint, want.hint]);
+  t.check(same(after.options, want.options), 'the same palette is marked suggested as on a page opened on that hand', [after.options.filter((o) => /suggested/.test(o[1])), want.options.filter((o) => /suggested/.test(o[1]))]);
+  // the targets: what each number's recipe is, then whether following the recipes reaches 100%
+  await click(page, '#gameStart'); await playing(page);
+  await click(control, '#gameStart'); await playing(control);
+  const got = await recipesOfBoard(page), exp = await recipesOfBoard(control);
+  const recOk = t.check(same(got, exp), 'the recipes of the numbers are the ones a page opened on that hand gives', [got.slice(0, 4), exp.slice(0, 4)]);
+  await playAgain(page); await mixAll(page, got); await lockIn(page);
+  const stale = (await result(page)).pct;
+  await playAgain(control); await mixAll(control, exp); await lockIn(control);
+  const fresh = (await result(control)).pct;
+  const exactOk = t.check(stale === '100' && fresh === '100', 'every number mixed to the recipe the Analysis gives reaches 100%, on the changed hand as on a fresh page', [stale, fresh]);
+  if (!(hintOk && recOk && exactOk)) t.finding({
+    title: 'Changing the ticked paints on the Study leaves the game’s numbers mixed from the old hand',
+    severity: 'high',
+    steps: '1. Tick White and Black (TW, IB) in My paints on the Study tab. 2. Open Paint by numbers on the sample portrait, choose "My paints (2)" in the palette menu (the hint reads "2 paints, which mix 1 of its 11 colors closely"). 3. Back on the Study tab, tick Cadmium Red Light and Yellow Ochre and untick Ivory Black. 4. Open Paint by numbers again, read the palette hint, Start painting, Lock in portrait, Analyze and read the recipes.',
+    expected: 'The numbers are mixed again from the new hand, as on a page opened on that hand (hint "3 paints, which mix 2 of its 11 colors closely"; recipes such as "CRL 2 · YO 1"), and following every recipe shown reaches 100%.',
+    actual: `The menu and the dots show the new hand, but the hint says "${after.hint.replace(/^.*?\. (\d+ paints)/, '$1').slice(0, 60)}" (a fresh page: "${want.hint.replace(/^.*?\. (\d+ paints)/, '$1').slice(0, 60)}"), the recipes read ${got.slice(0, 3).map((x) => '"' + x[1] + '"').join(', ')} (fresh: ${exp.slice(0, 3).map((x) => '"' + x[1] + '"').join(', ')}), and mixing them to the letter scores ${stale}%.`,
+    cause: 'js/game.js 407-410 (targetsFor) keeps a board’s targets under the palette’s id, and My paints keeps the id "mine" whatever is ticked; paletteChoices (120-125) rebuilds the list but the cached targets (and the cached suggestion, b.suggested at 376-384) stay those of the old hand. The recipes name the new paints by the old counts (game.paints.map((p, i) => r.t.counts[i]), 1603), and the targets are greys no red-ochre-white hand can mix.',
+  });
+  await clean(t, page, 'my paints changed between two setups');
+  await clean(t, control, 'my paints changed: the control');
+  await page.context().close(); await control.context().close();
+}
+
+// ================================================================================================
+// 10. My paints unticked below two (or ticked up to two) while a score is on screen
+// ================================================================================================
+async function myPaintsWhileScored(t, site) {
+  const page = await openPage(site, { url: '#game', storage: ADV });
+  await ready(page);
+  // two paints ticked while a score is on screen
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  await tickMine(page, ['TW', 'IB']);
+  await tab(page, 'game');
+  await toSetup(page);
+  const s2 = await setup(page);
+  const offered2 = t.check(s2.options.some((o) => o[0] === 'mine' && /^My paints \(2\)/.test(o[1])), 'My paints is offered after two paints were ticked while a score was on screen (Change settings)', s2.options);
+  if (!offered2) t.finding({
+    title: 'Paints ticked on the Study while a score is on screen are not offered by Change settings',
+    severity: 'low',
+    steps: '1. With fewer than two paints ticked, play Paint by numbers and Lock in portrait. 2. On the Study tab tick White and Black in My paints. 3. Back on Paint by numbers press Change settings and open the palette menu.',
+    expected: '"My paints (2)" is in the menu.',
+    actual: `The menu lists ${s2.options.length} palettes and no My paints; it appears only after leaving the tab with no score on screen.`,
+    cause: 'js/game.js 1659-1663 and 1617-1623: renderPalettes runs on a tab switch only when no game is set, and toSetup does not call it.',
+  });
+  // (leaving the tab with no score on screen rebuilds the menu, so the next step starts from one that offers it)
+  await tab(page, 'study'); await tab(page, 'game'); await ready(page);
+  await setPalette(page, 'mine'); await ready(page);
+  // ...and unticked below two while a score is on screen
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  await tickMine(page, [], ['TW', 'IB']);
+  await tab(page, 'game');
+  t.check(!(await page.evaluate(() => document.getElementById('gameResult').hidden)), 'a tab switch with the score on screen keeps the score', await page.evaluate(() => document.getElementById('gameResult').hidden));
+  await toSetup(page);
+  const s = await setup(page);
+  const named = (s.options.find((o) => o[0] === s.palette) || [])[1];
+  const offered = s.options.some((o) => o[0] === 'mine');
+  const menuOk = t.check(!offered && s.options.length === PRESETS.length, 'My paints is no longer offered once fewer than two paints are ticked (the score was on screen while they were unticked)', [s.options, s.palette]);
+  const dotsWant = await page.evaluate((id) => { const p = Paints.PRESETS.find((x) => x.id === id); return p ? p.paints.map((c) => Paints.byCode(c).name) : null; }, s.palette);
+  const dotsOk = t.check(dotsWant && same(s.dots, dotsWant), 'the dots show the paints of the palette the menu names', [s.palette, named, s.dots]);
+  await click(page, '#gameStart'); await playing(page);
+  const played = (await play(page)).paints;
+  const codesWant = await page.evaluate((id) => { const p = Paints.PRESETS.find((x) => x.id === id); return p ? p.paints : null; }, s.palette);
+  const playOk = t.check(codesWant && same(played, codesWant), 'Start plays the paints of the palette the menu names', [s.palette, named, played]);
+  await lockIn(page);
+  const keys = Object.keys(await bests(page));
+  const keyOk = t.check(keys[keys.length - 1].split('|')[2] === s.palette, 'and the best is kept under that palette', [s.palette, keys]);
+  if (!(menuOk && dotsOk && playOk && keyOk)) t.finding({
+    title: 'Unticking My paints while a score is on screen leaves "My paints" in the menu and plays Zorn under its name',
+    severity: 'medium',
+    steps: '1. Tick White and Black in My paints on the Study tab. 2. In Paint by numbers choose "My paints (2)", Start painting and Lock in portrait. 3. On the Study tab, untick both paints. 4. Back on Paint by numbers (the score is still shown), press Change settings and read the palette menu, then Start painting.',
+    expected: 'My paints is gone from the menu (fewer than two are ticked) and the suggested palette is chosen; the game plays what the menu names and keeps its best under that palette.',
+    actual: `The menu still offers ${offered ? '"My paints"' : 'no My paints'} and has ${JSON.stringify(named)} chosen (value "${s.palette}"); the dots show ${JSON.stringify(s.dots.slice(0, 4))}; Start plays ${JSON.stringify(played)}; the best is kept under "${keys[keys.length - 1]}".`,
+    cause: 'js/game.js 1659-1663 (the studio:tab handler) rebuilds the palette menu only while no game is set, and after a lock-in game stays set until Change settings; toSetup (1617-1623) calls refreshSetup and showPalette but not renderPalettes, so paletteChoices() has no "mine" any more while the menu does, and chosenPalette() (472-475) falls back to the first palette, Zorn, while bestKey (335) still reads the select’s "mine".',
+  });
+  await clean(t, page, 'my paints ticked and unticked while a score is on screen');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 11. Only the fifty most recently played boards are kept: playing a board counts, beating its best or not
+// ================================================================================================
+async function prunedByPlay(t, site) {
+  const probe = await openPage(site, { url: '#game' });
+  const sampleKey = await probe.evaluate(() => Studio.sourceKey());
+  await probe.context().close();
+  const mine = `${sampleKey}|medium|zorn`;
+  const seeds = { [mine]: 1200 };
+  for (let i = 0; i < 49; i++) seeds[`old-${String(i).padStart(2, '0')}:1x1|medium|zorn`] = 100 + i;
+  const page = await openPage(site, { url: '#game', storage: { [K('gameBest')]: seeds } });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  t.check(Object.keys(await bests(page)).length === 50 && (await setup(page)).best.endsWith('1200 points'), 'fifty bests are kept, the sample’s the oldest and unbeatable', (await setup(page)).best);
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  let b = await bests(page), keys = Object.keys(b);
+  t.check(!(await result(page)).newBest && b[mine] === 1200 && keys.length === 50 && keys[49] === mine, 'a replay that does not beat its best leaves the best and counts as played (it is now the newest)', [keys.length, keys[49], b[mine]]);
+  await toSetup(page);
+  await click(page, '#gameFromPainting'); await ready(page);
+  await click(page, '#gameStart'); await playing(page); await lockIn(page);
+  b = await bests(page); keys = Object.keys(b);
+  const kept = t.check(keys.length === 50 && keys.includes(mine) && !keys.includes('old-00:1x1|medium|zorn') && keys.includes('old-01:1x1|medium|zorn') && /^painting:/.test(keys[49]), 'a fifty-first board prunes the least recently played, not the one just replayed', [keys.length, keys.slice(0, 2), keys[49], keys.includes(mine)]);
+  if (!kept) t.finding({
+    title: 'A board replayed without beating its best is the first to go when the fifty-first is scored',
+    severity: 'medium',
+    steps: '1. Keep fifty bests, the sample portrait’s the oldest and unbeatable. 2. Play the sample portrait again at the same level and palette and Lock in (no New best!). 3. Play A painting and Lock in so a fifty-first board is scored.',
+    expected: '"Only the fifty most recently played are kept": the sample, played just before, stays and the board played longest ago goes.',
+    actual: `The sample’s best is ${keys.includes(mine) ? 'kept' : 'dropped'} and ${keys.includes('old-00:1x1|medium|zorn') ? 'the oldest unplayed board stays' : 'the oldest unplayed board went'}.`,
+    cause: 'js/game.js 1311-1315 (lockIn): a board is re-added last only when it is scored.',
+  });
+  await clean(t, page, 'pruned by play');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 12. Stars and grade words at every band, the share card (sheet, fallback, pixels), the Analysis's pictures
+// ================================================================================================
+// the number of unpainted pixels the chosen number's wash covers: the area of that number's shapes, outlines apart
+const washCount = (page) => page.evaluate(() => { const c = document.getElementById('gameCanvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] === 226 && d[i + 1] === 234 && d[i + 2] === 216) n++; return n; });
+// the colors a canvas holds, as hex -> pixel count
+const colorsOf = (page, selector) => page.evaluate((s) => { const c = document.querySelector(s); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const m = {}; for (let i = 0; i < d.length; i += 4) { const h = '#' + [d[i], d[i + 1], d[i + 2]].map((v) => v.toString(16).padStart(2, '0')).join(''); m[h] = (m[h] || 0) + 1; } return m; }, selector);
+const STAR_MINS = [88, 78, 65, 50, 30];
+const GRADE_WORDS = ['Keep mixing', 'Keep mixing', 'Getting there', 'Good eye', 'Sharp eye!', 'Master colorist!'];
+// the share card's picture, read back in the page: a few pixels and how much ink lies in a few regions
+const readCard = (page, file) => page.evaluate(async (b64) => {
+  const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+  const px = (x, y) => [...g.getImageData(x, y, 1, 1).data];
+  const count = (x0, y0, x1, y1, pred) => { const d = g.getImageData(x0, y0, x1 - x0, y1 - y0).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (pred(d[i], d[i + 1], d[i + 2])) n++; return n; };
+  const dark = (r, gg, b) => r < 110 && gg < 110 && b < 110;
+  const matte = px(80, 160);
+  const off = (r, gg, b) => Math.abs(r - matte[0]) > 25 || Math.abs(gg - matte[1]) > 25 || Math.abs(b - matte[2]) > 25;
+  return {
+    size: [img.width, img.height], header: px(10, 10), matte, paper: px(10, 1340), stars: [0, 1, 2, 3, 4].map((i) => px(601 + i * 90, 1026)),
+    ink: {
+      title: count(60, 40, 520, 85, (r) => r > 200), mode: count(600, 40, 1020, 85, (r) => r > 200),
+      pct: count(60, 950, 520, 1110, (r, gg, b) => r < 80 && gg < 110 && b < 90), grade: count(560, 1060, 1040, 1110, (r, gg, b) => r > 140 && gg < 110 && b < 90),
+      points: count(560, 1120, 1040, 1155, dark), subject: count(60, 1215, 1020, 1260, dark), palette: count(60, 1275, 700, 1305, (r) => r < 130), date: count(700, 1275, 1020, 1305, (r) => r < 130),
+      portrait: count(300, 330, 780, 730, off),
+    },
+  };
+}, fs.readFileSync(file).toString('base64'));
+
+async function scoreBands(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  const recipes = await recipesOfBoard(page);
+  const N = recipes.length;
+  const targets = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#gameZones .game-zone')].map((li) => [+li.querySelector('.game-zone-number').textContent, li.querySelectorAll('.mix-chip')[1].title.replace('The color to match ', '')])));
+  // the area of every number, from the wash its shapes wear when it is the chosen one
+  await playAgain(page);
+  const areas = [];
+  for (let k = 0; k < N; k++) { await pickNumber(page, k); areas.push(await washCount(page)); }
+  const total = areas.reduce((a, b) => a + b, 0);
+  t.check(N >= 5 && N <= 16 && areas.every((a) => a > 0), 'the sample at Zorn has between 5 and 16 numbers, each with shapes of its own', [N, areas]);
+  // Gap: the Blocks reference is the colors each number is scored against
+  await click(page, '#tab-game [data-ref-view="blocks"]');
+  const blocks = await colorsOf(page, '#gameRef');
+  const wantHex = [...new Set(Object.values(targets))].sort();
+  t.check(same(Object.keys(blocks).sort(), wantHex), 'the Blocks reference holds exactly the colors the Analysis lists to match', [Object.keys(blocks).sort(), wantHex]);
+  await click(page, '#tab-game [data-ref-view="photo"]');
+  // a subset of the numbers whose areas add up to about a goal: mixed exactly, the rest left bare
+  const subsetFor = (goal) => {
+    let best = null;
+    for (let m = 1; m < (1 << N); m++) { let sum = 0; for (let k = 0; k < N; k++) if ((m >> k) & 1) sum += areas[k] / total * 100; const d = Math.abs(sum - goal); if (!best || d < best.d) best = { m, sum, d }; }
+    return best;
+  };
+  const played = {};
+  for (const [want, goal] of [[1, 40], [2, 57], [3, 71], [4, 83]]) {
+    const pick = subsetFor(goal);
+    await click(page, '#gamePopup [data-game="again"]'); await sleep(200); await click(page, '#againSame'); await playing(page);
+    await mixAll(page, recipes.filter((_, k) => (pick.m >> k) & 1));
+    await lockIn(page);
+    const r = await result(page);
+    const pct = +r.pct;
+    const stars = STAR_MINS.filter((m) => pct >= m).length;
+    const edge = STAR_MINS.some((m) => Math.abs(pct - m) <= 0.5);
+    t.check(r.stars === want, `${want} star${want > 1 ? 's' : ''}: a game of about ${goal}% lands in that band`, [goal, pct, r.stars]);
+    t.check(edge || r.stars === stars, `${pct}% earns ${stars} star${stars === 1 ? '' : 's'} by the README’s thresholds (30, 50, 65, 78, 88)`, [pct, r.stars, stars]);
+    t.check(r.grade === GRADE_WORDS[r.stars] && r.starsLabel === `${r.stars} out of 5 stars, ${pct}% color match`, `${r.stars} stars: the grade word and the label agree`, [r.grade, r.starsLabel]);
+    played[want] = pct;
+  }
+  t.note(`score bands played on the sample at Zorn: about 40, 57, 71 and 83 percent landed on ${[1, 2, 3, 4].map((w) => played[w] + '%').join(', ')} (the areas are measured from the wash, outlines apart, so they can differ from the game’s by a point or two)`);
+
+  // ---- the 83% game is on screen (4 stars, 4 gold on the card), Analysis open
+  await click(page, '#gameAnalyze');
+  const yours = await page.evaluate(() => [document.getElementById('gameYours').toDataURL() === document.getElementById('gameFinal').toDataURL(), document.getElementById('gameTarget').toDataURL() === document.getElementById('gameFinalTarget').toDataURL(), [document.getElementById('gamePhoto').width, document.getElementById('gamePhoto').height], [document.getElementById('gameFinal').width, document.getElementById('gameFinal').height]]);
+  t.check(yours[0] && yours[1] && same(yours[2], yours[3]), 'the Analysis’s portrait is the final board, its colors to match are the target board, and the reference is as big as the board', yours);
+  const targetColors = await colorsOf(page, '#gameTarget');
+  const edgeHex = '#1b1e1a';
+  t.check(same(Object.keys(targetColors).filter((h) => h !== edgeHex).sort(), wantHex), 'the colors-to-match picture holds each number’s target color and the outline', Object.keys(targetColors).sort());
+
+  // ---- Share card: the share sheet where there is one, the saved PNG where there is not
+  await page.evaluate(() => {
+    window.__shared = []; window.__shareFail = '';
+    Object.defineProperty(navigator, 'canShare', { value: () => true, configurable: true });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async (d) => { window.__shared.push(d.files.map((f) => [f.name, f.type, f.size])); if (window.__shareFail) throw Object.assign(new Error('refused'), { name: window.__shareFail }); } });
+  });
+  const share = async (selector, fail) => {
+    await page.evaluate((f) => { window.__shareFail = f; }, fail);
+    const before = await page.evaluate(() => window.__shared.length);
+    const dl = page.waitForEvent('download', { timeout: 1500 }).catch(() => null);
+    await click(page, selector);
+    await page.waitForFunction((n) => window.__shared.length > n, before, { timeout: 5000 }).catch(() => null);
+    return dl;
+  };
+  const r4 = await result(page);
+  let d = await share('#gamePopup [data-game="share"]', '');
+  let shared = await page.evaluate(() => window.__shared);
+  t.check(!d && shared.length === 1 && shared[0].length === 1 && shared[0][0][0] === `portrait-value-studio-${r4.pct}pct.png` && shared[0][0][1] === 'image/png' && shared[0][0][2] > 20000, 'Share card on a phone that can share: one PNG named by the score goes to the share sheet and nothing is downloaded', [!!d, shared]);
+  d = await share('#gamePopup [data-game="share"]', 'AbortError');
+  t.check(!d && (await page.evaluate(() => window.__shared.length)) === 2, 'Share card: the visitor closing the share sheet (AbortError) saves nothing', !!d);
+  d = await share('#gameAnalysis [data-game="share"]', '');
+  t.check(!d && (await page.evaluate(() => window.__shared.length)) === 3, 'the Share card button inside the Analysis shares too', !!d);
+  d = await share('#gamePopup [data-game="share"]', 'NotAllowedError');
+  const fallback = d ? await d : null;
+  t.check(fallback && fallback.suggestedFilename() === `portrait-value-studio-${r4.pct}pct.png`, 'Share card: a share sheet that refuses (NotAllowedError) falls back to saving the PNG', fallback && fallback.suggestedFilename());
+  // what the card shows
+  if (fallback) {
+    const card = await readCard(page, await fallback.path());
+    const gold = (p) => p[0] > 200 && p[1] > 150 && p[1] < 185 && p[2] < 90;
+    const grey = (p) => p[0] > 190 && p[1] > 190 && p[2] > 180 && !gold(p);
+    t.check(same(card.size, [1080, 1350]) && same(card.header, [44, 74, 54, 255]) && same(card.matte, [139, 140, 142, 255]) && same(card.paper, [239, 231, 214, 255]), 'the card: header band, gray matte and paper in their colors', [card.header, card.matte, card.paper]);
+    t.check(card.stars.filter(gold).length === 4 && card.stars.slice(0, 4).every(gold) && grey(card.stars[4]), 'the card: four gold stars and one gray for a four-star game', card.stars);
+    t.check(card.ink.title > 100 && card.ink.mode > 100 && card.ink.pct > 800 && card.ink.grade > 100 && card.ink.points > 40 && card.ink.subject > 100 && card.ink.palette > 100 && card.ink.date > 50 && card.ink.portrait > 5000, 'the card carries its title, mode, percentage, grade, points, portrait label, palette and level, date, and the finished portrait', card.ink);
+  }
+  await page.evaluate(() => { Reflect.deleteProperty(navigator, 'share'); Reflect.deleteProperty(navigator, 'canShare'); });
+  // a no-star game: nothing gold on the card
+  await playAgain(page); await lockIn(page);
+  const dl0 = page.waitForEvent('download', { timeout: 10000 }).catch(() => null);
+  await click(page, '#gamePopup [data-game="share"]');
+  const d0 = await dl0;
+  if (d0) {
+    const card0 = await readCard(page, await d0.path());
+    t.check(card0.stars.every((p) => !(p[0] > 200 && p[1] > 150 && p[1] < 185 && p[2] < 90)) && d0.suggestedFilename() === 'portrait-value-studio-0pct.png', 'the card of a 0% game: no gold star, named 0pct', [card0.stars, d0.suggestedFilename()]);
+  } else t.check(false, 'the card of a 0% game downloads', null);
+  await clean(t, page, 'score bands and the share card');
+  await page.context().close();
 }

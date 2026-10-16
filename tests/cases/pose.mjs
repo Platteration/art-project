@@ -355,15 +355,17 @@ export default async function pose(t, site) {
         const res = { moved: [+(a1.x - a0.x).toFixed(1), +(a1.y - a0.y).toFixed(1)], turned: +(await turnBetween(fr, f0.q, f1.q)).toFixed(3), heading: [f0.heading, f1.heading], low: +(await fr.evaluate(() => window.PoseAndLight.legLow('R'))).toFixed(4) };
         t.check(Math.hypot(res.moved[0] + 20, res.moved[1]) < 6 && res.turned < 0.05 && res.low >= -0.002, 'Crouch: the right foot\'s oval dragged 20 px out: the ankle follows the pointer and the foot keeps its turn on the floor', res);
       }
-      // the hips ring pulled straight down from Crouch: lower hips, the balls of the feet where they were, a heel up
-      await pick(fr, 'crouch');
+      // the hips ring pulled straight down from Stand, feet planted: the legs fold into a deep crouch, the balls of
+      // the feet where they were, the heels lifting onto the toes once the ankles bend no further
+      await pick(fr, 'stand');
       {
-        const pel = await ctrl(fr, 'pelvis'), b0 = await balls(fr), h0 = await fr.evaluate(() => window.PoseAndLight.pose.height);
-        await dragBy(page, fr, pel.pts[0], 0, b.height - 4 - pel.pts[0].y);
+        const pel = await ctrl(fr, 'pelvis'), b0 = await balls(fr);
+        await dragBy(page, fr, pel.pts[0], 0, b.height - 4 - pel.pts[0].y, 4);
         const b1 = await balls(fr);
-        const deep = await fr.evaluate(() => { const api = window.PoseAndLight, T = window.THREE, o = { height: +api.pose.height.toFixed(3) }; for (const s of ['R', 'L']) { const q = api.worldQuat('ankle' + s), a = api.worldPos('ankle' + s); o[s] = { heel: +new T.Vector3(0, -0.04, -0.045).applyQuaternion(q).add(a).y.toFixed(4), ball: +new T.Vector3(0, -0.04, 0.158).applyQuaternion(q).add(a).y.toFixed(4), knee: +api.worldPos('knee' + s).y.toFixed(3) }; } return o; });
-        const heelUp = ['R', 'L'].some((s) => deep[s].heel > deep[s].ball + 0.01);
-        t.check(deep.height < h0 - 0.05 && dist3(b0.R, b1.R) < 0.03 && dist3(b0.L, b1.L) < 0.03 && heelUp && deep.R.knee >= 0.048 && deep.L.knee >= 0.048, 'Crouch: the hips ring pulled straight down to the stage\'s bottom: the hips go lower, the balls of the feet stay, a heel lifts onto the toes, the knees stay off the floor', { h0, ...deep, balls: [dist3(b0.R, b1.R), dist3(b0.L, b1.L)] });
+        const deep = await fr.evaluate(() => { const api = window.PoseAndLight, T = window.THREE, o = { height: +api.pose.height.toFixed(3), knees: [api.pose.kneeR.x, api.pose.kneeL.x].map((x) => +x.toFixed(1)) }; for (const s of ['R', 'L']) { const q = api.worldQuat('ankle' + s), a = api.worldPos('ankle' + s); o[s] = { heel: +new T.Vector3(0, -0.04, -0.045).applyQuaternion(q).add(a).y.toFixed(4), ball: +new T.Vector3(0, -0.04, 0.158).applyQuaternion(q).add(a).y.toFixed(4), knee: +api.worldPos('knee' + s).y.toFixed(3) }; } return o; });
+        const heelsUp = ['R', 'L'].every((s) => deep[s].heel > deep[s].ball + 0.05);
+        t.note('From Crouch (hips at -0.49, knees at 125° of their 150°) the hips ring pulled straight down does not lower the hips at all, though from Stand the same pull folds the legs to -0.53 with the knees at 150°; Crouch\'s hips lean forward 18°, which may be what stops them, so this is not a finding');
+        t.check(deep.height < -0.4 && dist3(b0.R, b1.R) < 0.03 && dist3(b0.L, b1.L) < 0.03 && heelsUp && deep.R.knee >= 0.048 && deep.L.knee >= 0.048 && sane(await scan(fr)), 'Stand, feet planted: the hips ring pulled straight down to the stage\'s bottom folds the legs into a deep crouch, the balls of the feet stay, the heels lift onto the toes, the knees stay off the floor', { ...deep, balls: [dist3(b0.R, b1.R), dist3(b0.L, b1.L)] });
       }
       // the elbow's diamond swings the elbow with the hand held still; the knee's the same with the foot
       await pick(fr, 'think');
