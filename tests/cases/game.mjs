@@ -1961,7 +1961,7 @@ async function otherInputs(t, site) {
   t.check(s.subject === 'photo' && s.photoPane && s.photoName === 'Painting from pasted-a.' && s.preview[0] === 500, 'a photo pasted while A painting is chosen switches the setup to My photo and names it', [s.subject, s.photoName, s.preview]);
   await click(q, '#gameFromPainting'); await ready(q);
   await dropFiles(q, 'body', [await makeImage(q, { width: 440, height: 600, type: 'image/jpeg', name: 'dropped-b.jpg' })]);
-  await q.waitForFunction(() => document.getElementById('gamePhotoName').textContent === 'Painting from dropped-b.', null, { timeout: 15000 }).catch(() => null);
+  await q.waitForFunction(() => document.getElementById('gamePhotoName').textContent === 'Painting from dropped-b.' && document.getElementById('gamePreview').width === 440, null, { timeout: 15000 }).catch(() => null);
   await ready(q);
   s = await setup(q);
   t.check(s.subject === 'photo' && s.photoName === 'Painting from dropped-b.' && s.preview[0] === 440, 'a photo dropped while A painting is chosen does the same', [s.subject, s.photoName, s.preview]);
