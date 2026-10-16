@@ -870,7 +870,7 @@ const savedPaint = (page) => page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => { const r = indexedDB.open('portrait-value-studio'); r.onerror = () => reject(r.error); r.onsuccess = () => resolve(r.result); });
     let got;
     try {
-      got = await new Promise((resolve, reject) => { const tx = db.transaction('studio'), st = tx.objectStore('studio'), keys = st.getAllKeys(), rec = st.get('painting'); tx.oncomplete = () => resolve({ keys: keys.result, rec: rec.result }); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('aborted')); });
+      got = await new Promise((resolve, reject) => { const tx = db.transaction('studio'), st = tx.objectStore('studio'), keys = st.getAllKeys(), recReq = st.get('painting'); tx.oncomplete = () => resolve({ keys: keys.result, rec: recReq.result }); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('aborted')); });
     } finally { db.close(); }
     const rec = got.rec;
     if (!rec || !(rec.paper instanceof Blob)) return { keys: got.keys, savedAt: rec ? rec.savedAt : undefined, w: undefined, h: undefined, ink: null, hash: null };
@@ -995,7 +995,7 @@ async function reloadTailBlock(t, page, mem) {
   // compared as what it paints (size, ink, every alpha), not by savedAt: a save of the same painting still on its way when the record was read
   // lands with the same pixels and a later time, which is no change; a different painting, or a class's drawing reaching the record, is
   const dbNow = await savedPaint(page), was = mem.studio && mem.studio.db;
-  t.check(!!(was && dbNow && typeof was.hash === 'number' && typeof dbNow.hash === 'number') && dbNow.keys.length === 1 && dbNow.keys[0] === 'painting' && dbNow.w === was.w && dbNow.h === was.h && dbNow.ink === was.ink && dbNow.hash === was.hash, 'after the classes the Studio\'s saved painting is the record it was: still the only one, the same painting (its pixels), never saved over (the class\'s paper has autosave off)', { before: was, now: dbNow });
+  t.check(!!(was && dbNow && typeof was.hash === 'number' && typeof dbNow.hash === 'number') && dbNow.keys.length === 1 && dbNow.keys[0] === 'painting' && dbNow.w === was.w && dbNow.h === was.h && dbNow.ink === was.ink && dbNow.hash === was.hash, 'after the classes the Studio\'s saved painting is the record it was: still the only one, the same pixels (coverage), never saved over (the class\'s paper has autosave off)', { before: was, now: dbNow });
   await page.reload({ waitUntil: 'load' });
   await sleep(300);
   await tab(page, 'paint');
@@ -1015,8 +1015,16 @@ async function reloadTailBlock(t, page, mem) {
   await tab(page, 'help');
   await click(page, '#forgetBtn');
   const armed = await text(page, '#forgetBtn');
-  await Promise.all([page.waitForEvent('load', { timeout: 20000 }).catch(() => null), click(page, '#forgetBtn')]);
-  await sleep(300);
+  // the second tap's reload is waited for by its own signal, as forgetElsewhereBlock waits for its reload: this page's new document reaching
+  // DOMContentLoaded (not the load event, which also waits for the hidden pose frame's pictures). The timeout only matters on a slow machine
+  const reloaded = page.waitForEvent('domcontentloaded', { timeout: 60000 }).then(() => true).catch(() => false);
+  await click(page, '#forgetBtn');
+  const reloadedNow = await reloaded;
+  t.check(reloadedNow, 'Forget my work on the second tap reloads this page (within 60 s)');
+  // without that reload the checks below would read the old document, so the block stops here (its page errors are still counted)
+  if (!reloadedNow) { await clean(t, page, 'reload and Forget'); return; }
+  await page.waitForLoadState('load', { timeout: 60000 }).catch(() => null);
+  await sleep(300); // (the settle before the checks below, as forgetElsewhereBlock has it)
   t.check(/Tap again/.test(armed || ''), 'Forget my work asks for a second tap', armed);
   const leftKeys = await storageKeys(page);
   t.check(leftKeys.length === 0, 'after Forget my work and the reload nothing is stored: no key of the site\'s is left (the visit drew its setup and wrote nothing)', leftKeys);
