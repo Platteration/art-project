@@ -355,7 +355,7 @@ const FLOW = {
     await tab(page, 'figure'); await sleep(300);
     await sweep(t, page, acc, ctx, 'set up', { how: 'Figure study: the class set up, Start drawing' });
     await click(page, '#fig-start'); await shownIn(page, '#fig-bar');
-    await stroke(page, '#fig-drawing', [[0.4, 0.2], [0.5, 0.5], [0.6, 0.8]]); await sleep(300);
+    await stroke(page, '#fs-paper', [[0.4, 0.2], [0.5, 0.5], [0.6, 0.8]]); await sleep(300);
     await sweep(t, page, acc, ctx, 'drawing a pose', { how: 'Figure study: Start drawing, one stroke on the drawing, the clock running' });
     await click(page, '#fig-done'); await shownIn(page, '#fig-result');
     await sweep(t, page, acc, ctx, 'pose score', { how: 'Figure study: Done, the pose score dialog open' });
@@ -432,6 +432,12 @@ const KNOWN = [
     cause: 'styles.css:1683 `.vb-letter { color: #faf5ea; text-shadow: …0.7 }` is one light color whatever paint the round deals; the swatch fill is the letter\'s background (set per color inline at js/battle.js:308; the letter is made at js/battle.js:310), so a light swatch (for example #e97259 or #df9067) leaves the letter at 2.3 to 2.8:1. The colors are dealt at random each round, so the letter\'s ratio varies run to run.',
   },
   {
+    kind: 'contrast', sig: /^span\.fig-rating-stars$/, severity: 'medium',
+    title: 'Figure study review: each drawing\'s star rating is gold on cream, 2.1:1',
+    expected: 'The stars that rate each drawing read against the card (3:1 for a graphic that carries information, 4.5:1 for text). README: "Figure study ... scored with stars after each pose".',
+    cause: 'styles.css:1588 `.fig-rating-stars { color: #d9a441 }` on the cream card (the card background is --surface #faf5ea, styles.css:9). The glyphs are aria-hidden (js/figure.js:991-996), so the rating reaches a screen reader only as the visually hidden sentence, while a sighted visitor reads the gold stars alone.',
+  },
+  {
     kind: 'overlap', sig: /gameFinalHandle/, severity: 'low',
     title: 'Paint by numbers, Compare with target: the divider handle\'s box covers the Show score and Stop comparing buttons',
     expected: 'Controls do not overlap. README: "Compare with target lays the colors to match over your portrait: drag the divider (or use the arrow keys) to wipe between them."',
@@ -439,21 +445,24 @@ const KNOWN = [
   },
 ];
 export function report(t, acc) {
+  // one finding per known problem (however many elements show it), else one per kind and element
   const groups = new Map();
   for (const i of acc.confirmed) {
-    const k = i.kind + '|' + i.sig;
-    if (!groups.has(k)) groups.set(k, { ...i, states: new Set(), vps: new Set(), modes: new Set(), hows: new Set(), texts: new Set() });
-    const g = groups.get(k);
-    g.states.add(`${i.tab} ${i.state}`); g.vps.add(i.vp); g.modes.add(i.mode); g.hows.add(i.how); if (i.text) g.texts.add(i.text);
+    const known = KNOWN.findIndex((k) => k.kind === i.kind && (!k.sig || k.sig.test(i.sig)));
+    const key = known >= 0 ? `known${known}` : `${i.kind}|${i.sig}`;
+    if (!groups.has(key)) groups.set(key, { ...i, known, sigs: new Set(), states: new Set(), vps: new Set(), modes: new Set(), hows: new Set(), texts: new Set() });
+    const g = groups.get(key);
+    g.sigs.add(i.sig); g.states.add(`${i.tab} ${i.state}`); g.vps.add(i.vp); g.modes.add(i.mode); g.hows.add(i.how); if (i.text) g.texts.add(i.text);
   }
   for (const g of groups.values()) {
-    const known = KNOWN.find((k) => k.kind === g.kind && (!k.sig || k.sig.test(g.sig)));
+    const known = g.known >= 0 ? KNOWN[g.known] : null;
     const vps = [...g.vps].join(', '), modes = [...g.modes].join(' and ');
     const where = [...g.states].join('; ');
+    const what = known ? [...g.sigs].slice(0, 3).join('; ') : g.sig;
     t.finding({
       title: known ? known.title : `${g.kind} at ${g.sig}`,
       severity: known ? known.severity : 'medium',
-      steps: `Open the site (${modes} mode) at ${vps}. ${[...g.hows].join('. ')}. Look at ${g.sig}${g.texts.size ? ' ("' + [...g.texts].slice(0, 2).join('", "') + '")' : ''}. States: ${where}.`,
+      steps: `Open the site (${modes} mode) at ${vps}. ${[...g.hows].join('. ')}. Look at ${what}${g.texts.size ? ' ("' + [...g.texts].slice(0, 2).join('", "') + '")' : ''}. States: ${where}.`,
       expected: known ? known.expected : 'Nothing overflows, overlaps or is covered at any width, and body text reaches 4.5:1 against its background.',
       actual: `${g.detail} (first seen: ${g.tab} ${g.state}, ${g.mode}, ${g.vp}).`,
       cause: known ? known.cause : 'not traced yet',

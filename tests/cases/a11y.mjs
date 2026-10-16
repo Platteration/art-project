@@ -15,7 +15,7 @@
 // Names are read from Chromium's own accessibility tree (CDP Accessibility.getPartialAXTree), not guessed from markup.
 import fs from 'node:fs';
 import path from 'node:path';
-import { openPage, clean, tab, click, sleep, axe, poseFrame, stroke, app, ROOT, DESKTOP, PHONE, textFile } from '../lib.mjs';
+import { openPage, clean, tab, click, axe, poseFrame, stroke, app, ROOT, DESKTOP, PHONE, textFile } from '../lib.mjs';
 
 const AXE_SRC = fs.readFileSync(path.join(ROOT, 'node_modules', 'axe-core', 'axe.min.js'), 'utf8');
 const ONLY = process.env.A11Y_ONLY ? new RegExp(process.env.A11Y_ONLY) : null;
@@ -72,7 +72,7 @@ const focusNow = (page) => page.evaluate(probe);
 // a box may still be scrolling into view when first read (a paint scrolled to in its row): read it again a frame later
 async function focusSettled(page) {
   let x = await focusNow(page);
-  if (!x.body && (!x.inView || !x.onTop)) { await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); await sleep(120); x = await focusNow(page); }
+  for (let i = 0; i < 4 && !x.body && (!x.inView || !x.onTop); i++) { await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); x = await focusNow(page); }
   return x;
 }
 const label = (x) => (x.body ? 'the page itself' : `${x.tag}${x.elId ? '#' + x.elId : ''} "${x.text}"${x.hidden ? ' (hidden)' : ''}`);
@@ -154,6 +154,16 @@ const shown = (page, selector, frame = null) => (frame || app(page)).evaluate((s
 const waitFor = (page, fn, arg, timeout = 15000) => page.waitForFunction(fn, arg, { timeout }).then(() => true).catch(() => false);
 // the page's clock moved forward (the battle's and the class's clocks read performance.now), so a long wait needs none
 const skewClock = (page) => page.evaluate(() => { if (window.__skew) return; const real = performance.now.bind(performance); let skew = 0; performance.now = () => real() + skew; window.__skew = (ms) => { skew += ms; }; });
+// press a button until the page takes it (Figure's Done waits half a second after a pose shows, its card's buttons 0.6 s)
+async function pressUntil(page, selector, done, { key = 'Enter', tries = 20 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    if (key) await keyOn(page, selector, key); else await click(page, selector);
+    if (await waitFor(page, done, null, 400)) return true;
+  }
+  return false;
+}
+// the pop-ups' entrances (count, stars, grade, New best!) have ended: what axe reads is what stays on screen
+const settled = (page) => waitFor(page, () => !document.getAnimations().some((a) => a.playState === 'running' && a.effect && a.effect.getComputedTiming().endTime !== Infinity), null, 10000);
 // running animations that move something (transform, translate, scale, rotate, or a box's place)
 const MOVING = () => document.getAnimations().filter((a) => a.playState === 'running' || a.playState === 'pending').map((a) => {
   const kf = a.effect && a.effect.getKeyframes ? a.effect.getKeyframes() : [];
@@ -164,6 +174,7 @@ const MOVING = () => document.getAnimations().filter((a) => a.playState === 'run
 }).filter((x) => x.props.some((p) => /transform|translate|scale|rotate|^(top|left|right|bottom|inset)$/.test(p)));
 
 export default async function a11y(t, site) {
+  const seen = new Set(); // findings already written, for a defect a later block meets again
   // =================================================================================================================
   // The shell: the header, the sections and their menus, the Study tab's tools, drawers and dialog, the guide
   // =================================================================================================================
@@ -352,6 +363,7 @@ export default async function a11y(t, site) {
         actual: `${dropped.join('; ')}. The sheet is hidden around the focused control, so the focus is lost (document.activeElement is the body once the page has drawn again): the next Tab starts from the top of the page, and a screen reader says nothing.`,
         cause: 'js/painting.js:538 (closeSheets) hides every sheet and resets aria-expanded but never moves the focus; it is what Escape (js/painting.js:548), the × buttons (js/painting.js:540), Lock in (js/painting.js:799) and Save as PNG (js/painting.js:267) call.',
       });
+      seen.add('sheets');
     }
     // the brush row says which brush is in hand
     await keyOn(page, '#ps-brushBtn', 'Enter');
@@ -391,7 +403,7 @@ export default async function a11y(t, site) {
         steps: '1. Learning tools → Loomis head (any width). 2. Use only the keyboard: Tab through the tab, press Enter, Space or the arrows anywhere.',
         expected: 'Everything is operable from the keyboard (WCAG 2.1.1; placing a point is not a freehand path): the photo takes the focus and the arrows move a crosshair that Enter or Lock in places, or another key-driven way to set each feature.',
         actual: `The card asks for "${lh.ask}" with Lock in disabled (${lh.lock}); the photo (#lh-overlay, tabIndex ${lh.overlayTab}) is not focusable and the only enabled controls on the tab are ${JSON.stringify(lh.stops)}. No key places a mark, so none of the eight steps, the fitted head, Draw it in the Studio or Save can be reached.`,
-        cause: 'js/loomis.js:406 places marks from pointerdown on the overlay canvas only; index.html:411 gives #lh-overlay no tabindex and no key handler exists in js/loomis.js (its only keyboard code is keepFocus, js/loomis.js:303-311). Lock in (js/loomis.js:295) stays disabled until a pointer has marked the feature.',
+        cause: 'js/loomis.js:406 places marks from pointerdown on the overlay canvas only; index.html:411 gives #lh-overlay no tabindex and no key handler exists in js/loomis.js (its only keyboard code is keepFocus, js/loomis.js:303-311). Lock in stays disabled until a pointer has marked the feature (js/loomis.js:288: disabled = !state.pending).',
       });
     }
     await page.evaluate(() => document.activeElement && document.activeElement.blur());
@@ -456,13 +468,15 @@ export default async function a11y(t, site) {
     t.check(!(await shown(page, '#gamePopup')) && (await focusIs(page, '#gameShowScore')), 'Paint by numbers: × hides the score card and the focus goes to Show score', label(await focusNow(page)));
     await keyOn(page, '#gameCompare', 'Enter');
     await waitFor(page, () => document.getElementById('gameCompare').getAttribute('aria-pressed') === 'true', null, 3000);
-    await sleep(1400); // (the reveal sweeps once before the handle is the visitor's)
+    await waitFor(page, () => document.getElementById('gameFinalHandle').getAttribute('aria-valuenow') === '50', null, 5000); // (the reveal sweeps in to the middle first)
     await keyOn(page, '#gameFinalHandle', 'ArrowLeft');
     const now0 = +(await attr(page, '#gameFinalHandle', 'aria-valuenow'));
     await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft');
     const now1 = +(await attr(page, '#gameFinalHandle', 'aria-valuenow'));
     const handle = await focusNow(page);
-    t.check(now1 < now0 && handle.fv && handle.ring, 'Paint by numbers: Compare with target\'s divider moves with the arrow keys (aria-valuenow follows) and shows its focus', { now0, now1, ring: handle.ring });
+    await page.keyboard.press('Home'); const home = await attr(page, '#gameFinalHandle', 'aria-valuenow');
+    await page.keyboard.press('End'); const end = await attr(page, '#gameFinalHandle', 'aria-valuenow');
+    t.check(now1 < now0 && home === '0' && end === '100' && handle.fv && handle.ring, 'Paint by numbers: Compare with target\'s divider moves with the arrow keys, Home and End (aria-valuenow follows) and shows its focus', { now0, now1, home, end, ring: handle.ring });
     await keyOn(page, '#gameShowScore', 'Enter');
     t.check(await focusIs(page, '#gameAnalyze'), 'Paint by numbers: Show score brings the card back with the focus on it', label(await focusNow(page)));
     await keyOn(page, '#gamePopup [data-game="again"]', 'Enter');
@@ -519,7 +533,7 @@ export default async function a11y(t, site) {
         steps: '1. Games → Value battle, Start the battle (the focus is on the left color). 2. Answer a round right with the arrow keys: the focus moves to Next ▸. 3. Press Enter. (On the clock, the next round comes by itself 0.65 s after a right answer.)',
         expected: 'Each new round puts the focus where Start and Play again put it: on the first color ("Start (and Play again) puts the focus on the first color", README), so the focus stays visible and a screen reader reads the round.',
         actual: `Round 2 comes up with document.activeElement = ${label(afterNext)}: no color or button shows a focus ring, the next Tab leaves the board, and nothing reads the new question ("${question}"); what a screen reader has at that moment: "${nextSaid.slice(0, 200)}". The arrow keys still answer (they work on the bare page), so the game goes on, blind.`,
-        cause: 'js/battle.js:299-325 (showRound) replaces the swatches and hides Next ▸, the focused button, without moving the focus; only start() focuses the first color (js/battle.js:253). The question (#vb-question) is not a live region either (index.html:930).',
+        cause: 'js/battle.js:297-323 (showRound) replaces the swatches and hides Next ▸ (js/battle.js:320), the focused button, without moving the focus; only start() focuses the first color (js/battle.js:253). The question (#vb-question) is not a live region either (index.html:930).',
       });
     }
     // a miss: the pop-up with the right answer
@@ -537,7 +551,7 @@ export default async function a11y(t, site) {
         steps: '1. Games → Value battle, Start the battle. 2. Answer a round wrong (Both the same on a non-tie, or a color on a tie). 3. Listen with a screen reader (or read the accessibility tree) as the miss pop-up comes up.',
         expected: 'The miss "pops up the right answer in words" (README) for everyone: the explanation is in a live region, or is the description of the pop-up or of the button the focus lands on, as Figure study\'s card does (aria-describedby plus a live line).',
         actual: `The focus lands on "See the score" inside a group named "Not quite"; the words "${why}" are in neither, and the answer line (the board's live region) is emptied on a miss. What a screen reader has: "${missSaid.slice(0, 200)}".`,
-        cause: 'index.html:939 gives #vb-miss role="group" with aria-labelledby="vb-missKicker" only; js/battle.js:401-421 (showMiss) writes #vb-missWhy, which is neither live nor referenced by aria-describedby, and js/battle.js:392 sets #vb-answer (aria-live) to \'\' when the answer is wrong.',
+        cause: 'index.html:939 gives #vb-miss role="group" with aria-labelledby="vb-missKicker" only; js/battle.js:403-423 (showMiss) writes #vb-missWhy, which is neither live nor referenced by aria-describedby, and js/battle.js:390 sets #vb-answer (aria-live) to \'\' when the answer is wrong.',
       });
     }
     await page.keyboard.press('Enter');
@@ -587,7 +601,7 @@ export default async function a11y(t, site) {
         steps: '1. Paint by numbers: Start painting, Lock in portrait. 2. Value battle: play Streak until a miss and press See the score; or play 1 min until time is up. 3. Listen with a screen reader (or read the accessibility tree) as each score pop-up comes up.',
         expected: 'The result is announced, as Figure study\'s card does for its own score (a live line saying "Pose 1 done Kneel: 2 out of 5 stars, 47% gesture match. Getting there." plus aria-describedby on the card): the stars, the match or the number right, and New best!.',
         actual: `The focus moves to a button inside a role="group" named only by the pop-up's title, and the score is in neither: ${gameScore ? `Paint by numbers reads "${gameScore.said.slice(0, 120)}" while the card shows "${gameScore.stars}"; ` : ''}Value battle (Streak) reads "${streakSaid.slice(0, 120)}" while it shows "${streakStars}"; on the clock it reads "${timedSaid.slice(0, 120)}" while it shows "${timedStars}" (${rightN} right) — the number right is never said.`,
-        cause: 'index.html:830 (#gamePopup) and index.html:947 (#vb-popup) are role="group" with aria-labelledby on the kicker alone, and the score (#gamePct / #vb-pct, the stars\' role="img" label written at js/game.js:1391 and js/battle.js:475) is neither live nor referenced by aria-describedby; js/game.js:1417 and js/battle.js:490 just move the focus to Analyze / Play again. Compare js/figure.js:930 (the live #fig-say) and index.html:686 (aria-describedby="fig-stars fig-grade").',
+        cause: 'index.html:830 (#gamePopup) and index.html:947 (#vb-popup) are role="group" with aria-labelledby on the kicker alone, and the score (#gamePct / #vb-pct, the stars\' role="img" label written at js/game.js:1391 and js/battle.js:476) is neither live nor referenced by aria-describedby; js/game.js:1417 and js/battle.js:490 just move the focus to Analyze / Play again. Compare js/figure.js:934 (the live #fig-say) and index.html:676 (aria-describedby="fig-stars fig-grade").',
       });
     }
     await clean(t, page, 'Value battle');
@@ -628,11 +642,19 @@ export default async function a11y(t, site) {
     await page.evaluate(() => { const b = document.querySelector('#fs-paintSheet button:not([disabled])'); if (b) b.focus(); });
     await page.keyboard.press('Escape');
     const fsBack = { open: fsOpen, closed: !(await shown(page, '#fs-paintSheet')), focus: label(await focusAfter(page)), onIcon: await focusIs(page, '#fs-colorBtn') };
-    t.check(fsBack.open && fsBack.closed && fsBack.onIcon, 'Figure study: Escape in the drawing\'s Paints sheet closes it with the focus back on its icon', fsBack);
+    if (!t.check(fsBack.open && fsBack.closed && fsBack.onIcon, 'Figure study: Escape in the drawing\'s Paints sheet closes it with the focus back on its icon', fsBack) && !seen.has('sheets')) {
+      t.finding({
+        title: 'Figure study: closing a sheet of the drawing\'s studio with Escape drops the focus on the page',
+        severity: 'medium',
+        steps: '1. Figure study: Start drawing. 2. Tab to Paints and mixing on the strip, press Enter, move into the sheet, press Escape.',
+        expected: 'The focus goes back to the icon that opened the sheet.',
+        actual: `The sheet closes and the focus is on ${fsBack.focus}.`,
+        cause: 'js/painting.js:538 (closeSheets), shared by Figure study\'s copy of the Studio, hides the sheet without moving the focus.',
+      });
+    }
     // draw, Done, the card
     await stroke(page, '#tab-figure canvas[aria-label="Drawing paper"]', [[0.5, 0.15], [0.5, 0.45], [0.42, 0.8]]);
-    await sleep(600);
-    await keyOn(page, '#fig-done', 'Enter');
+    await pressUntil(page, '#fig-done', () => !document.getElementById('fig-result').hidden);
     await waitFor(page, () => !document.getElementById('fig-result').hidden && /out of 5 stars|nothing drawn/.test(document.getElementById('fig-say').textContent), null, 30000);
     const cardSaid = await announced(page, cdp);
     const cardStars = await attr(page, '#fig-stars', 'aria-label');
@@ -642,9 +664,7 @@ export default async function a11y(t, site) {
     t.check(/^The pose: /.test(poseImg), 'Figure study: the card\'s picture of the pose is named', poseImg);
     const behind = await page.evaluate(() => [...document.querySelectorAll('#tab-figure .ps-strip button')].every((b) => b.closest('[inert]')));
     t.check(behind, 'Figure study: the studio behind the card is inert (its strip takes no focus)');
-    await sleep(700); // (the card's buttons wait 0.6 s, README)
-    await keyOn(page, '#fig-stop', 'Enter');
-    await waitFor(page, () => !document.getElementById('fig-review').hidden, null, 10000);
+    await pressUntil(page, '#fig-stop', () => !document.getElementById('fig-review').hidden); // (the card's buttons wait 0.6 s, README)
     t.check(await focusIs(page, '#fig-reviewTitle'), 'Figure study: Stop class shows the drawings with the focus on their heading', label(await focusNow(page)));
     await keyOn(page, '[data-fig-gesture="0"]', 'Enter');
     const pill = { hidden: await attr(page, '[data-fig-gesture="0"]', 'aria-pressed'), shownBtn: await attr(page, '[data-fig-gesture="1"]', 'aria-pressed'), canvas: await attr(page, '#fig-cards canvas', 'aria-label') };
@@ -657,7 +677,7 @@ export default async function a11y(t, site) {
         title: 'Figure study: New class drops the focus on the page',
         severity: 'low',
         steps: '1. Figure study: Start drawing, draw something, Done, then Stop class (the drawings show, with the focus on their heading). 2. Tab to New class and press Enter.',
-        expected: 'The setup opens with the focus in it (its first choice, Relaxed), as Paint by numbers\' Change settings does (js/game.js:1653-1658, "focus goes to its first choice") and as Value battle\'s does (js/battle.js:497).',
+        expected: 'The setup opens with the focus in it (its first choice, Relaxed), as Paint by numbers\' Change settings does (js/game.js:1653 and 1657, "focus goes to its first choice") and as Value battle\'s does (js/battle.js:497).',
         actual: `The setup shows and document.activeElement is ${label(afterNew)}: the New class button was hidden with the drawings, so a screen reader says nothing and the next Tab starts at the top of the page.`,
         cause: 'js/figure.js:1026: the New class handler calls show(\'setup\'), showSetup() and scrollTo(0, 0) and moves the focus nowhere.',
       });
@@ -718,7 +738,7 @@ export default async function a11y(t, site) {
         steps: '1. Open Pose and light (in the app or pose.html), choose a pose, switch to Advanced. 2. Using only the keyboard, Tab through the page and try to pick a hand, an elbow, the hips or any part.',
         expected: '"Any part can also be tapped to pick it and moved with arrows, joint by joint" (README) has a keyboard way in: the parts (or the rig\'s controls) are focusable, or a list picks one, and its arrows (already buttons, with Enter and Space handled at js/pose.js:902) then move it (WCAG 2.1.1).',
         actual: `The Tab stops are only ${JSON.stringify(names.slice(0, 24))}: the lamp, the pose library and the side cards. The figure canvas has tabIndex ${pickable.canvasTab}, the rig is aria-hidden="${pickable.rigHidden}", and no arrows appear (#arrows has ${arrows} buttons), so a keyboard visitor can only take a whole pose from the library and move the lamp.`,
-        cause: 'js/pose.js:822 (pick) is reached only from the canvas\'s pointer handlers (js/pose.js:2109, 2178-2181); pose.html:28 gives the canvas no tabindex, pose.html:31 hides the rig controls from assistive tech, and js/pose.js:906 (buildArrows) builds the arrow buttons only for a picked part.',
+        cause: 'js/pose.js:822 (pick) is reached only from the canvas\'s pointer handlers (js/pose.js:2109, 2178-2181); pose.html:28 gives the canvas no tabindex, pose.html:31 hides the rig controls from assistive tech, and js/pose.js:907 (buildArrows) builds the arrow buttons only for a picked part.',
       });
     }
     await keyOn(page, '[data-mode="simple"]', 'Enter');
@@ -740,7 +760,7 @@ export default async function a11y(t, site) {
         steps: '1. Open pose.html on its own (a fresh visit opens on "Choose a pose to start", with the focus on the first pose). 2. Press Shift+Tab.',
         expected: 'The sheet is a modal dialog (role="dialog" aria-modal="true", and "the rest of the page waiting until a pose is picked", README): the focus stays inside it, as it does for everything else behind it, which is inert.',
         actual: `Shift+Tab goes to ${outside.map(label).join(' then ')}, the Simple / Advanced switch in the page header, which a screen reader in the modal is told does not exist; the header is not inert (${modal.headerInert}).`,
-        cause: 'js/pose.js:1495 (behindSheet) makes the canvas, hint, picked note, rig, arrows, lamp, stage bar and rail inert while the sheet is open, but not the page header (.top) that pose.html shows on its own (pose.css:157 hides it only when embedded).',
+        cause: 'js/pose.js:1492 (behindSheet) makes the canvas, hint, picked note, rig, arrows, lamp, stage bar and rail inert while the sheet is open, but not the page header (.top) that pose.html shows on its own (pose.css:157 hides it only when embedded).',
       });
     }
     await sp.evaluate(() => document.querySelector('#poses .pose-btn').focus());
@@ -789,20 +809,53 @@ export default async function a11y(t, site) {
     moved.drawer = await act(() => document.querySelector('#drawer-values summary').click());
     await tab(page, 'battle');
     await click(page, '#vbCount2'); await click(page, '#vbModeStreak');
+    // a game: a wrong color tapped (the swatch's own pulse is turned off), the miss, the score, Play again, ✕'s toast
     moved.start = await act(() => document.getElementById('vb-start').click());
     const ans = await page.evaluate(() => { const g = ValueBattle.state(); return g.rounds[g.i].answer; });
-    moved.answer = await act(ans === 'same' ? (() => document.querySelector('.vb-swatch').click()) : (() => document.querySelector('.vb-choice').click()));
+    moved.answer = await act(`() => document.querySelector('.vb-swatch[data-index="${ans === 'left' ? 1 : 0}"]').click()`);
     await waitFor(page, () => !document.getElementById('vb-miss').hidden, null, 3000);
+    moved.miss = await page.evaluate(MOVING);
     moved.score = await act(() => document.getElementById('vb-missNext').click());
     moved.again = await act(() => document.getElementById('vb-again').click());
     moved.toast = await act(() => document.getElementById('vb-quit').click());
     const app0 = Object.entries(moved).filter(([, list]) => list.length);
-    t.check(app0.length === 0, 'Reduced motion (the app): opening a menu and a drawer, the battle\'s answer, miss, score pop-up and a toast move nothing', app0);
+    t.check(app0.length === 0, 'Reduced motion (the app): opening a menu and a drawer, a color tapped, the battle\'s miss and score pop-ups, Play again and a toast move nothing', app0);
+    // Both the same, pressed once: nothing moves when the next round shows it again
+    await act(() => document.getElementById('vb-quit').click());
+    await waitFor(page, () => !document.getElementById('vb-setup').hidden, null, 3000);
+    await click(page, '#vb-start');
+    await waitFor(page, () => { const g = window.ValueBattle && ValueBattle.state(); return g && g.i === 0 && !g.over; }, null, 5000);
+    const same = await page.evaluate(() => { const g = ValueBattle.state(); return g.rounds[g.i].answer === 'same'; });
+    const pressed = await act(() => document.querySelector('.vb-choice').click());
+    await waitFor(page, () => ValueBattle.state().answered, null, 3000);
+    let next;
+    if (same) next = await act(() => document.getElementById('vb-next').click());
+    else {
+      await waitFor(page, () => !document.getElementById('vb-miss').hidden, null, 3000);
+      await page.evaluate(() => document.getElementById('vb-missNext').click());
+      await waitFor(page, () => !document.getElementById('vb-popup').hidden, null, 3000);
+      next = await act(() => document.getElementById('vb-again').click());
+    }
+    const nextRound = await page.evaluate(() => { const g = ValueBattle.state(); return { i: g.i, n: g.rounds[g.i].n, choiceShown: getComputedStyle(document.querySelector('.vb-choice')).display !== 'none', cls: document.querySelector('.vb-choice').className }; });
+    const pulsing = next.filter((m) => /vb-choice/.test(m.what));
+    if (!t.check(pulsing.length === 0, 'Reduced motion (Value battle): once Both the same has been pressed, the next round shows it without a pulse', { pressedWasRight: same, onPress: pressed, next, nextRound })) {
+      t.finding({
+        title: 'Value battle: once pressed, Both the same pulses again at the start of every round, and reduced motion does not stop it',
+        severity: 'low',
+        steps: '1. Turn on "Reduce motion" in the system settings (the pulse also replays without it). 2. Games → Value battle, two colors, Start. 3. Press Both the same once (right on a tie, or wrong: then See the score and Play again). 4. Watch the button as each later two-color round comes up.',
+        expected: 'Nothing moves with reduced motion (the stylesheet already means it: styles.css:1699 sets .vb-choice.is-pulse { animation: none } under prefers-reduced-motion), and without it a press pulses once, as a tapped swatch does.',
+        actual: `At the next round (${same ? 'after Next ▸' : 'after Play again'}) the button, still carrying "${nextRound.cls}", starts ${pulsing.map((m) => `the ${m.name} animation (${m.props.join('/')})`).join(', ')}, a scale to 1.05 and back, with prefers-reduced-motion: reduce; it replays every time the button comes back, round after round.`,
+        cause: 'js/battle.js:318 (showRound) clears is-chosen from the button but not is-pulse (added by pulse(), js/battle.js:326), so the CSS animation restarts each time the hidden button is displayed again; and styles.css:1710 repeats ".vb-choice.is-pulse { animation: vb-pulse-btn 0.3s ease-out; }" after the reduced-motion rule at styles.css:1699, which it overrides (same specificity, later).',
+      });
+    }
     await clean(t, page, 'reduced motion: app');
     const sp = await openPage(site, { url: 'pose.html', reducedMotion: true }); pages.push(sp);
     await waitFor(sp, () => window.__poseStarted, null, 60000);
     await sp.evaluate(() => document.querySelector('#poses .pose-btn').click());
     await sp.evaluate(() => document.querySelector('[data-mode="advanced"]').click());
+    // (a section that has just appeared has no style to move from: let it be drawn once first)
+    await waitFor(sp, () => { const e = document.querySelector('#rigMore summary'); return !!e && e.checkVisibility() && document.getElementById('library').hidden; }, null, 5000);
+    await sp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     const poseMoved = await sp.evaluate(`(() => { document.querySelector('#rigMore summary').click(); return (${MOVING})(); })()`);
     if (!t.check(poseMoved.length === 0, 'Reduced motion (pose.html): opening Rig controls moves nothing', poseMoved)) {
       t.finding({
@@ -822,7 +875,7 @@ export default async function a11y(t, site) {
   // =================================================================================================================
   await segment(t, 'axe: every state, light and dark, desktop and phone', async (pages) => {
     const page = await openPage(site, { bypassCSP: true }); pages.push(page);
-    const serious = [], minor = new Set(), mismatch = [], states = [];
+    const serious = [], minor = new Set(), mismatch = [], labelled = [], states = [];
     const run = async (pg, what, frameOf = null) => {
       states.push(what);
       for (const [w, vp] of [['desktop', DESKTOP], ['phone', PHONE]]) for (const scheme of ['light', 'dark']) {
@@ -840,8 +893,13 @@ export default async function a11y(t, site) {
       if (!(await fr.evaluate(() => !!window.axe))) await fr.evaluate(AXE_SRC);
       const r = await fr.evaluate(() => window.axe.run(document, { runOnly: ['label-content-name-mismatch'], resultTypes: ['violations'] }).then((x) => x.violations.flatMap((v) => v.nodes.map((n) => ({ target: n.target.join(' '), html: n.html.slice(0, 160) })))));
       for (const n of r) {
-        const info = await fr.evaluate((sel) => { const e = document.querySelector(sel); return e ? { name: e.getAttribute('aria-label'), text: e.innerText.replace(/\s+/g, ' ').trim() } : null; }, n.target).catch(() => null);
-        mismatch.push({ where: what, target: n.target, ...info });
+        const info = await fr.evaluate((sel) => { const e = document.querySelector(sel); return e ? { name: e.getAttribute('aria-label') || '', text: e.innerText.replace(/\s+/g, ' ').trim(), first: (e.innerText.split('\n').map((x) => x.trim()).find(Boolean) || '') } : null; }, n.target).catch(() => null);
+        if (!info) continue;
+        // the words that label it are its first line (a palette's "Zorn" over "7 / 11" and its note): a name that holds
+        // them passes (WCAG 2.5.3 asks for the label, not every word near it); the rest are told in a note
+        const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        if (norm(info.name).includes(norm(info.first))) labelled.push(`${what}: "${info.text}" named "${info.name}"`);
+        else mismatch.push({ where: what, target: n.target, ...info });
       }
     };
     await run(page, 'Study (Simple)');
@@ -871,13 +929,11 @@ export default async function a11y(t, site) {
     await waitFor(page, () => { const s = window.FigureStudy && FigureStudy.state(); return s && s.shot; }, null, 60000);
     await run(page, 'Figure study drawing');
     await stroke(page, '#tab-figure canvas[aria-label="Drawing paper"]', [[0.5, 0.15], [0.5, 0.45], [0.42, 0.8]]);
-    await sleep(600);
-    await click(page, '#fig-done');
-    await waitFor(page, () => !document.getElementById('fig-result').hidden && /out of 5 stars/.test(document.getElementById('fig-say').textContent), null, 30000);
-    await sleep(2600); // the card's count and stars, settled
+    await pressUntil(page, '#fig-done', () => !document.getElementById('fig-result').hidden, { key: null });
+    await waitFor(page, () => !document.getElementById('fig-result').hidden && /out of 5 stars|nothing drawn/.test(document.getElementById('fig-say').textContent), null, 30000);
+    await settled(page);
     await run(page, 'Figure study card');
-    await click(page, '#fig-stop');
-    await waitFor(page, () => !document.getElementById('fig-review').hidden, null, 10000);
+    await pressUntil(page, '#fig-stop', () => !document.getElementById('fig-review').hidden, { key: null });
     await run(page, 'Figure study drawings');
     // Paint by numbers: setup, playing, the score card, the analysis, Play again's dialog
     await tab(page, 'game');
@@ -889,10 +945,10 @@ export default async function a11y(t, site) {
     await run(page, 'Paint by numbers playing');
     await click(page, '#gameLock');
     await waitFor(page, () => { const m = /(\d+)% color match/.exec(document.getElementById('gameStars').getAttribute('aria-label') || ''); return !document.getElementById('gameResult').hidden && m && document.getElementById('gamePct').textContent === m[1]; }, null, 30000);
-    await sleep(2600);
+    await settled(page);
     await run(page, 'Paint by numbers score card');
     await click(page, '#gameAnalyze'); await click(page, '#gamePopupClose'); await click(page, '#gameCompare');
-    await sleep(1400);
+    await waitFor(page, () => document.getElementById('gameFinalHandle').getAttribute('aria-valuenow') === '50', null, 5000);
     await run(page, 'Paint by numbers analysis and Compare with target');
     await click(page, '#gameShowScore'); await click(page, '#gamePopup [data-game="again"]');
     await waitFor(page, () => document.getElementById('againDialog').open, null, 3000);
@@ -907,11 +963,11 @@ export default async function a11y(t, site) {
     const ans = await page.evaluate(() => { const g = ValueBattle.state(); return g.rounds[g.i].answer; });
     await page.evaluate((a) => (a === 'same' ? document.querySelector('.vb-swatch').click() : document.querySelector('.vb-choice').click()), ans);
     await waitFor(page, () => !document.getElementById('vb-miss').hidden, null, 3000);
-    await sleep(600);
+    await settled(page);
     await run(page, 'Value battle miss');
     await click(page, '#vb-missNext');
     await waitFor(page, () => !document.getElementById('vb-popup').hidden, null, 3000);
-    await sleep(2600);
+    await settled(page);
     await run(page, 'Value battle score');
     // Pose and light in the frame: the start sheet, a pose, Advanced
     await tab(page, 'pose', { timeout: 120000 });
@@ -941,11 +997,13 @@ export default async function a11y(t, site) {
     await clean(t, sp, 'axe tour: pose.html');
 
     t.check(serious.length === 0, `axe: no serious or critical issue in ${states.length} states, each in light and dark at 1400 × 900 and 390 × 844`, serious);
+    if (serious.length) t.finding({ title: `axe-core reports ${serious.length} serious or critical issue${serious.length > 1 ? 's' : ''}`, severity: 'medium', steps: 'Run axe-core (tests/lib.mjs axe()) on the states listed in the check, in the scheme and width given.', expected: 'No serious or critical axe issue in any state, light or dark, at either width.', actual: serious.slice(0, 6).join(' / '), cause: 'See each rule\'s nodes in the check detail.' });
     for (const m of minor) t.note(`axe (not serious): ${m}`);
     t.note(`axe states: ${states.join('; ')}`);
     const paints = mismatch.filter((m) => /game-paint|data-index/.test(m.target) || /^Add /.test(m.name || ''));
     const groups = mismatch.filter((m) => /fig-group-btn|data-group/.test(m.target) || /poses$/.test(m.name || ''));
-    if (!t.check(mismatch.length === 0, 'Every control\'s name holds the words it shows (axe label-content-name-mismatch, every state)', mismatch.slice(0, 12))) {
+    if (labelled.length) t.note(`axe label-content-name-mismatch also lists ${labelled.length} controls whose name holds their label (the first line) but not every word shown with it, e.g. ${[...new Set(labelled)].slice(0, 3).join('; ')}`);
+    if (!t.check(mismatch.length === 0, 'Every control\'s name holds the words that label it (its first visible line; axe label-content-name-mismatch, every state)', mismatch.slice(0, 12))) {
       const ex = (list) => list.slice(0, 3).map((m) => `"${m.text}" is named "${m.name}"`).join(', ');
       t.finding({
         title: 'Some buttons are named in words they do not show, so voice control cannot press them by what they say',
