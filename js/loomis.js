@@ -316,8 +316,9 @@
   });
   $('refit').addEventListener('click', () => { if (state.auto) { state.fit = { ...state.auto }; Studio.redraw(); drawTab(); } });
   $('show').addEventListener('click', () => { state.shown = !state.shown; render(); });
-  // Draw it in the Studio draws the head, so a hidden head is shown again first
-  const toStudio = () => { if (state.fit && !state.shown) { state.shown = true; render(); } Studio.go('paint'); setTimeout(() => document.getElementById('ps-sketchFromStudy').click(), 150); };
+  // Draw it in the Studio draws the head, so a hidden head is shown again first. It copies the head alone: the
+  // Study tab's grid, lines and measures are not on this tab, so the Studio's Copy the Study lines is not pressed
+  const toStudio = () => { if (state.fit && !state.shown) { state.shown = true; render(); } Studio.go('paint'); setTimeout(() => PaintStudio.copyLines(segments(), 'The head is'), 150); };
   $('studio').addEventListener('click', toStudio);
   $('cardStudio').addEventListener('click', toStudio);
   $('save').addEventListener('click', () => {

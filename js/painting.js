@@ -377,20 +377,26 @@
     });
     ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => paper.addEventListener(t, (e) => { if (e.pointerId === strokeId) endStroke(); }));
     paper.addEventListener('contextmenu', (e) => e.preventDefault());
-    $('undo').addEventListener('click', () => { const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
-    let clearArmed = 0;
+    // Undo (the button, or Ctrl/⌘+Z) during a stroke takes back that stroke's snapshot, so the stroke in hand ends
+    // first, as a release ends it: what the pointer draws after that lands nowhere
+    $('undo').addEventListener('click', () => { if (last) endStroke(strokeId); const u = undoStack.pop(); if (u) u.layer.getContext('2d').putImageData(u.img, 0, 0); $('undo').disabled = !undoStack.length; saveSoon(); });
+    // performance.now() counts from the page's load, so an arming time of 0 would take the first tap of a page
+    // under three seconds old (or the first after a Clear, made that early) as the second of a pair: it starts
+    // at -Infinity, and a Clear leaves it there
+    let clearArmed = -Infinity;
     $('clear').addEventListener('click', () => {
       closeSheets();
       if (performance.now() - clearArmed > 3000) { clearArmed = performance.now(); Studio.toast('Tap again to clear the paper (Undo brings it back)'); return; }
-      clearArmed = 0;
+      clearArmed = -Infinity;
       useLayer(paper); snapshot(); blank(); saveSoon();
     });
     $('sketchClear').addEventListener('click', () => { useLayer(sketch); snapshot(); blank(); saveSoon(); });
     // The grid, lines, measures and plumb lines from the Study tab, drawn on the underdrawing in
     // pencil, with the underdrawing brush as it is set. They were drawn over the reference, so they
-    // are fitted to the paper the way the reference would be: as large as fits, centred.
-    $('sketchFromStudy').addEventListener('click', () => {
-      const prep = Studio.prep(), segs = Studio.marks();
+    // are fitted to the paper the way the reference would be: as large as fits, centred. copyLines draws
+    // any list of segments (in picture fractions) that way: Draw it in the Studio sends the head alone.
+    function copyLines(segs, what) {
+      const prep = Studio.prep();
       if (!prep) return;
       if (!segs.length) { const none = withNotice('Nothing to copy: draw lines, measures or plumb lines on the Study tab first, or turn its grid on.'); Studio.toast(none, none.length > 120 ? 8000 : 5000); return; }
       const k = Math.min(paper.width / prep.w, paper.height / prep.h);
@@ -404,9 +410,10 @@
       state.lastLayer = 'sketch';
       closeSheets();
       saveSoon();
-      const said = withNotice('The Study lines are on the underdrawing, in pencil');
+      const said = withNotice(`${what} on the underdrawing, in pencil`);
       Studio.toast(said, said.length > 60 ? 8000 : 1800);
-    });
+    }
+    $('sketchFromStudy').addEventListener('click', () => copyLines(Studio.marks(), 'The Study lines are'));
     // the one-time note, shown as the Studio opens, is not lost to a message that follows at once
     // (Draw it in the Studio copies the head a moment after opening it): that message carries it
     let noticeAt = 0;
@@ -629,7 +636,6 @@
       $('refAnother').hidden = ref.kind !== 'painting';
       $('refFig').hidden = !ref.shown || !ref.prep;
       sizeReference();
-      $('refSizeOut').textContent = `${Math.round(ref.size * 100)}%`;
       q('[data-ref-show]').forEach((b) => b.setAttribute('aria-pressed', String(!!+b.dataset.refShow === ref.shown)));
     }
     // the size is a share of the stage's shorter side, so every step of the slider shows on a wide screen
@@ -637,24 +643,35 @@
     function sizeReference() {
       const st = $('stage'), side = Math.min(st.clientWidth, st.clientHeight);
       if (side <= 0) return;
-      // the picture has to fit the stage's height too, with its switch under it: a tall picture on a wide,
-      // short stage stops the slider short of 70%, so the readout never names a size that is not shown
+      // the picture has to fit the stage both ways, with its switch above it: a very tall picture is narrower, so
+      // its largest size is smaller (no floor of 20%, which would be taller than the stage), and the slider's low
+      // end follows it, so the readout never names a size that is not shown
       const aspect = ref.prep ? ref.prep.w / ref.prep.h : 1;
-      const fitW = Math.max(0.2 * side, Math.min(st.clientWidth - 24, (st.clientHeight - 48) * aspect));
-      const top = Math.max(20, Math.min(70, Math.floor((fitW / side) * 100)));
-      $('refSize').max = top;
-      if (ref.size > top / 100) { ref.size = top / 100; $('refSize').value = top; }
+      const fitW = Math.max(0, Math.min(st.clientWidth - 24, (st.clientHeight - 48) * aspect));
+      const top = Math.max(1, Math.min(70, Math.floor((fitW / side) * 100)));
+      const low = top >= 20 ? 20 : Math.max(1, Math.floor(top / 2));
+      $('refSize').min = low; $('refSize').max = top;
+      if (ref.size > top / 100) ref.size = top / 100;
+      if (ref.size < low / 100) ref.size = low / 100;
+      $('refSize').value = Math.round(ref.size * 100);
+      $('refSizeOut').textContent = `${Math.round(ref.size * 100)}%`;   // here, so a size a resize moved is read out too
       $('refFig').style.width = `${Math.round(ref.size * side)}px`;
       // the status pill along the top stops short of the reference (it would cover the pill's end on a phone)
       $('stage').style.setProperty('--ref-w', $('refFig').hidden ? '0px' : `${Math.round(ref.size * side)}px`);
       clampReference();
+    }
+    // the figure with its switch, which hangs past a narrow figure's sides: the part that has to stay on the stage
+    function refBounds(fig) {
+      const r = fig.getBoundingClientRect(), sw = fig.querySelector('.pill-switch'), s = sw ? sw.getBoundingClientRect() : r;
+      const left = Math.min(r.left, s.left), top = Math.min(r.top, s.top);
+      return { left, top, width: Math.max(r.right, s.right) - left, height: Math.max(r.bottom, s.bottom) - top };
     }
     // a reference dragged to an edge stays on the stage when the stage gets smaller (a smaller window, a
     // phone turned), as a drag keeps it there
     function clampReference() {
       const fig = $('refFig');
       if (fig.hidden) return;
-      const st = $('stage').getBoundingClientRect(), r = fig.getBoundingClientRect();
+      const st = $('stage').getBoundingClientRect(), r = refBounds(fig);
       if (!st.width || !r.width) return;
       const bx = r.left - ref.x, by = r.top - ref.y;
       const x = Math.min(st.right - r.width - bx, Math.max(st.left - bx, ref.x));
@@ -695,7 +712,7 @@
         fig.classList.add('is-moving');
         const start = { x: e.clientX, y: e.clientY, px: ref.x, py: ref.y };
         const move = (ev) => {
-          const st = $('stage').getBoundingClientRect(), r = fig.getBoundingClientRect();
+          const st = $('stage').getBoundingClientRect(), r = refBounds(fig);
           const bx = r.left - ref.x, by = r.top - ref.y;
           ref.x = Math.min(st.right - r.width - bx, Math.max(st.left - bx, start.px + ev.clientX - start.x));
           ref.y = Math.min(st.bottom - r.height - by, Math.max(st.top - by, start.py + ev.clientY - start.y));
@@ -803,7 +820,10 @@
       $('wellParts').textContent = parts.length ? [...by].map(([c, n]) => `${c} ${fmt(n)}`).join(' · ') : 'Empty. Tap a paint to start a mix.';
       ['lock', 'wellUndo', 'wellClear'].forEach((id) => { $(id).disabled = !parts.length; });
       q('.ps-paint').forEach((b) => { const n = by.get(b.dataset.code); b.querySelector('.ps-n').textContent = n ? fmt(n) : ''; });
-      if (mixed) { setColor(mixed, 'Current mix'); q('.ps-mix').forEach((m) => m.setAttribute('aria-pressed', 'false')); picked = -1; $('picked').hidden = true; }
+      if (mixed) setColor(mixed, 'Current mix');
+      // a kept mix is named only while its parts are in the well (pickMix sets the row again after it loads them):
+      // a well that empties (a palette change, its Clear or Undo) lets it go, so the row never names a mix not in the well
+      q('.ps-mix').forEach((m) => m.setAttribute('aria-pressed', 'false')); picked = -1; $('picked').hidden = true;
     }
     $('wellUndo').addEventListener('click', () => { state.well.pop(); showWell(); });
     $('wellClear').addEventListener('click', () => { state.well = []; showWell(); });
@@ -987,7 +1007,7 @@
       x.drawImage(paper, 0, 0);
       return c;
     }
-    return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
+    return { root, composite, reference, state, saveNow, ready: () => ready, activate, layout, closeSheets, setReference, clearAll, setLocked, ink, copyLines, paperSize: () => ({ w: paper.width, h: paper.height }), isActive: () => active };
   }
 
   const main = createStudio({ root: psRoot, prefix: 'ps-', tab: 'paint', bodyClass: 'tab-paint', welcome: 'Your painting is back from last time',
