@@ -324,7 +324,7 @@ seg('roundtrip', 60, async (t, site, pages) => {
     if (round === 1) t.note(`not kept across a reload (the README promises none of it): the Simplify slider set to 9 reads ${await val(page, '#simplify')} and Colors in each value set to 5 reads ${await val(page, '#colors')} after it`);
     await clean(t, page, `roundtrip ${label}`);
   }
-  t.note(`the Studio's wash after the reload is "${wash.name}" (one of ${wash.n} buttons); ${painting}`);
+  t.note(`the wash chosen in the Studio was "${wash.name}" (the last of ${wash.n} buttons); the portrait dealt to Paint by numbers was "${painting}"`);
 
   // -- Pose and light, on its own page: the pose, the light, the mode and a saved pose
   const pose = await open(pages, site, { url: 'pose.html', waitUntil: 'domcontentloaded' });
@@ -737,10 +737,11 @@ for (const kind of ['full', 'blocked']) {
     const g = await gameLock(page, { paint: true });
     t.check(g.popup && Number(g.pct) >= 0, `${L}: Paint by numbers locks in and scores`, g);
     t.note(`${L}: Paint by numbers' score card reads "${g.newBest || '(no New best)'}" and ${g.notes ? 'says' : 'does not say'} that the best is not kept`);
-    if (g.newBest && !g.notes) t.finding({
-      title: `Paint by numbers shows "New best!" with no sign that the best could not be kept (storage ${kind}), where Value battle says "(this visit only)"`,
+    if (g.newBest && !g.notes && kind === 'blocked') t.note(`${L}: the same card, the same missing sign as with the storage full (see that finding)`);
+    if (g.newBest && !g.notes && kind === 'full') t.finding({
+      title: 'Paint by numbers shows "New best!" with no sign that the best could not be kept (storage full or blocked), where Value battle says "(this visit only)"',
       severity: 'low',
-      steps: `1. Make the browser's storage ${kind === 'full' ? 'full (another site or tab has used the quota)' : 'unavailable (site data blocked)'}. 2. Open Games, Paint by numbers, tap every number and every paint once, and lock in the portrait. 3. Read the score card, then reload and open the setup.`,
+      steps: '1. Make the browser\'s storage full (another site or tab has used the quota), or unavailable (site data blocked). 2. Open Games, Paint by numbers, tap every number and every paint once, and lock in the portrait. 3. Read the score card, then reload and open the setup.',
       expected: 'The score card tells the visitor the best is not kept, as Value battle\'s does ("New best! (this visit only)", js/battle.js 475) and as the Studio and Pose and light say what they cannot keep; the README says "best scores" are kept in the browser.',
       actual: `The card reads "${g.newBest}" and nothing else about storage; after a reload the setup shows no best for the portrait.`,
       cause: 'js/game.js 1345 calls save(BEST_KEY, bests) and drops its result (save, line 108, returns nothing on a refused write, unlike battle.js save, line 35, which returns false and finish() shows in els.newBest).',
