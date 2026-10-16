@@ -1371,8 +1371,12 @@
     cancelAnimationFrame(countUp);
     if (reduceMotion.matches) { els.pct.textContent = pct; }
     else {
-      const t0 = performance.now(), ms = 1100;
+      // timed from the first frame: a frame's timestamp can come before a performance.now() read
+      // earlier in the same frame, which would start the count below zero
+      let t0 = -1;
+      const ms = 1100;
       const step = (t) => {
+        if (t0 < 0) t0 = t;
         const k = Math.min(1, (t - t0) / ms);
         els.pct.textContent = Math.round(pct * (1 - Math.pow(1 - k, 3)));
         if (k < 1) countUp = requestAnimationFrame(step);
@@ -1416,8 +1420,9 @@
     setCut(50);
     if (on && animate && !reduceMotion.matches) {
       // the target wipes in from the right edge
-      const t0 = performance.now();
+      let t0 = -1;
       const step = (t) => {
+        if (t0 < 0) t0 = t;
         const k = Math.min(1, (t - t0) / 800);
         setCut(100 - 50 * (1 - Math.pow(1 - k, 3)));
         if (k < 1) sweep = requestAnimationFrame(step);

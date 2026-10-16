@@ -462,8 +462,10 @@
     cancelAnimationFrame(countUp);
     if (reduceMotion.matches) els.pct.textContent = pct;
     else {
-      const t0 = performance.now(), ms = 1100;
-      const step = (t) => { const k = Math.min(1, (t - t0) / ms); els.pct.textContent = Math.round(pct * (1 - Math.pow(1 - k, 3))); if (k < 1) countUp = requestAnimationFrame(step); };
+      // timed from the first frame, as the figure card's count is
+      let t0 = -1;
+      const ms = 1100;
+      const step = (t) => { if (t0 < 0) t0 = t; const k = Math.min(1, (t - t0) / ms); els.pct.textContent = Math.round(pct * (1 - Math.pow(1 - k, 3))); if (k < 1) countUp = requestAnimationFrame(step); };
       countUp = requestAnimationFrame(step);
     }
     els.again.focus({ preventScroll: true });
