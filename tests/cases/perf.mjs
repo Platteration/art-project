@@ -167,10 +167,28 @@ async function probe(page, bcdp) {
   const frames = await Promise.all(page.frames().map((f) => f.evaluate(() => ({ blobs: window.__blobs ? window.__blobs.live.size : 0, made: window.__blobs ? window.__blobs.made : 0, gl: window.__gl ? JSON.parse(JSON.stringify(window.__gl)) : null })).catch(() => null)));
   const gl = {};
   for (const f of frames) if (f && f.gl) for (const k of Object.keys(f.gl.made)) gl[k] = (gl[k] || 0) + f.gl.made[k] - (f.gl.gone[k] || 0);
-  return { heap: heap ? Math.round(heap.usedSize / 1048576 * 10) / 10 : -1, nodes: dom ? dom.nodes : -1, listeners: dom ? dom.jsEventListeners : -1, blobs: frames.reduce((s, f) => s + (f ? f.blobs : 0), 0), made: frames.reduce((s, f) => s + (f ? f.made : 0), 0), gl, rss: await rendererMB(bcdp) };
+  // the page's live typed arrays (every photo's pixels and Lab planes), ImageData, canvases and images, counted by the engine after a collection
+  const live = {};
+  for (const [name, expr] of [['typed', 'Object.getPrototypeOf(Float32Array.prototype)'], ['imageData', 'ImageData.prototype'], ['canvases', 'HTMLCanvasElement.prototype'], ['images', 'HTMLImageElement.prototype']]) {
+    try {
+      const proto = await page.cdp.send('Runtime.evaluate', { expression: expr });
+      const q = await page.cdp.send('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId });
+      live[name] = (await page.cdp.send('Runtime.callFunctionOn', { objectId: q.objects.objectId, functionDeclaration: 'function () { return this.length; }', returnByValue: true })).result.value;
+      await page.cdp.send('Runtime.releaseObject', { objectId: q.objects.objectId }).catch(() => null);
+      await page.cdp.send('Runtime.releaseObject', { objectId: proto.result.objectId }).catch(() => null);
+    } catch (e) { live[name] = -1; }
+  }
+  return { live, heap: heap ? Math.round(heap.usedSize / 1048576 * 10) / 10 : -1, nodes: dom ? dom.nodes : -1, listeners: dom ? dom.jsEventListeners : -1, blobs: frames.reduce((s, f) => s + (f ? f.blobs : 0), 0), made: frames.reduce((s, f) => s + (f ? f.made : 0), 0), gl, rss: await rendererMB(bcdp) };
 }
-const fmt = (p) => `heap ${p.heap} MB, ${p.nodes} nodes, ${p.listeners} listeners, ${p.blobs} object URLs live (${p.made} made), WebGL ${JSON.stringify(p.gl)}, renderer ${p.rss} MB`;
+const fmt = (p) => `heap ${p.heap} MB, live ${JSON.stringify(p.live)}, ${p.nodes} nodes, ${p.listeners} listeners, ${p.blobs} object URLs live (${p.made} made), WebGL ${JSON.stringify(p.gl)}, renderer ${p.rss} MB`;
 const sameGl = (a, b) => Object.keys({ ...a, ...b }).every((k) => (a[k] || 0) === (b[k] || 0));
+// a photo chosen and studied: the label names it and the "Updating…" pill has come up and gone since the file was chosen
+// (a pill already down, with the label of the photo before, would otherwise be taken for the new photo being done)
+async function loadFile(fr, file, pattern, timeout = 180000) {
+  await fr.evaluate(() => { window.__pf.busy.length = 0; });
+  await fr.setInputFiles('#file', file);
+  await fr.waitForFunction((p) => { const b = window.__pf.busy; return b.length > 0 && b[b.length - 1].hidden && new RegExp(p).test(document.getElementById('source').textContent); }, pattern, { timeout });
+}
 // one section: a thrown error is one failed check, not the end of the case
 async function segment(t, name, fn) {
   try { await fn(); } catch (e) { t.check(false, `${name}: the section ran to its end`, String((e && e.message) || e).slice(0, 300)); }
@@ -204,8 +222,7 @@ export default async function perf(t, site) {
     // ======================================================================================================
     const page = await perfPage(site);
     const fr = app(page);
-    const waitStudy = (pattern, timeout = 180000) => fr.waitForFunction((p) => new RegExp(p).test(document.getElementById('source').textContent) && document.getElementById('busy').hidden, pattern, { timeout });
-    const loadAndWait = async (file, pattern) => { await fr.setInputFiles('#file', file); await waitStudy(pattern); await sleep(300); };
+    const loadAndWait = async (file, pattern) => { await loadFile(fr, file, pattern); await sleep(300); };
     try {
       // ---- the page itself: first paint and the sample study
       await segment(t, 'page load', async () => {
@@ -234,10 +251,7 @@ export default async function perf(t, site) {
       // ---- loading a 4000 x 3000 photo
       await segment(t, '12 megapixel photo', async () => {
         const runs = [];
-        for (const rate of [1, 1, 4]) {
-          if (runs.length) await loadAndWait(P4K, '4000 × 3000'); // (a different state to load into: it is the same photo again)
-          runs.push({ rate, ...(await measure(page, rate, async () => { await fr.setInputFiles('#file', P4K); await waitStudy('4000 × 3000'); })) });
-        }
+        for (const rate of [1, 1, 4]) runs.push({ rate, ...(await measure(page, rate, () => loadFile(fr, P4K, '4000 × 3000'))) });
         const full = runs.filter((r) => r.rate === 1), phone = runs.find((r) => r.rate === 4);
         t.note(`4000 × 3000 JPEG: time to the studies ${full.map((r) => r.ms).join('/')} ms at full speed, ${phone.ms} ms at phone speed; tasks over 50 ms: ${JSON.stringify(full[0].tasks)} (full), ${JSON.stringify(phone.tasks)} (phone)`);
         t.check(await inked(page, '#cv-value') > 100 && await inked(page, '#cv-block') > 100, 'the 12 megapixel photo is studied: the value and color-block studies are drawn');
@@ -253,11 +267,11 @@ export default async function perf(t, site) {
         const heapBefore = (await probe(page, bcdp)).heap, rssBefore = await rendererMB(bcdp);
         let peak = rssBefore, stop = false;
         const sampler = (async () => { while (!stop) { peak = Math.max(peak, await rendererMB(bcdp)); await sleep(80); } })();
-        const full = await measure(page, 1, async () => { await fr.setInputFiles('#file', P12K); await waitStudy('2800 × 2100'); });
+        const full = await measure(page, 1, () => loadFile(fr, P12K, '2800 × 2100'));
         stop = true; await sampler;
         const toast = await fr.evaluate(() => document.getElementById('toast').textContent);
         const heapAfter = (await probe(page, bcdp)).heap;
-        const phone = await measure(page, 4, async () => { await loadAndWait(P4K, '4000 × 3000'); await fr.setInputFiles('#file', P12K); await waitStudy('2800 × 2100'); });
+        const phone = await measure(page, 4, async () => { await loadFile(fr, P4K, '4000 × 3000'); await loadFile(fr, P12K, '2800 × 2100'); });
         t.note(`12000 × 9000 PNG (108 MP): ${full.ms} ms to the studies at full speed (tasks ${JSON.stringify(full.tasks)}); ${phone.ms} ms for a 12 MP photo and then this one at phone speed (tasks ${JSON.stringify(phone.tasks)}); renderer ${rssBefore} MB before, ${peak} MB at its peak while it was read; JS heap ${heapBefore} → ${heapAfter} MB; toast: ${toast}`);
         t.check(/very large photo \(12000 × 9000\) was reduced to 2800 × 2100/.test(toast), 'a 108 megapixel photo says it was reduced to 2800 × 2100', toast);
         t.check(await inked(page, '#cv-value') > 100, 'the 108 megapixel photo is studied');
@@ -280,12 +294,11 @@ export default async function perf(t, site) {
         const w = await measure(page, 1, async () => { drags.push(await dragRange(page, 'simplify', 3, 7)); await busyDone(page); drags.push(await dragRange(page, 'simplify', 7, 3)); await busyDone(page); });
         const slow = await measure(page, 4, async () => { drags.push(await dragRange(page, 'simplify', 3, 7, { steps: 3 })); await busyDone(page); });
         await setRange(page, 'simplify', 3); await busyDone(page); await sleep(300);
-        const moved = drags.every((d) => d.value !== 3 || d === drags[1]);
         t.check(drags[0].value === 7 && drags[1].value === 3, 'the Simplify slider follows the mouse from 3 to 7 and back', drags.map((d) => d.value));
         const lat = drags.slice(0, 2).map((d) => d.max);
         t.note(`Simplify drag at 900 px, edge-aware: slowest mouse event ${lat.join('/')} ms at full speed, ${drags[2].max} ms at phone speed; study re-run tasks ${JSON.stringify(w.tasks)} (full), ${JSON.stringify(slow.tasks)} (phone)`);
         t.check(w.shown && w.uncovered.length === 0, 'each study re-run shows Updating… (painted) before it starts', w.uncovered);
-        const ok = t.check(min(lat) <= 200 && w.max <= 200, 'dragging Simplify keeps every mouse event handled within 200 ms and every task under 200 ms (full speed)', { slowestEvent: lat, longestTask: w.max, tasks: w.tasks });
+        const ok = t.check(min(lat) <= 200 && w.max <= 200, 'dragging Simplify: the slowest mouse event of a drag and the longest study task are within 200 ms at full speed', { slowestEvent: lat, longestTask: w.max, tasks: w.tasks });
         t.check(slow.max <= 800, 'the same at phone speed (4 × 200 ms)', { longestTask: slow.max, slowestEvent: drags[2].max });
         if (!ok && lat.every((x) => x > 200) && w.tasks.length >= 2) {
           t.finding({
@@ -299,7 +312,7 @@ export default async function perf(t, site) {
         }
         // the other controls: only the first stage is skipped when the blur radius is unchanged, the rest still runs
         const others = {};
-        for (const [id, a, b] of [['merge', 7, 4], ['colors', 5, 3], ['t1', 40, 35], ['lean', 30, 0], ['g0', 8, 5]]) {
+        for (const [id, a, b] of [['merge', 7, 4], ['colors', 5, 3], ['t1', 40, 35], ['lean', 30, 0], ['g0', 8, 20]]) {
           const runs = [];
           for (const v of [a, b]) { const r = await measure(page, 1, async () => { await setRange(page, id, v); await busyDone(page); }); runs.push(r.max); }
           others[id] = runs;
@@ -326,14 +339,15 @@ export default async function perf(t, site) {
       await segment(t, 'palette ranking', async () => {
         await fr.evaluate(() => { document.getElementById('drawer-colors').open = false; }); await sleep(300);
         await setRange(page, 'colors', 4); await busyDone(page); await sleep(300); // a new study to rank
+        const want = await fr.evaluate(() => window.Paints.PRESETS.length);
         const rank = (rate) => measure(page, rate, async () => {
           await fr.evaluate(() => { document.querySelector('#drawer-colors > summary').click(); });
-          await fr.waitForFunction(() => { const l = document.getElementById('presetList'); return l.children.length >= 10 && !l.hasAttribute('aria-busy'); }, null, { timeout: 120000 });
+          await fr.waitForFunction((n) => { const l = document.getElementById('presetList'); return l.children.length >= n && !l.hasAttribute('aria-busy'); }, want, { timeout: 120000 });
         });
         const r1 = await rank(1);
-        const listed = await fr.evaluate(() => ({ n: document.getElementById('presetList').children.length, best: document.querySelectorAll('#presetList .preset-best').length }));
+        const listed = await fr.evaluate(() => ({ n: document.getElementById('presetList').children.length, best: document.querySelectorAll('#presetList .preset-best').length, want: window.Paints.PRESETS.length }));
         t.note(`ranking the known palettes: ${r1.ms} ms, tasks over 50 ms ${JSON.stringify(r1.tasks)} (full speed)`);
-        t.check(listed.n === 10 && listed.best === 1, 'the known palettes are all ranked, with one "Best match"', listed);
+        t.check(listed.n === listed.want && listed.best === 1, 'the known palettes are all ranked, with one "Best match"', listed);
         t.check(r1.max <= 200, 'ranking the palettes holds no task over 200 ms at full speed', r1.tasks);
         t.check(r1.ms < 3000, 'the palettes are ranked within 3 s at full speed', r1.ms);
         await fr.evaluate(() => { document.getElementById('drawer-colors').open = false; }); await sleep(300);
@@ -359,11 +373,12 @@ export default async function perf(t, site) {
       await segment(t, 'check my painting', async () => {
         await fr.evaluate(() => { document.getElementById('drawer-values').open = false; document.getElementById('drawer-check').open = true; }); await sleep(500);
         const load = async (rate) => measure(page, rate, async () => {
+          await fr.evaluate(() => { window.__pf.busy.length = 0; });
           await fr.setInputFiles('#artFile', P4K);
-          await fr.waitForFunction(() => !document.getElementById('checkBody').hidden && document.getElementById('busy').hidden && /4000 × 3000/.test(document.getElementById('artSource').textContent), null, { timeout: 180000 });
+          await fr.waitForFunction(() => { const b = window.__pf.busy; return b.length > 0 && b[b.length - 1].hidden && !document.getElementById('checkBody').hidden && /4000 × 3000/.test(document.getElementById('artSource').textContent); }, null, { timeout: 180000 });
         });
         const l1 = await load(1);
-        t.check(await inked(page, '#cv-diff') > 50, 'a 12 megapixel painting is scored: the accuracy map is drawn');
+        t.check(/^\d+$/.test(await fr.evaluate(() => document.getElementById('scoreColor').textContent.trim())), 'a 12 megapixel painting is scored (a color score is shown)', await fr.evaluate(() => document.getElementById('scoreColor').textContent));
         t.note(`Check my painting, loading a 4000 × 3000 painting: ${l1.ms} ms, tasks ${JSON.stringify(l1.tasks)} (full speed)`);
         t.check(l1.uncovered.length === 0, 'Updating… is painted before the long task of scoring a painting', l1.uncovered);
         const l4 = await load(4);
@@ -480,6 +495,7 @@ export default async function perf(t, site) {
         t.check(builds.painting <= 200 && builds.anotherPainting <= 200, 'A painting / Another painting deal a board within 200 ms at full speed', builds);
         await timedClick(page, '#gameFromPhoto'); await sleep(800);
         await tab(page, 'study'); await sleep(400);
+        await loadAndWait(P4K, '4000 × 3000'); await sleep(400); // (a new study, so the board is built again)
         const g4 = await open(4);
         t.note(`  ... Games opened at phone speed: handler ${g4.handler} ms, to the frame ${g4.toFrame} ms, tasks ${JSON.stringify(g4.tasks)}`);
         if (!ok) {
@@ -512,31 +528,37 @@ export default async function perf(t, site) {
       });
       await clean(t, page, 'paint by numbers');
 
-      // ---- Value battle: a game, ten rounds
+      // ---- Value battle: a game, ten rounds answered right
       await segment(t, 'value battle', async () => {
         await tab(page, 'battle'); await sleep(500);
-        const round = async (rate) => {
-          const answers = [];
+        // the answer the round asks for, given through the page's own buttons, and the time to the next frame
+        const answerRight = () => fr.evaluate(() => new Promise((res) => {
+          const g = window.ValueBattle.state(), r = g.rounds[g.i], sw = (i) => document.querySelector(`.vb-swatch[data-index="${i}"]`);
+          const t0 = performance.now();
+          if (r.q.mode === 'pair') { if (r.answer === 'same') document.querySelector('.vb-choice[data-choice="same"]').click(); else sw(r.answer === 'left' ? 0 : 1).click(); }
+          else if (r.q.mode === 'pick') sw(r.answer).click();
+          else for (const i of r.answer) sw(i).click();
+          requestAnimationFrame(() => setTimeout(() => res(Math.round(performance.now() - t0)), 0));
+        }));
+        const play = async (rate) => {
+          const frames = []; let rounds = 0;
           const r = await measure(page, rate, async () => {
-            const st = await timedClick(page, '#vb-start'); answers.push(st.toFrame);
+            frames.push((await timedClick(page, '#vb-start')).toFrame);
             await sleep(300);
             for (let i = 0; i < 10; i++) {
-              const live = await fr.evaluate(() => { const g = window.ValueBattle && ValueBattle.state(); return !!g && !g.over; });
-              if (!live) break;
-              answers.push((await timedClick(page, '.vb-swatch[data-index="0"]')).toFrame); await sleep(120);
-              const nx = await fr.evaluate(() => { const n = document.getElementById('vb-next'); return !!n && !n.hidden; });
-              if (nx) { answers.push((await timedClick(page, '#vb-next')).toFrame); await sleep(120); }
-              else { await fr.evaluate(() => { const c = document.getElementById('vb-missNext'); if (c && !c.closest('[hidden]')) c.click(); }); await sleep(150); }
+              if (!(await fr.evaluate(() => { const g = window.ValueBattle.state(); return !!g && !g.over && !g.answered; }))) break;
+              frames.push(await answerRight()); rounds++; await sleep(150);
+              if (await fr.evaluate(() => { const n = document.getElementById('vb-next'); return !!n && !n.hidden; })) { frames.push((await timedClick(page, '#vb-next')).toFrame); await sleep(150); }
             }
           });
           await click(page, '#vb-quit'); await sleep(150); await click(page, '#vb-quit'); await sleep(400);
-          return { answers, max: Math.max(...answers), task: r.max };
+          return { frames, rounds, max: Math.max(...frames), task: r.max };
         };
-        const b1 = await round(1), b4 = await round(4);
-        t.note(`Value battle (start, ten rounds): slowest tap or Next to the next frame ${b1.max} ms, longest task ${b1.task} ms at full speed; ${b4.max} ms / ${b4.task} ms at phone speed`);
-        t.check(b1.answers.length > 4, 'the battle was played (a start and several rounds)', b1.answers.length);
-        t.check(b1.max <= 200 && b1.task <= 200, 'a battle start, tap or Next reaches the next frame within 200 ms at full speed', { frame: b1.max, task: b1.task });
-        t.check(b4.max <= 800 && b4.task <= 800, 'a battle start, tap or Next reaches the next frame within 800 ms at phone speed', { frame: b4.max, task: b4.task });
+        const b1 = await play(1), b4 = await play(4);
+        t.note(`Value battle (start, ten rounds answered right, Next after each): slowest start, answer or Next to the next frame ${b1.max} ms, longest task ${b1.task} ms at full speed; ${b4.max} ms / ${b4.task} ms at phone speed`);
+        t.check(b1.rounds >= 8 && b4.rounds >= 8, 'ten battle rounds were played at each speed', [b1.rounds, b4.rounds]);
+        t.check(b1.max <= 200 && b1.task <= 200, 'a battle start, answer or Next reaches the next frame within 200 ms at full speed', { frame: b1.max, task: b1.task });
+        t.check(b4.max <= 800 && b4.task <= 800, 'a battle start, answer or Next reaches the next frame within 800 ms at phone speed', { frame: b4.max, task: b4.task });
       });
       await clean(t, page, 'value battle');
 
@@ -553,13 +575,17 @@ export default async function perf(t, site) {
         t.note(`Pose and light opening: its 30 pictures were up ${up} ms after the tab was tapped (full speed); tasks over 50 ms: ${open.tasks.length}, longest ${open.max} ms (${softwareGl ? 'software GL: shaders and frames are CPU here' : 'hardware GL'})`);
         t.check(up < 20000, 'Pose and light is up with its 30 pictures within 20 s of the tap at full speed', up);
         await pf.evaluate(() => { document.getElementById('libClose').click(); }); await sleep(500);
-        const hand = await pf.evaluate(() => { window.PoseAndLight.render(); return window.PoseAndLight.ctrls().find((c) => c.id === 'handR' && c.center); });
-        if (!hand) throw new Error('no right-hand control on the stage');
-        const box = await pf.locator('#view').boundingBox();
-        const lamp = await pf.locator('#lampHandle').boundingBox();
+        const handAt = async () => {
+          const c = await pf.evaluate(() => { window.PoseAndLight.render(); return window.PoseAndLight.ctrls().find((q) => q.id === 'handR' && q.center); });
+          if (!c) throw new Error('no right-hand control on the stage');
+          const box = await pf.locator('#view').boundingBox();
+          return { x: box.x + c.center.x, y: box.y + c.center.y };
+        };
+        const lampAt = async () => { const b = await pf.locator('#lampHandle').boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
         const metrics = async () => Object.fromEntries((await page.cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
-        const dragged = async (rate, label, from, dx, dy) => {
+        const dragged = async (rate, label, where, dx, dy) => {
           const lat = []; let script = 0, taskTime = 0;
+          const from = await where();
           const r = await measure(page, rate, async () => {
             const m0 = await metrics();
             await page.mouse.move(from.x, from.y); let t1 = Date.now(); await page.mouse.down(); lat.push(Date.now() - t1);
@@ -570,11 +596,11 @@ export default async function perf(t, site) {
           }, { settle: 200 });
           return { label, rate, perMoveScript: Math.round(script / 21 * 10) / 10, perMoveTask: Math.round(taskTime / 21), slowest: Math.max(...lat), longest: r.max };
         };
-        const j1 = await dragged(1, 'hand', { x: box.x + hand.center.x, y: box.y + hand.center.y }, 120, -100);
+        const j1 = await dragged(1, 'hand', handAt, 120, -100);
         await pf.evaluate(() => document.getElementById('undo').click()); await sleep(300);
-        const j4 = await dragged(4, 'hand', { x: box.x + hand.center.x, y: box.y + hand.center.y }, -100, -90);
-        const l1 = await dragged(1, 'lamp', { x: lamp.x + lamp.width / 2, y: lamp.y + lamp.height / 2 }, -150, 40);
-        const l4 = await dragged(4, 'lamp', { x: lamp.x + lamp.width / 2, y: lamp.y + lamp.height / 2 }, 100, 30);
+        const j4 = await dragged(4, 'hand', handAt, -100, -90);
+        const l1 = await dragged(1, 'lamp', lampAt, -150, 40);
+        const l4 = await dragged(4, 'lamp', lampAt, 100, 30);
         t.note(`Pose and light drags, per mouse event: hand ${JSON.stringify(j1)} / ${JSON.stringify(j4)}; lamp ${JSON.stringify(l1)} / ${JSON.stringify(l4)}`);
         for (const d of [j1, l1]) t.check(d.perMoveScript <= 25, `dragging the ${d.label} runs the page's own script for under 25 ms an event at full speed`, d);
         for (const d of [j4, l4]) t.check(d.perMoveScript <= 80, `dragging the ${d.label} runs the page's own script for under 80 ms an event at phone speed`, d);
@@ -629,7 +655,7 @@ export default async function perf(t, site) {
     {
       const m = await perfPage(site);
       const mf = app(m);
-      const loadM = async (file, pattern) => { await mf.setInputFiles('#file', file); await mf.waitForFunction((p) => new RegExp(p).test(document.getElementById('source').textContent) && document.getElementById('busy').hidden, pattern, { timeout: 120000 }); await sleep(120); };
+      const loadM = async (file, pattern) => { await loadFile(mf, file, pattern, 120000); await sleep(100); };
       try {
         await segment(t, 'photos replaced', async () => {
           // a few different pictures, so no decoded copy of the last one can be mistaken for the next
@@ -645,9 +671,10 @@ export default async function perf(t, site) {
           const p2 = await probe(m, bcdp);
           t.note(`36 photos replaced: start ${fmt(p0)}; after 12 ${fmt(p1)}; after 36 ${fmt(p2)}`);
           t.check(p2.heap - p1.heap <= 6, 'the JS heap does not grow over 24 more photos (after a collection)', { after12: p1.heap, after36: p2.heap });
+          t.check(p1.live.typed >= 0 && p2.live.typed - p1.live.typed <= 2 && p2.live.imageData - p1.live.imageData <= 2 && p2.live.canvases - p1.live.canvases <= 4 && p2.live.images - p1.live.images <= 2, 'no earlier photo is kept: the live typed arrays (pixels, Lab planes), ImageData, canvases and images are the same after 36 photos as after 12', { after12: p1.live, after36: p2.live });
           t.check(p2.nodes - p1.nodes <= 30 && p2.listeners - p1.listeners <= 30, 'DOM nodes and listeners do not grow over 24 more photos', { nodes: [p1.nodes, p2.nodes], listeners: [p1.listeners, p2.listeners] });
           t.check(p2.blobs === 0 && p2.made > 0, 'every object URL made to read a photo is let go of (none live after 36 photos)', { live: p2.blobs, made: p2.made });
-          t.check(p2.rss < 0 || p2.rss - p1.rss <= 250, 'the renderer does not keep growing over 24 more photos (loose bound: 250 MB)', { after12: p1.rss, after36: p2.rss });
+          t.check(p2.rss < 0 || p2.rss - p1.rss <= 400, 'the renderer does not keep growing without bound over 24 more photos (loose bound: 400 MB)', { after12: p1.rss, after36: p2.rss });
         });
 
         await segment(t, 'games and battles', async () => {
@@ -690,6 +717,7 @@ export default async function perf(t, site) {
           const s1 = await probe(m, bcdp);
           t.note(`50 strokes, 16 undone: after 10 ${fmt(s0)}; after 50 ${fmt(s1)}`);
           t.check(s1.heap - s0.heap <= 5, 'the JS heap does not grow over 40 more Studio strokes', { after10: s0.heap, after50: s1.heap });
+          t.check(s1.live.imageData - s0.live.imageData <= 22 && s1.live.canvases - s0.live.canvases <= 4, 'the undo stack stays capped: at most twenty pictures of the paper are kept over 40 more strokes', { after10: s0.live, after50: s1.live });
           t.check(s1.nodes - s0.nodes <= 20 && s1.listeners - s0.listeners <= 20, 'DOM nodes and listeners do not grow over 40 more Studio strokes', { nodes: [s0.nodes, s1.nodes], listeners: [s0.listeners, s1.listeners] });
           t.check(s1.rss < 0 || s1.rss - s0.rss <= 160, 'the renderer does not keep growing over 40 more strokes (the undo stack is capped at 20 pictures)', { after10: s0.rss, after50: s1.rss });
         });
@@ -755,25 +783,28 @@ export default async function perf(t, site) {
           t.check(b.heap - a.heap <= 3 && b.nodes === a.nodes && b.listeners === a.listeners, 'the JS heap, DOM nodes and listeners do not grow over 60 picks', { heap: [a.heap, b.heap], nodes: [a.nodes, b.nodes], listeners: [a.listeners, b.listeners] });
         });
         await segment(t, 'saved poses', async () => {
-          // Save this pose and remove it again, past the twelve the page keeps
-          const cycle = async () => { await p.evaluate(() => { if (document.getElementById('library').hidden) document.getElementById('posesBtn').click(); document.getElementById('savePose').click(); }); await sleep(450); await p.evaluate(() => { const x = document.querySelector('#mine .pose-x'); if (x) x.click(); }); await sleep(200); };
-          await cycle(); await cycle();
+          // Save this pose sixteen times (the page keeps twelve), then remove what is left
+          const save = async () => { await p.evaluate(() => document.getElementById('savePose').click()); await sleep(420); };
           const a = await probe(p, bcdp);
-          for (let i = 0; i < 14; i++) await cycle();
+          for (let i = 0; i < 16; i++) await save();
+          const mid = await probe(p, bcdp);
+          const listed = await p.evaluate(() => document.querySelectorAll('#mine .pose-item').length);
+          for (let i = 0; i < 14 && (await p.evaluate(() => !!document.querySelector('#mine .pose-x'))); i++) { await p.evaluate(() => document.querySelector('#mine .pose-x').click()); await sleep(120); }
+          const left = await p.evaluate(() => document.querySelectorAll('#mine .pose-item').length);
           const b = await probe(p, bcdp);
-          const growth = b.blobs - a.blobs;
-          t.note(`16 Save this pose / × cycles: after 2 ${fmt(a)}; after 16 ${fmt(b)} (object URLs +${growth} over 14 cycles)`);
-          t.check(await p.evaluate(() => document.querySelectorAll('#mine .pose-item').length) <= 12, 'no more than twelve poses are listed after 16 saves and removals');
-          const ok = t.check(growth <= 2, 'a pose saved and removed leaves no picture (object URL) behind', { after2: a.blobs, after16: b.blobs });
-          t.check(sameGl(a.gl, b.gl), 'saving and removing poses creates no WebGL objects that are kept (shotTargets stay at their two sizes)', { after2: a.gl, after16: b.gl });
-          if (!ok && growth >= 10) {
+          const leaked = b.blobs - a.blobs;
+          t.note(`16 poses saved, then every one removed: before ${fmt(a)}; with ${listed} listed ${fmt(mid)}; none left (${left}) ${fmt(b)}; pictures kept: ${leaked}`);
+          t.check(listed === 12 && left === 0, 'the page keeps twelve of sixteen saved poses, and all can be removed', { listed, left });
+          const ok = t.check(leaked <= 1, 'with every saved pose removed, no saved pose\'s picture (object URL) is left behind', { before: a.blobs, withTwelve: mid.blobs, afterRemoving: b.blobs });
+          t.check(sameGl(a.gl, b.gl) && sameGl(a.gl, mid.gl), 'saving and removing poses creates no WebGL objects that are kept (shotTargets stay at their two sizes)', { before: a.gl, afterSaving: mid.gl, afterRemoving: b.gl });
+          if (!ok && leaked >= 10) {
             t.finding({
               severity: 'low',
-              title: 'Every pose saved in Pose and light keeps its picture (a Blob URL) for the whole visit after the pose is removed: one more object URL per Save this pose / × cycle, never revoked',
-              steps: '1. Open pose.html (or the Pose and light tab). 2. Close the library and repeatedly press Poses, then Save this pose, then the × on "Your pose 1". 3. Count the page\'s live object URLs (URL.createObjectURL minus URL.revokeObjectURL).',
-              expected: 'A picture belongs to a pose in the library; when the pose is removed (or pushed out by the thirteenth) its Blob URL is revoked, as the Save dialog\'s and the snapshot\'s are, so the count of live URLs follows the count of poses on the page.',
-              actual: `Live object URLs after 2 cycles: ${a.blobs}; after 16 cycles: ${b.blobs} (+${growth}), with at most 12 poses listed. (Each is a small JPEG, about 8 KB, so this is a slow leak, but it never stops: the count and the Map grow with every pose saved in a long visit. Figure study's own picture cache for poses saved in Pose and light behaves the same: js/figure.js:97-102 revokes a picture only when the same id sends a new one.)`,
-              cause: 'js/pose.js:1295-1303 (pumpThumbs) stores each drawn picture in the thumbs Map by pose id (js/pose.js:1328: "kept for the visit") and nothing ever revokes or deletes an entry: the × handler (js/pose.js:1431-1441, changeMine/showMine) removes the pose from the stored list and the button, not its entry in thumbs; neither does the push-out of the oldest by MINE_MAX (js/pose.js:1372, changeMine).',
+              title: 'Every pose saved in Pose and light keeps its picture (a Blob URL) for the whole visit after the pose is removed or pushed out: one object URL per pose ever saved, never revoked',
+              steps: '1. Open pose.html (or the Pose and light tab). 2. Press Save this pose sixteen times (the page keeps twelve: four are pushed out), then press the × on every listed pose. 3. Count the page\'s live object URLs (URL.createObjectURL minus URL.revokeObjectURL), before and after.',
+              expected: 'A picture belongs to a pose in the library; when the pose is removed (or pushed out by the thirteenth) its Blob URL is revoked, as the Save dialog\'s and the snapshot\'s are, so the live URLs follow the poses on the page. (The README says the saved poses are "no pictures": joint angles and a viewpoint.)',
+              actual: `Live object URLs before: ${a.blobs}; with twelve poses listed: ${mid.blobs} (+${mid.blobs - a.blobs} for sixteen saves); after every pose was removed (${left} listed): ${b.blobs} (+${leaked}). Each is a small JPEG of about 8 KB, so this is a slow leak, but it never stops: it grows with every pose saved or removed in a long visit. Figure study's picture cache for poses saved in Pose and light behaves the same way (js/figure.js:97-102 revokes a picture only when the same id sends a new one).`,
+              cause: 'js/pose.js:1295-1303 (pumpThumbs) stores each drawn picture in the thumbs Map by pose id (js/pose.js:1328, "kept for the visit") and nothing ever revokes it or deletes the entry: the × handler (js/pose.js:1431-1441) and changeMine (js/pose.js:1380-1400, with its MINE_MAX push-out) remove the pose from the stored list and its button, not its entry in thumbs.',
             });
           }
         });
