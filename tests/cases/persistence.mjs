@@ -391,16 +391,14 @@ seg('studio', 60, async (t, site, pages) => {
       await waitRecord(page, (r) => r.savedAt > Date.now() - 4000);
     }
   }
-  const lostAtOnce = trials[0].top === 0, lostSoon = trials[300].top === 0;
-  t.check(!lostAtOnce || !lostSoon || true, 'measured');
   t.note(`a stroke followed by a reload: after 0 ms the stroke ${trials[0].top > 0 ? 'was kept' : 'was lost'}, after 300 ms ${trials[300].top > 0 ? 'was kept' : 'was lost'}, after 900 ms ${trials[900].top > 0 ? 'was kept' : 'was lost'}, after 2500 ms ${trials[2500].top > 0 ? 'was kept' : 'was lost'}`);
   t.check(trials[0].top > 0 && trials[300].top > 0, 'a stroke made less than a second before the page goes (a reload, a closed tab) is still saved: the README says a closed tab loses nothing', trials);
-  if (trials[0].top === 0 && trials[300].top === 0 && trials[900].top === 0) t.finding({
+  if (trials[0].top === 0 && trials[300].top === 0) t.finding({
     title: 'A stroke made less than about a second before a reload or a closed tab is lost: the save on pagehide never finishes',
     severity: 'low',
     steps: '1. Open the Studio (index.html#paint) and paint a stroke across the paper; wait two seconds (it is saved). 2. Paint a second stroke and reload the page (or close the tab) at once, 300 ms after the stroke, or 900 ms after it. 3. Open the Studio again.',
     expected: 'README, Simple and Advanced: "The Studio keeps your work: the paper, the underdrawing, ... are saved in the browser a moment after each change ... and come back on the next visit"; the Help tab: "Close the tab, come back later, and it is still there." js/painting.js says the page saves what is waiting as it goes (pagehide), "so a closed tab ... loses nothing".',
-    actual: `The second stroke is gone after the reload when the page goes 0, 300 or 900 ms after it (bottom stroke kept whole in every case; the stroke after 2.5 s is kept). The first stroke, saved before, is intact (${J(trials)}).`,
+    actual: `The second stroke is gone after the reload when the page goes 0 or 300 ms after it${trials[900].top === 0 ? ' or 900 ms after it' : ' (and, on a busy machine, 900 ms after it)'}; the stroke is kept when the page goes 2.5 s after it, and the painting saved before is intact in every case: ${J(trials)}.`,
     cause: 'js/painting.js saveNowIfDue (about 528) answers pagehide by calling saveNow, but saveNow awaits two canvas.toBlob() encodings and then an IndexedDB write (about 474-480); a page that is unloading does not stay alive for them, so the record is never written. A save already under way (the 800 ms delay has passed, the PNGs are being encoded) is cut off the same way. Taking the pixels synchronously at pagehide (getImageData, put into the record as ImageData) or encoding after every stroke ends would keep it.',
   });
 
@@ -504,10 +502,19 @@ seg('twotabs', 70, async (t, site, pages) => {
   await tab(a, 'figure', { wait: false }); await tab(b, 'figure', { wait: false });
   for (const p of [a, b]) await app(p).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
   await click(a, '#tab-figure [data-pose-id="stand"]');
+  await app(a).waitForFunction((k) => (JSON.parse(localStorage.getItem(k) || '{}').out || []).includes('stand'), P + 'figureStudy', { timeout: 4000 }).catch(() => null);
   await click(b, '#tab-figure [data-pose-id="walk"]');
+  await app(b).waitForFunction((k) => (JSON.parse(localStorage.getItem(k) || '{}').out || []).includes('walk'), P + 'figureStudy', { timeout: 4000 }).catch(() => null);
   const fs = JSON.parse(await storageGet(a, P + 'figureStudy') || '{}');
   t.check(J((fs.out || []).slice().sort()) === J(['stand', 'walk']), 'the poses taken out of the Figure class in two tabs are both out', fs);
-  t.note(`the Figure class's poses taken out in two tabs: ${J(fs.out)} is what is kept (each tab writes the set it holds)`);
+  if (fs.out && fs.out.length === 1 && fs.out[0] === 'walk') t.finding({
+    title: 'Poses taken out of the Figure class in one tab are put back by a second tab that was open before',
+    severity: 'low',
+    steps: '1. Open the site in tab A and in tab B and open Figure study in both. 2. In tab A tap Stand to take it out of the class. 3. In tab B tap Walk to take it out. 4. Read localStorage portrait-value-studio.figureStudy, or reload tab A.',
+    expected: 'README, Privacy: the Figure study class "(Relaxed or Timed, the time a pose gets, the poses taken out)" is kept; both poses stay out, as the picked colors and the paints ticked follow every tab.',
+    actual: `figureStudy holds ${J(fs)}: Stand is back in the class, with no sign to tab A.`,
+    cause: 'js/figure.js showSetup (about 205) writes the whole Set of poses taken out that this tab holds (kept = load() is read once, at line 133), without reading what the other tab saved.',
+  });
   await clean(t, a, 'twotabs: A'); await clean(t, b, 'twotabs: B');
 });
 
@@ -533,6 +540,138 @@ seg('gamesetup', 30, async (t, site, pages) => {
   });
   await clean(t, page, 'gamesetup');
 });
+
+
+// ---- segment: full and blocked ----------------------------------------------------------------------------------------------------
+// Every write site with the storage full (a real quota: localStorage filled until any write throws, and a database that refuses
+// the painting with QuotaExceededError) and blocked (localStorage throws SecurityError on access, IndexedDB refuses to open): the
+// page keeps working for the visit, the Studio and Value battle say that nothing is kept, and what was saved before is not harmed.
+const INIT = {
+  full: () => { IDBObjectStore.prototype.put = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; },
+  blocked: () => {
+    Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Access is denied for this document.', 'SecurityError'); }, configurable: true });
+    IDBFactory.prototype.open = function () { throw new DOMException('Access to the Indexed Database API is denied in this context.', 'SecurityError'); };
+  },
+};
+for (const kind of ['full', 'blocked']) {
+  seg(kind, 75, async (t, site, pages) => {
+    const page = await open(pages, site);
+    await appUp(page);
+    const L = `storage ${kind}`;
+    const SEEDED = { [P + 'mode']: 'advanced', [P + 'lean']: '40', [P + 'palette']: [{ r: 9, g: 8, b: 7 }] };
+    if (kind === 'full') {
+      await put(page, SEEDED);
+      const f = await fillStorage(page);
+      t.check(f.full, 'the storage could be filled until every write throws', f);
+    }
+    await page.addInitScript(INIT[kind]);
+    await reload(page);
+    // -- the Study tab's writes
+    if (kind === 'full') t.check(await app(page).evaluate(() => !document.body.classList.contains('mode-simple')), `${L}: what was saved before (Advanced) is read back from the full storage`);
+    await click(page, '[data-mode="simple"]');
+    t.check(await app(page).evaluate(() => document.body.classList.contains('mode-simple')) && (await pressed(page, '[data-mode="simple"]')) === 'true', `${L}: the Simple switch still works for this visit`);
+    await click(page, '[data-mode="advanced"]');
+    await setRange(page, 'lean', 70);
+    t.check((await text(page, '#leanOut')) === '70%' && (await val(page, '#lean')) === '70', `${L}: the lean slider still moves, and reads 70%`, await text(page, '#leanOut'));
+    await click(page, '[data-block-view="palette"]');
+    t.check((await pressed(page, '[data-block-view="palette"]')) === 'true', `${L}: the block view still switches to the palette`);
+    await click(page, '#drawer-swatches > summary');
+    t.check(await app(page).evaluate(() => document.getElementById('drawer-swatches').open), `${L}: a drawer still opens`);
+    await app(page).evaluate(() => Studio.addColor({ r: 200, g: 10, b: 20 }, false));
+    const sw = await app(page).evaluate(() => [...document.querySelectorAll('#swatches .swatch-meta span:first-child')].map((s) => s.textContent));
+    t.check(sw.includes('#C80A14'), `${L}: a picked color is listed for this visit`, sw);
+    await app(page).evaluate(() => { const s = document.getElementById('canvasSize'); s.value = '8.5'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+    t.check((await val(page, '#canvasSize')) === '8.5' && !(await toastNow(page)).match(/went wrong/), `${L}: the unit on my canvas takes a length`, await toastNow(page));
+    await app(page).evaluate(() => { const s = document.getElementById('paintAddPreset'); s.value = 'zorn'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+    t.check(/4/.test(await text(page, '#mineCount')), `${L}: ticking a known palette's paints ticks them for this visit`, await text(page, '#mineCount'));
+    // -- Value battle: a streak of one, then a miss. "New best!" says it is for this visit only
+    const vb = await battleStreak(page, 1);
+    t.check(vb.popup && /^New best! \(this visit only\)$/.test(vb.newBest), `${L}: Value battle's score says the best is for this visit only`, vb);
+    await click(page, '#vb-settings'); await sleep(300);
+    const best = await text(page, '#vb-best');
+    t.check(/^Your best streak here: 1 in a row\.$/.test(best), `${L}: the setup still shows the best of this visit`, best);
+    // -- Paint by numbers: every number mixed from all the paints, then locked in
+    await tab(page, 'game');
+    const g = await gameLock(page, { paint: true });
+    t.check(g.popup && Number(g.pct) >= 0, `${L}: Paint by numbers locks in and scores`, g);
+    t.note(`${L}: Paint by numbers' score card reads "${g.newBest || '(no New best)'}" and ${g.notes ? 'says' : 'does not say'} that the best is not kept`);
+    if (g.newBest && !g.notes) t.finding({
+      title: `Paint by numbers shows "New best!" with no sign that the best could not be kept (storage ${kind}), where Value battle says "(this visit only)"`,
+      severity: 'low',
+      steps: `1. Make the browser's storage ${kind === 'full' ? 'full (another site or tab has used the quota)' : 'unavailable (site data blocked)'}. 2. Open Games, Paint by numbers, tap every number and every paint once, and lock in the portrait. 3. Read the score card, then reload and open the setup.`,
+      expected: 'The score card tells the visitor the best is not kept, as Value battle\'s does ("New best! (this visit only)", js/battle.js 475) and as the Studio and Pose and light say what they cannot keep; the README says "best scores" are kept in the browser.',
+      actual: `The card reads "${g.newBest}" and nothing else about storage; after a reload the setup shows no best for the portrait.`,
+      cause: 'js/game.js 1345 calls save(BEST_KEY, bests) and drops its result (save, line 108, returns nothing on a refused write, unlike battle.js save, line 35, which returns false and finish() shows in els.newBest).',
+    });
+    await gameBack(page);
+    // -- Figure study: the class setup
+    await tab(page, 'figure', { wait: false });
+    await app(page).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
+    await click(page, '#fig-timed'); await click(page, '#tab-figure [data-pose-id="stand"]');
+    t.check(await app(page).evaluate(() => document.getElementById('fig-timed').checked && document.querySelector('#tab-figure [data-pose-id="stand"]').getAttribute('aria-pressed') === 'false' && !document.getElementById('fig-start').disabled), `${L}: Figure study's setup still takes a change, and Start is there`);
+    // -- the Studio: a stroke, then a locked mix; the painting cannot be kept and the Studio says so, once
+    await openStudio(page);
+    await app(page).evaluate(() => { const e = document.getElementById('toast'); e.textContent = ''; e.classList.remove('show'); });
+    await line(page, 0.8);
+    t.check((await band(page, ...BOTTOM)) > 100, `${L}: the Studio still paints`);
+    const said = await app(page).waitForFunction(() => /could not be saved|cannot be saved/.test(document.getElementById('toast').textContent), null, { timeout: 6000 }).then(() => text(page, '#toast')).catch(() => null);
+    const wantSaid = kind === 'full' ? /The painting could not be saved: browser storage is full\. It stays for this visit only\./ : /The painting could not be saved in this browser\. It stays for this visit only\./;
+    t.check(!!said && wantSaid.test(said), `${L}: the Studio says the painting could not be kept, and why`, said);
+    await app(page).evaluate(() => { const e = document.getElementById('toast'); e.textContent = ''; e.classList.remove('show'); });
+    await line(page, 0.2); await sleep(2500);
+    t.check(!/could not be saved/.test(await toastNow(page)), `${L}: and says it once a visit, not on every stroke`, await toastNow(page));
+    const mixes = await lockMix(page, 1);
+    t.check(mixes === 9, `${L}: a mix can be locked in for this visit`, mixes);
+    await clean(t, page, L);
+    // -- what was there before is not harmed, and nothing is written behind the failure
+    const other = await newTab(site, page);
+    if (kind === 'full') {
+      await dropFiller(other);
+      const back = await dumpOf(other);
+      t.check(back[P + 'mode'] === 'advanced' && back[P + 'lean'] === '40' && back[P + 'palette'] === J([{ r: 9, g: 8, b: 7 }]), `${L}: the values saved before the storage was full are as they were (Advanced, lean 40, one picked color)`, back);
+    } else {
+      t.check((await siteKeys(other)).length === 0, `${L}: nothing the site wrote while it was blocked reached the storage`, await siteKeys(other));
+      t.check((await record(other)) === null, `${L}: nor a painting in the database`);
+    }
+    await clean(t, other, `${L}: a tab opened after`);
+  });
+}
+
+// ---- segment: poseStorage -----------------------------------------------------------------------------------------------------------
+for (const kind of ['full', 'blocked']) {
+  seg('pose-' + kind, 40, async (t, site, pages) => {
+    const page = await open(pages, site, { url: 'pose.html' });
+    await page.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+    const L = `Pose and light, storage ${kind}`;
+    if (kind === 'full') {
+      await page.evaluate(() => { document.querySelector('#poses .pose-btn[data-id="wave"]').click(); document.getElementById('savePose').click(); });
+      const f = await fillStorage(page);
+      t.check(f.full, `${L}: the storage could be filled until every write throws`, f);
+    } else await page.addInitScript(INIT.blocked);
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+    const fresh = await page.evaluate(() => ({ cont: !document.getElementById('continueWrap').hidden, mine: document.querySelectorAll('#mine .pose-item').length }));
+    if (kind === 'full') t.check(fresh.cont && fresh.mine === 1, `${L}: the pose and the saved pose from before are read from the full storage`, fresh);
+    await page.evaluate(() => document.querySelector('#poses .pose-btn[data-id="run"]').click());
+    const note = await page.evaluate(() => { const n = document.getElementById('keepNote'); return { shown: !n.hidden, text: n.textContent }; });
+    const wantNote = kind === 'full' ? /^This pose could not be kept for next time: browser storage is full\.$/ : /^This pose cannot be kept for next time: this browser does not let the site keep it\.$/;
+    t.check(note.shown && wantNote.test(note.text), `${L}: the rail says the pose cannot be kept for next time, and why`, note);
+    t.check(await page.evaluate(() => PoseAndLight.pose.hipR.x < -40), `${L}: the figure takes the pose for this visit`);
+    await page.evaluate(() => document.getElementById('savePose').click());
+    const btn = await page.evaluate(() => document.getElementById('savePose').textContent);
+    t.check(btn === `In the library for this visit only: ${kind === 'full' ? 'storage is full' : 'storage is off'}`, `${L}: Save this pose says it is in the library for this visit only`, btn);
+    const lib = await page.evaluate(() => ({ mine: document.querySelectorAll('#mine .pose-item').length, note: document.getElementById('libNote').textContent }));
+    t.check(lib.mine === (kind === 'full' ? 2 : 1), `${L}: the pose is in the library for this visit`, lib);
+    t.check(/(could not be saved: browser storage is full|kept for this visit only: this browser does not let the site keep them)/.test(lib.note), `${L}: the library says why the poses are for this visit only`, lib.note);
+    await page.evaluate(() => document.querySelector('#mine .pose-x').click());
+    t.check(await page.evaluate(() => document.querySelectorAll('#mine .pose-item').length) === (kind === 'full' ? 1 : 0), `${L}: a saved pose can still be removed`);
+    await page.evaluate(() => document.querySelector('[data-mode="advanced"]').click());
+    t.check(await page.evaluate(() => PoseAndLight.mode()) === 'advanced', `${L}: the mode switch still works for this visit`);
+    const other = await newTab(site, page, { url: 'pose.html' });
+    if (kind === 'full') { await dropFiller(other); const k = await siteKeys(other); t.check(k.includes(PL + 'mine.v1'), `${L}: the poses saved before are still saved`, k); }
+    await clean(t, page, L); await clean(t, other, `${L}: a tab opened after`);
+  });
+}
 
 
 export default async function persistence(t, site) {
