@@ -678,6 +678,211 @@ for (const kind of ['full', 'blocked']) {
 }
 
 
+// ---- segment: forget --------------------------------------------------------------------------------------------------------------
+// Forget my work on this device, with every kind of thing kept and three tabs of the site open (the app twice, Pose and light on its own page)
+seg('forget', 60, async (t, site, pages) => {
+  const a = await open(pages, site);
+  await appUp(a);
+  await put(a, { ...OLD, [P + 'mode']: 'advanced', [P + 'palette']: [{ r: 1, g: 2, b: 3 }], [P + 'battleBest']: { 'zorn:mix:streak': 5 }, [P + 'gameBest']: { 'sample-study:600x750|medium|zorn': 640 },
+    [PL + 'v2']: { pose: { shoulderL: { z: 90 } }, light: { az: 100, el: 20 } }, [PL + 'mine.v1']: [{ id: 'mine-1', p: { kneeR: { x: 40 } } }], [PL + 'mode']: 'advanced' });
+  await reload(a);
+  await openStudio(a);
+  await line(a, 0.8); await lockMix(a, 1);
+  const painted = await waitRecord(a, (r) => r.savedAt > Date.now() - 600000 && r.paper);
+  const b = await newTab(site, a);
+  await appUp(b); await tab(b, 'game', { wait: false });
+  const c = await newTab(site, a, { url: 'pose.html' });
+  await c.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  const before = await siteKeys(a);
+  t.check(!!painted && before.length >= 20 && before.includes(P + 'paintMixes') && before.includes(PL + 'v2'), 'before Forget: the painting is saved and the site holds a key of every kind', { keys: before.length, painted: !!painted });
+  t.check(await c.evaluate(() => !document.getElementById('continueWrap').hidden && document.querySelectorAll('#mine .pose-item').length === 1), 'before Forget: Pose and light offers Where you left off and holds a saved pose');
+  await tab(a, 'help');
+  await click(a, '#forgetBtn');
+  await a.waitForFunction(() => /again/i.test(document.getElementById('forgetBtn').textContent), null, { timeout: 3000 }).catch(() => null);
+  const armed = await text(a, '#forgetBtn');
+  await Promise.all([
+    a.waitForNavigation({ waitUntil: 'load', timeout: 25000 }).catch(() => 'A did not reload'),
+    b.waitForNavigation({ waitUntil: 'load', timeout: 25000 }).catch(() => 'B did not reload'),
+    c.waitForNavigation({ waitUntil: 'load', timeout: 25000 }).catch(() => 'C did not reload'),
+    click(a, '#forgetBtn'),
+  ]).then((r) => { t.check(r.slice(0, 3).every((x) => !x || typeof x === 'object'), 'Forget in one tab reloads it, the other tab of the app and the Pose and light page', r.slice(0, 3).map((x) => (x && typeof x === 'object' ? 'reloaded' : x))); });
+  t.check(/again/i.test(armed), 'the first tap only arms the button', armed);
+  await appUp(a); await appUp(b);
+  await c.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  await sleep(1500);
+  for (const [name, pg] of [['this tab', a], ['the other tab of the app', b], ['the Pose and light tab', c]]) t.check((await keysOf(pg)).length === 0, `after Forget no key remains, ${name} included`, await keysOf(pg));
+  t.check((await record(a)) === null, 'after Forget the saved painting is gone from the database');
+  await openStudio(a);
+  t.check((await band(a, ...BOTTOM)) === 0 && (await mixCount(a)) === 8, 'after Forget the Studio opens on a blank paper with only its eight starting mixes', [await band(a, ...BOTTOM), await mixCount(a)]);
+  t.check(await c.evaluate(() => document.getElementById('continueWrap').hidden && document.querySelectorAll('#mine .pose-item').length === 0 && PoseAndLight.mode() === 'simple'), 'after Forget Pose and light has no pose to continue, no saved pose and is in Simple');
+  t.check(await app(a).evaluate(() => document.body.classList.contains('mode-simple')) && await app(b).evaluate(() => document.body.classList.contains('mode-simple')), 'after Forget both tabs of the app are in Simple');
+  t.check(await app(b).evaluate(() => document.getElementById('tab-study') && !document.getElementById('tab-study').hidden), 'the tab that was on Paint by numbers starts again on the Study tab');
+  const dbs = await dbNames(a);
+  t.note(`after Forget and the reload the Studio opens its database again: indexedDB.databases() lists ${J(dbs)} (empty, with no painting in it)`);
+  await clean(t, a, 'forget: this tab'); await clean(t, b, 'forget: the other tab'); await clean(t, c, 'forget: Pose and light');
+});
+
+// ---- segment: midway --------------------------------------------------------------------------------------------------------------
+seg('midway', 75, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await appUp(page);
+  // -- a Studio stroke with the pointer still down
+  await openStudio(page);
+  await line(page, 0.8);
+  const base = await waitRecord(page, (r) => r.savedAt > Date.now() - 600000 && r.paper);
+  const full = await band(page, ...BOTTOM);
+  const box = await app(page).evaluate(() => { const r = document.getElementById('ps-paper').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  await page.mouse.move(box.x + box.w * 0.2, box.y + box.h * 0.2); await page.mouse.down();
+  await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.2, { steps: 6 });
+  await page.reload({ waitUntil: 'load' }); await page.mouse.up();
+  await appUp(page); await openStudio(page);
+  t.check(!!base && (await band(page, ...BOTTOM)) > full * 0.9, 'a reload with the pointer still down mid-stroke leaves the saved painting whole', [full, await band(page, ...BOTTOM)]);
+  const topNow = await band(page, ...TOP);
+  t.check(topNow === 0 || topNow > 100, 'and the stroke that was being made is whole or not there, never a fragment', topNow);
+  t.check(!/could not be read|went wrong/i.test(await toastNow(page)), 'and the Studio opens without a complaint', await toastNow(page));
+  // -- Paint by numbers in play
+  const keysBefore = await dumpOf(page);
+  await tab(page, 'game'); await gameReady(page);
+  await setSelect(page, 'gameMode', 'relaxed');
+  await click(page, '#gameStart');
+  await app(page).waitForFunction(() => !document.getElementById('gamePlay').hidden && document.querySelectorAll('#gameNumbers .game-number').length > 0, null, { timeout: 40000 });
+  await app(page).evaluate(() => { const n = document.querySelector('#gameNumbers .game-number'); n.click(); document.querySelectorAll('#gamePaints button').forEach((b) => b.click()); });
+  await reload(page);
+  const afterGame = await dumpOf(page);
+  t.check(!(P + 'gameBest' in afterGame), 'a reload in the middle of a game writes no best for it', afterGame[P + 'gameBest']);
+  t.check(afterGame[P + 'gameLevel'] === '"medium"' && /^"[a-z-]+"$/.test(afterGame[P + 'gamePalette'] || ''), 'the level and palette the game was started with are what is kept', { level: afterGame[P + 'gameLevel'], palette: afterGame[P + 'gamePalette'] });
+  t.check(await app(page).evaluate(() => !document.getElementById('tab-study').hidden && !document.body.classList.contains('game-focus')), 'the page comes back on the Study tab, out of the game\'s full-screen layout');
+  await tab(page, 'game'); await gameReady(page);
+  t.check(await app(page).evaluate(() => !document.getElementById('gameSetup').hidden && document.getElementById('gamePlay').hidden), 'and Paint by numbers opens on its setup, with Start painting ready');
+  // -- Value battle in a streak
+  await tab(page, 'battle');
+  await click(page, '#vb-start');
+  await app(page).waitForFunction(() => { const g = window.ValueBattle && ValueBattle.state(); return g && g.i === 0 && !document.getElementById('vb-play').hidden; }, null, { timeout: 8000 });
+  await battleAnswer(page, true); await click(page, '#vb-next'); await battleAnswer(page, true);
+  await reload(page);
+  t.check(!((P + 'battleBest') in (await dumpOf(page))), 'a reload in the middle of a streak of two writes no best for it (the streak is not over)', (await dumpOf(page))[P + 'battleBest']);
+  await tab(page, 'battle');
+  t.check(await app(page).evaluate(() => !document.getElementById('vb-setup').hidden && document.getElementById('vb-play').hidden && !document.body.classList.contains('battle-focus') && /^No streak yet/.test(document.getElementById('vb-best').textContent)), 'Value battle opens on its setup, out of its pinned board, with no streak yet');
+  // -- a Figure study class under way
+  await tab(page, 'figure', { wait: false });
+  await app(page).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
+  await click(page, '#fig-timed'); await click(page, '#fig-t60');
+  const figKeys = await dumpOf(page);
+  await click(page, '#fig-start');
+  const inClass = await app(page).waitForFunction(() => document.body.classList.contains('figure-focus') && !!document.querySelector('#fs-paper'), null, { timeout: 45000 }).then(() => true).catch(() => false);
+  if (inClass) { await sleep(1500); await stroke(page, '#fs-paper'); await sleep(1200); }
+  t.check(inClass, 'a Figure study class starts (the pose is drawn and the paper is up)');
+  await reload(page);
+  t.check(await app(page).evaluate(() => !document.body.classList.contains('figure-focus')), 'a reload in the middle of a class comes back out of the class');
+  await tab(page, 'figure', { wait: false });
+  await app(page).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
+  t.check(await app(page).evaluate(() => document.getElementById('fig-timed').checked && document.getElementById('fig-t60').checked && !document.getElementById('fig-setup').hidden), 'Figure study opens on its setup, still Timed at a minute a pose');
+  await openStudio(page);
+  t.check((await band(page, ...BOTTOM)) > full * 0.9, 'the class\'s drawing did not touch the Studio\'s painting', await band(page, ...BOTTOM));
+  const rec = await record(page);
+  t.check(!!rec && rec.w === base.w && rec.h === base.h, 'and the Studio\'s record is the one saved before', rec);
+  // -- Pose and light with a drag under way
+  const pose = await newTab(site, page, { url: 'pose.html' });
+  await pose.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  await pose.evaluate(() => document.querySelector('#poses .pose-btn[data-id="wave"]').click());
+  await sleep(400);
+  const wave = await pose.evaluate(() => JSON.stringify(PoseAndLight.pose));
+  const hand = await pose.evaluate(() => { PoseAndLight.render(); const c = PoseAndLight.ctrls().find((x) => x.id === 'handR'); return c && c.center; });
+  const vb = await pose.locator('#view').boundingBox();
+  await pose.mouse.move(vb.x + hand.x, vb.y + hand.y); await pose.mouse.down();
+  await pose.mouse.move(vb.x + hand.x + 90, vb.y + hand.y - 120, { steps: 8 });
+  const mid = await pose.evaluate(() => JSON.stringify(PoseAndLight.pose));
+  t.check(mid !== wave, 'the pose is moving under the pointer when the page is reloaded', { moved: mid !== wave });
+  await pose.reload({ waitUntil: 'load' }); await pose.mouse.up();
+  await pose.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  const back = await pose.evaluate(() => ({ pose: JSON.stringify(PoseAndLight.pose), cont: !document.getElementById('continueWrap').hidden, keep: document.getElementById('keepNote').hidden }));
+  t.check(back.cont && back.pose === wave, 'Pose and light comes back with the pose that was last let go of (Where you left off), not the half-dragged one', { cont: back.cont, same: back.pose === wave });
+  await clean(t, page, 'midway'); await clean(t, pose, 'midway: Pose and light');
+});
+
+// ---- segment: limits --------------------------------------------------------------------------------------------------------------
+// The README: only the fifty most recently played boards keep a best (Paint by numbers; Value battle keeps its settings the same way);
+// up to twelve saved poses. At the limit, one past it, and a board played again.
+const fifty = (n, mk) => Object.fromEntries(Array.from({ length: n }, (_, i) => [mk(i), 100 + i]));
+seg('limits-game', 70, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await appUp(page);
+  await put(page, { [P + 'gameBest']: fifty(49, (i) => `old-${i}.jpg:100x100|medium|zorn`), [P + 'gameMode']: '"relaxed"' });
+  await reload(page);
+  await tab(page, 'game'); await gameReady(page);
+  const g1 = await gameLock(page);
+  let bests = JSON.parse(await storageGet(page, P + 'gameBest')); let ks = Object.keys(bests);
+  const first = ks[ks.length - 1];
+  t.check(g1.popup && ks.length === 50 && ks.slice(0, 49).every((k, i) => k === `old-${i}.jpg:100x100|medium|zorn`), 'with 49 boards kept, a fiftieth is added and none is dropped', { n: ks.length, last: first });
+  await gameBack(page); await click(page, '#gameEasy'); await gameReady(page);
+  const g2 = await gameLock(page);
+  bests = JSON.parse(await storageGet(page, P + 'gameBest')); ks = Object.keys(bests);
+  t.check(g2.popup && ks.length === 50 && !ks.includes('old-0.jpg:100x100|medium|zorn') && ks.includes('old-1.jpg:100x100|medium|zorn') && ks.includes(first) && /\|easy\|/.test(ks[ks.length - 1]), 'with fifty kept, a fifty-first board played drops the oldest one only and keeps the rest', { n: ks.length, head: ks.slice(0, 2), tail: ks.slice(-2) });
+  await gameBack(page); await click(page, '#gameMedium'); await gameReady(page);
+  const g3 = await gameLock(page);
+  bests = JSON.parse(await storageGet(page, P + 'gameBest')); ks = Object.keys(bests);
+  t.check(g3.popup && ks.length === 50 && ks.includes('old-1.jpg:100x100|medium|zorn') && ks[ks.length - 1] === first, 'a board played again is the most recent again, and drops nothing', { n: ks.length, head: ks.slice(0, 2), tail: ks.slice(-2) });
+  t.check(Object.values(bests).every((v) => Number.isInteger(v)), 'every best kept is still a whole number of points', Object.values(bests).filter((v) => !Number.isInteger(v)));
+  await clean(t, page, 'limits: Paint by numbers');
+});
+seg('limits-battle', 50, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await appUp(page);
+  await put(page, { [P + 'battleBest']: fifty(49, (i) => `p${i}:2:streak`) });
+  await reload(page);
+  const v1 = await battleStreak(page, 1);
+  let bests = JSON.parse(await storageGet(page, P + 'battleBest')); let ks = Object.keys(bests);
+  t.check(v1.popup && ks.length === 50 && ks.includes('p0:2:streak') && ks[49] === 'zorn:mix:streak', 'Value battle: with 49 kept, a fiftieth is added and none is dropped', { n: ks.length, last: ks[ks.length - 1] });
+  await click(page, '#vb-settings'); await click(page, '#vbCount3'); await sleep(200);
+  const v2 = await battleStreak(page, 1);
+  bests = JSON.parse(await storageGet(page, P + 'battleBest')); ks = Object.keys(bests);
+  t.check(v2.popup && ks.length === 50 && !ks.includes('p0:2:streak') && ks.includes('p1:2:streak') && ks[49] === 'zorn:3:streak', 'Value battle: a fifty-first setting played drops the oldest only', { n: ks.length, head: ks.slice(0, 2), tail: ks.slice(-2) });
+  await click(page, '#vb-settings'); await click(page, '#vbCountMix'); await sleep(200);
+  const v3 = await battleStreak(page, 1);
+  bests = JSON.parse(await storageGet(page, P + 'battleBest')); ks = Object.keys(bests);
+  t.check(v3.popup && ks.length === 50 && ks.includes('p1:2:streak') && ks[49] === 'zorn:mix:streak', 'Value battle: a setting played again is the most recent again and drops nothing', { n: ks.length, tail: ks.slice(-2) });
+  await clean(t, page, 'limits: Value battle');
+});
+seg('limits-poses', 45, async (t, site, pages) => {
+  const page = await open(pages, site, { url: 'pose.html' });
+  await page.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  await page.evaluate(() => document.querySelector('#poses .pose-btn[data-id="stand"]').click());
+  const stored = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k) || '[]').map((q) => q.id), PL + 'mine.v1');
+  const ids = [];
+  for (let i = 1; i <= 13; i++) {
+    await page.evaluate((i) => { PoseAndLight.pose.neck.y = i; document.getElementById('savePose').click(); }, i);
+    const now = await stored(); ids.push(now.slice());
+    const text = await page.evaluate(() => document.getElementById('savePose').textContent);
+    if (i === 12) t.check(now.length === 12 && !/oldest/.test(text), 'Save this pose: the twelfth pose is kept and nothing is dropped', { n: now.length, text });
+    if (i === 13) {
+      t.check(now.length === 12 && !now.includes(ids[0][0]) && now[11] !== ids[11][11] && now.slice(0, 11).join() === ids[11].slice(1).join(), 'Save this pose: a thirteenth drops the oldest one only, and is the newest', { n: now.length });
+      t.check(/the oldest of your twelve made room/.test(text), 'the button says the oldest of the twelve made room', text);
+    }
+  }
+  t.check(await page.evaluate(() => document.querySelectorAll('#mine .pose-item').length) === 12 && J(await page.evaluate(() => [...document.querySelectorAll('#mine .pose-item .pose-name, #mine .pose-item span')].map((e) => e.textContent).filter((x) => /^Your pose/.test(x)))) === J(Array.from({ length: 12 }, (_, i) => `Your pose ${i + 1}`)), 'the library lists twelve, named Your pose 1 to Your pose 12');
+  t.check(await page.evaluate(() => document.getElementById('savePose').disabled === false), 'Save this pose is still available with twelve kept (it replaces the oldest)');
+  // fifteen in the store (an older page, another tool): the page shows the newest twelve, and the first change trims the store to the twelve
+  const fifteen = Array.from({ length: 15 }, (_, k) => ({ id: 'mine-seed-' + k, p: { neck: { y: k } } }));
+  await page.evaluate(([k, v]) => localStorage.setItem(k, v), [PL + 'mine.v1', J(fifteen)]);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__poseStarted, null, { timeout: 40000 }).catch(() => null);
+  const shown = await page.evaluate(() => [...document.querySelectorAll('#mine .pose-btn')].map((b) => b.dataset.id));
+  t.check(shown.length === 12 && shown[0] === 'mine-seed-3' && shown[11] === 'mine-seed-14', 'fifteen saved poses in the storage: the library shows the newest twelve', shown);
+  await page.evaluate(() => document.querySelector('#mine .pose-x').click());
+  const trimmed = await stored();
+  t.check(trimmed.length === 11 && trimmed[0] === 'mine-seed-4', 'and removing one leaves eleven in the storage (the store is held to twelve at the first change)', trimmed);
+  // Figure study reads the same list: thirteen in the store give twelve in the class
+  await page.evaluate(([k, v]) => localStorage.setItem(k, v), [PL + 'mine.v1', J(Array.from({ length: 13 }, (_, k) => ({ id: 'mine-seed-' + k, p: { neck: { y: k } } })))]);
+  const app2 = await newTab(site, page);
+  await appUp(app2);
+  await tab(app2, 'figure', { wait: false });
+  await app2.waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 42, null, { timeout: 45000 }).catch(() => null);
+  const mine = await app2.evaluate(() => [...document.querySelectorAll('#tab-figure [data-pose-id^="mine-"]')].map((b) => b.dataset.poseId));
+  t.check(mine.length === 12 && !mine.includes('mine-seed-0'), 'Figure study offers the newest twelve of thirteen saved poses', mine);
+  await clean(t, page, 'limits: poses'); await clean(t, app2, 'limits: Figure study');
+});
+
+
 export default async function persistence(t, site) {
   await runPool(t, site, +(process.env.PERSIST_JOBS || 3));
   t.note('segment times: ' + timings.join('; '));
