@@ -11,6 +11,7 @@
 //              text called .jpg, a truncated PNG): each opened with its colours right, or refused in words
 //   exif       a JPEG stored in each of the eight Exif orientations is shown upright, and hostile Exif is shown as it is
 //   sizes      1 x 1, 15 x 15, 16 x 16, 10000 x 200, 200 x 10000, fully transparent, half transparent, 12000 x 9000
+//   metadata   a JPEG full of Exif, GPS, XMP, IPTC and comment text: none of it reaches a saved PNG (README Privacy)
 //   textdrops  pasted text, links and html, pasted and dropped files that are not pictures, dropped links and text
 //   hashes     #study?x, #%00, #../, prototype names, a megabyte of hash, every way of writing a tab; pose.html's query
 //   foreign    postMessage from another origin (a page framing the app) to the app, the Pose page and Figure study's
@@ -18,6 +19,7 @@
 //   storage    junk of types and shapes the other cases do not deal, under every key the site reads
 //   database   a corrupt painting in IndexedDB of kinds the other cases do not write
 //   fields     the paint search and the canvas length, typed hostile
+//   crosstab   another tab of the site writes junk into the picked colours, My paints, the mode and the saved poses
 // HOSTILE_ONLY=names,formats runs some segments only.
 import fs from 'node:fs';
 import zlib from 'node:zlib';
