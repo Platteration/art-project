@@ -1062,7 +1062,7 @@ const STAR_MINS = [88, 78, 65, 50, 30];
 const GRADE_WORDS = ['Keep mixing', 'Keep mixing', 'Getting there', 'Good eye', 'Sharp eye!', 'Master colorist!'];
 // the share card's picture, read back in the page: a few pixels and how much ink lies in a few regions
 const readCard = (page, file) => page.evaluate(async (b64) => {
-  const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+  const img = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))], { type: 'image/png' }));
   const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
   const g = c.getContext('2d'); g.drawImage(img, 0, 0);
   const px = (x, y) => [...g.getImageData(x, y, 1, 1).data];
@@ -1087,7 +1087,7 @@ async function scoreBands(t, site) {
   await click(page, '#gameStart'); await playing(page);
   const recipes = await recipesOfBoard(page);
   const N = recipes.length;
-  const targets = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#gameZones .game-zone')].map((li) => [+li.querySelector('.game-zone-number').textContent, li.querySelectorAll('.mix-chip')[1].title.replace('The color to match ', '')])));
+  const targets = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#gameZones .game-zone')].map((li) => [+li.querySelector('.game-zone-number').textContent, li.querySelectorAll('.mix-chip')[1].title.replace('The color to match ', '').toLowerCase()])));
   // the area of every number, from the wash its shapes wear when it is the chosen one
   await playAgain(page);
   const areas = [];
@@ -1176,5 +1176,224 @@ async function scoreBands(t, site) {
     t.check(card0.stars.every((p) => !(p[0] > 200 && p[1] > 150 && p[1] < 185 && p[2] < 90)) && d0.suggestedFilename() === 'portrait-value-studio-0pct.png', 'the card of a 0% game: no gold star, named 0pct', [card0.stars, d0.suggestedFilename()]);
   } else t.check(false, 'the card of a 0% game downloads', null);
   await clean(t, page, 'score bands and the share card');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 13. Value first scores against the reference's own values: 100 for the values, 900 for the colors
+// ================================================================================================
+// the grey the slider shows for a lightness L* (0 black to 100 white), as the sRGB value of a neutral grey
+const greyOf = (L) => { const Y = L > 8 ? Math.pow((L + 16) / 116, 3) : L / 903.3; return Math.round(255 * (Y <= 0.0031308 ? 12.92 * Y : 1.055 * Math.pow(Y, 1 / 2.4) - 0.055)); };
+const setValue = (page, L) => page.evaluate((L) => { const r = document.getElementById('gameValueRange'); r.value = L; r.dispatchEvent(new Event('input')); }, L);
+async function valueScoring(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  await setMode(page, 'value'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  const N = (await play(page)).numbers;
+  // the slider's own grey: 50 on the scale of 100 is the neutral grey of that lightness
+  await setValue(page, 50);
+  const chip = (await play(page)).valueChip;
+  t.check(chip === `rgb(${greyOf(50)}, ${greyOf(50)}, ${greyOf(50)})`, 'the value chip shows the neutral grey of lightness 50', [chip, greyOf(50)]);
+  await click(page, '#gameValueClear');
+  // each number's own lightness: its color in the Blocks reference, from the pixel under its wash
+  await click(page, '#tab-game [data-ref-view="blocks"]');
+  const lights = [];
+  for (let k = 0; k < N; k++) {
+    await pickNumber(page, k);
+    const L = await page.evaluate(() => {
+      const c = document.getElementById('gameCanvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      for (let i = 0; i < d.length; i += 4) if (d[i] === 226 && d[i + 1] === 234 && d[i + 2] === 216) {
+        const q = document.getElementById('gameRef').getContext('2d').getImageData((i / 4) % c.width, Math.floor(i / 4 / c.width), 1, 1).data;
+        return Study.rgbToLab(q[0], q[1], q[2])[0];
+      }
+      return null;
+    });
+    lights.push(L);
+    if (L != null) await setValue(page, Math.round(L * 2) / 2);
+  }
+  t.check(lights.every((L) => L != null) && lights.every((L, k) => k === 0 || L >= lights[k - 1] - 3), 'every number has a lightness in the reference, numbered from the darkest', lights.map((L) => L && Math.round(L)));
+  await click(page, '#gameLock');
+  await lockIn(page);
+  await click(page, '#gameAnalyze');
+  let r = await result(page);
+  const pts = (row) => ({ pct: +(/^(\d+)%/.exec(row || '') || [])[1], pts: +(/\+(\d+)$/.exec(row || '') || [])[1] });
+  const recipes = r.zones.map((z) => [z.n, z.mix]).sort((a, b) => a[0] - b[0]);
+  let v = pts(r.rows['Value study']);
+  t.check(v.pct >= 99 && v.pts >= 99 && r.rows['Color accuracy'] === '0% · 0' && r.points === v.pts, 'every value set to the reference’s own (to a half step): the value study scores 99 or 100 of 100 and nothing else is scored', [r.rows, r.points]);
+  // every value 20 off scores half, every value 40 off scores nothing (2.5 points of 100 a step of lightness)
+  for (const [off, want] of [[20, 50], [41, 0]]) {
+    await playAgain(page);
+    for (let k = 0; k < N; k++) { await pickNumber(page, k); const L = lights[k]; await setValue(page, Math.round((L >= 50 ? L - off : L + off) * 2) / 2); }
+    await click(page, '#gameLock');
+    await lockIn(page); await click(page, '#gameAnalyze');
+    r = await result(page);
+    v = pts(r.rows['Value study']);
+    t.check(Math.abs(v.pct - want) <= 1 && v.pts === v.pct, `every value ${off} lightness steps from the reference’s own: the value study scores ${want}%`, [r.rows['Value study']]);
+  }
+  // the colors count 900 with Value first, and the match shown is the colors alone: every number mixed exactly is 100%
+  // and 900 points whatever the values were
+  await playAgain(page);
+  for (let k = 0; k < N; k++) { await pickNumber(page, k); const L = lights[k]; await setValue(page, Math.round((L >= 50 ? L - 41 : L + 41) * 2) / 2); }
+  await click(page, '#gameLock');
+  await mixAll(page, recipes);
+  await lockIn(page); await click(page, '#gameAnalyze');
+  r = await result(page);
+  v = pts(r.rows['Value study']);
+  const bonus = +(/\+(\d+)$/.exec(r.rows['Time left']) || [])[1];
+  t.check(r.pct === '100' && r.stars === 5 && v.pct === 0 && r.rows['Color accuracy'] === '100% · 900' && bonus > 0 && r.points === 900 + bonus, 'Value first with every color exact and every value 41 steps off: 100% match and five stars, 900 for the colors, 0 for the values, the time bonus on top', [r.pct, r.rows, r.points]);
+  await clean(t, page, 'value first scoring');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 14. Time's up in the stages the first run-out did not meet: the value stage, Copy mix, a peek
+// ================================================================================================
+async function timesUp(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  await page.clock.install();
+  // Value first: the clock runs from Start, so it can run out before any color
+  await setMode(page, 'value'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  const N = (await play(page)).numbers;
+  const set = [30, 50, 70];
+  for (let k = 0; k < set.length; k++) { await pickNumber(page, k); await setValue(page, set[k]); }
+  await page.clock.fastForward(5 * 60 * 1000 + 2000); await scored(page);
+  await click(page, '#gameAnalyze');
+  let r = await result(page);
+  const vp = +(/\+(\d+)$/.exec(r.rows['Value study'] || '') || [])[1];
+  t.check(r.kicker === 'Time’s up!' && r.pct === '0' && r.stars === 0 && r.rows['Color accuracy'] === '0% · 0' && vp > 0 && r.points === vp && r.rows['Time left'] === '0:00 · +0 (some numbers unpainted)' && !r.focusMode, 'Time’s up in the value stage: locked in with the value study alone, 0% color, no time bonus', [r.kicker, r.pct, r.rows, r.points]);
+  const finalColors = await colorsOf(page, '#gameFinal');
+  t.check(set.every((L) => { const v = greyOf(L); return (finalColors[`#${[v, v, v].map((x) => x.toString(16).padStart(2, '0')).join('')}`] || 0) > 100; }), 'and the final picture wears the three greys that were set', Object.keys(finalColors).length);
+  await playAgain(page);
+  let p = await play(page);
+  t.check(p.valuing && p.valuePane && p.progress === `0 of ${N} values set` && p.timer === '5:00' && p.lock === 'Done with values', 'Same photo after that run-out: a clean value stage, the clock at 5:00', [p.valuing, p.progress, p.timer]);
+  await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
+
+  // Classic with Copy mix on when the clock runs out: the score comes without the copy bar, and the next game does not start copying
+  await setMode(page, 'classic'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  await pickNumber(page, 0); await setAmount(page, 2); await tapPaint(page, 'TW');
+  await click(page, '#gameCopy');
+  t.check((await play(page)).copying, 'Copy mix is on before the clock runs out');
+  await page.clock.fastForward(5 * 60 * 1000 + 2000); await scored(page);
+  const afterCopy = await page.evaluate(() => ({ bar: !document.getElementById('gameCopyBar').hidden, copying: document.getElementById('gamePlay').classList.contains('is-copying'), kicker: document.getElementById('gameKicker').textContent }));
+  t.check(afterCopy.kicker === 'Time’s up!' && !afterCopy.bar && !afterCopy.copying, 'the clock running out ends the copy: no copy bar on the score', afterCopy);
+  await playAgain(page);
+  p = await play(page);
+  t.check(!p.copying && !p.copyBar && p.copyText === 'Copy mix' && p.timer === '5:00', 'and the next game does not start copying', [p.copying, p.copyBar, p.copyText]);
+  await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
+
+  // Memory: a peek taken with little time left, the clock running out inside it
+  await setMode(page, 'memory'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  await page.clock.fastForward(10500); await sleep(300);
+  const secs = async () => { const [m, sec] = (await play(page)).timer.split(':').map(Number); return m * 60 + sec; };
+  await page.clock.fastForward(Math.max(0, ((await secs()) - 11.8) * 1000)); await sleep(100);
+  await click(page, '#gameRefToggle'); await sleep(100);
+  p = await play(page);
+  if (p.toggle !== 'Peeking…') t.note('Memory: the peek taken with about 12 seconds left was refused on this run (' + p.toast + '; the real clock moved on between the steps), so the clock-out-inside-a-peek order was not played.');
+  else {
+    await page.clock.fastForward((await secs()) * 1000 + 300); await scored(page);
+    const atEnd = await page.evaluate(() => ({ toggle: document.getElementById('gameRefToggle').textContent, collapsed: document.getElementById('gameRefFig').classList.contains('is-collapsed'), kicker: document.getElementById('gameKicker').textContent }));
+    await page.waitForFunction(() => true, null, { timeout: 100 }).catch(() => null);
+    await sleep(1500); // the peek's own 3 seconds end here, after the score
+    const later = await page.evaluate(() => ({ toggle: document.getElementById('gameRefToggle').textContent, collapsed: document.getElementById('gameRefFig').classList.contains('is-collapsed') }));
+    t.check(atEnd.kicker === 'Time’s up!' && same([atEnd.toggle, atEnd.collapsed], [later.toggle, later.collapsed]), 'Memory: the clock running out inside a peek scores, and the peek’s end afterwards changes nothing', [atEnd, later]);
+  }
+  await clean(t, page, 'time’s up in the value stage, a copy and a peek');
+  await page.context().close();
+}
+
+// ================================================================================================
+// 15. Storage that cannot be written (a full quota, a private window) or read at all
+// ================================================================================================
+async function noStorage(t, site) {
+  for (const [name, init] of [
+    ['a full quota (every setItem throws)', () => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; }],
+    ['storage that refuses access (localStorage throws)', () => { Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } }); }],
+  ]) {
+    const page = await openPage(site, { url: '#game' });
+    await page.addInitScript(init);
+    await page.reload({ waitUntil: 'load' }); await sleep(500);
+    await ready(page);
+    const broken = await page.evaluate(() => { try { localStorage.setItem('x', 'y'); return 'works'; } catch (e) { return e.name; } });
+    t.check(broken !== 'works', `${name}: the page really cannot store anything`, broken);
+    const s = await page.evaluate(() => ({ shown: !document.getElementById('gameSetup').hidden, start: document.getElementById('gameStart').disabled, level: (document.querySelector('input[name="gameLevel"]:checked') || {}).value, mode: document.getElementById('gameMode').value, palette: document.getElementById('gamePalette').value, best: document.getElementById('gameBest').textContent }));
+    t.check(s.shown && !s.start && s.level === 'medium' && s.mode === 'classic' && s.palette !== '' && s.best === '', `${name}: the setup comes up with its defaults and Start enabled`, s);
+    await setLevel(page, 'easy'); await ready(page);
+    await setPalette(page, 'primary'); await setMode(page, 'relaxed'); await ready(page);
+    await click(page, '#gameStart'); await playing(page);
+    await setAmount(page, 3); await click(page, '#gameSound'); await click(page, '#gameSound');
+    await click(page, '#tab-game [data-ref-view="blocks"]');
+    await tapPaint(page, (await play(page)).paints[0], 2);
+    const p = await play(page);
+    t.check(p.parts.length > 0 && !p.parts.startsWith('Empty') && p.amount === '2 parts per tap', `${name}: Start, the amount, the speaker and a mix work`, [p.parts, p.amount]);
+    await click(page, '#gameLock'); await scored(page);
+    const r = await result(page);
+    t.check(r.popup && /^\d+$/.test(r.pct) && r.points >= 0, `${name}: the score comes up`, [r.popup, r.pct, r.points]);
+    await click(page, '#gamePopup [data-game="again"]'); await sleep(200); await click(page, '#againSame'); await playing(page);
+    await click(page, '#gameLock'); await scored(page);
+    await toSetup(page);
+    t.check((await page.evaluate(() => !document.getElementById('gameSetup').hidden)) && (await page.evaluate(() => document.getElementById('gameBest').textContent)) === '', `${name}: Change settings shows the setup, with no best (nothing could be kept)`, await page.evaluate(() => document.getElementById('gameBest').textContent));
+    await clean(t, page, name);
+    await page.context().close();
+  }
+}
+
+// ================================================================================================
+// 16. The Analysis says in plain words which way each mix is off, and by how much
+// ================================================================================================
+async function analysisWords(t, site) {
+  const page = await openPage(site, { url: '#game' });
+  await ready(page); await setPalette(page, 'zorn'); await ready(page);
+  await click(page, '#gameStart'); await playing(page);
+  const N = (await play(page)).numbers;
+  // number 1 (the darkest) as white, the last (the lightest) as black, the rest in turn as one paint, two, or three
+  const mixes = Array.from({ length: N }, (_, k) => k === 0 ? [['TW', 4]] : k === N - 1 ? [['IB', 1]] : [[['YO', 2]], [['IB', 1], ['TW', 3]], [['CRL', 1], ['TW', 2]], [['YO', 1], ['IB', 1], ['TW', 1]]][k % 4]);
+  for (let k = 0; k < N; k++) { await pickNumber(page, k); await mixExact(page, Object.fromEntries(mixes[k])); }
+  await lockIn(page); await click(page, '#gameAnalyze');
+  // each zone: the words, and the two chips' colors read as the Study reads them
+  const zones = await page.evaluate(() => [...document.querySelectorAll('#gameZones .game-zone')].map((li) => {
+    const hex = (c) => /#[0-9A-Fa-f]{6}/.exec(c.title)[0];
+    const lab = (h) => Study.rgbToLab(parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16));
+    const [mine, target] = li.querySelectorAll('.mix-chip');
+    return { n: +li.querySelector('.game-zone-number').textContent, note: li.querySelector('.mix-zone').textContent, match: li.querySelector('.game-zone-match').textContent, yours: lab(hex(mine)), target: lab(hex(target)) };
+  }));
+  const heard = new Set();
+  const wrong = [];
+  const hue = 50 * Math.PI / 180;
+  for (const z of zones) {
+    const dL = z.yours[0] - z.target[0];
+    const warm = (z.yours[1] - z.target[1]) * Math.cos(hue) + (z.yours[2] - z.target[2]) * Math.sin(hue);
+    const dC = Math.hypot(z.yours[1], z.yours[2]) - Math.hypot(z.target[1], z.target[2]);
+    // a part of the note is judged only when the measure is clearly on one side of its threshold (the chips are rounded to 8 bits)
+    const parts = [
+      ['light', dL >= 3.8, dL < 2.2, /^too light by (\d\.\d) value/, Math.abs(dL) / 10],
+      ['dark', dL <= -3.8, dL > -2.2, /^too dark by (\d\.\d) value/, Math.abs(dL) / 10],
+      ['warm', warm >= 4.8, warm < 3.2, /too warm/],
+      ['cool', warm <= -4.8, warm > -3.2, /too cool/],
+      ['strong', dC >= 6, dC < 4, /too strong/],
+      ['gray', dC <= -6, dC > -4, /too gray/],
+    ];
+    for (const [word, clearly, clearlyNot, re, value] of parts) {
+      const m = re.exec(z.note.split(', ').find((x) => re.test(x)) || '');
+      if (m) heard.add(word);
+      if (clearly && !m) wrong.push(`number ${z.n}: should say too ${word}: ${z.note}`);
+      if (clearlyNot && m) wrong.push(`number ${z.n}: should not say too ${word}: ${z.note}`);
+      if (m && value !== undefined && Math.abs(+m[1] - value) > 0.11) wrong.push(`number ${z.n}: says ${m[1]} value, the chips differ by ${value.toFixed(2)}`);
+    }
+    if (z.note === 'spot on' && !(Math.abs(dL) < 3.8 && Math.abs(warm) < 4.8 && Math.abs(dC) < 6)) wrong.push(`number ${z.n}: spot on, but the chips differ`);
+  }
+  t.check(zones.length === N && wrong.length === 0, 'every number’s words say too light or too dark (and by how much), too warm or cool, too strong or gray as the two chips differ', wrong.slice(0, 4));
+  const dark1 = zones.find((z) => z.n === 1), light1 = zones.find((z) => z.n === N);
+  t.check(/^too light by /.test(dark1.note) && /^too dark by /.test(light1.note), 'the darkest number mixed as white says too light, the lightest mixed as black says too dark', [dark1.note, light1.note]);
+  t.note('words heard in the notes of this game: ' + [...heard].join(', ') + (heard.size < 6 ? '; not heard: ' + ['light', 'dark', 'warm', 'cool', 'strong', 'gray'].filter((w) => !heard.has(w)).join(', ') : ''));
+  t.check(['warm', 'cool'].some((w) => heard.has(w)) && ['strong', 'gray'].some((w) => heard.has(w)), 'a temperature word and a strength word were exercised', [...heard]);
+  // furthest off first
+  const order = await page.evaluate(() => [...document.querySelectorAll('#gameZones .game-zone-match')].map((e) => +(/^(\d+)%/.exec(e.textContent) || [])[1]));
+  t.check(order.every((m, i) => i === 0 || m >= order[i - 1]), 'the numbers run from furthest off to closest', order);
+  await clean(t, page, 'analysis words');
   await page.context().close();
 }

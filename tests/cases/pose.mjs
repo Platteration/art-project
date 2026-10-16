@@ -262,7 +262,9 @@ export default async function pose(t, site) {
     const a1 = await fr.evaluate(() => window.PoseAndLight.pose.shoulderR.x);
     t.check(Math.abs(Math.abs(a1 - a0) - 6) < 1e-6, 'a tap on an arrow moves the part six degrees', [a0, a1]);
     const held = await fr.locator('#arrows button').first().boundingBox();          // the arrows follow the part's end
-    await page.mouse.move(held.x + 20, held.y + 20); await page.mouse.down(); await sleep(1200); await page.mouse.up();
+    // (held until it has gone on past a tap's six degrees, or 6 s: a busy machine draws the stage slowly, and a
+    // fixed 1.2 s could end the hold before its repeat began)
+    await page.mouse.move(held.x + 20, held.y + 20); await page.mouse.down(); await fr.waitForFunction((a) => Math.abs(window.PoseAndLight.pose.shoulderR.x - a) > 13, a1, { timeout: 6000 }).catch(() => null); await page.mouse.up();
     const a2 = await fr.evaluate(() => window.PoseAndLight.pose.shoulderR.x);
     t.check(Math.abs(a2 - a1) > 7, 'an arrow held keeps the part moving past the six degrees of a tap', [a1, a2]);   // (how far depends on how fast the stage draws here)
     await fr.evaluate(() => document.querySelector('#arrows button').focus());
@@ -1073,15 +1075,16 @@ export default async function pose(t, site) {
     {
       await fr.evaluate(() => { window.PoseAndLight.pick('shoulderR'); window.PoseAndLight.render(); });
       const ab = await fr.locator('#arrows button').first().boundingBox();
+      const x0 = await fr.evaluate(() => window.PoseAndLight.pose.shoulderR.x);
       await page.mouse.move(ab.x + 20, ab.y + 20); await page.mouse.down();
-      await fr.waitForFunction(() => document.querySelector('#arrows .is-held'), null, { timeout: 3000 }).catch(() => null);
-      await sleep(400);                                                     // held, so it keeps moving
+      await fr.waitForFunction((x0) => Math.abs(window.PoseAndLight.pose.shoulderR.x - x0) > 10, x0, { timeout: 6000 }).catch(() => null);     // held: past a tap's 6°
       await tab(page, 'study', { wait: false });
       await page.mouse.up();
       const atUp = await fr.evaluate(() => window.PoseAndLight.pose.shoulderR.x);
       await tab(page, 'pose', { wait: false });
       await fr.waitForFunction(() => document.getElementById('view').width > 800, null, { timeout: 8000 }).catch(() => null);
-      await sleep(500);                                                     // a hold still running moves it about 35° in this time
+      // a hold still running turns it 70° a second: wait (at most 1.5 s) for it to move on
+      await fr.waitForFunction((x) => Math.abs(window.PoseAndLight.pose.shoulderR.x - x) > 5, atUp, { timeout: 1500 }).catch(() => null);
       const later = await fr.evaluate(() => ({ x: window.PoseAndLight.pose.shoulderR.x, held: document.querySelectorAll('#arrows .is-held').length }));
       const stopped = t.check(later.held === 0 && Math.abs(later.x - atUp) < 3, 'an arrow held while the tab is switched away and let go there stops moving the arm', { atUp, later });
       if (!stopped) t.finding({ title: 'An arrow held while the tab is switched away keeps moving the part after it is let go', severity: 'medium', steps: 'Portrait Value Studio, Pose and light tab, Advanced: pick a part (the right upper arm), hold one of its yellow arrows, switch to another tab (Learning tools → Study the photo; a second finger on a tablet) and let go there; come back to Pose and light', expected: 'The arrow stops when it is let go, as it does on the stage: the arm is where it was at that moment, and the move is remembered', actual: `The arrow is still marked held (${later.held}) and the arm goes on turning (${atUp.toFixed(0)}° when let go, ${later.x.toFixed(0)}° half a second after coming back), on to the joint's limit; the move is not remembered until something rebuilds the arrows`, cause: 'js/pose.js:836-852: the hold stops only on the button\'s own pointerup, pointercancel or lostpointercapture; let go while the frame is hidden (display: none), none of them reaches the button, and the 30 ms interval (js/pose.js:847) keeps calling run()' });
