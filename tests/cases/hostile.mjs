@@ -278,7 +278,9 @@ export default async function hostile(t, site) {
     const fr = app(page);
     const png64 = await quad(page, 64, 48, 'image/png', 'quad.png');
     const jpg64 = await quad(page, 64, 48, 'image/jpeg', 'quad.jpg');
-    const SVG_EVIL = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100" height="120"><style>@import url("http://evil.example/x.css");</style><script>window.__pwn=1</script><image href="http://evil.example/x.png" width="10" height="10"/><image xlink:href="https://evil.example/y.png" width="10" height="10"/><foreignObject width="50" height="50"><div xmlns="http://www.w3.org/1999/xhtml"><iframe src="http://evil.example/"></iframe><img src="http://evil.example/z.png"/></div></foreignObject><rect width="100" height="120" fill="rgb(220,30,30)" onload="window.__pwn=2"/></svg>';
+    const SVG_EVIL = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100" height="120"><style>@import url("http://evil.example/x.css");</style><script>window.__pwn=1</script><image href="http://evil.example/x.png" width="10" height="10"/><image xlink:href="https://evil.example/y.png" width="10" height="10"/><rect width="100" height="120" fill="rgb(220,30,30)" onload="window.__pwn=2"/></svg>';
+    // (kept apart below: an SVG with a foreignObject marks the canvas it is drawn on as tainted)
+    const SVG_FO = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="120"><rect width="100" height="120" fill="rgb(220,30,30)"/><foreignObject x="10" y="10" width="80" height="40"><div xmlns="http://www.w3.org/1999/xhtml" style="color:white">A caption laid out by the browser</div></foreignObject></svg>';
     const OPENS = [
       ['a PNG', png64, [64, 48], true],
       ['a JPEG', jpg64, [64, 48], true],
@@ -370,6 +372,133 @@ export default async function hostile(t, site) {
     t.check(!art.length, 'formats: Check my painting opens a CMYK JPEG and an SVG, and refuses a text file and a zero-byte file in words', art);
     t.check(await fr.evaluate(() => window.__pwn === undefined), 'formats: nothing ran from the painting slot either');
     await clean(t, page, 'formats: drop, paste and Check my painting');
+
+    // An SVG with a foreignObject (text laid out by the browser, as drawing tools export it): Chromium marks the canvas
+    // it is drawn on as tainted, and reading the pixels back throws. The photo slot and the painting slot are each tried on
+    // a page of their own. Either the picture opens (its study drawn) or it is refused in words, and the page is left whole.
+    for (const [slot, where, selector, labelId, canvasId, mark] of [['the photo', '', '#file', 'source', 'cv-orig', 'with-text.svg'], ['Check my painting', '#check', '#artFile', 'artSource', 'cv-art', 'with-caption.svg']]) {
+      const fo = await open({ url: where });
+      const ff = app(fo);
+      const lab0 = await ff.evaluate((id) => document.getElementById(id).textContent.trim(), labelId);
+      const r = await feed(fo, svgImage(SVG_FO, mark), { selector, labelId, limit: 8000 });
+      await sleep(700);
+      const st = await ff.evaluate(([id, cv]) => ({ spinner: !document.getElementById('busy').hidden, toast: document.getElementById('toast').textContent.trim(), label: document.getElementById(id).textContent.trim(), canvasW: (document.getElementById(cv) || {}).width }), [labelId, canvasId]);
+      const errs = fo.log.pageerrors.splice(0);
+      fo.log.console.length = 0;
+      const opened = st.label.startsWith(mark), refusedInWords = st.label === lab0 && (NOT_OPENED.test(st.toast) || /SVG|picture|image/i.test(st.toast)) && !/Something went wrong/.test(st.toast);
+      const whole = errs.length === 0 && !st.spinner && !/Something went wrong/.test(st.toast) && (opened || refusedInWords);
+      t.check(whole, `formats: an SVG with a foreignObject given to ${slot} opens, or is refused in words, with no page error, no stuck "Updating…" and no "Something went wrong"`, { how: r.how, ...st, errors: errs.map((e) => e.split('\n')[0]) });
+      if (!whole) t.finding({
+        title: `An SVG with a foreignObject (text or HTML laid out by the browser, as Figma, draw.io and Inkscape export) breaks loading in ${slot}: a page error, "Something went wrong in the app", a spinner that never stops and a label that names a picture the studies do not show`,
+        severity: 'medium',
+        steps: `${slot === 'the photo' ? 'Study the photo: Load photo' : 'Open #check, Load a photo of your finished painting'} and choose an .svg file whose drawing holds a <foreignObject> (for example <svg xmlns="http://www.w3.org/2000/svg" width="100" height="120"><rect width="100" height="120" fill="red"/><foreignObject width="80" height="40"><div xmlns="http://www.w3.org/1999/xhtml">caption</div></foreignObject></svg>). Chromium; watch the page.`,
+        expected: 'README, "To load a photo, use Load photo, drag it onto the page, or paste it": the picture opens, or the site says in words that it cannot use it ("This image could not be opened. ..."), and the previous photo and its label stay.',
+        actual: `uncaught ${(errs[0] || '').split('\n')[0].slice(0, 130)}; toast "${st.toast.slice(0, 90)}"; the "Updating…" spinner ${st.spinner ? 'stays up for good' : 'is gone'}; the label reads "${st.label.slice(0, 40)}" while the ${canvasId} canvas is ${st.canvasW} px wide (the previous picture, not this one's 100). Loading any other photo recovers it.`,
+        cause: slot === 'the photo'
+          ? 'js/app.js:477 readImage accepts any image/* the browser decodes, SVG included, and hands the <img> on. js/app.js:566 useSource sets the label first; js/app.js:392-401 prepareAndRun calls Study.prepare inside requestAnimationFrame with no try/catch; js/processing.js:87-88 draws the SVG on a canvas and calls getImageData, which throws SecurityError because a foreignObject taints the canvas in Chromium. The throw leaves owed.prep set and els.busy shown (settleBusy is never reached), the label already changed and state.prep/the canvases still the old photo\'s.'
+          : 'js/app.js:588 loadArtFile takes the same image; js/app.js:2371 alignArt draws it on a canvas and reads it back with getImageData, which throws SecurityError for a tainted canvas; the run never finishes, so the spinner stays and the score never comes.',
+      });
+      await clean(t, fo, `formats: an SVG with a foreignObject given to ${slot} (after what the check above took)`);
+    }
+  });
+
+  // ====================================================================================================================
+  // exif: a phone's JPEG is stored sideways and says so; every one of the eight turns is shown upright
+  // ====================================================================================================================
+  await seg.run('exif', async (open) => {
+    const page = await open();
+    const base = await quad(page, 96, 64, 'image/jpeg', 'base.jpg');
+    // what each Orientation says about the stored picture's first row and first column (the Exif 2.3 table)
+    const SIDES = { 1: ['top', 'left'], 2: ['top', 'right'], 3: ['bottom', 'right'], 4: ['bottom', 'left'], 5: ['left', 'top'], 6: ['right', 'top'], 7: ['right', 'bottom'], 8: ['left', 'bottom'] };
+    const where = (o, r, c) => { const [rs, cs] = SIDES[o]; return o <= 4 ? (((rs === 'top') === (r === 0)) ? 'T' : 'B') + (((cs === 'left') === (c === 0)) ? 'L' : 'R') : (((cs === 'top') === (c === 0)) ? 'T' : 'B') + (((rs === 'left') === (r === 0)) ? 'L' : 'R'); };
+    const upright = (o) => { const e = {}; for (const [r, c, color] of [[0, 0, 'red'], [0, 1, 'green'], [1, 0, 'blue'], [1, 1, 'yellow']]) e[where(o, r, c)] = color; return e; };
+    const wrongOf = (c, want) => ['TL', 'TR', 'BL', 'BR'].filter((k) => nameOf(c[k]) !== want[k]).map((k) => `${k}=${nameOf(c[k])} (want ${want[k]})`);
+
+    const bad = [];
+    for (const little of [false, true]) {
+      for (let o = 1; o <= 8; o++) {
+        const name = `exif-${o}${little ? 'le' : 'be'}.jpg`;
+        const r = await feed(page, withExif(base.buffer, o, { little, name }));
+        const c = await corners(page), [W, H] = o >= 5 ? [64, 96] : [96, 64], wrong = wrongOf(c, upright(o));
+        if (r.how !== 'opened' || !r.label.endsWith(`${W} × ${H} px`) || wrong.length) bad.push(`${name}: ${r.how} ${r.label.slice(-13)} ${wrong.join(' ')}`);
+      }
+    }
+    t.check(!bad.length, 'exif: a JPEG stored in each of the eight Exif orientations, in both byte orders, is shown upright at its turned size', bad);
+    await clean(t, page, 'exif: the eight orientations');
+
+    // an Orientation no table has is no turn at all; a block whose length is wrong is opened (whatever it makes of it) or refused in words
+    const odd = [];
+    for (const [what, o, opts] of [['Orientation 0', 0, {}], ['Orientation 9', 9, {}], ['Orientation 255', 255, {}], ['Orientation 65535, little-endian', 65535, { little: true }]]) {
+      const r = await feed(page, withExif(base.buffer, o, { ...opts, name: `exif-odd-${o}.jpg` }));
+      const wrong = wrongOf(await corners(page), upright(1));
+      if (r.how !== 'opened' || !r.label.endsWith('96 × 64 px') || wrong.length) odd.push(`${what}: ${r.how} ${r.label.slice(-13)} ${wrong.join(' ')}`);
+    }
+    t.check(!odd.length, 'exif: an Orientation outside 1 to 8 leaves the picture as it was stored', odd);
+    const lies = [];
+    for (const [what, skew] of [['a block that claims 6 bytes fewer than it holds', -6], ['a block that claims 50 bytes more', 50]]) {
+      const r = await feed(page, withExif(base.buffer, 6, { skew, name: `exif-length${skew}.jpg` }), { limit: 8000 });
+      if (!(r.how === 'opened' || (r.how === 'said' && NOT_OPENED.test(r.toast)))) lies.push(`${what}: ${r.how} "${r.toast}"`);
+    }
+    t.check(!lies.length && (await busyDown(page, 5000)) && (await usable(page)), 'exif: a JPEG whose Exif block lies about its length is opened or refused in words, and the page is left usable', lies);
+    await clean(t, page, 'exif: odd orientations and lying blocks');
+
+    // a 25-megapixel photo stored sideways: reduced to 2800 on its long side (README: nothing about the turn is lost), still upright
+    const bigJpg = await quad(page, 6000, 4200, 'image/jpeg', 'big.jpg');
+    const rb = await feed(page, withExif(bigJpg.buffer, 6, { name: 'big-exif6.jpg' }), { limit: 60000 });
+    const wrongBig = wrongOf(await corners(page), upright(6));
+    t.check(rb.how === 'opened' && rb.label.endsWith('1960 × 2800 px') && /^A very large photo \(4200 × 6000\) was reduced to 1960 × 2800 for speed\.$/.test(rb.toast) && !wrongBig.length, 'exif: a 25-megapixel JPEG stored sideways (Exif 6) is reduced to 1960 × 2800 and is upright', { how: rb.how, label: rb.label.slice(-16), toast: rb.toast, wrong: wrongBig });
+    await clean(t, page, 'exif: a very large photo stored sideways');
+  });
+
+  // ====================================================================================================================
+  // sizes: the smallest and the strangest shapes, and a picture with nothing in it
+  // ====================================================================================================================
+  await seg.run('sizes', async (open) => {
+    const page = await open();
+    const fr = app(page);
+    const junk = () => fr.evaluate(() => { const hits = [], w = document.createTreeWalker(document.getElementById('tab-study'), NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { const p = n.parentElement; if (p && !p.closest('script,style,template') && p.getClientRects().length && /NaN|undefined|\[object|Infinity/.test(n.textContent)) hits.push(n.textContent.trim().slice(0, 50)); } return hits.slice(0, 5); });
+
+    const small = [];
+    for (const [w, h] of [[1, 1], [15, 15], [10000, 10], [10, 10000], [15, 400]]) {
+      const lab0 = await labelOf(page);
+      const r = await feed(page, await flatPng(page, w, h, '#a06040', `tiny-${w}x${h}.png`), { limit: 8000 });
+      if (!(r.how === 'said' && TOO_SMALL.test(r.toast) && r.toast.includes(`(${w} × ${h} px)`) && r.label === lab0)) small.push(`${w} × ${h}: ${r.how} "${r.toast}"`);
+    }
+    t.check(!small.length, 'sizes: a picture under 16 px on a side (1 × 1, 15 × 15, a strip of 10 px) is refused in words, with its size, and the photo on show stays', small);
+
+    const shapes = [];
+    for (const [w, h] of [[16, 16], [10000, 200], [200, 10000], [4000, 16]]) {
+      const r = await feed(page, await flatPng(page, w, h, '#a06040', `shape-${w}x${h}.png`), { limit: 30000 });
+      const c = await corners(page), s = Math.min(1, 900 / Math.max(w, h)), want = [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))];
+      const j = await junk();
+      if (r.how !== 'opened' || !r.label.endsWith(`${w} × ${h} px`) || c.w !== want[0] || c.h !== want[1] || j.length) shapes.push(`${w} × ${h}: ${r.how} ${r.label.slice(-16)} canvas ${c.w} × ${c.h} (want ${want.join(' × ')}) ${j.join('|')}`);
+    }
+    t.check(!shapes.length, 'sizes: 16 × 16, a 10000 × 200 strip, a 200 × 10000 strip and 4000 × 16 open, are studied at the working size, and show no NaN or undefined', shapes);
+    t.check((await busyDown(page, 5000)) && (await usable(page)), 'sizes: the page is usable after the strips');
+    await clean(t, page, 'sizes: tiny and strips');
+
+    // a picture with nothing in it: README "Transparent parts of a PNG ... are placed on mid gray"
+    const clear = await flatPng(page, 100, 100, null, 'clear.png');
+    const rc = await feed(page, clear);
+    const cc = await corners(page);
+    const grayish = (px) => Math.abs(px[0] - 127) <= 3 && Math.abs(px[1] - 127) <= 3 && Math.abs(px[2] - 127) <= 3;
+    t.check(rc.how === 'opened' && ['TL', 'TR', 'BL', 'BR'].every((k) => grayish(cc[k])), 'sizes: a fully transparent PNG opens as mid gray (#7f7f7f) on the Photo canvas', { how: rc.how, cc });
+    t.check((await junk()).length === 0 && !/NaN|undefined/.test(await fr.evaluate(() => document.getElementById('tab-study').innerText)), 'sizes: the studies of a flat gray picture show no NaN or undefined', await junk());
+    const half = await fr.evaluate(async () => { const cv = document.createElement('canvas'); cv.width = 120; cv.height = 120; const g = cv.getContext('2d'); g.fillStyle = 'rgb(220,30,30)'; g.fillRect(0, 0, 60, 60); g.fillStyle = 'rgba(220,30,30,0.5)'; g.fillRect(60, 0, 60, 60); return cv.toDataURL('image/png'); });
+    const rh = await feed(page, { name: 'half.png', mimeType: 'image/png', buffer: Buffer.from(half.split(',')[1], 'base64') });
+    const ch = await corners(page);
+    const near = (px, rgb, tol = 6) => px.every((v, i) => Math.abs(v - rgb[i]) <= tol);
+    t.check(rh.how === 'opened' && near(ch.TL, [220, 30, 30]) && near(ch.TR, [174, 78, 78]) && grayish(ch.BL) && grayish(ch.BR), 'sizes: an opaque red, a half-transparent red and two transparent quarters read as red, red over gray, gray, gray', { how: rh.how, TL: ch.TL, TR: ch.TR, BL: ch.BL, BR: ch.BR });
+    await clean(t, page, 'sizes: transparent pictures');
+
+    // 12000 x 9000: 108 million pixels, a PNG of 1-bit stripes built here; reduced to 2800 on the long side
+    const big = await open();
+    let crashed = false;
+    big.on('crash', () => { crashed = true; });
+    const rb = await feed(big, stripedPng(12000, 9000, 'huge.png'), { limit: 120000 });
+    t.check(!crashed && rb.how === 'opened' && rb.label.endsWith('2800 × 2100 px') && /^A very large photo \(12000 × 9000\) was reduced to 2800 × 2100 for speed\.$/.test(rb.toast), 'sizes: a 12000 × 9000 photo is reduced to 2800 × 2100 and said so, and the tab does not crash', { crashed, how: rb.how, label: rb.label.slice(-16), toast: rb.toast });
+    t.check(!crashed && (await busyDown(big, 20000)) && (await usable(big)), 'sizes: the page is usable after the 108-megapixel photo');
+    await clean(t, big, 'sizes: 12000 × 9000');
   });
 
   t.note(`segments: ${seg.timings.join('; ')}`);
