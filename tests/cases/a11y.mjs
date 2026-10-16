@@ -99,11 +99,16 @@ async function axFocused(cdp) {
     return out;
   } finally { await cdp.send('Runtime.releaseObject', { objectId: result.objectId }).catch(() => null); }
 }
-// What a screen reader is given at this moment: the text of every live region on screen (status, alert, aria-live),
-// and the name and description of the focused element and of the group or dialog it sits in.
+// What a screen reader is given by an action: the text of every live region on screen (status, alert, aria-live) that
+// changed since liveMark() was called before the action (a region is read when it changes, not for what it already
+// held), and the name and description of the focused element and of the group or dialog it sits in.
+const LIVE = '[aria-live]:not([aria-live="off"]), [role="status"], [role="alert"], [role="log"]';
+const liveMark = (page) => page.evaluate((sel) => { window.__liveBefore = new Map([...document.querySelectorAll(sel)].map((e) => [e, e.textContent.replace(/\s+/g, ' ').trim()])); }, LIVE);
 async function announced(page, cdp) {
-  const live = await page.evaluate(() => [...document.querySelectorAll('[aria-live]:not([aria-live="off"]), [role="status"], [role="alert"], [role="log"]')]
-    .filter((e) => (e.checkVisibility ? e.checkVisibility({ opacityProperty: true, visibilityProperty: true }) : true) && !e.closest('[hidden]')).map((e) => e.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean));
+  const live = await page.evaluate((sel) => [...document.querySelectorAll(sel)]
+    .filter((e) => (e.checkVisibility ? e.checkVisibility({ visibilityProperty: true }) : true) && !e.closest('[hidden]'))
+    .map((e) => [e, e.textContent.replace(/\s+/g, ' ').trim()])
+    .filter(([e, x]) => x && !(window.__liveBefore && window.__liveBefore.get(e) === x)).map(([, x]) => x), LIVE);
   const f = cdp ? await axFocused(cdp) : null;
   const around = f ? f.ancestors.filter((a) => /^(group|dialog|alertdialog|region)$/.test(a.role)).flatMap((a) => [a.name, a.description]) : [];
   return [...live, ...(f ? [f.name, f.description] : []), ...around].filter(Boolean).join(' | ');
@@ -253,6 +258,7 @@ export default async function a11y(t, site) {
 
     // ---- Picked colors from the keyboard: add, remove one, clear ----
     await page.evaluate(() => { document.getElementById('drawer-colors').open = true; document.getElementById('drawer-swatches').open = true; });
+    await liveMark(page);
     await keyOn(page, '#addBlocks', 'Enter');
     await waitFor(page, () => document.querySelectorAll('#swatches .swatch').length > 2);
     const toastSaid = await announced(page, null);
@@ -292,6 +298,7 @@ export default async function a11y(t, site) {
     await keyOn(page, '[data-mode="simple"]', 'Enter');
 
     // ---- an error is said in the status line ----
+    await liveMark(page);
     await page.setInputFiles('#file', textFile());
     await waitFor(page, () => /not an image/.test(document.getElementById('toast').textContent), null, 8000);
     const err = await announced(page, null);
@@ -353,12 +360,17 @@ export default async function a11y(t, site) {
     const well = await page.evaluate(() => document.getElementById('ps-wellParts').textContent);
     await keyOn(page, '#ps-lock', 'Enter');
     const afterLock = { hidden: !(await shown(page, '#ps-paintSheet')), focus: label(await focusAfter(page)), backOnIcon: await focusIs(page, '#ps-colorBtn'), well };
-    const dropped = [...escBad.map((r) => `Escape in ${r.name} → ${r.esc.focus}`), ...(afterX.backOnIcon ? [] : [`× in Canvas → ${afterX.focus}`]), ...(afterLock.backOnIcon ? [] : [`Lock in → ${afterLock.focus}`])];
-    if (!t.check(dropped.length === 0, 'Studio: closing a sheet (Escape, its ×, Lock in) gives the focus back to the icon that opened it', dropped)) {
+    await keyOn(page, '#ps-canvasBtn', 'Enter');
+    const saved = page.waitForEvent('download', { timeout: 10000 }).catch(() => null);
+    await keyOn(page, '#ps-save', 'Enter');
+    const download = await saved;
+    const afterSave = { hidden: !(await shown(page, '#ps-canvasSheet')), focus: label(await focusAfter(page)), backOnIcon: await focusIs(page, '#ps-canvasBtn'), file: download ? download.suggestedFilename() : null };
+    const dropped = [...escBad.map((r) => `Escape in ${r.name} → ${r.esc.focus}`), ...(afterX.backOnIcon ? [] : [`× in Canvas → ${afterX.focus}`]), ...(afterLock.backOnIcon ? [] : [`Lock in → ${afterLock.focus}`]), ...(afterSave.backOnIcon ? [] : [`Save as PNG (${afterSave.file || 'no download'}) → ${afterSave.focus}`])];
+    if (!t.check(dropped.length === 0, 'Studio: closing a sheet (Escape, its ×, Lock in, Save as PNG) gives the focus back to the icon that opened it', dropped)) {
       t.finding({
         title: 'Closing a Studio sheet from the keyboard (Escape, ×, Lock in, Save as PNG) drops the focus on the page',
         severity: 'medium',
-        steps: '1. Open the Studio, Tab to Paints and mixing, press Enter. 2. Shift+Tab into the sheet (or click into it) and press Escape; or Tab to the sheet\'s × and press Enter; or tap a paint and press Lock in. Same for the Brushes, Reference, Canvas and Zoom sheets, and in Figure study\'s copy of the Studio.',
+        steps: '1. Open the Studio, Tab to Paints and mixing, press Enter. 2. Shift+Tab into the sheet (or click into it) and press Escape; or Tab to the sheet\'s × and press Enter; or tap a paint and press Lock in; or press Save as PNG in the Canvas sheet. Same for the Brushes, Reference, Canvas and Zoom sheets, and in Figure study\'s copy of the Studio.',
         expected: 'Focus goes back to the strip icon that opened the sheet (the usual pattern for a disclosure or non-modal dialog, and what the site does for its menus and modal dialogs), so the visitor can carry on from there.',
         actual: `${dropped.join('; ')}. The sheet is hidden around the focused control, so the focus is lost (document.activeElement is the body once the page has drawn again): the next Tab starts from the top of the page, and a screen reader says nothing.`,
         cause: 'js/painting.js:538 (closeSheets) hides every sheet and resets aria-expanded but never moves the focus; it is what Escape (js/painting.js:548), the × buttons (js/painting.js:540), Lock in (js/painting.js:799) and Save as PNG (js/painting.js:267) call.',
@@ -438,6 +450,7 @@ export default async function a11y(t, site) {
     await waitFor(page, () => !document.getElementById('gamePlay').hidden && document.querySelectorAll('#gameNumbers .game-number').length > 0, null, 30000);
     t.check(await focusIs(page, '#gameLock'), 'Paint by numbers: Start painting puts the focus in the game (on Lock in portrait), not on the page', label(await focusNow(page)));
     checkWalk(t, 'Paint by numbers playing, desktop', await walk(page, { cdp }), { names: true });
+    await liveMark(page);
     await keyOn(page, '#gamePaints .game-paint', 'Enter');
     const mix = await announced(page, null);
     const parts = await page.evaluate(() => document.getElementById('gameMixParts').textContent.replace(/\s+/g, ' ').trim());
@@ -457,6 +470,7 @@ export default async function a11y(t, site) {
     const stopped = { pressed: await attr(page, '#gameCopy', 'aria-pressed'), bar: await shown(page, '#gameCopyBar'), focus: label(await focusNow(page)) };
     t.check(copying.pressed === 'true' && copying.bar && stopped.pressed === 'false' && !stopped.bar && !/the page itself/.test(stopped.focus), 'Paint by numbers: Copy mix is pressed while copying, and Escape stops it with the focus kept', { copying, stopped });
     // lock in: the score card
+    await liveMark(page);
     await keyOn(page, '#gameLock', 'Enter');
     await waitFor(page, () => { const m = /(\d+)% color match/.exec(document.getElementById('gameStars').getAttribute('aria-label') || ''); return !document.getElementById('gameResult').hidden && m && document.getElementById('gamePct').textContent === m[1]; }, null, 30000);
     const stars = await attr(page, '#gameStars', 'aria-label');
@@ -470,7 +484,8 @@ export default async function a11y(t, site) {
     t.check(!(await shown(page, '#gamePopup')) && (await focusIs(page, '#gameShowScore')), 'Paint by numbers: × hides the score card and the focus goes to Show score', label(await focusNow(page)));
     await keyOn(page, '#gameCompare', 'Enter');
     await waitFor(page, () => document.getElementById('gameCompare').getAttribute('aria-pressed') === 'true', null, 3000);
-    await waitFor(page, () => document.getElementById('gameFinalHandle').getAttribute('aria-valuenow') === '50', null, 5000); // (the reveal sweeps in to the middle first)
+    // (the reveal sweeps in from the right and ends exactly in the middle: the handle is the visitor's after that)
+    await waitFor(page, () => document.getElementById('gameFinalWrap').style.getPropertyValue('--cut') === '50%', null, 5000);
     await keyOn(page, '#gameFinalHandle', 'ArrowLeft');
     const now0 = +(await attr(page, '#gameFinalHandle', 'aria-valuenow'));
     await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft');
@@ -517,11 +532,13 @@ export default async function a11y(t, site) {
     checkWalk(t, 'Value battle playing, desktop', await walk(page, { cdp, max: 30 }), { names: true });
     await keyOn(page, '.vb-swatch[data-index="0"]', 'Shift');
     // a right answer, said; then Next
+    await liveMark(page);
     await page.keyboard.press(keyFor(await answerOf()));
     await waitFor(page, () => ValueBattle.state().answered, null, 3000);
     const right = await announced(page, cdp);
     t.check(/^Right! /.test(await page.evaluate(() => document.getElementById('vb-answer').textContent)) && /Right! /.test(right), 'Value battle: a right answer is said (the answer line is a live region)', right);
     t.check(await focusIs(page, '#vb-next'), 'Value battle: after a right answer the focus is on Next ▸', label(await focusNow(page)));
+    await liveMark(page);
     await page.keyboard.press('Enter');
     await waitFor(page, () => { const g = ValueBattle.state(); return g.i === 1 && !g.answered; }, null, 3000);
     const afterNext = await focusAfter(page);
@@ -541,6 +558,7 @@ export default async function a11y(t, site) {
     // a miss: the pop-up with the right answer
     await keyOn(page, '.vb-swatch[data-index="0"]', 'Shift');
     const ans = await answerOf();
+    await liveMark(page);
     await page.keyboard.press(wrongKey(ans));
     await waitFor(page, () => !document.getElementById('vb-miss').hidden, null, 3000);
     const why = await page.evaluate(() => document.getElementById('vb-missWhy').textContent);
@@ -556,6 +574,7 @@ export default async function a11y(t, site) {
         cause: 'index.html:939 gives #vb-miss role="group" with aria-labelledby="vb-missKicker" only; js/battle.js:403-423 (showMiss) writes #vb-missWhy, which is neither live nor referenced by aria-describedby, and js/battle.js:390 sets #vb-answer (aria-live) to \'\' when the answer is wrong.',
       });
     }
+    await liveMark(page);
     await page.keyboard.press('Enter');
     await waitFor(page, () => !document.getElementById('vb-popup').hidden && ValueBattle.state().over, null, 5000);
     const streakStars = await attr(page, '#vb-stars', 'aria-label');
@@ -567,6 +586,7 @@ export default async function a11y(t, site) {
     await waitFor(page, () => { const g = ValueBattle.state(); return g && !g.over && g.i === 0; }, null, 5000);
     t.check(await focusIs(page, '.vb-swatch[data-index="0"]'), 'Value battle: Play again puts the focus on the first color (README)', label(await focusNow(page)));
     // ✕ twice from the keyboard
+    await liveMark(page);
     await keyOn(page, '#vb-quit', 'Enter');
     const armed = await announced(page, null);
     await page.keyboard.press('Enter');
@@ -578,6 +598,7 @@ export default async function a11y(t, site) {
     await waitFor(page, () => { const g = window.ValueBattle && ValueBattle.state(); return g && g.i === 0 && !g.over; }, null, 5000);
     await page.keyboard.press(keyFor(await answerOf()));
     await waitFor(page, () => ValueBattle.state().right === 1, null, 3000);
+    await liveMark(page);
     await page.evaluate(() => window.__skew(61000));
     await waitFor(page, () => !document.getElementById('vb-popup').hidden && ValueBattle.state().over, null, 5000);
     const timedStars = await attr(page, '#vb-stars', 'aria-label');
@@ -656,6 +677,7 @@ export default async function a11y(t, site) {
     }
     // draw, Done, the card
     await stroke(page, '#tab-figure canvas[aria-label="Drawing paper"]', [[0.5, 0.15], [0.5, 0.45], [0.42, 0.8]]);
+    await liveMark(page);
     await pressUntil(page, '#fig-done', () => !document.getElementById('fig-result').hidden);
     await waitFor(page, () => !document.getElementById('fig-result').hidden && /out of 5 stars|nothing drawn/.test(document.getElementById('fig-say').textContent), null, 30000);
     const cardSaid = await announced(page, cdp);
@@ -950,7 +972,7 @@ export default async function a11y(t, site) {
     await settled(page);
     await run(page, 'Paint by numbers score card');
     await click(page, '#gameAnalyze'); await click(page, '#gamePopupClose'); await click(page, '#gameCompare');
-    await waitFor(page, () => document.getElementById('gameFinalHandle').getAttribute('aria-valuenow') === '50', null, 5000);
+    await waitFor(page, () => document.getElementById('gameFinalWrap').style.getPropertyValue('--cut') === '50%', null, 5000);
     await run(page, 'Paint by numbers analysis and Compare with target');
     await click(page, '#gameShowScore'); await click(page, '#gamePopup [data-game="again"]');
     await waitFor(page, () => document.getElementById('againDialog').open, null, 3000);
