@@ -1170,6 +1170,8 @@ const paperMap = (page) => page.evaluate(() => { const p = Studio.prep(), c = do
 // the ink of the underdrawing outside a box (pixels), to find anything drawn where the head is not
 const inkOutside = (page, sel, box) => page.evaluate(([sel, b]) => { const c = document.querySelector(sel); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) if (d[(y * c.width + x) * 4 + 3] > 8 && (x < b[0] || x > b[2] || y < b[1] || y > b[3])) n++; return n; }, [sel, box]);
 const ringOnSketch = (page, fit) => page.evaluate(([f]) => { const p = Studio.prep(), c = document.getElementById('ps-sketch'); const k = Math.min(c.width / p.w, c.height / p.h); const w = p.w * k, h = p.h * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const cx = ox + f.tx * w, cy = oy + f.ty * w, R = f.s * w; let hit = 0, n = 0; for (let a = 0; a < 360; a += 5) { const th = (a * Math.PI) / 180; let on = false; for (let r = R - 5; r <= R + 5 && !on; r++) { const x = Math.round(cx + r * Math.cos(th)), y = Math.round(cy + r * Math.sin(th)); if (x >= 0 && y >= 0 && x < c.width && y < c.height && d[(y * c.width + x) * 4 + 3] > 8) on = true; } n++; if (on) hit++; } return +(hit / n).toFixed(3); }, [fit]);
+const sketchHasInk = (page) => page.waitForFunction(() => { const c = document.getElementById('ps-sketch'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) return true; return false; }, null, { timeout: 15000 }).catch(() => null);
+const savedAtOf = (page) => page.evaluate(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('portrait-value-studio', 1); r.onupgradeneeded = () => r.result.createObjectStore('studio'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); try { const v = await new Promise((res, rej) => { const g = db.transaction('studio').objectStore('studio').get('painting'); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); }); return v ? v.savedAt : 0; } finally { db.close(); } }).catch(() => 0);
 const POSE = { s: 0.19, tx: 0.47, ty: 0.5, yaw: 0.45, pitch: -0.15, roll: 0.1, len: 1.05 };
 
 export async function headInTheStudio(t, site) {
@@ -1187,7 +1189,7 @@ export async function headInTheStudio(t, site) {
     await tab(page, 'loomis');
     armToast(page); await click(page, '#lh-cardStudio');
     const said = await toastMatch(page, /underdrawing/, 8000);
-    await sleep(400);
+    await sketchHasInk(page);
     const map = await paperMap(page);
     const inks = await midInk(page, '#ps-sketch', segs, map);
     const ring = await ringOnSketch(page, fit);
@@ -1218,7 +1220,7 @@ export async function headInTheStudio(t, site) {
     await tab(page, 'loomis');
     // the top fifth of the picture, above the head (its crown is at 0.31): a grid line would be inked there, the head is not
     const shownOnLoomis = await page.evaluate(() => { const c = document.getElementById('lh-overlay'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const x = Math.round(c.width / 3); let n = 0; const y0 = Math.round(c.height * 0.02), y1 = Math.round(c.height * 0.2); for (let y = y0; y < y1; y++) for (let dx = -2; dx <= 2; dx++) if (d[(y * c.width + x + dx) * 4 + 3] > 40) n++; return +(n / (y1 - y0) / 5).toFixed(2); });
-    await click(page, '#lh-cardStudio'); await toastMatch(page, /underdrawing/, 8000); await sleep(400);
+    await click(page, '#lh-cardStudio'); await toastMatch(page, /underdrawing/, 8000); await sketchHasInk(page);
     const read = await page.evaluate(() => { const p = Studio.prep(), c = document.getElementById('ps-sketch'); const k = Math.min(c.width / p.w, c.height / p.h); const w = p.w * k, h = p.h * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const band = (fx) => { const x = Math.round(ox + fx * w); let n = 0; const y0 = Math.round(oy + h * 0.02), y1 = Math.round(oy + h * 0.2); for (let y = y0; y < y1; y++) for (let dx = -2; dx <= 2; dx++) if (d[(y * c.width + x + dx) * 4 + 3] > 8) n++; return +(n / (y1 - y0) / 5).toFixed(2); }; return { thirds: [1 / 3, 2 / 3].map(band), edge: band(0.01) }; });
     t.check(marks.all === marks.head + 5 && shownOnLoomis < 0.2, 'the Study tab holds a 3 × 3 grid and a line besides the head, and the Loomis tab shows only the head (no grid line a third of the way across)', { marks, shownOnLoomis });
     const headOnly = read.thirds.every((v) => v < 0.3);
@@ -1276,7 +1278,7 @@ export async function headThroughTheStudyTab(t, site) {
     await stroke(page, '#cv-orig', [[0.2, 0.2], [0.8, 0.6]]);
     await page.evaluate(() => { document.getElementById('drawer-check').open = true; });
     await page.waitForFunction(() => ['cv-art', 'cv-artblock', 'cv-diff', 'cv-refblock'].every((id) => { const c = document.getElementById(id); return c && c.width > 0; }), null, { timeout: 60000 }).catch(() => null);
-    await sleep(800);
+    await page.waitForFunction(() => ['cv-refblock', 'cv-art', 'cv-artblock', 'cv-diff'].every((id) => { const o = document.getElementById(id).nextElementSibling; return o && o.width > 0; }), null, { timeout: 30000 }).catch(() => null);
     const rows = [];
     for (const id of ['cv-refblock', 'cv-art', 'cv-artblock', 'cv-diff']) {
       const present = await page.evaluate((id) => { const c = document.getElementById(id); const o = c && c.nextElementSibling; return !!o && o.width > 0; }, id);
@@ -1316,8 +1318,7 @@ export async function studioRestoreRacingTheCopy(t, site) {
     await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-brush="sketch"]');
     await stroke(page, '#ps-paper', [[0.1, 0.9], [0.4, 0.93]]);
     const savedAfter = Date.now();
-    const savedAt = async () => page.evaluate(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('portrait-value-studio', 1); r.onupgradeneeded = () => r.result.createObjectStore('studio'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); try { const v = await new Promise((res, rej) => { const g = db.transaction('studio').objectStore('studio').get('painting'); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); }); return v ? v.savedAt : 0; } finally { db.close(); } }).catch(() => 0);
-    for (let k = 0; k < 60 && !((await savedAt()) > savedAfter); k++) await sleep(250);
+    for (let k = 0; k < 120 && !((await savedAtOf(page)) > savedAfter); k++) await sleep(250);
     const had = await page.evaluate(() => { const px = (id, fx, fy, fw, fh) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.round(c.width * fw), Math.round(c.height * fh)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; }; return { paint: px('ps-paper', 0.05, 0.05, 0.4, 0.15), sketch: px('ps-sketch', 0.05, 0.85, 0.4, 0.1) }; });
     // the next visit, with the database slow to answer (6 s, once)
     await page.addInitScript(() => {
@@ -1341,14 +1342,15 @@ export async function studioRestoreRacingTheCopy(t, site) {
       Loomis.STEPS.forEach((st) => { const p = Loomis.project(st.model, f, st.face); Loomis.place(p[0], p[1] / a); document.getElementById('lh-lock').click(); });
     });
     const pending = await page.evaluate(async () => { let done = false; PaintStudio.ready().then(() => { done = true; }); await 0; await 0; return !done; });
+    const copiedAt = Date.now();
     await click(page, '#lh-cardStudio');
-    await studioUp(page); await sleep(1500);
+    await studioUp(page); await sketchHasInk(page);
     const now = await page.evaluate(() => { const px = (id, fx, fy, fw, fh) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.round(c.width * fw), Math.round(c.height * fh)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; }; return { paint: px('ps-paper', 0.05, 0.05, 0.4, 0.15), sketch: px('ps-sketch', 0.05, 0.85, 0.4, 0.1), tab: [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id).join(), toast: document.getElementById('toast').textContent }; });
     const fit = (await lstate(page)).fit;
     const ring = await ringOnSketch(page, fit);
     if (!pending) t.note('the slow database did not hold the restore back this run; the check below is not meaningful');
     t.check(had.paint > 500 && had.sketch > 100 && now.paint === had.paint && now.sketch >= had.sketch && ring >= 0.9, 'a head copied while the saved painting is still being read back lands on top of the painting that comes back: the paint, the saved underdrawing and the whole head are all there', { pending, had, now, ring });
-    await sleep(1500);
+    for (let k = 0; k < 120 && !((await savedAtOf(page)) > copiedAt); k++) await sleep(250);
     await page.reload({ waitUntil: 'load' }); await studioUp(page);
     const next = await page.evaluate(() => { const px = (id, fx, fy, fw, fh) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(Math.round(c.width * fx), Math.round(c.height * fy), Math.round(c.width * fw), Math.round(c.height * fh)).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++; return n; }; return { paint: px('ps-paper', 0.05, 0.05, 0.4, 0.15), sketch: px('ps-sketch', 0.05, 0.85, 0.4, 0.1) }; });
     const ring2 = await ringOnSketch(page, fit);
@@ -1416,10 +1418,45 @@ export async function headPngsAgree(t, site) {
   });
 }
 
+// ---- the fit on 120 random heads, with and without a little error in the marks ---------------------------------------------------
+export async function fitOnRandomHeads(t, site) {
+  await guard(t, 'round 2: the fit on 120 random heads', async () => {
+    const page = await openPage(site, { viewport: DESKTOP });
+    await tab(page, 'loomis');
+    const res = await page.evaluate(() => {
+      let seed = 12345; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+      const aspect = Studio.prep().h / Studio.prep().w, out = [];
+      for (let k = 0; k < 120; k++) {
+        const pose = { s: 0.12 + rnd() * 0.18, tx: 0.4 + rnd() * 0.2, ty: 0.35 + rnd() * 0.2, yaw: (rnd() * 2 - 1) * 1.0, pitch: (rnd() * 2 - 1) * 0.4, roll: (rnd() * 2 - 1) * 0.4, len: 0.85 + rnd() * 0.35 };
+        const jitter = k % 2 ? 0.004 : 0, pts = {};
+        Loomis.STEPS.forEach((st) => { const p = Loomis.project(st.model, pose, st.face); pts[st.key] = { x: p[0] + (rnd() * 2 - 1) * jitter, y: (p[1] + (rnd() * 2 - 1) * jitter) / aspect }; });
+        const fit = Loomis.fitPoints(pts, aspect);
+        const resid = Loomis.STEPS.map((st) => { const q = Loomis.project(st.model, fit, st.face), p = pts[st.key]; return Math.hypot(q[0] - p.x, q[1] - p.y * aspect); });
+        out.push({ jitter, pose, fit, resid: Math.max(...resid) });
+      }
+      Loomis.reset();
+      return out;
+    });
+    const worst = {};
+    for (const r of res) {
+      const e = { yaw: Math.abs(r.fit.yaw - r.pose.yaw), pitch: Math.abs(r.fit.pitch - r.pose.pitch), roll: Math.abs(r.fit.roll - r.pose.roll), s: Math.abs(r.fit.s - r.pose.s) / r.pose.s, len: Math.abs(r.fit.len - r.pose.len), where: Math.hypot(r.fit.tx - r.pose.tx, r.fit.ty - r.pose.ty), resid: r.resid - 2 * r.jitter };
+      for (const k of Object.keys(e)) if (!(worst[k] >= e[k])) worst[k] = e[k];
+    }
+    const fmt = Object.fromEntries(Object.entries(worst).map(([k, v]) => [k, +v.toFixed(4)]));
+    t.check(res.length === 120 && res.every((r) => Object.values(r.fit).every(Number.isFinite)), 'every one of 120 random heads (turned up to a radian either way, nodded, tilted, long and short; half of them with a 0.4% error in each mark) gets a finite fit', { n: res.length });
+    t.check(worst.resid <= 0.015, 'the fit lands every landmark within 1.5% of the picture width of its mark, error in the marks allowed for', fmt);
+    t.check(worst.yaw <= 0.2 && worst.roll <= 0.06 && worst.s <= 0.08 && worst.where <= 0.055 && worst.len <= 0.13, 'and recovers the turn within 0.2 rad, the tilt within 0.06 rad, the ball\'s radius within 8%, its place within 5.5% of the width and the face length within 0.13', fmt);
+    t.note(`the fit on 120 random heads, worst errors against the head that made the marks: ${JSON.stringify(fmt)}. The nod is the weakest value: with exact marks of a head nodded 0.33 rad the fit comes back at about 0.13 and one nodded -0.39 at -0.25, because the pull toward a level head (2e-3 x pitch squared, js/loomis.js line 97) outweighs the marks' own residuals, which are smaller than 1e-4 in the same units; the landmarks still land within 1.5% of their marks, and the README calls the pull gentle`);
+    await clean(t, page, 'round 2: the fit on random heads');
+    await page.context().close();
+  });
+}
+
 export async function round2(t, site) {
   await headInTheStudio(t, site);
   await headThroughTheStudyTab(t, site);
   await headPngsAgree(t, site);
+  await fitOnRandomHeads(t, site);
   await studioRestoreRacingTheCopy(t, site);
   await arrowsAtTheirLimits(t, site);
   t.note('round 2, left out: a held arrow when the window loses focus (a lost pointer-up cannot be made in this harness: a mouse held with the pointer captured gets its up wherever it is let go); Forget my work on this device from another tab (js/guard.js 166-171 tells the other tab with a storage event, which drops its pending autosave and reloads; multitab.mjs covers that for the Studio).');

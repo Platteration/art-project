@@ -1564,7 +1564,7 @@ export async function reloadMidStroke(t, site) {
     if (lost.length) t.finding({ title: 'A stroke made less than a second before a reload or a closed tab is lost: the save that is meant to run as the page goes never finishes', severity: 'medium',
       steps: '1. Open the Studio (index.html#paint) and draw one stroke. 2. Reload the page (or close the tab) at once, or within 0.6 s. 3. Open the Studio again.',
       expected: 'README: the Studio\'s paper and underdrawing "are saved in the browser a moment after each change ... and come back on the next visit"; js/painting.js line 530 says "a change still waiting is saved as the page goes (pagehide)". A stroke drawn just before leaving is in the painting that comes back.',
-      actual: `Reloading ${rows.map((r) => `${r.wait} ms`).join(', ')} after a stroke left ${rows.map((r) => r.back).join(', ')} inked samples of that stroke (${lost.length} of 3 lost; the painting from before was intact). The page's own log of the last reload reads "${rows[rows.length - 1].flush}": the pagehide handler starts the toBlob calls and ${/toBlob-done/.test(rows[rows.length - 1].flush) ? 'they call back' : 'neither calls back'}, ${/put/.test(rows[rows.length - 1].flush) ? 'and a put is made' : 'so no IndexedDB put is made'}.`,
+      actual: `Reloading ${rows.map((r) => `${r.wait} ms`).join(', ')} after a stroke left ${rows.map((r) => r.back).join(', ')} inked samples of that stroke (${lost.length} of 3 lost; the painting from before was intact). The page's own log of the last trial (ms after the stroke ended; the extra pagehide entries are its frames) reads "${rows[rows.length - 1].flush}": the pagehide handler starts the toBlob calls and ${/toBlob-done/.test(rows[rows.length - 1].flush) ? 'they call back' : 'neither calls back'}, ${/put@/.test(rows[rows.length - 1].flush) ? 'and a put is made' : 'so no IndexedDB put is made'}.`,
       cause: 'js/painting.js 532-534: saveNowIfDue() calls saveNow() on pagehide and visibilitychange, and saveNow() (472-490) first awaits canvas.toBlob (line 481, asynchronous) and then opens the database and puts (448-452). Once the page is unloading none of those callbacks runs, so only a save that was already written survives. The flush would need a synchronous snapshot (getImageData put in the same task), or a shorter delay.' });
     await clean(t, page, 'round 2: stroke before reload');
     await page.context().close();
@@ -1925,6 +1925,46 @@ export async function washWithEachPaint(t, site) {
   });
 }
 
+// ---- a kept mix tapped into the well, then the palette changes -------------------------------------------------------------------
+export async function mixInHandWhenThePaletteChanges(t, site) {
+  await guard(t, 'round 2: a mix in the well when the palette changes', async () => {
+    const results = {};
+    for (const way of ['menu', 'study']) {
+      const page = await openPage(site, { url: '#paint' }); await studioReady(page);
+      const read = () => page.evaluate(() => ({ rowHidden: document.getElementById('ps-picked').hidden, row: document.getElementById('ps-pickedRecipe').textContent, well: document.getElementById('ps-wellParts').textContent, pressed: [...document.querySelectorAll('#ps-mixes .ps-mix')].filter((m) => m.getAttribute('aria-pressed') === 'true').length, mixes: document.querySelectorAll('#ps-mixes .ps-mix').length, palette: document.getElementById('ps-palette').selectedOptions[0].text }));
+      await click(page, '#ps-colorBtn');
+      await page.evaluate(() => { const p = document.querySelectorAll('#ps-paints .ps-paint'); p[1].click(); p[2].click(); document.getElementById('ps-lock').click(); });
+      await click(page, '#ps-colorBtn');
+      await page.evaluate(() => { const m = document.querySelectorAll('#ps-mixes .ps-mix'); m[m.length - 1].click(); });
+      const picked = await read();
+      t.check(!picked.rowHidden && /is in the well/.test(picked.row) && !/^Empty/.test(picked.well) && picked.pressed === 1, `${way}: a kept mix tapped puts its parts in the well and the sheet says it is in the well`, picked);
+      if (way === 'menu') {
+        // the Studio's own palette menu
+        await page.evaluate(() => { const sel = document.getElementById('ps-palette'); const other = [...sel.options].find((o) => o.value !== sel.value); sel.value = other.value; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+      } else {
+        // the Study tab's palette, which an untouched Studio follows
+        const was = await page.evaluate(() => StudioPalette.current().codes.slice().sort().join());
+        await tab(page, 'study'); await studyPalette(page, was === ['CRL', 'IB', 'TW', 'YO'].sort().join() ? 'rembrandt' : 'zorn');
+        await tab(page, 'paint'); await studioReady(page);
+      }
+      const after = await read();
+      results[way] = { picked: picked.palette, after };
+      await clean(t, page, `round 2: a mix in the well and the palette (${way})`);
+      await page.context().close();
+    }
+    const consistent = (r) => r.rowHidden || !/is in the well/.test(r.row) || !/^Empty/.test(r.well);
+    const changed = (w) => results[w].picked !== results[w].after.palette;
+    t.check(changed('menu') && changed('study'), 'the palette did change both ways (the Paints menu, and the Study tab\'s choice followed by the Studio)', results);
+    const ok = consistent(results.menu.after) && consistent(results.study.after);
+    t.check(ok, 'when the palette changes and the well is emptied, the sheet no longer says a mix "is in the well"', results);
+    if (!ok) { const bad = !consistent(results.menu.after) ? results.menu : results.study; t.finding({ title: 'After the palette changes the Paints sheet still says a kept mix "is in the well" while the well is empty and no mix is selected', severity: 'low',
+      steps: '1. In the Studio open Paints, lock in a mix and tap it in My mixes (the sheet says "Mix 9 (YO 1 · RS 1) is in the well: add paint to build on it"). 2. Change the palette in the Paints sheet, or pick another palette on the Study tab and come back.',
+      expected: 'README: "tap a kept mix to paint with it and to put its parts back in the well, ready to build on". When the palette changes the well is emptied and the starting mixes are made again, so the line about the mix in the well goes (as it does when the well is mixed afresh: showWell hides it).',
+      actual: `${['menu', 'study'].filter((w) => !consistent(results[w].after)).join(' and ')}: after the palette went from ${bad.picked} to ${bad.after.palette} the sheet still shows "${bad.after.row}" with its Remove button, over a well that reads "${bad.after.well}", with ${bad.after.pressed} mix pressed and the brush colour back on the first starter. Remove would then delete the mix the row names, though it is no longer the mix in hand.`,
+      cause: 'js/painting.js 887 (applyPalette) empties the well (state.well = []) and 868-873 (seedMixes) replaces the starters and sets the colour, but nothing resets `picked` (777) or hides #ps-picked; showWell() (786) hides it only when the well holds a mix, and an empty well does not.' }); }
+  });
+}
+
 export async function round2(t, site) {
   await reloadMidStroke(t, site);
   await clearJustAfterLoad(t, site);
@@ -1933,6 +1973,7 @@ export async function round2(t, site) {
   await undoDuringAStroke(t, site);
   await savedPngs(t, site);
   await washWithEachPaint(t, site);
+  await mixInHandWhenThePaletteChanges(t, site);
   await turnThePaperTwice(t, site);
   await paletteAndReferenceOnOddPhotos(t, site);
   t.note('round 2, left out: hostile record sizes of 16384 x 16384 or 8192 x 8192 (256 MB to 1 GB per canvas layer in the renderer: not safe on a shared machine; the version-2 database path is covered by the first round); a 100 x 100 blob under a 900 x 1200 record is a tampered record the site never writes.');

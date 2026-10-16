@@ -126,7 +126,7 @@ function summarise(r, floor = 100) {
   return { gap: first && since0 !== null ? Math.round(first.s - since0) : null, tasks: lens, max: lens.length ? Math.max(...lens) : 0, uncovered: lt.filter((l) => l.d >= floor && !covered(l)).map((l) => Math.round(l.d)), shown: ev.some((e) => !e.hidden) };
 }
 // runs act() with the CPU slowed by `rate`, and returns its wall time and the long tasks it caused
-async function measure(page, rate, act, { settle = 450 } = {}) {
+async function measure(page, rate, act, { settle = 450, floor = null } = {}) {
   let out;
   await throttle(page, rate);
   try {
@@ -135,7 +135,7 @@ async function measure(page, rate, act, { settle = 450 } = {}) {
     const value = await act();
     const ms = Date.now() - t0;
     await sleep(settle);
-    out = { ms, value, ...summarise(await finish(page), S(100)) };
+    out = { ms, value, ...summarise(await finish(page), floor === null ? S(100) : floor) };
   } finally { await throttle(page, 1); }
   await calibrate(true);
   return out;
@@ -222,6 +222,8 @@ const S = (ms) => Math.round(ms * 1.5 * HI);
 const under = () => `(Times as measured while this machine ran ${LO.toFixed(1)}-${HI.toFixed(1)}x slower than a quiet one, from a fixed loop run in the page; divide by that for a quiet machine.)`;
 const took = {};
 async function segment(t, name, fn) {
+  // (PERF_ONLY="study re-run,loomis" runs just those sections, for working on one)
+  if (process.env.PERF_ONLY && !process.env.PERF_ONLY.split(',').includes(name)) return;
   const t0 = Date.now();
   await calibrate();
   try { await fn(); } catch (e) { t.check(false, `${name}: the section ran to its end`, String((e && e.message) || e).slice(0, 300)); }
@@ -358,10 +360,10 @@ export default async function perf(t, site) {
           const tries = [];
           let sure = 0;
           for (let i = 0; i < 9 && sure < 3; i++) {
-            const r = await measure(page, 1, async () => { await act(i); await busyDone(page); }, { settle: 300 });
+            const r = await measure(page, 1, async () => { await act(i); await busyDone(page); }, { settle: 300, floor: K(100) });
             const bareTry = r.uncovered.length > 0, slipped = !bareTry && r.gap !== null && r.gap > 14;
             tries.push({ max: r.max, gap: r.gap, bare: bareTry, slipped });
-            if (r.max >= S(100) && !slipped) sure++;
+            if (r.max >= K(100) && !slipped) sure++;
           }
           zero[label] = tries;
         };
@@ -374,7 +376,7 @@ export default async function perf(t, site) {
         note(`controls that re-run the study at once, per try (longest task, whether it began with no painted pill): ${JSON.stringify(zero)}`);
         const bare = {}, sure = {};
         for (const [label, tries] of Object.entries(zero)) {
-          const real = tries.filter((x) => !x.slipped && x.max >= S(100));
+          const real = tries.filter((x) => !x.slipped && x.max >= K(100));
           bare[label] = real.filter((x) => x.bare).length; sure[label] = real.length;
           if (real.length >= 2) t.check(bare[label] * 2 < real.length, `${label} shows Updating… (painted) before its re-run starts (in most tries)`, tries);
           else note(`${label}: only ${real.length} conclusive tries of ${tries.length} (the machine was too busy to tell); not checked`);
