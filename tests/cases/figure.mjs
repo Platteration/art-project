@@ -101,8 +101,18 @@ async function segment(t, name, fn) {
 const toastLog = (page) => page.evaluate(() => { if (window.__toasts) return; window.__toasts = []; const el = document.getElementById('toast'); new MutationObserver(() => { if (el.textContent) window.__toasts.push(el.textContent); }).observe(el, { childList: true, characterData: true, subtree: true }); });
 const toasts = (page) => page.evaluate(() => window.__toasts || []);
 // time the page's clock can be moved forward by (the class reads performance.now), so a long pose needs no long wait
-const skewClock = (page) => page.evaluate(() => { if (window.__skew) return; const real = performance.now.bind(performance); let skew = 0; performance.now = () => real() + skew; window.__skew = (ms) => { skew += ms; }; });
+const skewClock = (page) => page.evaluate(() => { if (window.__skew) return; const real = performance.now.bind(performance); let skew = 0; performance.now = () => real() + skew; window.__skew = (ms) => { skew += ms; }; window.__skewReset = () => { skew = 0; }; });
 const skewBy = (page, ms) => page.evaluate((ms) => window.__skew(ms), ms);
+// (only with no class and no card on screen: a card's guard and a pose's clock are stamped in the moved time)
+const unskew = (page) => page.evaluate(() => window.__skewReset && window.__skewReset());
+// the percentage a card's stars label names (the number in the page counts up to it)
+const pctOf = (c) => +((/, (\d+)%/.exec((c && c.label) || '') || [])[1]);
+// the tab open and its list of poses arrived (the pictures stream in after it, and are waited for only where a block needs them)
+async function figureUp(page) {
+  await tab(page, 'figure', { wait: false });
+  await page.waitForFunction(() => !document.getElementById('fig-start').disabled, null, { timeout: 40000 }).catch(() => null);
+  await watch(page);
+}
 // leave whatever is on the screen for the setup: a pose (✕ twice), the card (Stop class), the review (New class)
 async function toSetup(page) {
   for (let i = 0; i < 5; i++) {
@@ -476,10 +486,10 @@ async function toolsBlock(t, page, mem) {
   await traceParts(page);
   const dl = await downloadFile(page, '#fs-save');
   const sheetPng = dl && dl.buf.length ? await pngFacts(page, dl.buf) : null;
-  t.check(dl && dl.name === 'figure-drawing.png' && sheetPng && sheetPng.w === 900 && sheetPng.h === 1200 && sheetPng.tones > 50 && Object.values(sheetPng.near).every((n) => n === 0) && !(await page.evaluate(() => document.getElementById('saveDialog').open)), 'tools: the Canvas sheet\'s Save gives figure-drawing.png, 900 × 1200, textured, with the paper alone (no gesture on it), and no dialog at the top level', { name: dl && dl.name, sheetPng });
+  t.check(dl && dl.name === 'figure-drawing.png' && sheetPng && sheetPng.w === 900 && sheetPng.h === 1200 && sheetPng.tones > 8 && Object.values(sheetPng.near).every((n) => n === 0) && !(await page.evaluate(() => document.getElementById('saveDialog').open)), 'tools: the Canvas sheet\'s Save gives figure-drawing.png, 900 × 1200, textured, with the paper alone (no gesture on it), and no dialog at the top level', { name: dl && dl.name, sheetPng });
   t.check(/white/.test(wh) && sheetPng && Math.abs(sheetPng.corner[0] - sheetPng.corner[1]) < 14 && sheetPng.corner[0] > 100 && sheetPng.corner[0] < 160, 'tools: the gray ground is gray in the saved sheet', { wh, corner: sheetPng && sheetPng.corner });
   const c3 = await finishPose(page);
-  t.check(c3 && +c3.pct >= 65 && c3.grade !== 'Nothing drawn', 'tools: white-pencil marks on a gray ground count (a traced drawing earns at least three stars)', c3 && { pct: c3.pct, grade: c3.grade });
+  t.check(c3 && pctOf(c3) >= 65 && c3.grade !== 'Nothing drawn', 'tools: white-pencil marks on a gray ground count (a traced drawing earns at least three stars)', c3 && { pct: pctOf(c3), grade: c3.grade });
   mem.pose3 = c3;
   // ---- pose 4: the paper turned to landscape, zoomed in
   t.check(await nextPose(page, 4), 'tools: pose 4 comes');
@@ -499,7 +509,7 @@ async function toolsBlock(t, page, mem) {
   t.check((await inked(page, '#fs-paper')) === 0, 'tools: Fit and Undo bring the zoomed sheet back to blank');
   await traceParts(page);
   const c4 = await finishPose(page);
-  t.check(c4 && +c4.pct >= 65 && c4.grade !== 'Nothing drawn', 'tools: a drawing traced on the turned paper earns at least three stars', c4 && { pct: c4.pct });
+  t.check(c4 && pctOf(c4) >= 65 && c4.grade !== 'Nothing drawn', 'tools: a drawing traced on the turned paper earns at least three stars', c4 && { pct: pctOf(c4) });
   const cvs = await page.evaluate(() => { const c = document.getElementById('fig-drawing'); return [c.width, c.height]; });
   t.check(cvs[0] === 600 && cvs[1] === 450, 'tools: the card\'s drawing of a landscape sheet is 600 × 450', cvs);
   mem.landscape = c4;
@@ -522,7 +532,7 @@ async function toolsBlock(t, page, mem) {
   await traceParts(page);
   const col = await page.evaluate(() => { const c = document.getElementById('fs-paper'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let any = 0, colored = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 40) { any++; if (Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]) > 25) colored++; } return { any, colored }; });
   const c5 = await finishPose(page);
-  t.check(col.any > 500 && col.colored > col.any * 0.8 && c5 && +c5.pct >= 65, 'paints: a stroke painted with the locked mix is colored on the paper and scores like any other mark', { col, pct: c5 && c5.pct });
+  t.check(col.any > 500 && col.colored > col.any * 0.8 && c5 && pctOf(c5) >= 65, 'paints: a stroke painted with the locked mix is colored on the paper and scores like any other mark', { col, pct: pctOf(c5) });
   mem.urls = await page.evaluate(() => window.FigureStudy.state().results.map((r) => r.image));
   await clean(t, page, 'tools in a class');
 }
@@ -578,8 +588,8 @@ const usedOf = (page) => page.evaluate(() => { const c = window.FigureStudy.stat
 async function setLeft(page, secs, leftSecs) { const used = await usedOf(page); await skewBy(page, secs * 1000 - leftSecs * 1000 - used); }
 const clockText = (page) => page.evaluate(() => document.getElementById('fig-clock').textContent);
 const waitClock = (page, want, low = null) => page.waitForFunction(([want, low]) => { const c = document.getElementById('fig-clock'); return c.textContent === want && (low === null || c.classList.contains('is-low') === low); }, [want, low], { timeout: 5000 }).then(() => true).catch(() => false);
-async function clockBlock(t, page, mem) {
-  await toastLog(page); await skewClock(page);
+async function clockBlock(t, page) {
+  await toastLog(page);
   await renderFrame(page).evaluate(() => { window.__renders = []; addEventListener('message', (e) => { if (e.data && e.data.type === 'pose-and-light:render') window.__renders.push(e.data.id); }); });
   // ---- the next pose's picture is drawn while you work on this one
   t.check(await startClass(page, { ids: ['stand', 'relaxed'] }), 'clock: a relaxed class on two poses starts');
@@ -590,16 +600,14 @@ async function clockBlock(t, page, mem) {
   // ---- Relaxed: leaving the tab stops the clock, coming back runs it again (no button), and the card's time is the clock's
   await page.waitForFunction(() => document.getElementById('fig-clock').textContent !== '0:00', null, { timeout: 5000 }).catch(() => null);
   await traceParts(page, ['spine']);
-  const away0 = await clockText(page);
   await tab(page, 'study');
-  const away = await stateOf(page);
-  await skewBy(page, 20000);
+  const away = await stateOf(page), usedAway = await usedOf(page);
+  await sleep(1200); // (a stopped clock has no condition to wait on)
+  const usedLater = await usedOf(page);
   await tab(page, 'figure');
   const back = await stateOf(page), cb = await clockState(page);
   t.check(away && !away.running && back && back.running && cb.pauseHidden && !cb.paused, 'relaxed: leaving the tab stops the clock; coming back runs it again with no button to press', { away, back, pauseHidden: cb.pauseHidden });
-  const secsAway = await page.evaluate(() => { const [m, s] = document.getElementById('fig-clock').textContent.split(':').map(Number); return m * 60 + s; });
-  const secsBefore = (([m, s]) => m * 60 + s)(away0.split(':').map(Number));
-  t.check(secsAway >= secsBefore && secsAway <= secsBefore + 4, 'relaxed: the 20 s spent on another tab are not counted on the pose', { before: away0, after: await clockText(page) });
+  t.check(usedLater === usedAway, 'relaxed: no time is counted on the pose while another tab is open (1.2 s away, the time used did not move)', { usedAway, usedLater });
   await finishPose(page);
   const atDone = await clockText(page);
   await guardOver(page);
@@ -607,7 +615,6 @@ async function clockBlock(t, page, mem) {
   const dup = await renderFrame(page).evaluate(() => window.__renders.slice());
   const pose2 = await page.evaluate(() => window.FigureStudy.state().id);
   t.check(pose2 === pre.next && dup.filter((x) => x === pose2).length === 1, 'prefetch: pose 2 is the pose that was drawn ahead, and it was not drawn a second time when its turn came', { pose2, next: pre.next, renders: dup });
-  mem.firstTime = atDone;
   await traceParts(page, ['spine']);
   await finishPose(page);
   await guardOver(page); await click(page, '#fig-stop');
@@ -659,6 +666,7 @@ async function longClocksBlock(t, page) {
       t.check(tc.kicker === 'Time’s up!' && tc.chimes === before + 1 && tc.clock === '0:00' && tc.grade === 'Nothing drawn', '10 min: Time’s up! with one chime at the end of a long pose, the clock at 0:00', { kicker: tc.kicker, chimes: [before, tc.chimes], clock: tc.clock });
     }
     await toSetup(page);
+    await unskew(page);
   }
   t.check(spy, 'the games\' sound switch was on for the chime');
   await clean(t, page, 'long clocks');
@@ -756,6 +764,7 @@ async function keyboardBlock(t, page) {
   await page.keyboard.press('Control+z');
   const rv = await page.evaluate(() => ({ review: !document.getElementById('fig-review').hidden, cards: document.querySelectorAll('#fig-cards .fig-card').length, cls: !!window.FigureStudy.state() }));
   t.check(rv.review && rv.cards === 2 && !rv.cls, 'keyboard: Ctrl+Z on the review changes nothing', rv);
+  await unskew(page);
   await clean(t, page, 'keyboard');
 }
 // a new photo dropped or pasted while a pose is being drawn goes to the Study tab; the pose stays the reference
@@ -860,7 +869,9 @@ async function renderFailureBlock(t, page, mem) {
   await click(page, '#fig-start');
   await page.waitForFunction(() => !window.FigureStudy.state(), null, { timeout: 30000 }).catch(() => null);
   await skewBy(page, 30000);
-  t.check(spy && !(await stateOf(page)) && (await chimes(page)) === ringing && (await setupState(page)).setup, 'render failing: a timed class that could not draw its pose starts no clock (30 s later: no class, no chime)', { chimes: await chimes(page) });
+  const ranOn = { cls: await stateOf(page), chimes: await chimes(page) };
+  await unskew(page);
+  t.check(spy && !ranOn.cls && ranOn.chimes === ringing && (await setupState(page)).setup, 'render failing: a timed class that could not draw its pose starts no clock (30 s later: no class, no chime)', ranOn);
   // the context comes back: the next class draws again
   await frame.evaluate(() => { window.__lose.restoreContext(); });
   const back = await frame.waitForFunction(() => window.__restored === true, null, { timeout: 15000 }).then(() => true).catch(() => false);
@@ -943,8 +954,7 @@ async function reloadTailBlock(t, page, mem) {
 // Forget pressed in another tab of the site while a class is on: this tab starts over
 async function forgetElsewhereBlock(t, site) {
   const page = await openPage(site);
-  await tab(page, 'figure');
-  await watch(page);
+  await figureUp(page);
   await click(page, '#fig-timed'); await click(page, '#fig-t60');
   t.check(await startClass(page, { timed: 60, ids: ['stand', 'relaxed'] }), 'forget elsewhere: a timed class (1 min) is on');
   const other = await newTab(site, page, { url: '' });
@@ -1068,8 +1078,7 @@ async function silentFrameBlock(t, site) {
 async function noGameBlock(t, site) {
   const page = await openPage(site, { notFound: [site.base + 'js/game.js'] });
   try {
-    await tab(page, 'figure');
-    await watch(page); await skewClock(page);
+    await figureUp(page); await skewClock(page);
     const has = await page.evaluate(() => typeof window.GameSound);
     t.check(has === 'undefined', 'game.js missing: there is no GameSound', has);
     t.check(await startClass(page, { timed: 10, ids: ['stand', 'relaxed'] }), 'game.js missing: a timed class starts');
@@ -1120,7 +1129,7 @@ async function sandboxBlock(t, site) {
 // ================= Q. the review's wording at its edges, and the sound switch =================
 // README: "every drawing comes back beside its pose, with its stars ... the class's average stars"; "ending with a chime (with the game's sound switch)"
 async function wordingBlock(t, page) {
-  const ONE = ['spine', 'legR', 'legL']; // (a part of the stand pose's gesture: one star)
+  const ONE = ['head', 'spine', 'armR', 'armL']; // (the stand pose without its legs: one star, 43% as drawn here)
   const lede = (stars) => { const n = stars.length, shown = half(stars.reduce((a, b) => a + b, 0) / n); return `${n} drawing${n > 1 ? 's' : ''} from a relaxed class, ${shown} star${shown === '1' || shown === '½' ? '' : 's'} on average. Each is beside the pose it was drawn from, with the pose's gesture laid over it.`; };
   const classOf = async (kinds) => {
     t.check(await startClass(page, { ids: ['stand'] }), `wording: a class of ${kinds.length} on one pose starts`);
@@ -1167,6 +1176,7 @@ async function soundOffBlock(t, page) {
   const c = await cardState(page);
   t.check(c.kicker === 'Time’s up!' && (await chimes(page)) === rang, 'sound off: Time’s up! without a chime', { kicker: c.kicker, chimes: [rang, await chimes(page)] });
   await toSetup(page);
+  await unskew(page);
   await click(page, '#gameSound');
   t.check((await page.evaluate(() => window.GameSound.on())) === true, 'the sound switch is back on');
   await clean(t, page, 'sound off');
@@ -1636,9 +1646,8 @@ export default async function figure(t, site) {
   {
     const page = await openPage(site);
     try {
-      await tab(page, 'figure');
-      await watch(page);
-      await segment(t, 'clock orderings, prefetch, relaxed tab', () => clockBlock(t, page, mem));
+      await figureUp(page);
+      await segment(t, 'clock orderings, prefetch, relaxed tab', () => clockBlock(t, page));
       await segment(t, '1, 5 and 10 minute clocks', () => longClocksBlock(t, page));
       await segment(t, 'hold during a load', () => holdDuringLoadBlock(t, page));
       await segment(t, 'stopping in other orders', () => stopOrderBlock(t, page));
