@@ -14,7 +14,15 @@
 // Stretch; a new reference while the drawer is open, with the example and with a painting of the
 // visitor's; Use my Studio painting with a blank paper, with strokes, twice, and with a dealt portrait,
 // and with painting.js missing; Simple and Advanced hints; hostile saved state for every key the drawer
-// depends on; and the phone width.
+// depends on; and the phone width. Added from a coverage review: the README's formulas and its worked 75 on
+// paintings made from the reference with one known change (lighter, darker, grayer, warmer, moved, turned,
+// enlarged, a value zone repainted, padded, squashed), the uncovered part left out of the score, Crop and Stretch
+// shown correct; the list's direction and order and each white label tied to its entry; lines, measures, plumb
+// lines and the grid on the check panels and in their PNGs; a phone JPEG's EXIF turn; files arriving together;
+// the gain limits at their edges, a pick under the faded reference and on the gray fill of a moved photo, the fix
+// through moves, fits and a new reference; the Studio after another deal, a photo of the visitor's own, a turned
+// and toned paper, and a press before the Studio has read its painting back; touch on a phone and Working size
+// 1400 there; the Palette block view; axe with the drawer open, light and dark; the drawer's how-tos.
 import fs from 'node:fs';
 import path from 'node:path';
 import { openPage, clean, tab, makeImage, textFile, brokenImage, svgImage, dropFiles, pasteFile, stroke, inked, storageGet, click, text, hscroll, screenshot, axe, sleep, PHONE, PROTO_NAMES, ROOT } from '../lib.mjs';
