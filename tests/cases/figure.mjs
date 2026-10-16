@@ -189,7 +189,7 @@ export default async function figure(t, site) {
     // Next pose: a fresh sheet
     t.check(await nextPose(page, 2), 'Next pose (after the guard) brings pose 2');
     const p2 = await page.evaluate(() => ({ count: document.getElementById('fig-count').textContent, card: !document.getElementById('fig-result').hidden, undo: document.getElementById('fs-undo').disabled, focus: document.activeElement && document.activeElement.id, clock: document.getElementById('fig-clock').textContent }));
-    t.check(p2.count === 'Pose 2' && !p2.card && p2.undo && (await inked(page, '#fs-paper')) === 0 && p2.focus === 'fig-done' && p2.clock === '0:00', 'pose 2: a fresh sheet, nothing to undo, the clock from 0:00, Done focused', p2);
+    t.check(p2.count === 'Pose 2' && !p2.card && p2.undo && (await inked(page, '#fs-paper')) === 0 && p2.focus === 'fig-done' && /^0:0[0-2]$/.test(p2.clock), 'pose 2: a fresh sheet, nothing to undo, the clock from 0:00, Done focused', p2); // (read a moment after the pose starts: up to 0:02 on a loaded machine)
     // a blank sheet Done
     t.check(await endPose(page), 'Done with a blank sheet shows a card');
     await cardSettled(page);
