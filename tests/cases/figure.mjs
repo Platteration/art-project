@@ -357,6 +357,22 @@ async function analyzerBlock(t, page) {
     t.check(Math.abs(Sg.score - P.score) <= 1 && !Sg.leads.includes('Extra marks') && Sg.tips.find((x) => /^Your drawing/.test(x)) === P.tips.find((x) => /^Your drawing/.test(x)) && Math.abs(Ln.score - P.score) <= 1 && Ln.tips.find((x) => /^Your drawing/.test(x)) === P.tips.find((x) => /^Your drawing/.test(x)), `analyze ${id}: a signature in the corner and a line across the foot of the sheet are left out of the drawing's shape and cost nothing`, { plain: P.score, signature: Sg.score, line: Ln.score });
     const Br = R.bars;
     t.check(Br.parts.along < 0.8 && Br.parts.clean >= 0.9 && Br.leads.includes('Off the figure') && !Br.leads.includes('Well matched') && Br.score < P.score - 5, `analyze ${id}: long marks away from the body (two bars either side) take the score down and the note says the drawing lies off the figure`, { along: Br.parts.along, clean: Br.parts.clean, score: Br.score, leads: Br.leads });
+    // README: "The notes ... whether the drawing is as wide for its height as the pose": the pose's own proportions are said to have
+    // its overall shape, and a figure two fifths narrower is said to be taller and thinner (and its score falls well down)
+    const Th = R.thin;
+    t.check(P.tips.includes("Your drawing: has the pose's overall shape: about as wide for its height.") && Th.score < P.score - 30 && Th.tips.includes('Your drawing: is taller and thinner than the pose. Check how far the arms and legs reach out to the sides.'), `analyze ${id}: a drawing of the pose's proportions is said to have its overall shape, and one two fifths narrower is said to be taller and thinner, with its score well down`, { plain: P.score, thin: Th.score, tips: Th.tips.filter((x) => /^Your drawing/.test(x)) });
+    // README: "The gesture ... settles inside an outline drawing as well as on a stick figure": the wooden figure's own edge, drawn alone
+    if (R.outline) {
+      const O = R.outline;
+      t.check(O.marked && Math.abs(O.k / O.kDrawn - 1) < 0.05 && O.crownErr < 0.04 * O.figH && O.score >= 85 && all(O.match) && O.leads.includes('Well matched'), `analyze ${id}: an outline of the body alone (the cells on the wooden figure's edge) is fitted at its own size and place, every part matched, well matched`, { score: O.score, ratio: O.k / O.kDrawn, err: O.crownErr, match: O.match, cells: R.outlineCells });
+    } else t.note(`analyze ${id}: no picture for the wooden figure, so no outline drawing to fit`);
+    // README: "A part with no marks near half its length is dashed". Asserted on the stand, where the arm hangs clear of the body:
+    // a quarter of the arm drawn is dashed and named by side, three quarters are not. (On the relaxed pose the arm hangs against
+    // the torso, so the marks along the torso count as marks near the arm: that is the rule working, and it is noted, not checked.)
+    if (id === 'stand') {
+      const Q = R.arm25, Qh = R.arm75;
+      t.check(Q.match.armL === false && Q.parts.dashed === 1 && Q.tips.includes(`Dashed: no marks near ${nm.armL}. Look again at where it goes.`) && Qh.match.armL === true && Qh.parts.dashed === 0, `analyze ${id}: an arm drawn along a quarter of its length is dashed and named, one drawn along three quarters is not (README: no marks near half its length)`, { quarter: { match: Q.match.armL, dashed: Q.parts.dashed, tips: Q.tips.filter((x) => /^Dashed/.test(x)) }, threeQuarters: { match: Qh.match.armL, dashed: Qh.parts.dashed } });
+    } else t.note(`analyze ${id}: a quarter of the left arm drawn: ${R.arm25.match.armL ? 'not dashed (the marks along the torso are near the arm)' : 'dashed'}; three quarters: ${R.arm75.match.armL ? 'not dashed' : 'dashed'}`);
     if (R.castN) {
       const Cs = R.cast;
       t.check(Math.abs(Cs.score - P.score) <= 3 && all(Cs.match) && Cs.parts.along > 0.95, `analyze ${id}: the cast shadow (the gray floor patches touching the figure), drawn solid, costs nothing`, { plain: P.score, withCast: Cs.score, along: Cs.parts.along, cells: R.castN });
