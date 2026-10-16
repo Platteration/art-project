@@ -11,7 +11,7 @@
 
   // the modules this one needs; if app.js did not finish loading, this tab stays out and the page says so
   if (!window.Study || !window.Mixing || !window.Paints || !window.Studio) {
-    if (window.StudioGuard) StudioGuard.failed('palette.js: app.js did not finish loading');
+    if (window.StudioGuard) StudioGuard.failed('palette.js: app.js did not finish loading', 'palette');
     return;
   }
 

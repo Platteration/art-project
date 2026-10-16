@@ -109,6 +109,16 @@
       if (tab === 'paint') { var fromStudio = document.getElementById('artFromStudio'); if (fromStudio) fromStudio.hidden = true; }
       var goes = document.querySelectorAll('[data-go="' + tab + '"]');
       for (var g = 0; g < goes.length; g++) goes[g].hidden = true;
+      // palette.js plans the paints (it has no tab of its own): without it the paints part and the block
+      // study's Palette switch leave, the blocks keep the photo's colors, and the drawer's header still says
+      // what it is set to
+      if (tab === 'palette') {
+        var paints = document.getElementById('paints'); if (paints) paints.hidden = true;
+        var bv = document.querySelector('.block-view'); if (bv) bv.hidden = true;
+        var sayColors = function () { var st = document.getElementById('colorsState'), cs = document.getElementById('colors'); if (st && cs) st.textContent = cs.value + ' per value'; };
+        sayColors();
+        var cs = document.getElementById('colors'); if (cs) cs.addEventListener('input', sayColors);
+      }
       if (item) {
         item.hidden = true;
         // the group's button names one of its items: not this one any more; a group with none left goes too
@@ -156,7 +166,7 @@
   // that module did not start, and its tab is taken off the menu (a module cannot do that for itself).
   var booting = true;
   window.addEventListener('load', function () { booting = false; });
-  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure', subjects: 'game', palette: '' };
+  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure', subjects: 'game', palette: 'palette' };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
   // stylesheet failing to load shows the standing note at the top of the page, not a passing toast,
