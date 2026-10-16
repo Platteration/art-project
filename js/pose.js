@@ -38,6 +38,17 @@
   // ---- Renderer, scene, camera ---------------------------------------------------------
 
   const canvas = $('view');
+  // three.js finds WebGL missing by trying, and writes that to the console before it throws: asked first, on a
+  // scratch canvas (its context let go at once, as a browser keeps only a few), the panel says so with no error
+  const webgl = () => {
+    try {
+      const c = document.createElement('canvas'), gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+      const lose = gl && gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+      return !!gl;
+    } catch (err) { return false; }
+  };
+  if (!webgl()) { fail(); return; }
   let renderer;
   try {
     renderer = new T.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -141,7 +152,8 @@
     const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
     return inside(TARGET, az, Math.max(el, minEl), light.dist, LAMP_CLEAR);
   }
-  // raise the height until the lamp really sits at the distance and height the sliders say
+  // the height the lamp needs to really sit at the distance and height the sliders say, raised from `el` as far as
+  // that takes: only returned, the light itself is not changed (reachable() does that)
   function reachableEl(az, el) {
     for (let k = 0; k < 120 && el < 85; k++) {
       const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
@@ -736,14 +748,21 @@
     save(s);
     markLibrary();
   }
+  // a step as Undo brings it back: in Simple without the light's options, which have no sliders there
+  const undoStep = (s) => { const v = JSON.parse(s); if (simple) Object.assign(v.light, LIGHT_OPTIONS); return v; };
+  // steps that would bring back nothing to see (one that differed only in those options, before Simple put them
+  // back) are dropped, so no press of Undo seems to do nothing
+  function dropBlankSteps() {
+    while (history.length && JSON.stringify(undoStep(history[history.length - 1])) === last) history.pop();
+    $('undo').disabled = !history.length;
+  }
   $('undo').addEventListener('click', () => {
-    letGo();
+    letGo();          // a drag, a held arrow, the lamp or a view turn in flight ends first, or it goes on from the pose Undo replaces
     if (!history.length) return;
-    const s = JSON.parse(history.pop());
-    if (simple) Object.assign(s.light, LIGHT_OPTIONS);          // Simple has no sliders for these, so Undo does not bring them back
+    const s = undoStep(history.pop());
     last = JSON.stringify(s);
     setPose(s.pose); Object.assign(light, s.light); lightChanged(false);
-    $('undo').disabled = !history.length;
+    dropBlankSteps();
     save(last);
     markLibrary();
   });
@@ -752,8 +771,29 @@
   // of the site: nothing more is written, and a page of its own starts over
   let forgotten = false;
   window.addEventListener('storage', (e) => { if (e.key === 'portrait-value-studio.forget' && e.newValue) { forgotten = true; if (window.parent === window) setTimeout(() => location.reload(), 300); } });
-  // a full storage keeps this visit's pose but not the next visit's: the rail says so until a write goes through
-  function save(s) { if (forgotten) return; try { localStorage.setItem(KEY, s); $('keepNote').hidden = true; } catch (err) { $('keepNote').textContent = 'This pose could not be kept for next time: browser storage is full.'; $('keepNote').hidden = false; } }
+  // a write refused because the storage is full, told apart from a browser that lets the site keep nothing (site
+  // data blocked: localStorage throws SecurityError on access), where freeing room would not help
+  const isFull = (err) => !!err && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22 || err.code === 1014);
+  // a pose that cannot be stored stays for this visit but not the next: the rail says so until a write goes through.
+  // A full storage also lets go of the pose stored before (a removal frees room), so the next visit does not offer
+  // an older pose as Where you left off.
+  let keepSay = '';
+  function save(s) {
+    if (forgotten) return;
+    try { localStorage.setItem(KEY, s); keepSay = ''; } catch (err) {
+      if (isFull(err)) { try { localStorage.removeItem(KEY); } catch (e) { /* nothing freed */ } }
+      keepSay = isFull(err) ? 'This pose could not be kept for next time: browser storage is full.' : 'This pose cannot be kept for next time: this browser does not let the site keep it.';
+    }
+    sayKeep();
+  }
+  // the note is a status line, said only once the rail can be read: while the pose library is open the rail is
+  // inert, so a note that comes then (a pose picked there) is written as the library closes
+  function sayKeep() {
+    const n = $('keepNote');
+    if (!keepSay) { n.hidden = true; return; }
+    if (!$('library').hidden) return;
+    n.textContent = keepSay; n.hidden = false;
+  }
   function restore() { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (!v || typeof v !== 'object' || Array.isArray(v)) return null; if (v.pose != null && (typeof v.pose !== 'object' || Array.isArray(v.pose))) return null; if (v.light != null && (typeof v.light !== 'object' || Array.isArray(v.light))) return null; return v; } catch (err) { return null; } } // a saved pose of the wrong shape is ignored
 
   // ---- Picking a part: a yellow outline and arrows ------------------------------------------------
@@ -1032,7 +1072,9 @@
     });
     $('partDepth').hidden = !depthShown;
   }
+  // these buttons (as Undo) end a drag or a held arrow in flight first: its next move would undo their change
   $('straighten').addEventListener('click', () => {
+    letGo();
     if (!picked) return;
     const from = { ...pose[picked] };
     pose[picked] = { x: 0, y: 0, z: 0 };
@@ -1040,6 +1082,7 @@
     remember();
   });
   $('mirror').addEventListener('click', () => {
+    letGo();
     if (!picked || !/[RL]$/.test(picked)) return;
     const other = picked.slice(0, -1) + (picked.endsWith('R') ? 'L' : 'R');
     const a = pose[picked], onFloor = lowestPoint() < 0.01;
@@ -1083,7 +1126,7 @@
   LIGHTS.forEach((l) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'btn'; b.textContent = l.name; b.dataset.id = l.id;
-    b.addEventListener('click', () => { light.az = l.az; light.el = l.el; lightChanged(false); remember(); });
+    b.addEventListener('click', () => { letGo(); light.az = l.az; light.el = l.el; lightChanged(false); remember(); });   // a lamp drag in flight ends first
     $('lights').appendChild(b);
   });
   // the lowest point of the whole figure
@@ -1107,7 +1150,7 @@
     const low = lowestPoint();
     if (low < 0.002) { pose.height = clamp(pose.height + 0.002 - low, LOW, HIGH); fk(); }
   }
-  $('ground').addEventListener('click', () => { ground(); remember(); });
+  $('ground').addEventListener('click', () => { letGo(); ground(); remember(); });   // a drag in flight ends first, as for Undo
 
   // ---- Pose library: a picture of the figure in each pose ------------------------------------------
 
@@ -1321,17 +1364,53 @@
     $('poses').appendChild(sec);
   });
 
-  // your own poses, kept in this browser
+  // your own poses, kept in this browser. Pose and light can be open twice (the app's tab and pose.html in
+  // another), so each change reads the stored list again and makes just its own change to it (this page's list
+  // written back whole would drop a pose the other page saved), and a change made there shows here.
   const MINE_KEY = 'pose-and-light.mine.v1', MINE_MAX = 12;
-  let mine = [];
-  try {
-    const m = JSON.parse(localStorage.getItem(MINE_KEY) || '[]');
-    if (Array.isArray(m)) mine = m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object').slice(-MINE_MAX);
-  } catch (err) { /* none kept */ }
-  // a change to your poses that could not be stored (storage full) is said in the library's note, and the
-  // note keeps saying it (over what the figure wears) until a write succeeds
+  // the stored list (one of the wrong shape is none), or null where the storage cannot be read at all
+  function storedMine() {
+    let s;
+    try { s = localStorage.getItem(MINE_KEY); } catch (err) { return null; }
+    try { const m = JSON.parse(s || '[]'); return Array.isArray(m) ? uniqueIds(m.filter((q) => q && typeof q === 'object' && typeof q.id === 'string' && q.p && typeof q.p === 'object')).slice(-MINE_MAX) : []; } catch (err) { return []; }
+  }
+  // × and Put back go by id: two poses an older page saved in the same millisecond share one, so a later one is
+  // told apart by its place among them (the same on every read, so a change to it still finds it)
+  function uniqueIds(list) {
+    const seen = new Map();
+    return list.map((q) => { const n = seen.get(q.id) || 0; seen.set(q.id, n + 1); return n ? { ...q, id: `${q.id}~${n}` } : q; });
+  }
+  // poses saved here that could not be stored: in the library for this visit only, and offered to the storage
+  // again with the next change; and the ids of poses removed here whose removal could not be stored, taken out
+  // again with the next change (or a pose removed would come back with it)
+  let unkept = [], ungone = [];
+  const withUnkept = (list) => list.filter((q) => !ungone.includes(q.id)).concat(unkept.filter((q) => !list.some((s) => s.id === q.id))).slice(-MINE_MAX);
+  let mine = storedMine() || [];
+  // a change to your poses that could not be stored is said in the library's note, and the note keeps saying
+  // it (over what the figure wears) until a write succeeds
   let notStored = '';
-  const keepMine = () => { if (forgotten) return true; try { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); notStored = ''; return true; } catch (err) { notStored = 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.'; const n = document.getElementById('libNote'); if (n) n.textContent = notStored; return false; } };
+  // makes one change (change(list) gives the list back changed) to the stored list and the poses not yet stored,
+  // and writes the result: '' when it was stored, else why not ('full', or 'blocked' where nothing can be kept).
+  // The read and the write are two steps, not one: a pose the other page saves between them, before its storage
+  // event reaches this page, can still be written over.
+  function changeMine(change) {
+    if (forgotten) { mine = change(mine); return ''; }        // after Forget my work nothing more is written
+    const stored = storedMine() || [];
+    mine = change(withUnkept(stored));
+    try {
+      localStorage.setItem(MINE_KEY, JSON.stringify(mine));
+      unkept = []; ungone = []; notStored = '';
+      return '';
+    } catch (err) {
+      const full = isFull(err);
+      unkept = mine.filter((q) => !stored.some((s) => s.id === q.id));
+      ungone = stored.filter((s) => !mine.some((q) => q.id === s.id)).map((s) => s.id);
+      // nothing left that the storage lacks (the last pose removed with the storage off): no note
+      notStored = !unkept.length && !ungone.length ? '' : full ? 'Your poses could not be saved: browser storage is full. Remove a saved pose and try again.' : 'Your poses are kept for this visit only: this browser does not let the site keep them.';
+      const n = document.getElementById('libNote'); if (n && notStored) n.textContent = notStored;
+      return full ? 'full' : 'blocked';
+    }
+  }
   let removed = null;                        // the last pose taken away, until it is put back or another changes
   function showMine() {
     $('mine').textContent = '';
@@ -1348,8 +1427,7 @@
       x.title = `Remove ${name.toLowerCase()}`;
       x.addEventListener('click', () => {
         removed = { m, at: i };
-        mine = mine.filter((q) => q !== m);
-        keepMine();
+        changeMine((list) => list.filter((q) => q.id !== m.id));
         showMine();
         markLibrary();
         // focus stays in the list: the next pose's ×, or the way back
@@ -1363,28 +1441,47 @@
   }
   $('mineBack').addEventListener('click', () => {
     if (!removed) return;
-    mine.splice(Math.min(removed.at, mine.length), 0, removed.m);
-    if (mine.length > MINE_MAX) mine.shift();
+    const { m, at } = removed;
     removed = null;
-    keepMine();
+    changeMine((list) => (list.some((q) => q.id === m.id) ? list : [...list.slice(0, at), m, ...list.slice(at)].slice(-MINE_MAX)));
     showMine();
     markLibrary();
-    $('savePose').focus();
+    // (Save this pose sits in the rail, inert behind the open library)
+    focusFirst([...$('mine').querySelectorAll('.pose-btn')].find((b) => b.dataset.id === m.id), $('libClose'), $('poses').querySelector('.pose-btn'));
   });
-  let savedSay = 0;
+  // focus to the first of these that can take it (one hidden, or inert behind the open library, cannot)
+  const focusFirst = (...els) => els.some((el) => { if (el) el.focus({ preventScroll: true }); return !!el && document.activeElement === el; });
+  // a pose saved or removed in the other page shows here; the library is drawn again, with focus kept on its pose.
+  // Focus on a pose removed there goes on as this page's × hands it on: to the next pose, else the way back (Put
+  // back, Save this pose, the sheet's close button or its first pose). The hidden frame that draws for Figure study
+  // shows no library (and reads the store afresh for each request).
+  window.addEventListener('storage', (e) => {
+    if (RENDER || forgotten || (e.key !== MINE_KEY && e.key !== null)) return;
+    const f = document.activeElement, item = f && $('mine').contains(f) ? f.closest('.pose-item') : null;
+    const at = item ? [...$('mine').children].indexOf(item) : -1;
+    mine = withUnkept(storedMine() || []);
+    showMine();
+    markLibrary();
+    if (!item) return;
+    const items = [...$('mine').children];
+    const again = items.find((it) => it.firstChild.dataset.id === item.firstChild.dataset.id) || items[Math.min(at, items.length - 1)];
+    if (again) (f.classList.contains('pose-x') ? again.lastChild : again.firstChild).focus({ preventScroll: true });
+    else focusFirst($('mineBack'), $('savePose'), $('libClose'), $('library').querySelector('#continueWrap:not([hidden]) .pose-btn, #poses .pose-btn'));
+  });
+  let savedSay = 0, poseIdCount = 0;
   $('savePose').addEventListener('click', () => {
     clearTimeout(savedSay);
     removed = null;
-    const id = 'mine-' + Date.now().toString(36);
-    mine.push({ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } });
-    const madeRoom = mine.length > MINE_MAX; // the oldest goes once the twelve are full
-    if (madeRoom) mine.shift();
-    const kept = keepMine();
+    // an id of its own even for two saves in one millisecond, or in two pages at once (ids saved before are kept as they are)
+    const id = 'mine-' + Date.now().toString(36) + (++poseIdCount).toString(36) + Math.random().toString(36).slice(2, 6);
+    let madeRoom = false;                    // the oldest goes once the twelve are full
+    const lost = changeMine((list) => { madeRoom = list.length >= MINE_MAX; return list.concat([{ id, p: copyPose(pose), view: { az: Math.round(view.az), el: Math.round(view.el) } }]).slice(-MINE_MAX); });
     showMine();
     choose(id, `Your pose ${mine.length}`);
-    // the button says what happened: a pose that could not be stored is still in the library for this visit
-    $('savePose').textContent = !kept ? 'In the library for this visit only: storage is full' : madeRoom ? 'Saved in the pose library; the oldest of your twelve made room' : 'Saved in the pose library';
-    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, kept && !madeRoom ? 2200 : 6000);
+    // the button says what happened: a pose that could not be stored is still in the library for this visit (the
+    // library's note says why at more length)
+    $('savePose').textContent = lost ? `In the library for this visit only: ${lost === 'full' ? 'storage is full' : 'storage is off'}` : madeRoom ? 'Saved in the pose library; the oldest of your twelve made room' : 'Saved in the pose library';
+    savedSay = setTimeout(() => { $('savePose').textContent = 'Save this pose'; }, !lost && !madeRoom ? 2200 : 6000);
   });
   showMine();
 
@@ -1420,6 +1517,7 @@
     $('posesBtn').setAttribute('aria-expanded', 'false');
     document.querySelector('.tool').classList.remove('choosing');
     behindSheet().forEach((el) => el && el.removeAttribute('inert'));
+    sayKeep();                                 // a note that came while the rail was inert
     $('hint').hidden = !wasStart;              // the tips show once a first pose is chosen
     markLibrary();
     $('posesBtn').focus({ preventScroll: true });
@@ -2116,7 +2214,7 @@
   $('resetView').addEventListener('click', () => { Object.assign(view, { az: 0, el: 8, dist: 5.2 }); placeCamera(); requestRender(); });
   $('resetAll').addEventListener('click', () => {
     Object.assign(view, { az: 32, el: 8, dist: 5.2 }); placeCamera();
-    Object.assign(light, { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 }); lightChanged(false);
+    Object.assign(light, { az: 45, el: 30 }, LIGHT_OPTIONS); lightChanged(false);
     setPose(POSES[0].p); ground(); pick(null); remember();
     openLibrary(true);
   });
@@ -2139,6 +2237,19 @@
   // its own, remembered in this browser. Simple is where it starts.
   const MODE_KEY = 'pose-and-light.mode';
   const EMBEDDED = document.documentElement.classList.contains('embed');
+  // Simple has no sliders for the light's options or the value splits, so they go back to how they start: the light
+  // kept for next time (`store`), but no step of Undo of its own (Undo in Simple leaves those options as they are)
+  function lightAsSimple(store) {
+    const splits = [$('t1'), $('t2')];
+    // (t1's input event refreshes t2 too: both readouts and the picture)
+    if (splits.some((r) => r.value !== r.defaultValue)) { splits.forEach((r) => { r.value = r.defaultValue; }); splits[0].dispatchEvent(new Event('input')); }
+    if (!Object.keys(LIGHT_OPTIONS).some((k) => light[k] !== LIGHT_OPTIONS[k])) { if (last !== null) dropBlankSteps(); return; }
+    if (last !== null) remember();
+    Object.assign(light, LIGHT_OPTIONS);
+    lightChanged(false);
+    if (last !== null) { last = snapshot(); dropBlankSteps(); }      // (a page starting takes its first step after this)
+    if (store) save(snapshot());
+  }
   function setMode(mode, keep) {
     simple = mode !== 'advanced';
     document.documentElement.classList.toggle('simple', simple);
@@ -2146,10 +2257,7 @@
     // Simple has no switches for these, so they go back to how they start
     if (simple) {
       ['showRig', 'plantFeet', 'showStand', 'showLamp'].forEach((id) => { if (!$(id).checked) { $(id).checked = true; $(id).dispatchEvent(new Event('change')); } });
-      // and no sliders for the light's options or the value splits
-      if (Object.keys(LIGHT_OPTIONS).some((k) => light[k] !== LIGHT_OPTIONS[k])) { Object.assign(light, LIGHT_OPTIONS); lightChanged(false); remember(); }
-      const splits = [$('t1'), $('t2')];
-      if (splits.some((r) => r.value !== r.defaultValue)) { splits.forEach((r) => { r.value = r.defaultValue; }); splits[0].dispatchEvent(new Event('input')); }
+      lightAsSimple(!RENDER);
     }
     if (keep) { try { localStorage.setItem(MODE_KEY, simple ? 'simple' : 'advanced'); } catch (err) { /* not kept */ } }
     showPart();
@@ -2176,6 +2284,9 @@
     const range = { az: [-180, 180], el: [-20, 85], dist: [1.6, 4.6], soft: [0, 10], fill: [0, 100] };
     Object.entries(range).forEach(([k, [lo, hi]]) => { const v = num(saved.light[k], NaN); if (Number.isFinite(v)) light[k] = clamp(v, lo, hi); });
   }
+  // a page that starts in Simple puts back the options a visit in Advanced left (inside the app the app's mode
+  // message does that, as the page does not know its mode until then; the hidden frame keeps nothing)
+  if (simple && !EMBEDDED) lightAsSimple(false);
   placeCamera();
   lightChanged(false);
   showPart();

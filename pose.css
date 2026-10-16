@@ -92,6 +92,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn:disabled { opacity: 0.45; cursor: default; }
 .btn-small { padding: 5px 9px; font-size: 0.78rem; }
+/* a button that says what happened in a sentence (Save this pose) wraps it on a phone instead of pushing the page sideways */
+.btn-wrap { white-space: normal; line-height: 1.25; text-align: center; }
 .stage .btn { background: rgba(250, 245, 234, 0.92); color: #1e2b22; border-color: transparent; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 3px; gap: 2px; }
