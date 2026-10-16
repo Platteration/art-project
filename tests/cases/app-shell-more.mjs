@@ -1061,7 +1061,7 @@ function groupD(t, site) {
   step(t, 'sandboxed frame', async () => {
     const page = await openPage(site, { sandbox: {} });
     const fr = app(page);
-    t.check((await fr.evaluate(() => location.origin)) === 'null', 'sandboxed frame: the app has an opaque origin (the README\'s own test)');
+    t.check((await fr.evaluate(() => self.origin)) === 'null', 'sandboxed frame: the app has an opaque origin (the README\'s own test)');
     await fr.waitForFunction(() => document.fonts.status === 'loaded' && [...document.fonts].some((f) => f.status === 'loaded'), null, { timeout: 15000 }).catch(() => null);
     const fonts = await fr.evaluate(() => ({ status: document.fonts.status, loaded: [...document.fonts].filter((f) => f.status === 'loaded').length, font: getComputedStyle(document.querySelector('h1')).fontFamily }));
     t.check(fonts.loaded >= 1 && /Bricolage/i.test(fonts.font), 'sandboxed frame: the site\'s typefaces load', fonts);
@@ -1076,9 +1076,10 @@ function groupD(t, site) {
     await tab(page, 'paint'); await sleep(1500);
     await stroke(page, '#ps-paper');
     t.check((await inked(page, '#ps-paper')) > 50, 'sandboxed frame: the Studio paints', await inked(page, '#ps-paper'));
+    // (the autosave runs a moment after the stroke: wait for what it says, not for a time)
+    await fr.waitForFunction(() => { const e = document.getElementById('toast'); return e.classList.contains('show') && /saved/.test(e.textContent); }, null, { timeout: 15000 }).catch(() => null);
     const note = (await toastOf(page)).text;
-    t.note(`sandboxed frame: after a stroke the Studio says "${note || '(nothing)'}"`);
-    t.check(!/Something went wrong|could not be read/.test(note), 'sandboxed frame: the app reports no failure', note);
+    t.check(/stays for this visit only/.test(note) && !/Something went wrong|could not be read/.test(note), 'sandboxed frame: the Studio says the painting cannot be saved here and stays for this visit, and the app reports no failure', note);
     await tab(page, 'help');
     await click(page, '#forgetBtn');
     await fr.waitForFunction(() => /again/i.test(document.getElementById('forgetBtn').textContent), null, { timeout: 3000 }).catch(() => null);
