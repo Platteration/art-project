@@ -6,7 +6,7 @@
 // Simple and Advanced from the app's switch and the page's own (remembered), the window resized while
 // open, Where you left off after a reload (one mid-drag), hostile saved state for every key the page
 // reads, and the render protocol flooded from the app page; at 1400 × 900 and 390 × 844.
-import { openPage, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot } from '../lib.mjs';
+import { openPage, newTab, clean, tab, poseFrame, renderFrame, sleep, DESKTOP, PHONE, hscroll, screenshot } from '../lib.mjs';
 
 // the page is up: started, with all 30 pictures drawn
 const up = (fr, timeout = 30000) => fr.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses button.has-img').length >= 30, null, { timeout }).catch(() => null);
@@ -1342,4 +1342,74 @@ export default async function pose(t, site) {
   }
   lap('hostile saved state');
   t.note('A hostile saved pose with height -1e9 is clamped to the lowest height (-0.95) and shown as saved, sunk into the floor until Put the feet on the floor; a pose the page saved itself is never below the floor');
+
+  // ---- Two Pose and light pages open at once (the app's and one on its own), then Forget my work -----------
+  {
+    const page = await openPage(site);
+    await page.evaluate(() => localStorage.setItem('pose-and-light.mode', 'advanced'));      // the page on its own was left in Advanced
+    await tab(page, 'pose');
+    const A = poseFrame(page);
+    const modeA = { frame: await A.evaluate(() => window.PoseAndLight.mode()), app: await page.evaluate(() => (document.body.classList.contains('mode-simple') ? 'simple' : 'advanced')) };
+    t.check(modeA.frame === 'simple' && modeA.app === 'simple', 'in the app (Simple), the Pose frame is Simple, whatever the page on its own was left in (its key says Advanced)', modeA);
+    await A.click('#poses .pose-btn[data-id="walk"]');
+    await A.click('#savePose');
+    const B = await newTab(site, page, { url: 'pose.html' });
+    await B.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#mine .pose-btn').length === 1 && !document.getElementById('continueWrap').hidden, null, { timeout: 30000 }).catch(() => null);
+    await B.evaluate(() => { document.querySelector('#poses .pose-btn[data-id="run"]').click(); document.getElementById('savePose').click(); });
+    const ids = () => page.evaluate(() => JSON.parse(localStorage.getItem('pose-and-light.mine.v1') || '[]').map((m) => m.id));
+    const afterB = await ids();
+    await A.evaluate(() => { document.getElementById('posesBtn').click(); document.querySelector('#poses .pose-btn[data-id="sit"]').click(); document.getElementById('savePose').click(); });
+    const afterA = await ids();
+    const both = t.check(afterB.length === 2 && afterA.length === 3 && afterB.every((id) => afterA.includes(id)), 'Pose and light open twice (the app\'s tab and pose.html): a pose saved in one does not drop the pose saved in the other', { afterB, afterA });
+    if (!both) t.finding({ title: 'With Pose and light open twice, saving a pose in one throws away the pose saved in the other', severity: 'high', steps: '(1) In the app\'s Pose and light tab pick Walk and press Save this pose. (2) Open pose.html in another tab of the same browser (Your poses lists Walk); pick Run and press Save this pose. (3) Back in the app\'s tab pick Sit and press Save this pose. Reload either page and open Poses', expected: 'Your poses holds Walk, Run and Sit: each Save said "Saved in the pose library"', actual: `Your poses holds ${afterA.length}: Run, saved in the second page, is gone from the store (ids after step 2: ${afterB.join(', ')}; after step 3: ${afterA.join(', ')}). Removing a pose in one page and saving in the other brings the removed one back the same way`, cause: 'js/pose.js:1288-1292 reads the saved poses once, when the page opens, and keepMine() (js/pose.js:1296) writes that list back whole on every save or removal; nothing reads the store again when another page has changed it (the only storage listener, js/pose.js:747, is for Forget)' });
+    // Forget my work on this device, pressed in the app's Help: both pages start over with nothing kept
+    await tab(page, 'help', { wait: false });
+    const reloads = Promise.all([page.waitForNavigation({ timeout: 15000 }).then(() => true, () => false), B.waitForNavigation({ timeout: 15000 }).then(() => true, () => false)]);
+    await page.evaluate(() => { const f = document.getElementById('forgetBtn'); f.click(); f.click(); });
+    const [aReloaded, bReloaded] = await reloads;
+    await B.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses .pose-btn').length === 30, null, { timeout: 30000 }).catch(() => null);
+    const bAfter = await B.evaluate(() => ({ keys: Object.keys(localStorage).filter((k) => k.startsWith('pose-and-light.')), start: document.getElementById('library').classList.contains('is-start'), cont: document.getElementById('continueWrap').hidden, mine: document.getElementById('mineWrap').hidden, mode: window.PoseAndLight.mode(), hipR: window.PoseAndLight.pose.hipR.x }));
+    t.check(aReloaded && bReloaded && bAfter.keys.length === 0 && bAfter.start && bAfter.cont && bAfter.mine && bAfter.mode === 'simple' && bAfter.hipR === 0, 'Forget my work, pressed in the app with pose.html open in another tab: both reload, no pose-and-light. key is left, and pose.html opens on its start screen with no Where you left off, no saved poses, in Simple', { aReloaded, bReloaded, ...bAfter });
+    await tab(page, 'pose', { wait: false });
+    let A2 = null;
+    for (let i = 0; i < 40 && !A2; i++) { A2 = poseFrame(page); if (!A2) await sleep(250); }
+    if (A2) await A2.waitForFunction(() => window.__poseStarted && document.querySelectorAll('#poses .pose-btn').length === 30, null, { timeout: 30000 }).catch(() => null);
+    const aAfter = A2 && await A2.evaluate(() => ({ start: document.getElementById('library').classList.contains('is-start'), cont: document.getElementById('continueWrap').hidden, mine: document.getElementById('mineWrap').hidden, hipR: window.PoseAndLight.pose.hipR.x }));
+    t.check(aAfter && aAfter.start && aAfter.cont && aAfter.mine && aAfter.hipR === 0, 'and the app\'s Pose and light, opened again after Forget: the start screen with nothing from before', aAfter);
+    await B.evaluate(() => document.querySelector('[data-mode="advanced"]').click());
+    const bKeys = await B.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('pose-and-light.')).sort());
+    t.check(bKeys.join() === 'pose-and-light.mode', 'after Forget, Advanced pressed on pose.html keeps only that choice: none of the poses from before comes back', bKeys);
+    await clean(t, page, 'Forget with two pages: the app');
+    await clean(t, B, 'Forget with two pages: pose.html');
+    await page.context().close();
+    lap('two pages and Forget');
+  }
+
+  // ---- WebGL turned off (three.js loads, the context does not): the page's own panel; Figure study told at once
+  {
+    const page = await openPage(site);
+    await page.context().addInitScript(() => { const get = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (type, ...rest) { return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest); }; });
+    await page.reload({ waitUntil: 'load' });
+    await tab(page, 'pose', { wait: false });
+    await page.waitForFunction(() => { const d = document.getElementById('poseFrame').contentDocument; return !!d && !!d.getElementById('fail') && !d.getElementById('fail').hidden; }, null, { timeout: 10000 }).catch(() => null);
+    const fr = poseFrame(page);
+    const panel = () => ({ panel: !document.getElementById('fail').hidden, text: document.getElementById('fail').textContent, failed: document.documentElement.classList.contains('failed'), rail: getComputedStyle(document.querySelector('.rail')).display, bar: getComputedStyle(document.querySelector('.stage-bar')).display, top: getComputedStyle(document.querySelector('.top')).display, hint: document.getElementById('hint').hidden });
+    const inApp = fr && await fr.evaluate(panel);
+    t.check(inApp && inApp.panel && /WebGL turned off/.test(inApp.text) && inApp.failed && inApp.rail === 'none' && inApp.bar === 'none' && inApp.hint, 'WebGL off: the Pose tab says the 3D view could not start (WebGL turned off), with no controls left that would do nothing', inApp);
+    await tab(page, 'figure', { wait: false });
+    const t0 = Date.now();
+    await page.waitForFunction(() => /could not be drawn/.test(document.getElementById('fig-libNote').textContent), null, { timeout: 30000 }).catch(() => null);
+    const fig = { ms: Date.now() - t0, note: await page.evaluate(() => document.getElementById('fig-libNote').textContent.slice(0, 50)), start: await page.evaluate(() => document.getElementById('fig-start').disabled) };
+    t.check(/could not be drawn/.test(fig.note) && fig.start && fig.ms < 5000, 'WebGL off: Figure study says at once (not after its 25 s wait) that the poses could not be drawn, with Start off', fig);
+    const own = await newTab(site, page, { url: 'pose.html' });
+    await own.waitForFunction(() => !document.getElementById('fail').hidden, null, { timeout: 10000 }).catch(() => null);
+    const alone = await own.evaluate(panel);
+    t.check(alone.panel && alone.top !== 'none' && alone.rail === 'none', 'WebGL off, pose.html on its own: the same panel, under its header', alone);
+    const errors = [...page.log.console, ...own.log.console];
+    if (errors.length && errors.every((e) => /THREE\.WebGLRenderer: Error creating WebGL context/.test(e))) t.finding({ title: 'With WebGL turned off, Pose and light writes an error to the console', severity: 'low', steps: 'Open pose.html, or the app\'s Pose and light tab, in a browser whose WebGL is off (Chromium with --disable-webgl: canvas.getContext("webgl") returns null)', expected: 'The page\'s own panel says the 3D view could not start, and nothing else goes wrong: no console error (every page of the site is held to none)', actual: `Each page that tries (${errors.length} here: the app's frame, its picture frame, pose.html) logs "${errors[0]}"`, cause: 'js/pose.js:42-44 finds out by constructing THREE.WebGLRenderer, and three.min.js logs the failure with console.error before throwing; asking canvas.getContext("webgl2") || canvas.getContext("webgl") first (and calling fail() on null) would say the same without the error' });
+    await clean(t, page, 'WebGL off: the app');
+    await clean(t, own, 'WebGL off: pose.html on its own');
+    await page.context().close();
+    lap('WebGL off');
+  }
 }
