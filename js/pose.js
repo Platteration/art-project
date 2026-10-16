@@ -125,6 +125,7 @@
   scene.add(beam);
 
   const light = { az: 45, el: 30, dist: 2.6, soft: 3, fill: 40 };
+  const LIGHT_OPTIONS = { dist: light.dist, soft: light.soft, fill: light.fill };      // what Simple, which hides their sliders, keeps them at
   const LIGHTS = [
     { id: 'front', name: 'Front', az: 0, el: 12, lesson: 'Light from the front shows the least shadow. The figure looks <b>flat</b>: there is little light and shadow to turn its form.' },
     { id: 'rembrandt', name: 'Rembrandt', az: 45, el: 30, lesson: 'Light <b>high and to one side</b>, the classic portrait light. One side of the head is lit, the other turns into shadow, and the form looks round.' },
@@ -141,14 +142,16 @@
     return inside(TARGET, az, Math.max(el, minEl), light.dist, LAMP_CLEAR);
   }
   // raise the height until the lamp really sits at the distance and height the sliders say
-  function reachable() {
-    for (let k = 0; k < 120 && light.el < 85; k++) {
+  function reachableEl(az, el) {
+    for (let k = 0; k < 120 && el < 85; k++) {
       const minEl = Math.asin(clamp((LAMP_CLEAR - TARGET.y) / light.dist, -1, 1)) / DEG;
-      if (light.el < minEl) { light.el = Math.ceil(minEl); continue; }
-      if (lampAt(light.az, light.el).distanceTo(TARGET) >= light.dist - 0.01) return;
-      light.el = Math.floor(light.el) + 1;
+      if (el < minEl) { el = Math.ceil(minEl); continue; }
+      if (lampAt(az, el).distanceTo(TARGET) >= light.dist - 0.01) return el;
+      el = Math.floor(el) + 1;
     }
+    return el;
   }
+  function reachable() { light.el = reachableEl(light.az, light.el); }
   function placeLamp() {
     lamp.position.copy(lampAt(light.az, light.el));
     lamp.angle = clamp(Math.atan(1.6 / light.dist) * 1.5, 24 * DEG, 70 * DEG);   // wide enough to spill onto the backdrop
@@ -584,10 +587,12 @@
       footShown[s] = null;
     }
   }
-  // the foot keeps its turn in the room (flat on the floor stays flat) as the shin moves
+  // the foot keeps its turn in the room (flat on the floor stays flat) as the shin moves; true when the
+  // ankle's limits stop it
   function footTurn(s, q) {
-    setTurn('ankle' + s, worldQuat('knee' + s).invert().multiply(q));
+    const stopped = setTurn('ankle' + s, worldQuat('knee' + s).invert().multiply(q));
     J['ankle' + s].obj.updateMatrixWorld(true);
+    return stopped;
   }
   const planted = () => $('plantFeet').checked;
   const CHAIN_LEGS = ['hipR', 'kneeR', 'ankleR', 'hipL', 'kneeL', 'ankleL'];
@@ -732,8 +737,10 @@
     markLibrary();
   }
   $('undo').addEventListener('click', () => {
+    letGo();
     if (!history.length) return;
     const s = JSON.parse(history.pop());
+    if (simple) Object.assign(s.light, LIGHT_OPTIONS);          // Simple has no sliders for these, so Undo does not bring them back
     last = JSON.stringify(s);
     setPose(s.pose); Object.assign(light, s.light); lightChanged(false);
     $('undo').disabled = !history.length;
@@ -745,7 +752,8 @@
   // of the site: nothing more is written, and a page of its own starts over
   let forgotten = false;
   window.addEventListener('storage', (e) => { if (e.key === 'portrait-value-studio.forget' && e.newValue) { forgotten = true; if (window.parent === window) setTimeout(() => location.reload(), 300); } });
-  function save(s) { if (forgotten) return; try { localStorage.setItem(KEY, s); } catch (err) { /* not kept */ } }
+  // a full storage keeps this visit's pose but not the next visit's: the rail says so until a write goes through
+  function save(s) { if (forgotten) return; try { localStorage.setItem(KEY, s); $('keepNote').hidden = true; } catch (err) { $('keepNote').textContent = 'This pose could not be kept for next time: browser storage is full.'; $('keepNote').hidden = false; } }
   function restore() { try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (!v || typeof v !== 'object' || Array.isArray(v)) return null; if (v.pose != null && (typeof v.pose !== 'object' || Array.isArray(v.pose))) return null; if (v.light != null && (typeof v.light !== 'object' || Array.isArray(v.light))) return null; return v; } catch (err) { return null; } } // a saved pose of the wrong shape is ignored
 
   // ---- Picking a part: a yellow outline and arrows ------------------------------------------------
@@ -874,10 +882,25 @@
     placeArrows();
   }
   function nudge(a, f) {
-    const v = pose[a.name][a.ax.axis] + a.dir * a.ax.sign * STEP * f;
+    const from = { ...pose[a.name] }, v = from[a.ax.axis] + a.dir * a.ax.sign * STEP * f;
     pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max);
     // leaning or tilting the hips bends the legs, so the feet stay planted; turning around turns it all
-    if (a.name === 'root' && a.ax.axis !== 'y') keepFeet(); else applyPose();
+    if (a.name === 'root' && a.ax.axis !== 'y') keepFeet(); else { floorStop(a.name, from); applyPose(); }
+  }
+  // A part moved by an arrow or Straighten stops where it would go into the floor, as a dragged leg does:
+  // its angles go from `from` toward the ones asked for only as far as nothing goes into the floor (or
+  // deeper than it already was)
+  function floorStop(name, from) {
+    const to = { ...pose[name] };
+    const put = (t) => { pose[name] = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t }; fk(); };
+    put(0);
+    const floor = Math.min(-0.002, lowestPoint());
+    pose[name] = to;
+    fk();
+    if (lowestPoint() >= floor) return;
+    let a = 0, b = 1;
+    for (let k = 0; k < 8; k++) { const t = (a + b) / 2; put(t); if (lowestPoint() < floor) b = t; else a = t; }
+    put(a);
   }
   // Each arrow shows where the part's end goes when it is pressed, as seen from here:
   //  - a straight arrow when the end moves across the screen, pointing that way;
@@ -998,8 +1021,9 @@
   }
   $('straighten').addEventListener('click', () => {
     if (!picked) return;
+    const from = { ...pose[picked] };
     pose[picked] = { x: 0, y: 0, z: 0 };
-    if (picked === 'root') { pose.height = 0; applyPose(); ground(); } else applyPose();
+    if (picked === 'root') { pose.height = 0; applyPose(); ground(); } else { floorStop(picked, from); applyPose(); }
     remember();
   });
   $('mirror').addEventListener('click', () => {
@@ -1030,7 +1054,8 @@
     if (fromSlider && light.el !== asked) fromSlider = false;          // show the height the lamp can really reach
     // a slider whose own value was wrapped or clamped (180° around reads as -180°) is moved to what it reads
     LF.forEach(([id, k, f]) => { if (!fromSlider || +$(id).value !== light[k]) $(id).value = light[k]; $(id + 'Out').textContent = f(light[k]); });
-    const match = LIGHTS.find((l) => Math.abs(wrapAz(l.az - light.az)) < 6 && Math.abs(l.el - light.el) < 6);
+    // a preset the lamp cannot reach at this distance (From below, far away) is the lowest height it can reach
+    const match = LIGHTS.find((l) => Math.abs(wrapAz(l.az - light.az)) < 6 && Math.abs(reachableEl(light.az, l.el) - light.el) < 6);
     $('lightName').textContent = match ? match.name : 'Your own';
     setRich($('lightLesson'), match ? match.lesson : 'Move the light and watch the <b>shadow side</b> and the <b>cast shadow</b> on the backdrop change shape.');
     document.querySelectorAll('#lights .btn').forEach((b) => b.setAttribute('aria-pressed', String(!!match && b.dataset.id === match.id)));
@@ -1356,6 +1381,7 @@
   const sheet = $('library');
   const behindSheet = () => [canvas, $('hint'), $('picked'), rigSvg, $('arrows'), handle, document.querySelector('.stage-bar'), document.querySelector('.rail')];
   function openLibrary(start) {
+    letGo();                                   // a pose picked here must not be posed on by a pointer still down
     sheetStart = !!start;
     sheet.classList.toggle('is-start', sheetStart);
     $('libTitle').textContent = sheetStart ? 'Choose a pose to start' : 'Pose library';
@@ -1531,6 +1557,7 @@
     outlineMat.uniforms.size.value.set(Math.max(1, r.width), Math.max(1, r.height));
     camera.aspect = Math.max(1, r.width) / Math.max(1, r.height);
     camera.updateProjectionMatrix();
+    if (!r.width) letGo();                     // the frame was hidden: a pointer let go meanwhile never reaches the page
     requestRender();
   }
   if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas.parentElement);
@@ -1822,7 +1849,12 @@
           if (a > 0) reach(last.clone().lerp(target, a));
           d.last = last.clone().lerp(target, a);
         } else d.last = target;
-      } else reach(target);
+      } else {
+        // a fast drag is followed in short steps, as a slow one is, so the arm keeps up with the pointer
+        const last = d.last || d.from, n = Math.max(1, Math.ceil(last.distanceTo(target) / 0.04));
+        for (let i = 1; i <= n; i++) reach(last.clone().lerp(target, i / n));
+        d.last = target;
+      }
       applyPose(ch.leg);               // a foot that moved is planted where it is put
     } else if (c.kind === 'pole') {
       swivel(d, e);
@@ -1874,13 +1906,26 @@
     if (Math.abs(best - d.swing) < 0.05) return;
     const keep = [ch.upper, ch.mid, ch.end].map((n) => ({ ...pose[n] }));
     const floor = ch.leg && Math.min(-0.002, legLow(ch.side));
-    solveChain(ch, d.end, spotAt(best));
-    if (ch.leg) footTurn(ch.side, d.turn);
-    // a limit stopped it (the hand or foot would move), or the leg would go into the floor: stay as it was
-    if (worldPos(ch.end).distanceTo(d.end) > 0.003 || (ch.leg && legLow(ch.side) < floor)) {
-      [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = keep[i]; });
+    // false when a limit stops it (the hand or foot would move, or the ankle could not keep the foot's
+    // turn), or the leg would go into the floor
+    const swingTo = (deg) => {
+      [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = { ...keep[i] }; });
       fk();
-      return;
+      solveChain(ch, d.end, spotAt(deg));
+      const turned = ch.leg && footTurn(ch.side, d.turn);
+      return worldPos(ch.end).distanceTo(d.end) <= 0.003 && !turned && !(ch.leg && legLow(ch.side) < floor);
+    };
+    // stopped: it swings as far as it goes, or stays as it was
+    if (!swingTo(best)) {
+      let a = 0, b = 1;
+      for (let k = 0; k < 6; k++) { const t = (a + b) / 2; if (swingTo(d.swing + (best - d.swing) * t)) a = t; else b = t; }
+      if (!a) {
+        [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = keep[i]; });
+        fk();
+        return;
+      }
+      best = d.swing + (best - d.swing) * a;
+      swingTo(best);
     }
     d.swing = best;
     applyPose(ch.leg);
@@ -1933,6 +1978,20 @@
     lightChanged(false);
   }
   function lampEnd(e) { if (lampDrag && e.pointerId === lampDrag.id) { lampDrag = null; remember(); } }
+  // The stage is taken from under the pointers (the library opens over it, Undo replaces the figure, the
+  // frame is hidden): what they were doing ends as a release ends it, and they are let go of, so one still
+  // down moves nothing after. A tap picks nothing.
+  function letGo() {
+    if (!drag && !lampDrag && !pointers.size && !holds.size) return;
+    holds.forEach((stop) => stop());
+    if (lampDrag) { if (handle.hasPointerCapture(lampDrag.id)) handle.releasePointerCapture(lampDrag.id); lampDrag = null; remember(); }
+    if (drag && (drag.kind === 'pose' || drag.kind === 'turn' || (drag.kind === 'ctrl' && drag.moved))) remember();
+    [...pointers.keys()].forEach((id) => { if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id); });
+    pointers.clear();
+    drag = hot = null;
+    canvas.classList.remove('is-dragging');
+    requestRender();
+  }
 
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
@@ -2070,7 +2129,13 @@
     document.documentElement.classList.toggle('simple', simple);
     document.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === (simple ? 'simple' : 'advanced'))));
     // Simple has no switches for these, so they go back to how they start
-    if (simple) ['showRig', 'plantFeet', 'showStand', 'showLamp'].forEach((id) => { if (!$(id).checked) { $(id).checked = true; $(id).dispatchEvent(new Event('change')); } });
+    if (simple) {
+      ['showRig', 'plantFeet', 'showStand', 'showLamp'].forEach((id) => { if (!$(id).checked) { $(id).checked = true; $(id).dispatchEvent(new Event('change')); } });
+      // and no sliders for the light's options or the value splits
+      if (Object.keys(LIGHT_OPTIONS).some((k) => light[k] !== LIGHT_OPTIONS[k])) { Object.assign(light, LIGHT_OPTIONS); lightChanged(false); remember(); }
+      const splits = [$('t1'), $('t2')];
+      if (splits.some((r) => r.value !== r.defaultValue)) { splits.forEach((r) => { r.value = r.defaultValue; }); splits[0].dispatchEvent(new Event('input')); }
+    }
     if (keep) { try { localStorage.setItem(MODE_KEY, simple ? 'simple' : 'advanced'); } catch (err) { /* not kept */ } }
     showPart();
     buildArrows();
