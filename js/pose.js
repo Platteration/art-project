@@ -883,13 +883,25 @@
   }
   function nudge(a, f) {
     const from = { ...pose[a.name] }, v = from[a.ax.axis] + a.dir * a.ax.sign * STEP * f;
-    pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max);
     // leaning or tilting the hips bends the legs, so the feet stay planted; turning around turns it all
-    if (a.name === 'root' && a.ax.axis !== 'y') keepFeet(); else { floorStop(a.name, from); applyPose(); }
+    if (a.name === 'root' && a.ax.axis !== 'y') { pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max); keepFeet(); return; }
+    const onFloor = lowestPoint() < 0.01;
+    pose[a.name][a.ax.axis] = clamp(v, a.ax.min, a.ax.max);
+    fk();
+    keepOnFloor(onFloor);
+    // only where the figure can rise no higher does the part stop at the floor
+    if (lowestPoint() < -0.002) { floorStop(a.name, from); applyPose(); }
   }
-  // A part moved by an arrow or Straighten stops where it would go into the floor, as a dragged leg does:
-  // its angles go from `from` toward the ones asked for only as far as nothing goes into the floor (or
-  // deeper than it already was)
+  // A figure standing on the floor stays on it as a part moves: it rises onto a foot that dips and comes down
+  // again once that foot is clear, so a press that dips on its way to a pose does not stop there. One in the
+  // air is only kept out of the floor.
+  function keepOnFloor(onFloor) {
+    if (onFloor) ground();
+    else { aboveFloor(); applyPose(); }
+  }
+  // A part moved by Straighten (or an arrow, where the figure can rise no higher) stops where it would go into
+  // the floor, as a dragged leg does: its angles go from `from` toward the ones asked for only as far as nothing
+  // goes into the floor (or deeper than it already was)
   function floorStop(name, from) {
     const to = { ...pose[name] };
     const put = (t) => { pose[name] = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t }; fk(); };
@@ -1029,12 +1041,12 @@
   $('mirror').addEventListener('click', () => {
     if (!picked || !/[RL]$/.test(picked)) return;
     const other = picked.slice(0, -1) + (picked.endsWith('R') ? 'L' : 'R');
-    const a = pose[picked];
+    const a = pose[picked], onFloor = lowestPoint() < 0.01;
     pose[other] = { x: a.x, y: -a.y, z: -a.z };
     // the rest of the limb follows, so the whole arm or leg matches
     const chain = { shoulder: ['elbow', 'wrist'], hip: ['knee', 'ankle'], elbow: ['wrist'], knee: ['ankle'] }[picked.slice(0, -1)] || [];
     chain.forEach((c) => { const b = pose[c + picked.slice(-1)]; pose[c + other.slice(-1)] = { x: b.x, y: -b.y, z: -b.z }; });
-    applyPose(); remember();
+    fk(); keepOnFloor(onFloor); remember();                // a copied leg that would reach into the floor lifts the figure onto it
   });
 
   // ---- Light controls ----------------------------------------------------------------------
@@ -1850,8 +1862,9 @@
           d.last = last.clone().lerp(target, a);
         } else d.last = target;
       } else {
-        // a fast drag is followed in short steps, as a slow one is, so the arm keeps up with the pointer
-        const last = d.last || d.from, n = Math.max(1, Math.ceil(last.distanceTo(target) / 0.04));
+        // a fast drag is followed in short steps, as a slow one is, so the arm keeps up with the pointer (at most
+        // ten: a very long jump eases as before)
+        const last = d.last || d.from, n = Math.min(10, Math.max(1, Math.ceil(last.distanceTo(target) / 0.04)));
         for (let i = 1; i <= n; i++) reach(last.clone().lerp(target, i / n));
         d.last = target;
       }
@@ -1912,8 +1925,8 @@
       [ch.upper, ch.mid, ch.end].forEach((n, i) => { pose[n] = { ...keep[i] }; });
       fk();
       solveChain(ch, d.end, spotAt(deg));
-      const turned = ch.leg && footTurn(ch.side, d.turn);
-      return worldPos(ch.end).distanceTo(d.end) <= 0.003 && !turned && !(ch.leg && legLow(ch.side) < floor);
+      const ankleStopped = ch.leg && footTurn(ch.side, d.turn);
+      return worldPos(ch.end).distanceTo(d.end) <= 0.003 && !ankleStopped && !(ch.leg && legLow(ch.side) < floor);
     };
     // stopped: it swings as far as it goes, or stays as it was
     if (!swingTo(best)) {
