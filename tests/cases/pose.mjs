@@ -884,7 +884,7 @@ export default async function pose(t, site) {
     {
       await fr.evaluate(() => { for (const size of [1 << 16, 1 << 12, 1 << 8, 16, 1]) for (let i = 0; i < 4000; i++) { try { localStorage.setItem(`junkx${size}_${i}`, 'x'.repeat(size)); } catch (e) { break; } } });
       await pick(fr, 'run');
-      const lost = await fr.evaluate(() => ({ figure: window.PoseAndLight.pose.hipR.x, stored: (JSON.parse(localStorage.getItem('pose-and-light.v2') || '{}').pose || {}).hipR, said: [...document.querySelectorAll('.rail, .stage-bar, #hint')].map((e) => e.innerText).join(' ').match(/[^.]*(storage|not (be )?kept|could not be (saved|kept))[^.]*/i) }));
+      const lost = await fr.evaluate(() => ({ figure: window.PoseAndLight.pose.hipR.x, stored: ((JSON.parse(localStorage.getItem('pose-and-light.v2') || '{}').pose || {}).hipR || {}).x, said: [...document.querySelectorAll('.rail, .stage-bar, #hint')].map((e) => e.innerText).join(' ').match(/[^.]*(storage|not (be )?kept|could not be (saved|kept))[^.]*/i) }));
       if (lost.stored === lost.figure) t.note('storage full: the pose picked after the store was refilled was still written (the store had room for it), so Where you left off under a full store was not seen');
       else {
         const says = t.check(!!lost.said, 'storage full: a pose that cannot be kept for next time (Where you left off) is said so on the page', lost);

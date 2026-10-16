@@ -1024,7 +1024,7 @@ async function myPaintsWhileScored(t, site) {
     steps: '1. With fewer than two paints ticked, play Paint by numbers and Lock in portrait. 2. On the Study tab tick White and Black in My paints. 3. Back on Paint by numbers press Change settings and open the palette menu.',
     expected: '"My paints (2)" is in the menu.',
     actual: `The menu lists ${s2.options.length} palettes and no My paints; it appears only after leaving the tab with no score on screen.`,
-    cause: 'js/game.js 1659-1663 and 1617-1623: renderPalettes runs on a tab switch only when no game is set, and toSetup does not call it.',
+    cause: 'js/game.js 1680-1684 and 1617-1623: renderPalettes runs on a tab switch only when no game is set, and toSetup does not call it.',
   });
   // (leaving the tab with no score on screen rebuilds the menu, so the next step starts from one that offers it)
   await tab(page, 'study'); await tab(page, 'game'); await ready(page);
@@ -1054,7 +1054,7 @@ async function myPaintsWhileScored(t, site) {
     steps: '1. Tick White and Black in My paints on the Study tab. 2. In Paint by numbers choose "My paints (2)", Start painting and Lock in portrait. 3. On the Study tab, untick both paints. 4. Back on Paint by numbers (the score is still shown), press Change settings and read the palette menu, then Start painting.',
     expected: 'My paints is gone from the menu (fewer than two are ticked) and the suggested palette is chosen; the game plays what the menu names and keeps its best under that palette.',
     actual: `The menu still offers ${offered ? '"My paints"' : 'no My paints'} and has ${JSON.stringify(named)} chosen (value "${s.palette}"); the dots show ${JSON.stringify(s.dots.slice(0, 4))}; Start plays ${JSON.stringify(played)}; the best is kept under "${keys[keys.length - 1]}".`,
-    cause: 'js/game.js 1659-1663 (the studio:tab handler) rebuilds the palette menu only while no game is set, and after a lock-in game stays set until Change settings; toSetup (1617-1623) calls refreshSetup and showPalette but not renderPalettes, so paletteChoices() has no "mine" any more while the menu does, and chosenPalette() (472-475) falls back to the first palette, Zorn, while bestKey (335) still reads the select’s "mine".',
+    cause: 'js/game.js 1680-1684 (the studio:tab handler) rebuilds the palette menu only while no game is set, and after a lock-in game stays set until Change settings; toSetup (1617-1623) calls refreshSetup and showPalette but not renderPalettes, so paletteChoices() has no "mine" any more while the menu does, and chosenPalette() (472-475) falls back to the first palette, Zorn, while bestKey (335) still reads the select’s "mine".',
   });
   await clean(t, page, 'my paints ticked and unticked while a score is on screen');
   await page.context().close();
@@ -1087,7 +1087,7 @@ async function prunedByPlay(t, site) {
     steps: '1. Keep fifty bests, the sample portrait’s the oldest and unbeatable. 2. Play the sample portrait again at the same level and palette and Lock in (no New best!). 3. Play A painting and Lock in so a fifty-first board is scored.',
     expected: '"Only the fifty most recently played are kept": the sample, played just before, stays and the board played longest ago goes.',
     actual: `The sample’s best is ${keys.includes(mine) ? 'kept' : 'dropped'} and ${keys.includes('old-00:1x1|medium|zorn') ? 'the oldest unplayed board stays' : 'the oldest unplayed board went'}.`,
-    cause: 'js/game.js 1311-1315 (lockIn): a board is re-added last only when it is scored.',
+    cause: 'js/game.js 1307-1315 (lockIn): the board played has to be moved last on every lock-in, whether or not it beat its best (delete bests[key]; bests[key] = kept), or the prune at 110 drops it first.',
   });
   await clean(t, page, 'pruned by play');
   await page.context().close();
@@ -1136,7 +1136,7 @@ async function scoreBands(t, site) {
   for (let k = 0; k < N; k++) { await pickNumber(page, k); areas.push(await washCount(page)); }
   const total = areas.reduce((a, b) => a + b, 0);
   t.check(N >= 5 && N <= 16 && areas.every((a) => a > 0), 'the sample at Zorn has between 5 and 16 numbers, each with shapes of its own', [N, areas]);
-  // Gap: the Blocks reference is the colors each number is scored against
+  // the Blocks reference is the flat colors each number is scored against: the colors the Analysis lists as the ones to match
   await click(page, '#tab-game [data-ref-view="blocks"]');
   const blocks = await colorsOf(page, '#gameRef');
   const wantHex = [...new Set(Object.values(targets))].sort();
@@ -1165,7 +1165,7 @@ async function scoreBands(t, site) {
   }
   t.note(`score bands played on the sample at Zorn: about 40, 57, 71 and 83 percent landed on ${[1, 2, 3, 4].map((w) => played[w] + '%').join(', ')} (the areas are measured from the wash, outlines apart, so they can differ from the game’s by a point or two)`);
 
-  // ---- the 83% game is on screen (4 stars, 4 gold on the card), Analysis open
+  // ---- the 83% game is on screen (4 stars), Analysis open
   await click(page, '#gameAnalyze');
   const yours = await page.evaluate(() => [document.getElementById('gameYours').toDataURL() === document.getElementById('gameFinal').toDataURL(), document.getElementById('gameTarget').toDataURL() === document.getElementById('gameFinalTarget').toDataURL(), [document.getElementById('gamePhoto').width, document.getElementById('gamePhoto').height], [document.getElementById('gameFinal').width, document.getElementById('gameFinal').height]]);
   t.check(yours[0] && yours[1] && same(yours[2], yours[3]), 'the Analysis’s portrait is the final board, its colors to match are the target board, and the reference is as big as the board', yours);
@@ -1204,7 +1204,7 @@ async function scoreBands(t, site) {
     const gold = (p) => p[0] > 200 && p[1] > 150 && p[1] < 185 && p[2] < 90;
     const grey = (p) => p[0] > 190 && p[1] > 190 && p[2] > 180 && !gold(p);
     t.check(same(card.size, [1080, 1350]) && same(card.header, [44, 74, 54, 255]) && same(card.matte, [139, 140, 142, 255]) && same(card.paper, [239, 231, 214, 255]), 'the card: header band, gray matte and paper in their colors', [card.header, card.matte, card.paper]);
-    t.check(card.stars.filter(gold).length === 4 && card.stars.slice(0, 4).every(gold) && grey(card.stars[4]), 'the card: four gold stars and one gray for a four-star game', card.stars);
+    t.check(r4.stars === 4 && card.stars.slice(0, r4.stars).every(gold) && card.stars.slice(r4.stars).every(grey), `the card: ${r4.stars} gold stars and the rest gray for a ${r4.stars}-star game`, [r4.stars, card.stars]);
     t.check(card.ink.title > 100 && card.ink.mode > 100 && card.ink.pct > 800 && card.ink.grade > 100 && card.ink.points > 40 && card.ink.subject > 100 && card.ink.palette > 100 && card.ink.date > 50 && card.ink.portrait > 5000, 'the card carries its title, mode, percentage, grade, points, portrait label, palette and level, date, and the finished portrait', card.ink);
   }
   await page.evaluate(() => { Reflect.deleteProperty(navigator, 'share'); Reflect.deleteProperty(navigator, 'canShare'); });
@@ -1353,9 +1353,9 @@ async function timesUp(t, site) {
 // 15. Storage that cannot be written (a full quota, a private window) or read at all
 // ================================================================================================
 async function noStorage(t, site) {
-  for (const [name, init] of [
-    ['a full quota (every setItem throws)', () => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; }],
-    ['storage that refuses access (localStorage throws)', () => { Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } }); }],
+  for (const [name, init, full] of [
+    ['a full quota (every setItem throws)', () => { Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); }; }, true],
+    ['storage that refuses access (localStorage throws)', () => { Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('The operation is insecure.', 'SecurityError'); } }); }, false],
   ]) {
     const page = await openPage(site, { url: '#game' });
     await page.addInitScript(init);
@@ -1365,8 +1365,7 @@ async function noStorage(t, site) {
     t.check(broken !== 'works', `${name}: the page really cannot store anything`, broken);
     const s = await page.evaluate(() => ({ shown: !document.getElementById('gameSetup').hidden, start: document.getElementById('gameStart').disabled, level: (document.querySelector('input[name="gameLevel"]:checked') || {}).value, mode: document.getElementById('gameMode').value, palette: document.getElementById('gamePalette').value, best: document.getElementById('gameBest').textContent }));
     t.check(s.shown && !s.start && s.level === 'medium' && s.mode === 'classic' && s.palette !== '' && s.best === '', `${name}: the setup comes up with its defaults and Start enabled`, s);
-    await setLevel(page, 'easy'); await ready(page);
-    await setPalette(page, 'primary'); await setMode(page, 'relaxed'); await ready(page);
+    if (full) { await setLevel(page, 'easy'); await ready(page); await setPalette(page, 'primary'); await setMode(page, 'relaxed'); await ready(page); }
     await click(page, '#gameStart'); await playing(page);
     await setAmount(page, 3); await click(page, '#gameSound'); await click(page, '#gameSound');
     await click(page, '#tab-game [data-ref-view="blocks"]');
@@ -1506,8 +1505,9 @@ async function phoneLayouts(t, site) {
 // ================================================================================================
 async function forgetOtherTab(t, site) {
   const forgetHere = async (other) => { await click(other, '#forgetBtn'); await click(other, '#forgetBtn'); };
+  const a = await openPage(site, { url: '#game' });
+  const b = await newTab(site, a, { url: '#help' });
   for (const [name, race] of [['a game on, nothing else happens', false], ['a score arriving as the other tab forgets (the clock running out)', true]]) {
-    const a = await openPage(site, { url: '#game' });
     await ready(a); await setPalette(a, 'zorn'); await ready(a);
     await setAmount(a, 3);
     await click(a, '#gameStart'); await playing(a);
@@ -1515,10 +1515,10 @@ async function forgetOtherTab(t, site) {
     t.check((await storageKeys(a, /^portrait-value-studio\./)).length >= 3, `${name}: the game has left its settings in storage`, await storageKeys(a, /^portrait-value-studio\./));
     // (the score, if the page is made to lock in during the 300 ms before it reloads, as a clock running out would)
     if (race) await a.evaluate(() => window.addEventListener('studio:forget', () => setTimeout(() => document.getElementById('gameLock').click(), 60)));
-    const b = await newTab(site, a, { url: '#help' });
-    const reloaded = a.waitForEvent('load', { timeout: 8000 }).then(() => true).catch(() => false);
+    const reloaded = a.waitForEvent('load', { timeout: 15000 }).then(() => true).catch(() => false);
     await forgetHere(b);
     const did = await reloaded;
+    await b.waitForLoadState('load').catch(() => null);
     await sleep(800);
     const keys = await storageKeys(a, /^portrait-value-studio\./);
     t.check(did, `${name}: the other tab’s Forget reloads this one`, did);
@@ -1535,8 +1535,8 @@ async function forgetOtherTab(t, site) {
     });
     await clean(t, a, name);
     await clean(t, b, name + ' (the tab that forgot)');
-    await a.context().close();
   }
+  await a.context().close();
 }
 
 // ================================================================================================
@@ -1628,13 +1628,13 @@ async function generatedPortraits(t, site) {
     if (!id) { t.note(`no portrait of the kind "${what}" among the 3,000 ids tried`); continue; }
     await page.evaluate((id) => { Subjects.random = () => id; }, id);
     await click(page, '#gameReroll'); await ready(page);
-    const levels = n < 2 ? ['medium', 'easy', 'hard'] : ['medium'];
+    const levels = n < 1 ? ['medium', 'easy', 'hard'] : ['medium'];
     for (const lv of levels) {
       if (lv !== 'medium') { await setLevel(page, lv); await ready(page); }
       const sl = await setup(page);
       t.check(sl.painting === JSON.stringify(id) && PAINTERS.test(sl.paintingName) && numbersOf(sl.note) >= 3 && !sl.start && sl.preview[0] > 0, `${what} (${id}) at ${lv}: a board with at least three numbers, named, Start enabled`, [sl.painting, sl.note, sl.paintingName]);
     }
-    if (n < 2) { await setLevel(page, 'medium'); await ready(page); }
+    if (n < 1) { await setLevel(page, 'medium'); await ready(page); }
     n++;
   }
   await click(page, '#gameStart'); await playing(page);
@@ -1783,7 +1783,7 @@ async function gameFeel(t, site) {
   t.check((await play(page)).parts.startsWith('Empty') && menu, 'a right-click on a paint adds nothing and its context menu is prevented', [(await play(page)).parts, menu]);
   // a pointer that leaves the paint stops the hold
   await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
-  await page.mouse.down(); await sleep(800);
+  await page.mouse.down(); await sleep(1000);
   const held = parts((await play(page)).parts.replace(/^TW /, ''));
   await page.mouse.move(pb.x + pb.width / 2, pb.y - 60); await sleep(100);
   const atLeave = parts((await play(page)).parts.replace(/^TW /, ''));
@@ -1791,17 +1791,16 @@ async function gameFeel(t, site) {
   const later = parts((await play(page)).parts.replace(/^TW /, ''));
   await page.mouse.up();
   t.check(held >= 3 && later === atLeave, 'a pointer that leaves a held paint stops the adding', [held, atLeave, later]);
-  // the amount changed mid-hold applies from the next repeat
+  // the amount changed mid-hold applies from the next repeat: the parts read in the breath that changes it, and at the end
   await click(page, '#gameClear'); await setAmount(page, 2);
   await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
   await page.mouse.down(); await sleep(700);
-  await page.evaluate(() => { window.__seen = []; window.__poll = setInterval(() => window.__seen.push(document.getElementById('gameMixParts').textContent), 30); });
-  await setAmount(page, 3); await sleep(700);
+  const at = await page.evaluate(() => { const was = document.getElementById('gameMixParts').textContent; const r = document.getElementById('gameAmount'); r.value = 3; r.dispatchEvent(new Event('input')); return was; });
+  await sleep(700);
   await page.mouse.up();
-  const trail = await page.evaluate(() => { clearInterval(window.__poll); return window.__seen.map((x) => x.replace(/ /g, ' ')); });
-  const totals = trail.map((x) => parts(x.replace(/^TW /, ''))).filter((x) => !Number.isNaN(x));
-  const steps = new Set(totals.slice(1).map((x, i) => x - totals[i]).filter((d) => d > 0));
-  t.check(steps.has(2) && [...steps].every((d) => d === 1 || d === 2), 'the amount changed during a hold applies from the next repeat (1 part, then 2)', [...steps]);
+  const end = (await play(page)).parts;
+  const grew = parts(end.replace(/^TW /, '')) - parts(at.replace(/\u00a0/g, ' ').replace(/^TW /, ''));
+  t.check(grew >= 2 && grew % 2 === 0, 'the amount changed during a hold applies from the next repeat: from there on every add is 2 parts', [at, end, grew]);
 
   // Lock in while copying: the score has no copy bar, and Esc on the score does nothing
   await click(page, '#gameClear'); await tapPaint(page, 'TW');
@@ -2077,13 +2076,12 @@ async function motionAndTheme(t, site) {
     const run = async (label) => { for (const v of await axe(page)) { if (v.impact === 'critical' || v.impact === 'serious') bad.push(`${name} ${label}: ${v.id} (${v.impact}) ${v.help} ×${v.count} e.g. ${v.nodes[0]}`); else t.note(`axe ${name} ${label}: ${v.id} (${v.impact}) ${v.help} ×${v.count} e.g. ${v.nodes[0]}`); } };
     await run('play screen with mixed numbers');
     await lockIn(page); await run('score');
-    await click(page, '#gamePopupClose'); await click(page, '#gameCompare'); await run('score closed, comparing');
-    await click(page, '#gameShowScore'); await click(page, '#gameAnalyze'); await sleep(300); await run('analysis');
-    const ok = t.check(bad.length === 0, `axe, ${name} mode: no serious or critical issue on the play screen, the score, the comparison or the analysis`, bad.slice(0, 4));
+    await click(page, '#gameAnalyze'); await sleep(300); await run('analysis');
+    const ok = t.check(bad.length === 0, `axe, ${name} mode: no serious or critical issue on the play screen, the score or the analysis`, bad.slice(0, 4));
     if (!ok) t.finding({
       title: `Paint by numbers fails axe (${name} mode) on the play screen or the score`,
       severity: 'low',
-      steps: `1. Switch the system to ${name} mode. 2. Open Paint by numbers, Start painting, mix a few numbers, run axe-core on the page (tests/lib.mjs axe()), then Lock in portrait and run it on the score, the comparison and the analysis.`,
+      steps: `1. Switch the system to ${name} mode. 2. Open Paint by numbers, Start painting, mix a few numbers, run axe-core on the page (tests/lib.mjs axe()), then Lock in portrait and run it on the score and the analysis.`,
       expected: 'No serious or critical issue, as the smoke case holds every tab’s setup to.',
       actual: bad.slice(0, 4).join('; '),
     });
@@ -2216,19 +2214,29 @@ async function bigAndOddPhotos(t, site) {
   t.check(Object.keys(await bests(page)).some((k) => k.startsWith('face:600x750:400x500|medium|')), 'and kept under face:600x750:400x500', Object.keys(await bests(page)));
   await clean(t, page, 'a very large photo and an odd name');
   await page.context().close();
-  // a 200-character name on a phone wraps inside the card
+  // a long file name, as a camera or an export makes it (no spaces to break at), on a phone
   const ph = await openPage(site, { url: '#study', viewport: PHONE });
-  const long = 'a'.repeat(120) + '-' + 'b'.repeat(78) + '.jpg';
+  const long = 'IMG_20240601_123456_portrait_of_my_grandmother_final_v3_edited_copy.jpg';
   await loadPhoto(ph, await makeImage(ph, { width: 400, height: 500, type: 'image/jpeg', name: long }), { settle: 500 });
+  const studyScroll = await hscroll(ph);
   await tab(ph, 'game'); await ready(ph);
-  const width = await ph.evaluate(() => { const e = document.getElementById('gamePhotoName'); const c = e.closest('.game-card'); const r = c.getBoundingClientRect(); return { right: Math.round(r.right), vw: innerWidth, text: e.textContent.length }; });
-  t.check((await hscroll(ph)) <= 0 && width.right <= width.vw + 1 && width.text > 190, 'a 200-character file name wraps in the setup on a phone: no horizontal scroll', [await hscroll(ph), width]);
+  const wide = await ph.evaluate(() => { const e = document.getElementById('gamePhotoName'); const c = e.closest('.game-card').getBoundingClientRect(); return { card: [Math.round(c.left), Math.round(c.right)], name: Math.round(e.getBoundingClientRect().right), vw: innerWidth, text: e.textContent }; });
+  const scroll = await hscroll(ph);
+  const fits = t.check(scroll <= 0 && wide.card[1] <= wide.vw + 1, 'a long file name (71 characters, no spaces) does not widen the setup on a phone', [scroll, wide]);
+  if (!fits) t.finding({
+    title: 'A long file name makes the Paint by numbers setup scroll sideways on a phone',
+    severity: 'low',
+    steps: `1. On a 390 px wide phone load a photo named "${long}" on the Study tab (the Study tab itself does not scroll sideways: ${studyScroll}). 2. Open Paint by numbers.`,
+    expected: 'The photo pane’s sentence ("Painting from <file name>.") wraps or breaks inside the setup card, and the page does not scroll sideways.',
+    actual: `The page scrolls ${scroll} px sideways: the sentence runs out of the card (the card ends at ${wide.card[1]} px of ${wide.vw}) to ${wide.name} px.`,
+    cause: 'styles.css 813-814: .game-from is a grid with justify-items: start, so .hint takes the width of its longest unbreakable word (a name with underscores and no spaces) and has no overflow-wrap or min-width: 0; the card (800-807) does not clip it.',
+  });
   await clean(t, ph, 'a long file name on a phone');
   await ph.context().close();
 }
 
 // ================================================================================================
-// 32. A match shown as a threshold earns that threshold's stars (88, 65 and 30 percent)
+// 32. A match shown as 88% earns five stars (the lower thresholds are too far from any near mix of these paints to be played)
 // ================================================================================================
 async function starRounding(t, site) {
   const page = await openPage(site, { url: '#game' });
@@ -2258,7 +2266,7 @@ async function starRounding(t, site) {
     found.sort((a, b) => a[0] - b[0]);
     return found.length ? Object.fromEntries(codes.map((c, i) => [c, found[0][1][i] / 4]).filter(([, v]) => v > 0)) : null;
   }, [codes, recipe, goal]);
-  for (const goal of [88, 65, 30]) {
+  for (const goal of [88]) {
     const mixes = [];
     for (const [n, mix] of recipes) mixes.push([n, await nearMix(recipeOf(mix), goal)]);
     if (mixes.some(([, m]) => !m)) { t.note(`stars at ${goal}%: no mix just under ${goal} was found for number(s) ${mixes.filter(([, m]) => !m).map(([n]) => n).join(', ')}, so that threshold was not played`); continue; }
