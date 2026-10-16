@@ -655,5 +655,84 @@ export default async function hostile(t, site) {
     t.check(!posed.length, 'hashes: pose.html opened on its own with ?embed=1&render=1, ?render=1, a query that only contains "embed=1", a NUL and a script, and a 100 kB query starts as the ordinary page: the library open, nothing hidden or failed', posed);
   });
 
+  // ====================================================================================================================
+  // foreign: another origin's page frames the app (or the Pose page) and talks to it; and the drawing frame sends bad lists
+  // ====================================================================================================================
+  await seg.run('foreign', async (open) => {
+    const SB = { attrs: 'allow-scripts allow-same-origin allow-modals allow-downloads' };
+    const page = await open({ sandbox: SB });
+    const fr = app(page);
+    const origins = await Promise.all([page.evaluate(() => location.origin), fr.evaluate(() => location.origin)]);
+    t.check(origins[0] !== origins[1] && /^http:\/\/127\.0\.0\.1:\d+$/.test(origins[1]), 'foreign: the app runs inside a page of another origin and keeps its own', origins);
+    // every message below is posted by the framing page, to the app's window and to every frame inside it
+    const poke = (msgs) => page.evaluate((msgs) => { const w = document.getElementById('app').contentWindow, all = [w]; for (let i = 0; i < w.length; i++) all.push(w.frames[i]); for (const m of msgs) for (const x of all) x.postMessage(m, '*'); return all.length; }, msgs);
+    const POKES = [
+      { type: 'pose-and-light:height', height: 7000 }, { type: 'pose-and-light:height', height: 1 }, { type: 'pose-and-light:height', height: 'abc' },
+      { type: 'pose-and-light:mode', mode: 'advanced' }, { type: 'pose-and-light:mode', mode: { toString: 1 } },
+      { type: 'pose-and-light:failed' }, { type: 'pose-and-light:ready' }, { type: 'pose-and-light:list' },
+      { type: 'pose-and-light:list', poses: [{ id: 'evil', name: '<img src=x onerror=window.__pwn=1>', group: 'standing' }], groups: [['standing', 'Hacked']] },
+      { type: 'pose-and-light:thumb', id: 'stand', url: 'data:image/png;base64,iVBORw0KGgo=' },
+      { type: 'pose-and-light:shot', req: 1, id: 'stand', w: 600, h: 750, url: 'data:image/png;base64,iVBORw0KGgo=', joints: {} },
+      { type: 'pose-and-light:render', req: 1, id: 'stand', w: 600, h: 750 },
+      'a string', 42, null, [], {}, { type: ['pose-and-light:height'] }, { type: 7 }, { type: 'pose-and-light:height', height: { valueOf: 1 } },
+    ];
+    // before Figure study has opened its drawing frame, and before the Pose page has been opened at all
+    const early = await poke(POKES);
+    await tab(page, 'figure');
+    const tiles = () => fr.evaluate(() => ({ n: document.querySelectorAll('#tab-figure .fig-pose').length, names: [...document.querySelectorAll('#tab-figure .fig-pose-name')].slice(0, 3).map((e) => e.textContent), note: document.getElementById('fig-libNote').textContent.slice(0, 60), evil: !!document.querySelector('[data-pose-id="evil"]'), pwn: window.__pwn }));
+    const f1 = await tiles();
+    t.check(f1.n >= 30 && !f1.evil && f1.pwn === undefined && !/could not be drawn/.test(f1.note), 'foreign: messages posted before Figure study opened its frame (a list, a failure, a picture) changed nothing: its own thirty-odd poses are listed', { early, ...f1 });
+    await clean(t, page, 'foreign: before and while Figure study opens');
+
+    await tab(page, 'pose');
+    const pf = poseFrame(page);
+    const settled = async () => { let h = ''; for (let i = 0; i < 12; i++) { const now = await fr.evaluate(() => document.getElementById('poseFrame').style.height); if (now === h) break; h = now; await sleep(250); } return h; };
+    const hBefore = await settled();
+    const modeBefore = await pf.evaluate(() => window.PoseAndLight.mode());
+    const rf = renderFrame(page);
+    await fr.evaluate(() => { window.__heard = []; window.addEventListener('message', (e) => { window.__heard.push([e.data && e.data.type, e.source === window ? 'self' : e.source === document.getElementById('fig-render').contentWindow ? 'render' : e.source === document.getElementById('poseFrame').contentWindow ? 'pose' : 'other']); }); });
+    await poke(POKES);
+    await sleep(1800);
+    const hAfter = await settled();
+    const modeAfter = await pf.evaluate(() => window.PoseAndLight.mode());
+    const heard = await fr.evaluate(() => window.__heard.filter(([type, from]) => from === 'render' && /list|thumb|shot/.test(type || '')).length);
+    const f2 = await tiles();
+    t.check(hAfter === hBefore, 'foreign: the framing page cannot set the Pose frame\'s height (7000, 1, "abc" and an object are all ignored)', { hBefore, hAfter });
+    t.check(modeBefore === 'simple' && modeAfter === 'simple', 'foreign: the framing page cannot switch the Pose page to Advanced (its mode message is not from the app)', { modeBefore, modeAfter });
+    t.check(heard === 0, 'foreign: the drawing frame does not answer a list or render request from a page that is not the app', heard);
+    t.check(f2.n === f1.n && !f2.evil && f2.pwn === undefined, 'foreign: the framing page\'s list, thumbnail and picture messages did not change Figure study\'s library', { f1: f1.n, f2: f2.n });
+    t.check(await rf.evaluate(() => !!window.PoseAndLight || true) && (await fr.evaluate(() => window.__pwn === undefined)), 'foreign: nothing posted from outside ran');
+    await clean(t, page, 'foreign: pokes after both frames are up');
+
+    // the drawing frame itself (the app's own) sends a list and pictures a careless or compromised page could: shown as text, nothing made from them
+    await rf.evaluate(() => {
+      const many = Array.from({ length: 3000 }, (_, i) => ({ id: 'p' + i, name: 'Pose ' + i, group: i % 2 ? 'standing' : '__proto__' }));
+      window.parent.postMessage({ type: 'pose-and-light:list', groups: [['standing', 'Standing'], ['__proto__', 'Proto'], ['constructor', 'Ctor'], [1, 2], 'x', null], poses: [
+        { id: 'a"] b', name: '<img src=x onerror=window.__pwn=1>', group: 'standing' }, { id: 'x\'\\\n', name: 'quote', group: 'constructor' }, { id: 'dup', name: 'one' }, { id: 'dup', name: 'two' },
+        { id: 5, name: 'num' }, { id: 'noname' }, null, 'str', { id: '__proto__', name: 'proto', group: 'toString' }, ...many] }, '*');
+      for (const [id, url] of [['a"] b', 'data:image/png;base64,@@@@@@'], ['p1', 'data:image/jpeg;base64,' + 'A'.repeat(1e6)], ['p2', 'javascript:window.__pwn=2'], ['p3', 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='], ['p4', 'https://evil.example/x.png'], [5, 'data:image/png;base64,iVBORw0KGgo=']]) window.parent.postMessage({ type: 'pose-and-light:thumb', id, url }, '*');
+      window.parent.postMessage({ type: 'pose-and-light:shot', req: 'x', id: 'p1', w: 'NaN', h: [], url: 'data:image/png;base64,AAAA', joints: 5 }, '*');
+    });
+    await sleep(2500);
+    const h = await fr.evaluate(() => {
+      const t = [...document.querySelectorAll('#tab-figure .fig-pose')];
+      const by = (id) => t.find((b) => b.dataset.poseId === id);
+      return { n: t.length, hasEvil: t.filter((b) => b.querySelector('.fig-pose-name').textContent === '<img src=x onerror=window.__pwn=1>').length, imgs: document.querySelectorAll('#tab-figure img[src="x"]').length, pwn: window.__pwn, dupNames: t.filter((b) => b.dataset.poseId === 'dup').map((b) => b.querySelector('.fig-pose-name').textContent), p1: by('p1') && by('p1').classList.contains('has-img'), p2: by('p2') && by('p2').classList.contains('has-img'), p3: by('p3') && by('p3').classList.contains('has-img'), p4: by('p4') && by('p4').classList.contains('has-img'), weird: !!by('a"] b'), note: document.getElementById('fig-libNote').textContent.slice(0, 50) };
+    });
+    t.check(h.n === 3004 && h.hasEvil === 1 && !h.imgs && h.pwn === undefined && h.dupNames.join() === 'one', 'foreign: a list of 3000 poses with quotes, markup, duplicates, prototype names and entries of the wrong type is listed once each (3004 tiles), names as text, nothing made from them', h);
+    t.check(h.p1 === true && !h.p2 && !h.p3 && !h.p4, 'foreign: of the pictures sent, a JPEG data address is shown; a javascript: address, an SVG and an outside address are not', { p1: h.p1, p2: h.p2, p3: h.p3, p4: h.p4 });
+    await clean(t, page, 'foreign: hostile lists from the drawing frame');
+
+    // a page of another origin that frames Pose and light's drawing mode itself, and asks it for its list, hears nothing back
+    const ep = await open({ url: 'pose.html?render=1', sandbox: SB });
+    await ep.app.waitForFunction(() => window.__poseStarted, null, { timeout: 30000 }).catch(() => null);
+    await ep.evaluate(() => { window.__heard = []; window.addEventListener('message', (e) => window.__heard.push(e.data && e.data.type)); });
+    await ep.evaluate(() => { const w = document.getElementById('app').contentWindow; w.postMessage({ type: 'pose-and-light:list' }, '*'); w.postMessage({ type: 'pose-and-light:render', req: 1, id: 'stand', w: 600, h: 750 }, '*'); });
+    await sleep(3000);
+    const leaked = await ep.evaluate(() => window.__heard);
+    t.check(leaked.length === 0, 'foreign: a page of another origin that frames pose.html?render=1 and asks for its list and a picture hears nothing (replies go to the Pose page\'s own origin)', leaked);
+    await clean(t, ep, 'foreign: a foreign page framing the drawing mode');
+  });
+
   t.note(`segments: ${seg.timings.join('; ')}`);
 }
