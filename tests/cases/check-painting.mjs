@@ -424,7 +424,7 @@ export default async function checkPainting(t, site) {
       await page.mouse.move(5, 5);
       const owner = read.map((r) => fx.findIndex((f) => f.pct === r.pct && same(r.colors, [f.ref, f.art])));
       t.check(read.length === fx.length && owner.every((i) => i >= 0) && new Set(owner).size === fx.length, 'every white label sits on the shape of one entry of the list (its match and both colors under it), one label per entry', { labels: read, entry: owner.map((i) => i + 1) });
-      t.note('The white labels\' digits are not read (the page draws them on a canvas); each label is tied to its list entry by the match and the two colors under it.');
+      // (the labels' own text, numbers and percentages, is read off the canvas's drawing calls in the labels block at the end)
     }
     let l = await hoverAt(page, '#cv-diff', 0.5, 0.45);
     t.check(l.shown && /^\d{1,3}% match$/.test(l.hex) && /^ΔE \d+\.\d$/.test(l.val) && /^linear-gradient\(90deg, rgb\(\d+, \d+, \d+\) 50%, rgb\(\d+, \d+, \d+\) 50%\)$/.test(l.chip), 'hovering a zone shows its match, its ΔE and the reference color next to yours', l);
@@ -1358,7 +1358,7 @@ export default async function checkPainting(t, site) {
     const over = pillsOverlapping(r.list);
     if (!t.check(over.length === 0, 'the example\'s map: no label lies on another', over)) {
       const o = over[0];
-      t.finding({ title: 'On the example\'s accuracy map a numbered white label is drawn over the end of a zone\'s percentage label', severity: 'low', steps: 'Open index.html#check (the built-in example, nothing moved). Look at the accuracy map (Accuracy by shape) around the lower middle, where the white label "5 · …%" sits beside a dark "…%" label; zoom the page or Save PNG and look at the file to see it plainly. Twice: the example is drawn the same each time.', expected: 'Each label stands clear of the others, as the README\'s "Zones too small to hold a label stay unlabelled" implies: a label goes where its zone has room for it.', actual: `The white label "${o.labels[1]}" overlaps the dark "${o.labels[0]}" by ${o.by[0]} × ${o.by[1]} px (boxes at ${o.at.slice(0, 2).join(', ')} and ${o.at.slice(2).join(', ')} on the 600 × 750 map) and covers its rounded end; ${over.length} overlap${over.length === 1 ? '' : 's'} in all.`, cause: 'js/app.js drawLabels (lines 2443-2450): a white label\'s font is room / 1.9 floored at minFont (line 2448), but the pill is about 5 × font wide ("5 · 81%" plus 0.9 × font of padding), so its half-width is about 2.5 × font against the 1.9 × font of room its zone has, and it spills about 8 px into the next zone; neither loop looks at the boxes already drawn (cmp.labelBoxes is kept for the measures only).' });
+      t.finding({ title: 'On the example\'s accuracy map a numbered white label is drawn over the end of a zone\'s percentage label', severity: 'low', steps: 'Open index.html#check (the built-in example, nothing moved). Look at the accuracy map (Accuracy by shape) around the lower middle, where the white label "5 · …%" sits beside a dark "…%" label; zoom the page or Save PNG and look at the file to see it plainly. Twice: the example is drawn the same each time.', expected: 'Each label stands clear of the others, as the README\'s "Zones too small to hold a label stay unlabelled" implies: a label goes where its zone has room for it.', actual: `The white label "${o.labels[1]}" overlaps the dark "${o.labels[0]}" by ${o.by[0]} × ${o.by[1]} px (boxes at ${o.at.slice(0, 2).join(', ')} and ${o.at.slice(2).join(', ')} on the 600 × 750 map) and covers its rounded end; ${over.length} overlap${over.length === 1 ? '' : 's'} in all.`, cause: 'js/app.js drawLabels (lines 2442-2450): a white label\'s font is room / 1.9 floored at minFont (line 2448), but the pill is about 5 × font wide ("5 · 81%" plus 0.9 × font of padding), so its half-width is about 2.5 × font against the 1.9 × font of room its zone has, and it spills 8 to 10 px into the next zone; neither loop looks at the boxes already drawn (cmp.labelBoxes is kept for the measures only).' });
     }
     // Rotate and Size from the keyboard: their own steps (0.25°, 0.5%) and their outputs, Home and End
     await openAlign(page);
@@ -1387,11 +1387,34 @@ export default async function checkPainting(t, site) {
     const half = await px(page, 'cv-art', 300, 400);
     t.check(same(s.outs.onion, ['50', '50%']) && half.every((v, i) => Math.abs(v - (artPx[i] + origPx[i]) / 2) <= 2) && s.badge === before.badge, 'Show reference on top at 50%: Your painting shows half way between itself and the reference, and the score does not move', { out: s.outs.onion, shown: half, painting: artPx, reference: origPx, badge: [before.badge, s.badge] });
     await setRange(page, 'onion', 0);
+    // Move nudged, then a Study setting changed inside the check's 120 ms wait: the indicator stays up until the score
+    // is the one for both (every time it comes down, the badge already reads the final score)
+    {
+      await page.evaluate(() => document.querySelector('[data-mode="advanced"]').click()); await busyHidden(page);
+      const was = await page.evaluate(() => document.getElementById('simplify').value);
+      await page.evaluate(() => { window.__downWith = []; const busy = document.getElementById('busy'), badge = document.getElementById('checkState'); window.__downObs = new MutationObserver(() => { if (busy.hidden) window.__downWith.push({ t: Math.round(performance.now()), badge: badge.textContent }); }); window.__downObs.observe(busy, { attributes: true, attributeFilter: ['hidden'] }); });
+      const ran = await afterResult(page, () => page.evaluate(async () => {
+        window.__t0 = Math.round(performance.now());
+        const x = document.getElementById('alignX'); x.value = 4; x.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 50));
+        const e = document.getElementById('simplify'); e.value = String(+e.value === 9 ? 8 : 9); e.dispatchEvent(new Event('input', { bubbles: true }));
+      }));
+      await sleep(300);
+      const downs = await page.evaluate(() => { window.__downObs.disconnect(); return window.__downWith.map((d) => ({ ms: d.t - window.__t0, badge: d.badge })); });
+      const final = (await state(page)).badge;
+      if (!t.check(ran && downs.length >= 1 && downs.every((d) => d.badge === final), 'Move nudged and Simplify changed 50 ms later: the Updating indicator comes down only once the score is the one for both', { downs, final })) {
+        const stale = downs.find((d) => d.badge !== final) || {};
+        t.finding({ title: 'The Updating indicator comes down while a Study rerun is still pending, over a score that is about to change', severity: 'low', steps: 'Open index.html#check, choose Advanced. Nudge Move left / right (Line up the photo) and, within the next 120 ms, change a Study setting such as Simplify (for example from the console: set #alignX to 4 and dispatch input, then 50 ms later set #simplify to 9 and dispatch input). Watch the Updating indicator and the drawer\'s badge. Twice, with the same result.', expected: 'The indicator stays up until the score shown is the one for the new position and the new setting.', actual: `The indicator comes down ${stale.ms} ms after the nudge with the badge at "${stale.badge}" (the new position scored against the old Simplify), and a frame is painted that way (a requestAnimationFrame callback sees the indicator hidden and that badge); the badge changes to "${final}" only when the Study rerun finishes, ${(downs[downs.length - 1].ms - stale.ms) || '…'} ms later, with no indicator meanwhile (the moments it came down, from the nudge: ${JSON.stringify(downs)}).`, cause: 'js/app.js checkSoon (line 2387): the check\'s timer runs runCheck and then sets els.busy.hidden = true whatever else is pending; runSoon\'s timer (line 272, set 50 ms later for 90 ms) is still waiting to run the study, which run() rescores at line 289.' });
+      }
+      await page.evaluate((v) => { const e = document.getElementById('simplify'); e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); document.getElementById('alignReset').click(); }, was);
+      await busyHidden(page); await sleep(200);
+      await page.evaluate(() => document.querySelector('[data-mode="simple"]').click()); await busyHidden(page);
+    }
     await clean(t, page, 'labels and keyboard steps');
     // the photo made smaller (Size 80%): every label stays on the part still covered and inside the picture
     r = await labels(() => setRange(page, 'alignScale', 80));
     const [W, H] = [r.W, r.H], inCover = (p) => { const cx = p.x + p.w / 2, cy = p.y + p.h / 2; return cx >= 0.1 * W && cx <= 0.9 * W && cy >= 0.1 * H && cy <= 0.9 * H; };
-    t.check(r.list.length >= 5 && r.list.every((p) => pillInside(p, W, H) && inCover(p)), 'Size at 80%: every label is centred on the part of the picture still covered (none on the hatched border) and inside the picture', { labels: r.list.length, off: r.list.filter((p) => !pillInside(p, W, H) || !inCover(p)).map((p) => [p.text, Math.round(p.x), Math.round(p.y)]) });
+    t.check(r.list.length >= 5 && r.list.every((p) => pillInside(p, W, H) && inCover(p)), 'Size at 80%: every label is centred on the part of the picture still covered (none centred on the hatched border) and inside the picture', { labels: r.list.length, off: r.list.filter((p) => !pillInside(p, W, H) || !inCover(p)).map((p) => [p.text, Math.round(p.x), Math.round(p.y)]) });
     const overHatch = r.list.filter((p) => p.x < 0.1 * W || p.x + p.w > 0.9 * W || p.y < 0.1 * H || p.y + p.h > 0.9 * H);
     if (overHatch.length) t.note(`Size at 80%: ${overHatch.length} label${overHatch.length === 1 ? '' : 's'} (${overHatch.map((p) => p.text).join(', ')}) centred on the covered part reach over onto the hatched border.`);
     await click(page, '#alignReset'); await busyHidden(page);

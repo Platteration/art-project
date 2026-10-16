@@ -8,7 +8,8 @@
 // class, the 404 page, the toast's lifetime and cap, and the whole-app sweeps: every portrait-value-studio.* and
 // pose-and-light.* key seeded hostile at once (each shape, and a different one in every key) with every tab
 // opened in turn and the page read for words a bad value turned up (NaN, undefined, [object Object]); every
-// #route (and every way of writing one) opened with a hostile state; every script blocked one at a time and made
+// #route opened with every one of those shapes, pose.html on its own with them, and every way of writing a route
+// by hand; every script blocked one at a time and made
 // to throw one at a time, and two or all of them at once, each read against js/guard.js's TAB_OF (the menu item,
 // the panel, the guide's jump button, the menu's name, the note, the keyboard walk); styles.css, the fonts, the
 // icons, three.js, pose.html's scripts and the guide's pictures missing; axe on every tab at both widths.
@@ -55,12 +56,12 @@ const isSimple = (page) => page.evaluate(() => ({ simple: document.body.classLis
 const frameMode = (page) => { const f = poseFrame(page); return f ? f.evaluate(() => window.PoseAndLight ? PoseAndLight.mode() : null).catch(() => null) : null; };
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const timings = [];
-// what a step is expected to cost on a busy machine, in seconds (longest first keeps the workers even); the
-// default is 20
-const COSTS = [[/^modes/, 140], [/live resize/, 90], [/storage blocked \(writes\)/, 110], [/^pose and figure routes/, 100], [/^routes/, 70], [/^axe/, 90], [/dark/, 70], [/hostile keys/, 60], [/forget during a figure/, 60], [/reduced motion/, 40], [/storage blocked \(access\)/, 75], [/guard\.js blocked/, 50], [/three|pose scripts/, 40]];
+// what a step cost when measured on a busy machine, in seconds (longest first keeps the workers even); the default is 15
+const COSTS = [[/^heavy route/, 65], [/^modes/, 50], [/live resize/, 45], [/^pose\.html alone/, 40], [/storage blocked/, 36], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 25], [/hostile keys/, 24], [/forget during a figure/, 21], [/^route #/, 15], [/three|pose scripts/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20]];
 const jobs = [];
+let sharedIdFinding = false;
 // a step registers itself; the pool at the end of the case runs them
-function step(t, name, fn) { jobs.push({ name, fn, cost: (COSTS.find(([re]) => re.test(name)) || [0, 20])[1] }); }
+function step(t, name, fn) { jobs.push({ name, fn, cost: (COSTS.find(([re]) => re.test(name)) || [0, 15])[1] }); }
 async function runJob(t, j) {
   if (process.env.PVS_STEPS && !new RegExp(process.env.PVS_STEPS).test(j.name)) return;
   const t0 = Date.now();
@@ -617,26 +618,71 @@ function groupC(t, site) {
     });
   }
 
-  // every route opened with a hostile state: two shapes for each route, so that every shape meets two routes
+  // every route opened with every hostile state (the address is read while the saved state is still being read, which a
+  // click on a tab afterwards is not). Pose and Figure are not waited for to the last picture: what a bad value can break
+  // is the start, and the pictures do not read storage
+  const quick = async (page, name) => {
+    for (let k = 0; k < 60; k++) {
+      const f = name === 'pose' ? poseFrame(page) : null;
+      if (name === 'pose' && f) { const up = await f.evaluate(() => !!window.__poseStarted || !document.getElementById('fail').hidden).catch(() => false); if (up) break; }
+      if (name === 'figure') { const up = await page.evaluate(() => document.querySelectorAll('#tab-figure [data-pose-id]').length > 0 || /could not be drawn/.test(document.getElementById('fig-libNote').textContent)).catch(() => false); if (up) break; }
+      await sleep(250);
+    }
+    await sleep(800);
+  };
   async function openRoute(h, vi, heavy) {
     const [label, make] = VARIANTS[vi % VARIANTS.length];
     const page = await openPage(site, { url: h, storage: seedAll(make) });
     const want = { '#check': 'tab-study', '#nonsense': 'tab-study' }[h] || 'tab-' + h.slice(1);
-    if (heavy) await settle(page, h.slice(1), 40000);
+    if (heavy) await quick(page, h.slice(1));
     const shown = await shownPanels(page);
     t.check(shown.join() === want, `route ${h} with every key ${label}: opens ${want}`, shown);
     if (h === '#check') t.check(await page.evaluate(() => document.getElementById('drawer-check').open === true && !document.getElementById('checkSection').hidden), `route #check with every key ${label}: the check drawer is open`);
     const junk = await junkIn(app(page));
-    t.check(junk.length === 0, `route ${h} with every key ${label}: nothing on the page reads NaN or undefined`, junk);
+    const jf = h === '#pose' && poseFrame(page) ? await junkIn(poseFrame(page)).catch(() => []) : [];
+    t.check(junk.length === 0 && jf.length === 0, `route ${h} with every key ${label}: nothing on the page reads NaN or undefined`, junk.concat(jf));
+    if (h === '#pose') { const f = poseFrame(page); const s = f ? await f.evaluate(() => ({ started: !!window.__poseStarted, fail: !document.getElementById('fail').hidden })).catch(() => null) : null; t.check(s && s.started && !s.fail, `route #pose with every key ${label}: the Pose page started`, s); }
+    if (h === '#figure') {
+      // the library's 30 poses, and the visitor's own saved ones (up to twelve, from pose-and-light.mine.v1) after them
+      const s = await page.evaluate(() => {
+        const ids = [...document.querySelectorAll('#tab-figure [data-pose-id]')].map((x) => x.dataset.poseId);
+        const library = [...document.querySelectorAll('#tab-figure .fig-group')].filter((g) => g.querySelector('.fig-group-btn').dataset.group !== 'mine').reduce((n, g) => n + g.querySelectorAll('[data-pose-id]').length, 0);
+        return { poses: ids.length, library, sharing: ids.filter((x, i) => ids.indexOf(x) !== i).length, mix: document.getElementById('fig-mix').textContent, note: document.getElementById('fig-libNote').textContent.trim() };
+      });
+      t.check(s.library === 30 || /could not be drawn/.test(s.note), `route #figure with every key ${label}: the library's 30 poses are there`, s);
+      const own = await page.evaluate(() => { const ids = [...document.querySelectorAll('#tab-figure [data-pose-id]')]; const first = ids.find((x) => ids.filter((y) => y.dataset.poseId === x.dataset.poseId).length > 1); return first ? first.dataset.poseId : null; });
+      const unique = t.check(s.sharing === 0, `route #figure with every key ${label}: no two poses in the class share an id (tapping one would take out the others)`, s);
+      if (!unique && own !== null) {
+        // (what one tap does to the others is the visitor's view of it)
+        await page.locator(`#tab-figure [data-pose-id="${own.replace(/["\\]/g, '\\$&')}"]`).first().click();
+        const after = await page.evaluate((id) => ({ pressed: [...document.querySelectorAll('#tab-figure [data-pose-id]')].filter((x) => x.dataset.poseId === id).map((x) => x.getAttribute('aria-pressed')).join(), mix: document.getElementById('fig-mix').textContent }), own);
+        if (!sharedIdFinding) { sharedIdFinding = true; t.finding({ title: 'Figure study: saved poses that share an id show as separate tiles but are one pose in the class (one tap takes them all out)', severity: 'low', steps: `In a fresh browser set localStorage "pose-and-light.mine.v1" to [{"id":"dup","p":{}},{"id":"dup","p":{}},{"id":"dup","p":{}}] (a damaged or hand-edited record; the 5000-entry array of the sweep gives twelve such tiles) and open index.html#figure. Look at "Your poses" and tap one of the three.`, expected: 'Records the page cannot tell apart are dropped (or given ids of their own), as records that are not objects already are: the class has one tile for each pose it can deal, and a tap changes that one tile.', actual: `${s.poses - s.library} tiles under "Your poses" (${s.poses} poses in all) carry the id "${own}"; one tap sets all of them to aria-pressed=${after.pressed.split(',')[0]} (${after.pressed.split(',').length} tiles changed) and the line reads "${after.mix}".`, cause: 'js/pose.js 2119 (the Figure study list: poseList() keeps any record with a string id and an object p, twelve at most, without looking for an id seen before; the Pose page itself, 1291, does the same but removes by object) and js/figure.js 142-170 (the library, the class `out` set and the pictures `thumbs` are all keyed by the pose id).' }); }
+      }
+    }
     await clean(t, page, `route ${h} with every key ${label}`);
     await page.context().close();
   }
-  step(t, 'routes with hostile state', async () => {
-    const routes = ['#check', '#game', '#paint', '#help', '#loomis', '#battle', '#study', '#nonsense'];
-    for (let i = 0; i < routes.length; i++) for (const k of [0, 1]) await openRoute(routes[i], i + k * 4, false);
-  });
-  step(t, 'pose and figure routes with hostile state', async () => {
-    for (const [h, vi] of [['#pose', 3], ['#pose', 4], ['#figure', 7], ['#figure', 4]]) await openRoute(h, vi, true);
+  for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#battle', '#study']) {
+    step(t, `route ${h} with every hostile state`, async () => { for (let vi = 0; vi < VARIANTS.length; vi++) await openRoute(h, vi, false); });
+  }
+  step(t, 'route #nonsense with hostile state', async () => { for (const vi of [3, 4, 7]) await openRoute('#nonsense', vi, false); });
+  for (const h of ['#pose', '#figure']) {
+    step(t, `heavy route ${h} with every hostile state`, async () => { for (let vi = 0; vi < VARIANTS.length; vi++) await openRoute(h, vi, true); });
+  }
+  // pose.html on its own (the Pose page opened as a page): its three keys hostile, and the app's mode key beside them
+  step(t, 'pose.html alone with hostile state', async () => {
+    for (const [label, make] of VARIANTS) {
+      const page = await openPage(site, { url: 'pose.html', storage: seedAll(make) });
+      await page.waitForFunction(() => window.__poseStarted || !document.getElementById('fail').hidden, null, { timeout: 20000 }).catch(() => null);
+      await sleep(800);
+      const s = await page.evaluate(() => ({ started: !!window.__poseStarted, fail: !document.getElementById('fail').hidden, poses: document.querySelectorAll('#poses button').length, mode: window.PoseAndLight ? PoseAndLight.mode() : null, polluted: 'polluted' in Object.prototype }));
+      t.check(s.started && !s.fail && s.poses > 0 && !s.polluted, `pose.html alone with every key ${label}: the page starts with its poses and nothing polluted`, s);
+      t.check(s.mode === 'simple', `pose.html alone with every key ${label}: a mode that is not "advanced" reads as Simple`, s.mode);
+      const junk = await junkIn(app(page));
+      t.check(junk.length === 0, `pose.html alone with every key ${label}: nothing on the page reads NaN or undefined`, junk);
+      await clean(t, page, `pose.html alone with every key ${label}`);
+      await page.context().close();
+    }
   });
 
   // an address written by hand: any case, a trailing slash, a query, a name that is a property of Object, a bare #;
@@ -754,6 +800,12 @@ function groupD(t, site) {
     const table = BLOCKED.map(([f]) => shortName(f));
     t.check(loaded.every((s) => table.includes(s)), 'every script index.html loads is blocked in this case (a new script needs a row)', loaded.filter((s) => !table.includes(s)));
     t.check(loaded.filter((s) => !['guard', 'processing', 'mixing', 'paints'].includes(s)).every((s) => Object.prototype.hasOwnProperty.call(tabOf, s)), 'every module script has a rule in TAB_OF (a script with none is read as the app not starting)', loaded.filter((s) => !Object.prototype.hasOwnProperty.call(tabOf, s)));
+    // the keys: every one the scripts name is seeded by this case (a new key needs a row in APP_KEYS), and none seeded is stale
+    const sources = fs.readdirSync(path.join(site.root, 'js')).filter((f) => f.endsWith('.js')).map((f) => readSite(site, 'js/' + f)).join('\n');
+    const named = [...new Set([...sources.matchAll(/(portrait-value-studio\.[A-Za-z0-9]+|pose-and-light\.[A-Za-z0-9.]+?)(?=['"`])/g)].map((x) => x[1]))].filter((k) => k !== PVS('forget'));
+    t.check(named.length >= 20, 'the storage keys the scripts name can be read out of js/', named);
+    t.check(named.every((k) => ALL_KEYS.includes(k)), 'every storage key the scripts name is seeded hostile by this case (a new key needs a row in APP_KEYS)', named.filter((k) => !ALL_KEYS.includes(k)));
+    t.check(ALL_KEYS.every((k) => named.includes(k)), 'every key this case seeds is one the scripts still name', ALL_KEYS.filter((k) => !named.includes(k)));
     for (const [f, want] of BLOCKED) {
       const rule = Object.prototype.hasOwnProperty.call(tabOf, shortName(f)) ? tabOf[shortName(f)] : undefined;
       if (rule === 'all') t.check(want.note === 'nojs', `${f}: TAB_OF says "all", the table expects the standing note and the guide alone`);
@@ -830,9 +882,11 @@ function groupD(t, site) {
     await page.context().close();
   });
 
-  // the Palette part of the page, with palette.js missing: TAB_OF gives it no tab, so the guard takes nothing off
+  // the Palette part of the page, with palette.js missing: the guard's rule for it is "palette" (no tab, the paints part)
   step(t, 'palette.js blocked: what is left of the paints part', async () => {
-    const page = await openPage(site, { block: [site.base + 'js/palette.js'], storage: { [PVS('mode')]: 'advanced' } });
+    // Advanced shows every control of the part (My paints, the paints limit); a block view of "palette" saved by an earlier
+    // visit, with palette.js working, is read by app.js whether or not palette.js is there
+    const page = await openPage(site, { block: [site.base + 'js/palette.js'], storage: { [PVS('mode')]: 'advanced', [PVS('blockView')]: 'palette' } });
     await frames(page);
     await page.evaluate(() => { document.getElementById('drawer-colors').open = true; });
     const sig = () => page.evaluate(() => { const c = document.getElementById('cv-block'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 0; i < d.length; i += 97) h = (h * 31 + d[i]) | 0; return h; });
@@ -841,8 +895,9 @@ function groupD(t, site) {
     const seen = await page.evaluate(() => {
       const shown = (e) => !!e && !e.hidden && e.getClientRects().length > 0;
       const palette = document.getElementById('blockViewPalette'), mine = document.getElementById('srcMine');
-      return { paletteButton: shown(palette) && !palette.disabled, radios: shown(mine) && !mine.disabled, list: document.getElementById('presetList').children.length, listShown: shown(document.getElementById('presetPane')), state: document.getElementById('colorsState').textContent, title: palette.title };
+      return { paletteButton: shown(palette) && !palette.disabled, radios: shown(mine) && !mine.disabled, list: document.getElementById('presetList').children.length, listShown: shown(document.getElementById('presetPane')), state: document.getElementById('colorsState').textContent, title: palette.title, label: document.getElementById('cv-block').getAttribute('aria-label'), wide: document.getElementById('cv-block').width };
     });
+    t.check(seen.wide > 0 && seen.label === 'Color-block study', 'palette.js blocked, the block view saved as "palette": the block study still draws, in the photo\'s colors', seen);
     const before = await sig();
     if (seen.paletteButton) await page.locator('#blockViewPalette').click();
     if (seen.radios) await page.locator('label[for="srcMine"]').click();
@@ -851,8 +906,15 @@ function groupD(t, site) {
     const changed = (await sig()) !== before;
     const dead = { paletteView: seen.paletteButton && after.pressed === 'true' && !changed && after.label === 'Color-block study', myPaints: seen.radios && after.checked === 'srcMine' && after.mineHidden, emptyList: seen.listShown && seen.list === 0 };
     t.check(!dead.paletteView && !dead.myPaints && !dead.emptyList, 'palette.js blocked: no control or list that needs it is left on the page (the Palette view, Known palettes / My paints, the empty list of palettes)', { dead, seen, after });
-    t.check(seen.state !== '', 'palette.js blocked: the Colors and paints drawer still says what it is set to', { state: seen.state });
-    if (dead.paletteView || dead.myPaints || dead.emptyList) t.finding({ title: 'With palette.js missing, the paints part stays on the page as controls that do nothing', severity: 'medium', steps: 'Block js/palette.js (a partial deploy or one failed request) and open the site with Advanced chosen. Under Big color shapes press Palette; open Colors and paints and choose My paints.', expected: 'The standing note says part of the app did not start and "only the parts that started are shown" (the note\'s own words, as for every other script): the Palette view button, the Known palettes and My paints choice and the empty list are taken off, as the guard does for a missing Studio, Figure, Loomis, game or battle.', actual: `The note shows and everything else stays: Palette becomes pressed and the picture does not change (its tooltip says "${seen.title}", which sends the visitor to a drawer whose list is empty); in the drawer "Best match first. Pick one to see how to mix each color." sits over ${seen.list} palettes, the summary line is empty, and choosing My paints ticks the radio while the pane stays closed (${JSON.stringify(after)}).`, cause: 'js/guard.js 159: TAB_OF has palette: "", so failed() takes no tab off and nothing else; js/app.js 346-363 (showBlocks) keeps the Palette button for a StudioPalette that is not there; index.html 148-196 has the Paints to use block with its radios without a hidden state for the part-failed case (styles.css has no .part-failed rule for it).' });
+    t.check(/^\d per value$/.test(seen.state), 'palette.js blocked: the Colors and paints drawer still says what it is set to', { state: seen.state });
+    // the header follows the slider, the one control of the drawer that is left
+    await page.evaluate(() => { const c = document.getElementById('colors'); c.value = '5'; c.dispatchEvent(new Event('input', { bubbles: true })); });
+    await sleep(300);
+    const moved = await page.evaluate(() => ({ state: document.getElementById('colorsState').textContent, out: document.getElementById('colorsOut').textContent }));
+    t.check(moved.state === '5 per value' && moved.out === '5', 'palette.js blocked: the drawer\'s header follows the slider to 5', moved);
+    if (dead.paletteView || dead.myPaints || dead.emptyList) t.finding({ title: 'With palette.js missing, the paints part stays on the page as controls that do nothing', severity: 'medium', steps: 'Block js/palette.js (a partial deploy or one failed request) and open the site with Advanced chosen. Under Big color shapes press Palette; open Colors and paints and choose My paints.', expected: 'The standing note says part of the app did not start and "only the parts that started are shown" (the note\'s own words, as for every other script): the Palette view button, the Known palettes and My paints choice and the empty list are taken off, as the guard does for a missing Studio, Figure, Loomis, game or battle.', actual: `The note shows and everything else stays: Palette becomes pressed and the picture does not change (its tooltip says "${seen.title}"); in the drawer "Best match first. Pick one to see how to mix each color." sits over ${seen.list} palettes, the summary line reads "${seen.state}", and choosing My paints ticks the radio while the pane stays closed (${JSON.stringify(after)}).`, cause: 'js/guard.js failed(): the "palette" branch (TAB_OF palette) hides #paints and .block-view; js/palette.js passes it as the tab when app.js did not finish loading, and the guard\'s error handler when the script is missing or throws.' });
+    dropLogged(page, /Failed to load resource|palette\.js did not load/);
+    await clean(t, page, 'palette.js blocked');
     await page.context().close();
   });
 
@@ -1024,7 +1086,7 @@ function groupE(t, site) {
         const lasted = settledAt ? Math.max(0, Math.round((settledAt - placeholder.at) / 1000)) : null;
         t.check(placeholder.ratio >= 4.5, 'Figure study: a pose\'s name over its grey placeholder, before its picture arrives, reads at 4.5 : 1 or better', placeholder);
         if (placeholder.ratio < 4.5) t.finding({ title: 'Figure study\'s pose names are white on mid grey at 3.3 : 1 until each picture is drawn', severity: 'low', steps: 'Open Figure study (at any width) on a fresh visit and look at the pose buttons while the pictures are still being drawn one by one, or run axe-core (color-contrast) at that moment. They stay so when a picture cannot be drawn.', expected: 'A name that can be read: 4.5 : 1 for text this small (10.9 px, semi-bold).', actual: `${placeholder.total - placeholder.withPicture} of ${placeholder.total} buttons had no picture when read; their name is rgb(${placeholder.fg}) on rgb(${placeholder.bg}) at ${placeholder.size}, ${placeholder.ratio} : 1 (axe: color-contrast, serious, ×3 or more while it lasts; here the placeholders lasted about ${lasted === null ? 'the first seconds' : lasted + ' s'}).`, cause: 'styles.css 1504 and 1508: .fig-pose has background #8d8e8e and color #fff; .fig-pose:not(.has-img) .fig-pose-name drops the dark gradient (background: none) that gives the name its contrast once the picture is there (1507).' });
-      } else t.note('axe phone: no Figure placeholder was seen before its picture (the list arrived with its pictures, or not within 40 s), so its contrast was not read');
+      } else if (label === 'phone') t.note('axe phone: no Figure placeholder was seen before its picture (the list arrived with its pictures, or not within 40 s), so its contrast was not read');
       await clean(t, page, `axe ${label}`);
       await page.context().close();
       // the 404 page
