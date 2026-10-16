@@ -926,6 +926,8 @@ function groupD(t, site) {
       await settle(page, 'pose', 15000);
       await sleep(1500);
       const f = poseFrame(page);
+      // (the Pose page that still runs draws its thirty pictures one at a time: on a busy machine more than 15 s; wait for them, not for a time)
+      if (file === 'js/pose-embed.js' && f) await f.waitForFunction(() => document.querySelectorAll('#poses button.has-img').length >= 30, null, { timeout: 90000 }).catch(() => null);
       const s = f ? await f.evaluate(() => ({ started: !!window.__poseStarted, fail: !document.getElementById('fail').hidden, rail: getComputedStyle(document.querySelector('.rail')).display, embed: document.documentElement.classList.contains('embed'), imgs: document.querySelectorAll('#poses button.has-img').length, mode: window.PoseAndLight ? PoseAndLight.mode() : null })).catch(() => null) : null;
       const shell = await notesOf(page);
       const height = await page.evaluate(() => document.getElementById('poseFrame').style.height);
