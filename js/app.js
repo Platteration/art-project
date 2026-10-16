@@ -266,14 +266,20 @@
   // ---- Processing ---------------------------------------------------------
 
   let runTimer = 0;
+  // "Updating…" stays up while any of the work is still owed: a photo being prepared, a study rerun or a
+  // painting's score; whichever finishes first does not take it down over a result about to change
+  const owed = { prep: false, run: false, check: false };
+  function settleBusy() { els.busy.hidden = !(owed.prep || owed.run || owed.check); }
   function runSoon(delay) {
+    owed.run = true;
     els.busy.hidden = false;
     clearTimeout(runTimer);
     runTimer = setTimeout(run, delay == null ? 90 : delay);
   }
 
   function run() {
-    if (!state.prep) return;
+    owed.run = false;
+    if (!state.prep) { settleBusy(); return; }
     const r = Study.process(state.prep, settings());
     state.result = r;
     paint(els.canvases.value, r.valueImage, r.w, r.h);
@@ -287,7 +293,7 @@
       : `Splits at V ${valueLabel(+els.t1.value)} and ${valueLabel(+els.t2.value)} · Simplify ${els.simplify.value}`;
     state.art.dirty = true;
     if (checking()) runCheck();
-    els.busy.hidden = true;
+    settleBusy();
     window.dispatchEvent(new CustomEvent('studio:result'));
   }
 
@@ -388,6 +394,7 @@
     prepareReset = prepareReset || !!resetSplit;
     const work = () => {
       if (job !== prepareJob) return;
+      owed.prep = false;
       const reset = prepareReset;
       prepareReset = false;
       state.prep = Study.prepare(state.source, +els.detail.value);
@@ -398,6 +405,7 @@
       runSoon(0);
     };
     if (immediate) { work(); return; }
+    owed.prep = true;
     els.busy.hidden = false;
     clearTimeout(runTimer);
     requestAnimationFrame(() => requestAnimationFrame(work));
@@ -2382,9 +2390,10 @@
 
   let checkTimer = 0;
   function checkSoon() {
+    owed.check = true;
     els.busy.hidden = false;
     clearTimeout(checkTimer);
-    checkTimer = setTimeout(() => { runCheck(); els.busy.hidden = true; }, 120);
+    checkTimer = setTimeout(() => { owed.check = false; runCheck(); settleBusy(); }, 120);
   }
 
   function runCheck() {
