@@ -11,7 +11,8 @@
 //   2. a Loomis head fitted on a photo and drawn into the Studio, a pose saved in Pose and light and drawn in a
 //      Figure study class, then the next visit;
 //   3. Simple and Advanced switched at every step (the Study, the Studio, Pose and light, a game, a battle);
-//   4. two tabs of the site doing different things (a game in one, picked colors and a battle in the other);
+//   4. two tabs of the site doing different things (a game and a painting in one; picked colors, a battle and
+//      "Use my Studio painting" in the other);
 //   5. a phone session through the tab bar's two menus.
 // JOURNEYS_ONLY=<regexp> runs only the segments whose name matches.
 import { openPage, newTab, clean, tab, poseFrame, DESKTOP, PHONE, makeImage, loadPhoto, stroke, inked, click, text, visible, storageKeys, storageGet, screenshot, hscroll, sleep, app } from '../lib.mjs';
@@ -875,8 +876,7 @@ async function phoneMenus(t, site, pages) {
 
 // ---- the findings, from the evidence the journeys gathered ------------------------------------------------------------
 function findings(t) {
-  const w = [seen.washStudy && 'study', seen.washMode && 'mode', seen.washReload && 'reload'].filter(Boolean);
-  if (w.length) {
+  if (seen.washStudy || seen.washMode || seen.washReload) {
     const said = [];
     if (seen.washStudy) said.push(`Zorn picked on the Study tab after the Studio's ground was toned with Light Red (a Rembrandt paint): the Studio's ground went from rgb(${seen.washStudy.before}) to rgb(${seen.washStudy.after}), now a wash of ${seen.washStudy.wash}`);
     if (seen.washMode) said.push(`Simple to Advanced pressed while painting: the palette followed from ${seen.washMode.simple} to ${seen.washMode.advanced} and the ground toned with ${seen.washMode.wash} turned to ${seen.washMode.now} (rgb(${seen.washMode.before}) to rgb(${seen.washMode.after}))`);
@@ -885,7 +885,12 @@ function findings(t) {
     t.finding({
       title: 'The Studio\'s toned ground under a painting changes color by itself when the Study tab\'s palette changes: another palette picked, Simple and Advanced switched, or the next visit',
       severity: 'medium',
-      steps: '1. Load a photo (or keep the sample) and do not choose a palette in the Studio. 2. Studio, Canvas: Toned wash, and pick a paint of the palette that another palette lacks (Light Red in Rembrandt\'s earths, Viridian in Frank Reilly\'s). 3. Paint a few strokes. 4. Then either pick Zorn under Colors and paints on the Study tab, or press Advanced (Simple uses Rembrandt\'s earths, Advanced Sorolla\'s palette for this photo), or reload the page after loading a photo whose best palette (Advanced) is Frank Reilly\'s, so the Studio follows the sample\'s Sorolla. 5. Look at the Studio\'s paper.',
+      steps: [
+        'No palette is chosen in the Studio itself, so it follows the Study tab\'s (README: "until you choose one here, the palette follows the Study tab\'s").',
+        'A, another palette: load a photo; Advanced; Colors and paints: Rembrandt (earths). Studio, Canvas: Toned wash, Light Red; paint a few strokes. Study tab: pick Zorn. Open the Studio.',
+        `B, the switch: Simple (the default); load a photo (the Study tab uses ${seen.washMode ? seen.washMode.simple : 'Rembrandt (earths)'}). Studio, Canvas: Toned wash, ${seen.washMode ? seen.washMode.wash : 'Light Red'}; paint. Press Advanced (the best match becomes ${seen.washMode ? seen.washMode.advanced : 'Sorolla (studio portraits)'}).`,
+        `C, the next visit: Advanced; load a photo whose best match has a paint the sample's best match lacks (here a sitter against a blue wall: ${seen.washReload ? seen.washReload.photoPalette : 'Monet (impressionist)'}, with ${seen.washReload ? seen.washReload.wash : 'Ultramarine Blue'}; the sample's is ${seen.washReload ? seen.washReload.samplePalette : 'Sorolla (studio portraits)'}). Studio, Canvas: Toned wash, ${seen.washReload ? seen.washReload.wash : 'Ultramarine Blue'}; paint; wait a second. Reload and open the Studio.`,
+      ].join(' '),
       expected: 'README, Simple and Advanced: "The Studio keeps your work: the paper, the underdrawing, the ground and texture ... come back on the next visit". The ground the painting was started on stays as it was toned (the Studio\'s own hint: "The painting stays as it is when the ground changes" is about a change the visitor makes); a palette followed from the Study tab changes the paints offered, not the canvas already painted on.',
       actual: said.join('. ') + '. Nothing tells the visitor; the paint strokes now sit on a different ground, and the wash chosen is gone from the Canvas sheet.',
       cause: 'js/painting.js renderWash (242-244): "if (!codes.includes(canvasState.washCode)) canvasState.washCode = ..." replaces the wash paint by the first earth of the palette now in use whenever that palette lacks it. It runs from applyPalette (887) on every palette the Studio follows (followPalette 892-898, on studio:palette, which js/palette.js announce (532) sends for a palette picked and fitSimple (391-406) for the switch to Simple; the switch to Advanced changes the best match the same way), and from restore (493; renderWash at 523) right after the saved washCode was read back, so the record\'s wash is replaced before it is ever shown. The wash paint could be kept (and offered beside the palette) when the palette in use does not hold it.',

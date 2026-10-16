@@ -7,7 +7,7 @@
 // thirty rounds read off the page for the closing difficulty and the floor; hostile saved state for the five
 // keys; and the orderings: a double answer, two keys at once, keys while the pop-up shows, Enter on the pop-up,
 // a tab switch, a resize, a reload and Forget mid-round, and My paints changed on the Study tab between battles.
-import { openPage, clean, tab, PHONE, DESKTOP, click, text, visible, hscroll, screenshot, sleep, storageGet, storageKeys, axe } from '../lib.mjs';
+import { openPage, newTab, clean, tab, PHONE, DESKTOP, click, text, visible, hscroll, screenshot, sleep, storageGet, storageKeys, axe } from '../lib.mjs';
 
 const K = { palette: 'portrait-value-studio.battlePalette', count: 'portrait-value-studio.battleCount', mode: 'portrait-value-studio.battleMode', best: 'portrait-value-studio.battleBest', mine: 'portrait-value-studio.myPaints', sound: 'portrait-value-studio.gameSound' };
 const PRESETS = ['zorn', 'zorn-blue', 'primary', 'cmy', 'split', 'reilly', 'schmid', 'rembrandt', 'sorolla', 'monet'];
@@ -633,6 +633,191 @@ export default async function battleMore(t, site) {
     const radios2 = await page.evaluate(() => ({ count: document.querySelector('input[name="vbCount"]:checked').value, mode: document.querySelector('input[name="vbMode"]:checked').value }));
     t.check(after.keys.length === 0 && !after.game && !b.setup && b.best === 'No streak yet for these settings.' && radios2.count === 'mix', 'Forget mid-battle: after the reload no key is left, the game is gone, the setup is back at its defaults', { ...after, best: b.best, radios: radios2 });
     await clean(t, page, 'mid-round');
+    await page.context().close();
+  }
+
+  // ================= the round's leftovers, and the README's Value battle sentences that no check pinned =================
+  // ---- a browser that refuses storage: the best is kept for the visit, and the pop-up says so (README) ----------
+  {
+    const page = await openPage(site, { url: '#battle' });
+    await page.evaluate(() => { Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); }; });
+    await start(page, { count: '2' });
+    await answer(page, true); await next(page); await waitRound(page, 2);
+    await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, 1);
+    const nb = await page.evaluate(() => { const e = document.querySelector('#vb-board #vb-newBest'); return e && !e.hidden ? e.textContent : null; });
+    t.check(/this visit only/.test(nb || ''), 'a best the browser will not keep says so in the pop-up: New best! (this visit only)', nb);
+    await click(page, '#vb-settings');
+    const best = await text(page, '#vb-best');
+    t.check(best === 'Your best streak here: 1 in a row.', 'the best stands for this visit in the setup', best);
+    await clean(t, page, 'storage refused');
+    await page.context().close();
+  }
+
+  // ---- Forget in one tab while a battle is on in the other: a battle finished there must not write its best back ----
+  {
+    // (the game stops its writes on studio:forget; the battle does not listen, so its finish() saves into the cleared record)
+    const a = await openPage(site, { url: '#battle' });
+    const other = await newTab(site, a, { url: '#battle' });
+    await start(other, { count: '2' });
+    await answer(other, true, 'tap'); await next(other); await waitRound(other, 2);
+    await tab(a, 'help');
+    await click(a, '#forgetBtn'); await sleep(200);
+    await Promise.all([a.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), click(a, '#forgetBtn')]);
+    await sleep(800);
+    const cleared = await storageKeys(a);
+    await answer(other, false); await waitShown(other, '#vb-miss'); await closeMiss(other); await waitShown(other, '#vb-popup'); await waitPct(other, 1);
+    await sleep(300);
+    const after = await storageKeys(a);
+    const ok = cleared.length === 0 && after.length === 0;
+    t.check(ok, 'Forget in one tab, then a battle finished in the other: no key of the site is written back', { cleared, after });
+    if (!ok) t.finding({ title: 'Forget in one tab does not stop a Value battle open in another tab from writing its best back into the record Forget cleared', severity: 'medium', steps: '1. Open the site at #battle in two tabs (same browser). 2. In tab B: Start the battle (2 colors, Streak), answer one right, Next ▸, answer the next round wrong (leave the score up or not). 3. In tab A: Help, Forget my work on this device, tap again. 4. Back in B, press See the score (its best is saved when the game ends).', expected: 'README (What the site keeps in the browser, line 251): Forget my work on this device clears it, battle settings and best scores included; nothing of the site should be written again after that.', actual: `After A reloads with nothing kept, B's finished game puts its best back: storage keys ${JSON.stringify(after)}. Cause: js/battle.js save() (line 35) and finish() (lines 469-474) write battleBest with no check for studio:forget. js/game.js (107-109 and 1713) and painting.js (913) stop their writes on that event, and guard.js (33, 170) sends it.` });
+    await clean(t, other, 'other tab after Forget');
+    await clean(t, a, 'Forget tab');
+    await a.context().close();
+  }
+
+  // ---- Paint by numbers and the battle both in progress on a desktop window: each keeps its own focus mode ------------
+  {
+    const page = await openPage(site, { url: '#game' });
+    const modes = () => page.evaluate(() => ({ game: document.body.classList.contains('game-focus'), battle: document.body.classList.contains('battle-focus') }));
+    await tab(page, 'game');
+    await page.waitForFunction(() => !document.getElementById('gameStart').disabled, null, { timeout: 60000 }).catch(() => null);
+    await click(page, '#gameStart');
+    await page.waitForFunction(() => !document.getElementById('gamePlay').hidden, null, { timeout: 20000 }).catch(() => null);
+    const g0 = await modes();
+    await tab(page, 'battle');
+    await start(page, { count: '2' });
+    const b1 = await modes();
+    await answer(page, true, 'tap');
+    await tab(page, 'game');
+    const g1 = await modes();
+    await tab(page, 'battle');
+    const b2 = await modes();
+    t.check(g0.game && !g0.battle && !b1.game && b1.battle && !g1.battle && g1.game && !b2.game && b2.battle, 'a desktop window with both in progress: each tab takes its own focus mode, never both', { g0, b1, g1, b2 });
+    await quit(page);
+    await tab(page, 'game');
+    await click(page, '#gameQuit'); await click(page, '#gameQuit');
+    await page.waitForFunction(() => !document.getElementById('gameSetup').hidden, null, { timeout: 5000 }).catch(() => null);
+    const end = await modes();
+    t.check(!end.game && !end.battle, 'both quit: neither focus mode is left on the page', end);
+    await clean(t, page, 'both games on a desktop');
+    await page.context().close();
+  }
+
+  // ---- the keys: a menu's own arrows are not the board's; Start and Play again put the focus on the first color ---
+  {
+    const page = await openPage(site, { url: '#battle' });
+    await start(page, { count: '2' });
+    const focusOf = () => page.evaluate(() => { const e = document.activeElement; return e && e.classList.contains('vb-swatch') ? e.dataset.index : null; });
+    t.check((await focusOf()) === '0', 'Start puts the focus on the first color', await focusOf());
+    await page.focus('[data-mode="advanced"]');
+    await page.keyboard.press('ArrowLeft');
+    const menu = await round(page);
+    t.check(menu.i === 0 && !menu.answered, "the Simple/Advanced switch keeps its own arrow keys: an arrow pressed there answers nothing", { i: menu.i, answered: menu.answered });
+    await page.evaluate(() => document.querySelector('[data-mode="simple"]').click());
+    await answer(page, false); await closeMiss(page); await waitShown(page, '#vb-popup');
+    await click(page, '#vb-again');
+    t.check((await focusOf()) === '0', 'Play again puts the focus on the first color too', await focusOf());
+    await clean(t, page, 'keys and focus');
+    await page.context().close();
+  }
+
+  // ---- the letters: black or white, whichever reads better on each color (README) --------------------------------
+  {
+    const page = await openPage(site, { url: '#battle' });
+    await start(page, { count: '4' });
+    const inks = await page.evaluate(() => [...document.querySelectorAll('.vb-swatch')].map((b) => ({ bg: getComputedStyle(b).backgroundColor, ink: getComputedStyle(b.querySelector('.vb-letter')).color })));
+    const lum = (s) => { const m = /rgba?\((\d+), (\d+), (\d+)/.exec(s); if (!m) return null; const c = [m[1], m[2], m[3]].map((v) => { const x = +v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const rows = inks.map((x) => { const bg = lum(x.bg), ink = lum(x.ink); return { bg: x.bg, ink: x.ink, got: +ratio(ink, bg).toFixed(2), best: +Math.max(ratio(0, bg), ratio(1, bg)).toFixed(2) }; });
+    t.check(rows.length === 4 && rows.every((r) => r.got >= r.best - 0.3), 'each letter is in the ink that reads better on its color (black or white)', rows);
+    await clean(t, page, 'letters');
+    await page.context().close();
+  }
+
+  // ---- the board's layout as the README lists it: the streak, round and clock with the quit button along the top, then the colors, the answer line and the answer row
+  {
+    const page = await openPage(site, { url: '#battle' });
+    await start(page, { count: '3' });
+    const lay = await page.evaluate(() => { const r = (s) => { const e = document.querySelector(s); const b = e.getBoundingClientRect(); return { t: b.top, b: b.bottom, l: b.left, r: b.right }; }; const sw = [...document.querySelectorAll('.vb-swatch')].map((e) => e.getBoundingClientRect()); return { bar: r('#vb-bar'), round: r('#vb-round'), quit: r('#vb-quit'), swBottom: Math.max(...sw.map((b) => b.bottom)), swTop: Math.min(...sw.map((b) => b.top)), answer: r('#vb-answer'), choices: r('#vb-choices'), inBoard: !!document.querySelector('#vb-board #vb-answer') }; });
+    const topRow = lay.round.t >= lay.bar.t - 1 && lay.quit.b <= lay.bar.b + 1 && lay.quit.r <= lay.bar.r + 1 && lay.round.b <= lay.bar.b + 1;
+    t.check(topRow && lay.bar.b <= lay.swTop + 1 && lay.answer.t >= lay.swBottom - 1 && lay.choices.t >= lay.swBottom - 1 && lay.inBoard, 'the streak, round and quit sit along the top; the colors come next; the answer line and the answer row are below them, all on the board', lay);
+    await clean(t, page, 'layout');
+    await page.context().close();
+  }
+
+  // ---- the star table at its boundaries: the streak and the clock's right answers a minute, read off the score pop-up.
+  // (the count is set on the live game and then a miss or the clock ends it: the pop-up's stars come from the game's own finish)
+  {
+    const page = await openPage(site, { url: '#battle' });
+    await start(page, { count: '2' });
+    const streakSeen = [];
+    for (const k of [1, 2, 4, 5, 7, 8, 11, 12, 19, 20]) {
+      await page.evaluate((k) => { ValueBattle.state().streak = k; }, k);
+      await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, k);
+      const s = await page.evaluate(() => ({ stars: document.querySelectorAll('#vb-stars .game-star.is-on').length, grade: document.getElementById('vb-grade').textContent }));
+      streakSeen.push([k, s.stars, s.grade]);
+      await click(page, '#vb-again');
+    }
+    const starsOf = (k) => [20, 12, 8, 5, 2].filter((m) => k >= m).length;
+    const gradeOf = ['Keep looking', 'Warming up', 'Getting there', 'Good eye', 'Sharp eye!', 'Eagle eye!'];
+    t.check(streakSeen.every(([k, s, g]) => s === starsOf(k) && g === gradeOf[s]), 'stars by the streak at every boundary: 2 → one star, 5 → two, 8 → three, 12 → four, 20 → five (and one short of each)', streakSeen);
+    await click(page, '#vb-settings');
+    const clockSeen = [];
+    let first = true;
+    for (const [mode, right, want] of [['60', 1, 1], ['60', 3, 2], ['60', 6, 3], ['60', 7, 4], ['60', 10, 5], ['120', 5, 1], ['120', 6, 2], ['300', 34, 3], ['300', 50, 5]]) {
+      if (!first) await click(page, '#vb-settings');
+      await start(page, { count: '2', mode });
+      first = false;
+      await page.evaluate((r) => { ValueBattle.state().right = r; ValueBattle.state().left = 0.3; }, right);
+      await waitShown(page, '#vb-popup'); await waitPct(page, right);
+      const s = await page.evaluate(() => ({ stars: document.querySelectorAll('#vb-stars .game-star.is-on').length, grade: document.getElementById('vb-grade').textContent }));
+      clockSeen.push([mode, right, s.stars, want]);
+    }
+    t.check(clockSeen.every(([m, r, s, w]) => s === w), 'stars on the clock by right answers a minute, whatever the clock: 1 right in a minute is one star, 3 two, 6 three, 7 four, 10 five; 5 right in two minutes (2.5 a minute) is one star; 34 in five (6.8 a minute) is three', clockSeen);
+    await clean(t, page, 'star table');
+    await page.context().close();
+  }
+
+  // ---- a dark phone with the sound saved on: the sound stays on, and axe finds no serious issue on a round or on the miss ---
+  {
+    const page = await openPage(site, { url: '#battle', viewport: PHONE, dark: true, bypassCSP: true, storage: { [K.sound]: 'true' } });
+    const sound = await page.evaluate(() => GameSound.on());
+    await start(page, { count: '2' });
+    await answer(page, true, 'tap'); await sleep(200);
+    const v1 = await axe(page);
+    await next(page); await waitRound(page, 2);
+    await answer(page, false); await waitShown(page, '#vb-miss'); await sleep(200);
+    const v2 = await axe(page);
+    const serious = [...v1, ...v2].filter((x) => x.impact === 'critical' || x.impact === 'serious');
+    t.check(sound === true && serious.length === 0, 'a dark phone with the sound saved on: the sound stays on, and axe finds no serious issue on a round or the miss pop-up', { sound, serious });
+    await screenshot(page, 'battle-more-dark-phone-miss');
+    await clean(t, page, 'dark phone');
+    await page.context().close();
+  }
+
+  // ---- a miss shown when the tab comes back: still shown, and the clock stood still while the tab was away ------------
+  {
+    const page = await openPage(site, { url: '#battle' });
+    await start(page, { count: '2', mode: '60' });
+    await answer(page, true); await waitRound(page, 2);
+    await answer(page, false); await waitShown(page, '#vb-miss');
+    await tab(page, 'study'); await sleep(1300);
+    const away = await page.evaluate(() => ValueBattle.state().left);
+    await tab(page, 'battle'); await sleep(300);
+    const back = await board(page);
+    const after = await page.evaluate(() => ValueBattle.state().left);
+    t.check(!back.miss && back.game && after === away, 'a miss up when the tab was left is still up on return, and the clock did not run while it was away', { shown: !back.miss, away, after });
+    await clean(t, page, 'miss across a tab');
+    await page.context().close();
+  }
+
+  // ---- notes: what the README leaves open, observed rather than asserted ---------------------------------------------
+  {
+    const page = await openPage(site, { url: '#battle', storage: { [K.best]: JSON.stringify({ 'zorn:2:streak': 0 }) } });
+    const bestLine = await text(page, '#vb-best');
+    t.note(`a stored best of 0 reads as "${bestLine}" in the setup (the game reads a stored 0 as no best); the README promises nothing for a 0, and a finished game never stores one.`);
+    t.note('the pinch-zoom (visualViewport scale) variant of the resize check is not driven: Playwright cannot pinch the page here; "X while the toast shows another message" has no second toast to show from the battle board.');
     await page.context().close();
   }
 }
