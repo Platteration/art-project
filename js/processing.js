@@ -92,10 +92,18 @@
     const A = new Float32Array(n);
     const B = new Float32Array(n);
     for (let i = 0, p = 0; i < n; i++, p += 4) {
-      const lab = rgbToLab(rgba[p], rgba[p + 1], rgba[p + 2]);
-      L[i] = lab[0];
-      A[i] = lab[1];
-      B[i] = lab[2];
+      const lr = SRGB_TO_LIN[rgba[p]], lg = SRGB_TO_LIN[rgba[p + 1]], lb = SRGB_TO_LIN[rgba[p + 2]];
+      const x = (0.4124564 * lr + 0.3575761 * lg + 0.1804375 * lb) / 0.95047;
+      const y = 0.2126729 * lr + 0.7151522 * lg + 0.072175 * lb;
+      const z = (0.0193339 * lr + 0.119192 * lg + 0.9503041 * lb) / 1.08883;
+
+      const fx = x > EPS ? Math.cbrt(x) : (KAPPA * x + 16) / 116;
+      const fy = y > EPS ? Math.cbrt(y) : (KAPPA * y + 16) / 116;
+      const fz = z > EPS ? Math.cbrt(z) : (KAPPA * z + 16) / 116;
+
+      L[i] = 116 * fy - 16;
+      A[i] = 500 * (fx - fy);
+      B[i] = 200 * (fy - fz);
     }
     return { w, h, rgba, L, A, B, blurCache: null };
   }
