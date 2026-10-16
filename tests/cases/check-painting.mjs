@@ -1055,4 +1055,257 @@ export default async function checkPainting(t, site) {
     await clean(t, page, 'phone');
     await page.context().close();
   }
+
+  // ---- the scores against paintings made from the reference with one known change: the README's formulas and its
+  // worked example, the uncovered part left out, Shapes in the right place, Crop and Stretch ----
+  {
+    const page = await openPage(site, { url: '#check' });
+    await countResults(page);
+    await busyHidden(page);
+    let s, fx;
+    // half a value step lighter everywhere: the README's worked number, 75
+    t.check(await loadArt(page, (await variant(page, 'lighter.png', { kind: 'lab', dL: 5 })).file), 'the reference lifted by half a value step (ΔL* +5) loads as the painting');
+    s = await state(page); fx = fixesOf(s);
+    t.check(Math.abs(s.value - 75) <= 2, 'half a value step lighter everywhere: the light and dark score is 75, as the README works it out', { value: s.value, color: s.color, shapes: s.shapes });
+    t.check(s.color > s.value, 'a change of lightness alone costs the color score less than the light and dark score (CIEDE2000 weighs lightness below 5 × |ΔL*|)', { color: s.color, value: s.value });
+    t.check(fx.every((f) => /^Too light by \d\.\d value(,|$)/.test(f.note) && pctFits(f.pct, f.dE)), 'every difference listed is called too light, never too dark, its match 100 − 2.5 × its ΔE', fx.map((f) => [f.note, f.pct, f.dE]));
+    if (fx.some((f) => !/^Too light by 0\.[456] value/.test(f.note))) t.note(`Lifted by exactly half a value step everywhere, the list says ${fx.map((f) => `"${f.note}"`).join(', ')}: a shape's "most prominent color" is read through bins about 4 L* wide (processing.js dominantColors), so a note's amount can be off by about 0.2 value.`);
+    const hovers = [];
+    for (const [hx, hy] of [[0.2, 0.15], [0.5, 0.1], [0.8, 0.2], [0.3, 0.4], [0.5, 0.45], [0.7, 0.4], [0.35, 0.6], [0.6, 0.65], [0.2, 0.85], [0.75, 0.9]]) {
+      const l = await hoverAt(page, '#cv-diff', hx, hy);
+      hovers.push({ at: [hx, hy], pct: +(/^(\d{1,3})% match$/.exec(l.hex) || [])[1], dE: +(/^ΔE (\d+\.\d)$/.exec(l.val) || [])[1] });
+    }
+    await page.mouse.move(5, 5);
+    t.check(hovers.every((h) => pctFits(h.pct, h.dE)), 'ten zones hovered on the map: each match is 100 − 2.5 × its ΔE', hovers);
+    // a whole value step darker, colors grayer, colors warmer
+    t.check(await loadArt(page, (await variant(page, 'darker.png', { kind: 'lab', dL: -10 })).file), 'the reference darkened by a whole value step (ΔL* −10) loads');
+    s = await state(page); fx = fixesOf(s);
+    t.check(s.value >= 45 && s.value <= 58, 'a whole value step darker: the light and dark score is about 50 (100 − 5 × 10; the darkest shapes cannot go a whole step down)', s.value);
+    t.check(fx.length >= 1 && fx.every((f) => /^Too dark by \d\.\d value/.test(f.note) && pctFits(f.pct, f.dE)), 'every difference is called too dark, its match 100 − 2.5 × its ΔE', fx.map((f) => [f.note, f.pct, f.dE]));
+    t.check(await loadArt(page, (await variant(page, 'grayer.png', { kind: 'lab', chroma: 0.4 })).file), 'the reference with its colors 60% grayer loads');
+    s = await state(page); fx = fixesOf(s);
+    t.check(s.value >= 95 && s.color < s.value && fx.some((f) => /too gray/i.test(f.note)) && !fx.some((f) => /too saturated|^Too (light|dark)/i.test(f.note)), 'grayer colors at the same lightness: the light and dark score stays near 100, the color score drops, the list says too gray (never too saturated, lighter or darker)', { value: s.value, color: s.color, notes: fx.map((f) => f.note) });
+    t.check(await loadArt(page, (await variant(page, 'warmer.png', { kind: 'lab', warm: 8 })).file), 'the reference warmed (8 units toward orange in a*b*) loads');
+    s = await state(page); fx = fixesOf(s);
+    t.check(s.value >= 95 && fx.length >= 1 && fx.every((f) => /too warm/i.test(f.note) && !/too cool/i.test(f.note)), 'warmer colors at the same lightness: the light and dark score stays near 100, every difference is called too warm', { value: s.value, notes: fx.map((f) => f.note) });
+    // the part of the reference the photo no longer covers is left out of the score
+    await openAlign(page);
+    t.check(await loadArt(page, (await variant(page, 'shifted.png', { kind: 'shift', dx: 120 })).file), 'the reference drawn 120 px (20%) to the right, magenta behind, loads');
+    s = await state(page);
+    const unaligned = [s.color, s.value, s.shapes];
+    await setRange(page, 'alignX', -20);
+    s = await state(page);
+    const uncovered = await hoverAt(page, '#cv-diff', 0.9, 0.5), covered = await hoverAt(page, '#cv-diff', 0.3, 0.5);
+    await page.mouse.move(5, 5);
+    t.check(unaligned[0] < 90 && s.color === 100 && s.value === 100 && s.shapes === '100%' && s.alignState === 'moved, 20% of picture left out', 'moved back by −20% (Move is a share of the width): the reference\'s own pixels score 100, 100 and 100%, the 20% no longer covered left out of the score', { before: unaligned, after: [s.color, s.value, s.shapes], note: s.alignState });
+    t.check(uncovered.hex === 'Not covered' && /^\d{1,3}% match$/.test(covered.hex), 'the strip no longer covered reads Not covered, the rest its match', { uncovered: uncovered.hex, covered: covered.hex });
+    for (const [name, spec, id, v] of [['tilted.png', { kind: 'turn', deg: 2 }, 'alignRot', -2], ['larger.png', { kind: 'turn', f: 1.1 }, 'alignScale', 91]]) {
+      t.check(await loadArt(page, (await variant(page, name, spec)).file), `${name} (the reference ${spec.deg ? 'turned 2°' : 'enlarged 110%'} on mid gray) loads`);
+      const before = await state(page);
+      await setRange(page, id, v);
+      s = await state(page);
+      t.check(s.color >= 98 && s.value >= 97 && +s.shapes.slice(0, -1) >= 97 && (s.value > before.value || +s.shapes.slice(0, -1) > +before.shapes.slice(0, -1)), `${name}: ${id === 'alignRot' ? 'Rotate at −2° (degrees)' : 'Size at 91% (percent)'} lines it back up and the scores rise to about 100`, { before: [before.color, before.value, before.shapes], after: [s.color, s.value, s.shapes], note: s.alignState });
+    }
+    // Shapes in the right place: the share of the picture in the same mass
+    for (const [name, spec, word] of [['nolights.png', { kind: 'zone', zone: 'light', rgb: [0, 0, 0] }, 'Too dark'], ['noshadows.png', { kind: 'zone', zone: 'shadow', rgb: [255, 255, 255] }, 'Too light']]) {
+      const v = await variant(page, name, spec);
+      t.check(await loadArt(page, v.file), `${name} loads`);
+      s = await state(page); fx = fixesOf(s);
+      const want = Math.round(100 - v.info.share * 100), zoneName = spec.zone === 'light' ? 'Light' : 'Shadow';
+      const ofZone = fx.filter((f) => f.zone === zoneName);
+      t.check(Math.abs(+s.shapes.slice(0, -1) - want) <= 3 && s.value < 90 && ofZone.length >= 1 && ofZone.every((f) => f.note.startsWith(word)), `the reference's ${spec.zone} zone (${(v.info.share * 100).toFixed(1)}% of the picture) painted ${spec.zone === 'light' ? 'black' : 'white'}: Shapes in the right place falls to about ${want}%, and those shapes are called ${word.toLowerCase()}`, { shapes: s.shapes, want, value: s.value, list: fx.map((f) => `${f.zone}: ${f.note}`) });
+    }
+    // Crop and Stretch, shown correct rather than only different
+    const fit = (v) => afterResult(page, () => page.evaluate((v) => { const e = document.getElementById('artFit'); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); }, v));
+    t.check(await loadArt(page, (await variant(page, 'framed.png', { kind: 'pad', pad: 150 })).file), 'the reference between 150 px magenta bars (900 × 750) loads');
+    s = await state(page);
+    const framedCrop = [s.color, s.value, s.shapes];
+    await fit('stretch'); s = await state(page);
+    t.check(same(framedCrop, [100, 100, '100%']) && s.color < 60, 'Crop to match takes the middle of a wider photo (here the reference itself: 100 on every score); Stretch to match squeezes the bars in', { crop: framedCrop, stretch: [s.color, s.value, s.shapes] });
+    await fit('crop');
+    t.check(await loadArt(page, (await variant(page, 'squashed.png', { kind: 'squash', w: 300, h: 750 })).file), 'the reference squashed to 300 × 750 loads');
+    s = await state(page);
+    const squashCrop = [s.color, s.value, s.shapes];
+    await fit('stretch'); s = await state(page);
+    t.check(s.color >= 97 && s.value >= 96 && +s.shapes.slice(0, -1) >= 96 && squashCrop[0] < s.color - 5, 'a photo squashed to half its width: Stretch to match brings it back (about 100), Crop to match does not', { crop: squashCrop, stretch: [s.color, s.value, s.shapes] });
+    await fit('crop');
+    // Move changed and the tab switched inside the check's short wait: back on the Study tab the score is the new position's
+    await page.evaluate(() => { const e = document.getElementById('alignX'); e.value = 5; e.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-tab="help"]').click(); });
+    await tab(page, 'study'); await busyHidden(page); await sleep(200);
+    const viaSwitch = await state(page);
+    await click(page, '#alignReset'); await busyHidden(page);
+    await setRange(page, 'alignX', 5);
+    const direct = await state(page);
+    t.check(same(viaSwitch.outs.alignX, ['5', '+5%']) && viaSwitch.badge === direct.badge && viaSwitch.alignState === direct.alignState, 'Move changed and another tab opened within the check\'s 120 ms wait: back on the Study tab the score is the new position\'s', { viaSwitch: [viaSwitch.badge, viaSwitch.alignState], direct: [direct.badge, direct.alignState] });
+    await clean(t, page, 'paintings with known changes');
+    await page.context().close();
+  }
+
+  // ---- the tool bar's marks on the check panels and in their saved PNGs; a phone photo's EXIF turn; files at once ----
+  {
+    const page = await openPage(site, { url: '#check' });
+    await countResults(page);
+    await busyHidden(page);
+    let s;
+    const lineOn = async (fx, fy) => Object.fromEntries(await Promise.all(['cv-refblock', 'cv-art', 'cv-artblock', 'cv-diff'].map(async (id) => [id, await overlayHas(page, id, fx, fy, LINE_RED)])));
+    await click(page, '[data-tool="line"]'); await sleep(100);
+    await stroke(page, '#cv-orig'); // (0.3, 0.3) to (0.7, 0.65)
+    let on = await lineOn(0.5, 0.475);
+    t.check((await toolCount(page, 'line')) === 1 && Object.values(on).every(Boolean), 'a line drawn on the Photo shows on all four check panels', on);
+    await stroke(page, '#cv-art', [[0.2, 0.85], [0.5, 0.86], [0.8, 0.87]]);
+    t.check((await toolCount(page, 'line')) === 2 && (await overlayHas(page, 'cv-orig', 0.5, 0.86, LINE_RED)) && (await overlayHas(page, 'cv-diff', 0.5, 0.86, LINE_RED)), 'a line drawn on Your painting is drawn, and shows on the Photo and on the map', await toolCount(page, 'line'));
+    await openAlign(page);
+    await setRange(page, 'alignScale', 90);
+    on = await lineOn(0.5, 0.475);
+    t.check(Object.values(on).every(Boolean), 'after a rerun (Size 90%) the check panels still carry the line', on);
+    await click(page, '[data-tool="plumb"]'); await sleep(80);
+    { const b = await box(page, '#cv-art'); await page.mouse.click(b.x + b.width * 0.62, b.y + b.height * 0.2); await sleep(150); }
+    t.check((await toolCount(page, 'plumb')) === 1 && (await overlayHas(page, 'cv-orig', 0.62, 0.05, '#ffffff', 6)) && (await overlayHas(page, 'cv-diff', 0.9, 0.2, '#ffffff', 6)), 'a plumb point dropped on Your painting draws its plumb line and level on the Photo and on the map', await toolCount(page, 'plumb'));
+    await click(page, '#gridBtn'); await sleep(100);
+    t.check((await overlayHas(page, 'cv-diff', 1 / 3, 0.95, '#ffffff', 3)) && (await overlayHas(page, 'cv-art', 0.95, 2 / 3, '#ffffff', 3)), 'the 3 × 3 grid shows on the check panels');
+    await click(page, '#gridBtn'); await click(page, '#gridBtn'); await sleep(100);
+    // a measure dragged just under a numbered label: its label must keep off the map's percentages
+    await click(page, '[data-tool="measure"]'); await sleep(80);
+    const pills = await clusters(page, 'cv-diff', LABEL_INK);
+    const pill = pills.boxes.slice().sort((a, b) => (b.x1 - b.x0) - (a.x1 - a.x0)).find((b) => (b.x0 + b.x1) / 2 > 100 && (b.x0 + b.x1) / 2 < pills.W - 100 && b.y1 + 2.5 * (b.y1 - b.y0) < pills.H) || pills.boxes[0];
+    const lineY = pill.y1 + 12, pcx = (pill.x0 + pill.x1) / 2; // close enough that a label above the line would cover the numbered label
+    {
+      const b = await box(page, '#cv-diff');
+      const X = (x) => b.x + (b.width * x) / pills.W, Y = (y) => b.y + (b.height * y) / pills.H;
+      await page.mouse.move(X(pcx - 90), Y(lineY)); await page.mouse.down(); await page.mouse.move(X(pcx), Y(lineY), { steps: 4 }); await page.mouse.move(X(pcx + 90), Y(lineY), { steps: 4 }); await page.mouse.up(); await sleep(200);
+    }
+    const keepOff = await page.evaluate(([p, ly, rgb]) => {
+      const c = document.getElementById('cv-diff'); const o = c.nextElementSibling; const sx = o.width / c.width, sy = o.height / c.height;
+      const od = o.getContext('2d').getImageData(0, 0, o.width, o.height).data;
+      const yellow = (i) => od[i + 3] > 200 && Math.abs(od[i] - rgb[0]) < 25 && Math.abs(od[i + 1] - rgb[1]) < 25 && Math.abs(od[i + 2] - rgb[2]) < 45;
+      let onLabel = 0, label = 0, top = Infinity, bottom = -1;
+      for (let y = 0; y < o.height; y++) for (let x = 0; x < o.width; x++) {
+        const i = (y * o.width + x) * 4; if (!yellow(i)) continue;
+        if (x >= p.x0 * sx && x <= (p.x1 + 1) * sx && y >= p.y0 * sy && y <= (p.y1 + 1) * sy) onLabel++;
+        if (Math.abs(y - ly * sy) > 8) { label++; top = Math.min(top, y / sy); bottom = Math.max(bottom, y / sy); } // off the line and its end ticks: the 1 U label
+      }
+      return { onLabel, label, labelRows: [Math.round(top), Math.round(bottom)], lineRow: Math.round(ly) };
+    }, [pill, lineY, UNIT_YELLOW]);
+    t.check((await toolCount(page, 'measure')) === 1 && keepOff.label > 30 && keepOff.onLabel === 0, 'a measure dragged just under a numbered label: its 1 U label is drawn, and off the map\'s percentages', { ...keepOff, pill: [pill.x0, pill.y0, pill.x1, pill.y1] });
+    // Save PNG burns the marks in: the map with its hatched border, its numbered labels and both lines; Your blocks
+    await setRange(page, 'alignScale', 80);
+    const save = (id) => download(page, async () => { await page.locator(`[data-save="${id}"]`).scrollIntoViewIfNeeded(); await page.locator(`[data-save="${id}"]`).click(); });
+    const dlMap = await save('diff');
+    const map = dlMap && dlMap.buf.length ? await pngRead(page, dlMap.buf, { at: [[1, 375], [2, 375], [3, 375], [4, 375]], count: [LABEL_INK], near: [[0.5, 0.475, LINE_RED, 4], [0.5, 0.86, LINE_RED, 4]] }) : null;
+    t.check(map && dlMap.name === 'sample-study-accuracy-map.png' && map.w === 600 && map.h === 750 && map.at.every((p) => p[0] === p[1] && p[1] === p[2] && (p[0] === 105 || p[0] === 78)) && map.count[0] > 300 && map.near.every(Boolean), 'Save PNG on the map: 600 × 750 with the hatched border, the numbered labels and both lines burned in', map && { name: dlMap.name, w: map.w, h: map.h, border: map.at, labelInk: map.count[0], lines: map.near });
+    const dlBlocks = await save('artblock');
+    const blocks = dlBlocks && dlBlocks.buf.length ? await pngRead(page, dlBlocks.buf, { near: [[0.5, 0.475, LINE_RED, 4]] }) : null;
+    t.check(blocks && dlBlocks.name === 'sample-study-my-painting-blocks.png' && blocks.w === 600 && blocks.h === 750 && blocks.near[0], 'Save PNG on Your blocks: 600 × 750 with the line burned in', blocks && { name: dlBlocks.name, w: blocks.w, h: blocks.h, line: blocks.near[0] });
+    await page.evaluate(() => { const dlg = document.getElementById('saveDialog'); if (dlg.open) dlg.close(); });
+    await click(page, '[data-tool="sample"]'); await click(page, '#alignReset'); await busyHidden(page);
+    await clean(t, page, 'marks on the check panels');
+    // a phone photo stored on its side with an EXIF turn, by the input, a drop and a paste
+    const phoneJpeg = await exifJpeg(page);
+    for (const [how, act] of [['the input', () => page.setInputFiles('#artFile', phoneJpeg)], ['a drop', () => dropFiles(page, 'body', [phoneJpeg])], ['a paste', () => pasteFile(page, phoneJpeg)]]) {
+      const loaded = await afterResult(page, act);
+      s = await state(page);
+      const mark = await px(page, 'cv-art', 540, 50), plain = await px(page, 'cv-art', 60, 50);
+      t.check(loaded && s.label === 'phone.jpg · 600 × 800 px' && mark[0] > 150 && mark[1] < 90 && Math.abs(plain[0] - 128) < 12 && Math.abs(plain[2] - 128) < 12, `a phone photo stored on its side with an EXIF turn, by ${how}: upright, 600 × 800, its marked corner top right`, { loaded, label: s.label, topRight: mark, topLeft: plain });
+    }
+    // two files at once: dropped together, chosen one straight after the other, a reference and a painting together
+    const a = await makeImage(page, { width: 640, height: 800, type: 'image/jpeg', name: 'a.jpg' }), b = await makeImage(page, { width: 500, height: 700, draw: 'flat', name: 'b.png' });
+    await resetToast(page);
+    t.check(await afterResult(page, () => dropFiles(page, 'body', [a, b])), 'two files dropped together are read');
+    s = await state(page);
+    t.check(s.label === 'a.jpg · 640 × 800 px' && s.toast === 'Of the 2 files dropped, only a.jpg was taken.', 'two files dropped at once: the first is the painting, and the page says only it was taken', { label: s.label, toast: s.toast });
+    await resetToast(page);
+    await afterResult(page, async () => { await page.setInputFiles('#artFile', a); await page.setInputFiles('#artFile', b); });
+    await busyHidden(page); await sleep(600);
+    s = await state(page);
+    t.check(s.label === 'b.png · 500 × 700 px' && s.toast === '', 'two paintings chosen one straight after the other: the last is the painting, nothing said of the first', { label: s.label, toast: s.toast });
+    const ref2 = await makeImage(page, { width: 800, height: 1000, type: 'image/jpeg', name: 'ref2.jpg' }), art2 = await makeImage(page, { width: 700, height: 900, type: 'image/jpeg', name: 'art2.jpg' });
+    const both = [['file', ref2], ['artFile', art2]].map(([id, f]) => ({ id, name: f.name, type: f.mimeType, b64: f.buffer.toString('base64') }));
+    await afterResult(page, () => page.evaluate((both) => { for (const f of both) { const bin = atob(f.b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const dt = new DataTransfer(); dt.items.add(new File([u], f.name, { type: f.type })); const el = document.getElementById(f.id); el.files = dt.files; el.dispatchEvent(new Event('change', { bubbles: true })); } }, both), { more: 2 });
+    await page.waitForFunction(() => /^ref2\.jpg/.test(document.getElementById('source').textContent) && /^art2\.jpg/.test(document.getElementById('artSource').textContent) && document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
+    await sleep(300);
+    const together = await state(page);
+    await afterResult(page, () => page.setInputFiles('#file', ref2));
+    await afterResult(page, () => page.setInputFiles('#artFile', art2));
+    const apart = await state(page);
+    t.check(together.source === 'ref2.jpg · 800 × 1000 px' && together.label === 'art2.jpg · 700 × 900 px' && together.badge === apart.badge && together.shapes === apart.shapes, 'a new reference and a new painting at the same moment are scored as that pair is when loaded one after the other', { together: [together.source, together.label, together.badge, together.shapes], apart: [apart.badge, apart.shapes] });
+    await clean(t, page, 'files at once');
+    await page.context().close();
+  }
+
+  // ---- a phone with a touch screen: a tap on a zone, the loupe that goes by itself, taps that pick and that do not;
+  // then a big reference at Working size 1400 with the drawer open, and Simplify dragged ----
+  {
+    const page = await openTouchPage(site, '#check');
+    await countResults(page);
+    await busyHidden(page);
+    let s;
+    const picked = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem('portrait-value-studio.palette') || '[]').length; } catch (e) { return -1; } });
+    await page.evaluate(() => { window.__loupeLog = []; const l = document.getElementById('loupe'); new MutationObserver(() => window.__loupeLog.push({ t: performance.now(), hidden: l.hidden, hex: document.getElementById('loupeHex').textContent })).observe(l, { attributes: true, attributeFilter: ['hidden'] }); });
+    const p0 = await picked();
+    await tapOn(page, '#cv-diff', 0.5, 0.45);
+    await page.waitForFunction(() => { const lg = window.__loupeLog; const i = lg.findIndex((e) => !e.hidden); return i >= 0 && lg.slice(i).some((e) => e.hidden); }, null, { timeout: 8000 }).catch(() => null);
+    const lg = await page.evaluate(() => window.__loupeLog);
+    const shownAt = lg.find((e) => !e.hidden), goneAt = shownAt && lg.find((e) => e.hidden && e.t > shownAt.t);
+    t.check(shownAt && /^\d{1,3}% match$/.test(shownAt.hex) && goneAt, 'phone, a tap on a zone of the map: the loupe shows its match, then goes by itself', lg.map((e) => ({ t: Math.round(e.t), hidden: e.hidden, hex: e.hex })));
+    if (shownAt && goneAt) t.note(`phone: the loupe of a tap on the map stayed ${Math.round(goneAt.t - shownAt.t)} ms`);
+    t.check((await picked()) === p0, 'phone: a tap on the map adds no Picked color', { before: p0, after: await picked() });
+    await tapOn(page, '#cv-art', 0.5, 0.45); await sleep(300);
+    t.check((await picked()) === p0 + 1, 'phone: a tap on Your painting (the magnifier) adds its color to Picked colors', { before: p0, after: await picked() });
+    // picking a neutral spot by touch: a finger that drags is told to tap; one that wobbles a little picks
+    t.check(await loadArt(page, await ownPixels(page, { patches: true })), 'phone: the patch painting loads');
+    await openAlign(page);
+    const cdp = await page.context().newCDPSession(page);
+    await page.locator('#wbPick').tap(); await sleep(80);
+    await resetToast(page);
+    await touchDrag(page, cdp, '#cv-art', patchAt(1)[0] / 600, patchAt(1)[1] / 750, 15);
+    s = await state(page);
+    t.check(s.toast === 'Click one white or gray spot, without dragging' && s.picking && !s.wbUndo, 'phone: a finger dragged 15 px across Your painting while picking is told to pick one spot, and picking stays on', { toast: s.toast, picking: s.picking });
+    await resetToast(page);
+    if (!s.picking) { await page.locator('#wbPick').tap(); await sleep(80); }
+    await touchDrag(page, cdp, '#cv-art', patchAt(1)[0] / 600, patchAt(1)[1] / 750, 6);
+    s = await state(page);
+    t.check(FIXED.test(s.toast) && !s.picking && s.wbUndo, 'phone: a tap that wobbles 6 px on the warm-tinted white picks it: the cast is removed', { toast: s.toast, picking: s.picking });
+    await clean(t, page, 'touch');
+    // Working size 1400 with a big reference and painting, the drawer open, and Simplify dragged across its range
+    await page.evaluate(() => document.querySelector('[data-mode="advanced"]').click()); await busyHidden(page);
+    t.check(await afterResult(page, async () => page.setInputFiles('#file', await makeImage(page, { width: 1600, height: 2000, type: 'image/jpeg', name: 'big-ref.jpg' })), { timeout: 120000 }), 'phone: a 1600 × 2000 reference loads with the drawer open');
+    t.check(await loadArt(page, await makeImage(page, { width: 1500, height: 1900, type: 'image/jpeg', name: 'big-art.jpg' })), 'phone: a 1500 × 1900 painting loads');
+    t.check(await afterResult(page, () => page.evaluate(() => { const e = document.getElementById('detail'); e.value = '1400'; e.dispatchEvent(new Event('change', { bubbles: true })); }), { timeout: 180000 }), 'phone: Working size 1400 with the drawer open reruns');
+    s = await state(page);
+    t.check(same(s.orig, [1120, 1400]) && same(s.art, s.orig) && same(s.diff, s.orig), 'phone: at 1400 the reference, the painting and the map are 1120 × 1400', { orig: s.orig, art: s.art, diff: s.diff });
+    const t0 = Date.now();
+    await page.evaluate(async () => { const e = document.getElementById('simplify'); for (let i = 0; i < 30; i++) { e.value = String(i % 11); e.dispatchEvent(new Event('input', { bubbles: true })); await new Promise((r) => setTimeout(r, 40)); } e.value = '7'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+    const settled = await busyHidden(page, 180000); const took = Date.now() - t0;
+    await sleep(300);
+    const frameMs = await page.evaluate(() => new Promise((r) => { const t0 = performance.now(); requestAnimationFrame(() => setTimeout(() => r(Math.round(performance.now() - t0)), 0)); }));
+    const spammed = await state(page), simplifyOut = await page.evaluate(() => document.getElementById('simplifyOut').value);
+    await afterResult(page, () => page.evaluate(() => { const e = document.getElementById('simplify'); e.dispatchEvent(new Event('input', { bubbles: true })); }), { timeout: 180000 });
+    const again = await state(page);
+    t.check(settled && simplifyOut === '7' && spammed.badge === again.badge && frameMs < 500, 'phone at 1400: thirty Simplify steps with the drawer open settle on the last one, scored as a single run at it scores, and the page answers at once afterwards', { settled, seconds: took / 1000, simplifyOut, badge: spammed.badge, single: again.badge, frameMs });
+    t.note(`phone at 1400 with the drawer open: thirty Simplify steps 40 ms apart took ${(took / 1000).toFixed(1)} s to settle on a shared machine (not checked)`);
+    await clean(t, page, 'phone at 1400');
+    await page.context().close();
+  }
+
+  // ---- the Palette block view remembered, with the drawer open: what the check shows and scores; axe over the
+  // drawer and the align panel, light and dark ----
+  {
+    const page = await openPage(site, { url: '#check', bypassCSP: true, storage: { 'portrait-value-studio.blockView': 'palette' } });
+    await countResults(page);
+    await busyHidden(page);
+    const mixed = await page.waitForFunction(() => !document.getElementById('blockViewPalette').classList.contains('is-busy'), null, { timeout: 30000 }).then(() => true).catch(() => false);
+    const view = await page.evaluate(() => { const a = document.getElementById('cv-block').getContext('2d'), b = document.getElementById('cv-refblock').getContext('2d'); const pts = [[300, 300], [100, 100], [300, 600], [450, 350], [150, 500]]; return { pressed: document.getElementById('blockViewPalette').getAttribute('aria-pressed'), name: document.getElementById('blockViewPalette').textContent.trim(), differ: pts.filter(([x, y]) => { const p = a.getImageData(x, y, 1, 1).data, q = b.getImageData(x, y, 1, 1).data; return Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]) > 6; }).length }; });
+    const s = await state(page);
+    t.check(mixed && view.pressed === 'true' && s.badge === exampleBadge, 'the Palette block view remembered: the check scores the example as with Photo (it compares the photo\'s colors)', { mixed, view, badge: s.badge, withPhoto: exampleBadge });
+    if (view.differ) t.note(`With the Palette view (${view.name}) remembered, the Study's color-block panel shows the palette's mixes while the check's Reference blocks and the accuracy map show the photo's colors (${view.differ} of 5 points differ); the README does not say which the check shows, and the page does not say why its two sets of blocks differ.`);
+    await openAlign(page);
+    let v = await axe(page);
+    t.check(v.length === 0, 'axe: no violations with the drawer, its scorecard, list and map, and the align panel open', v);
+    await page.emulateMedia({ colorScheme: 'dark' }); await sleep(400);
+    v = await axe(page);
+    t.check(v.length === 0, 'axe, dark: no violations with the same open', v);
+    await screenshot(page, 'check-painting-dark');
+    await clean(t, page, 'palette view and axe');
+    await page.context().close();
+  }
 }
