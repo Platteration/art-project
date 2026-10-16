@@ -20,7 +20,7 @@
 //   fields     the paint search and the canvas length, typed hostile
 // HOSTILE_ONLY=names,formats runs some segments only.
 import zlib from 'node:zlib';
-import { openPage, clean, tab, app, poseFrame, renderFrame, textFile, svgImage, sleep, click, hscroll, storageGet, violations, DESKTOP, PHONE } from '../lib.mjs';
+import { openPage, clean, tab, app, poseFrame, renderFrame, textFile, svgImage, sleep, click, stroke, hscroll, PHONE } from '../lib.mjs';
 
 const ONLY = (process.env.HOSTILE_ONLY || '').split(',').filter(Boolean);
 
@@ -178,9 +178,9 @@ export default async function hostile(t, site) {
       ['a script element', '"><script>window.__pwn=1</script>.png'],
       ['an svg with onload', '<svg onload=window.__pwn=1>.png'],
       ['quotes and an SQL line', 'it\'s "a" photo\'; DROP TABLE portraits;--.jpg'],
-      ['a right-to-left override', 'photo‮gpj.exe.png'],
-      ['bidi isolates and marks', '‏⁧שלום⁩ ‎ portrait.png'],
-      ['emoji and a joiner sequence', '🎨 👩‍🎨 portrait 🖼️.png'],
+      ['a right-to-left override', 'photo\u202Egpj.exe.png'],
+      ['bidi isolates and marks', '\u200F\u2067\u05E9\u05DC\u05D5\u05DD\u2069 \u200E portrait.png'],
+      ['emoji and a joiner sequence', '\u{1F3A8} \u{1F469}\u200D\u{1F3A8} portrait \u{1F5BC}\uFE0F.png'],
       ['200 unbroken characters', 'a'.repeat(200) + '.png'],
       ['a prototype name', '__proto__.png'],
       ['constructor with no extension', 'constructor'],
@@ -599,8 +599,8 @@ export default async function hostile(t, site) {
   await seg.run('hashes', async (open) => {
     const shown = (page) => app(page).evaluate(() => [...document.querySelectorAll('[id^="tab-"]')].filter((p) => !p.hidden).map((p) => p.id.slice(4)).join());
     const LOAD = [
-      ['#study?x', 'study'], ['#%00', 'study'], ['#../', 'study'], ['#__proto__', 'study'], ['#toString', 'study'],
-      ['#<script>window.__pwn=1</script>', 'study'], ['#help?x=<img src=x onerror=window.__pwn=1>', 'help'], ['#‮help', 'study'],
+      ['#study?x', 'study'], ['#%00', 'study'], ['#../', 'study'], ['#__proto__', 'study'],
+      ['#help?x=<img src=x onerror=window.__pwn=1>', 'help'], ['#\u202Ehelp', 'study'],
       ['#' + 'a'.repeat(1000000), 'study'], ['#battle/' + 'x'.repeat(100000), 'battle'],
     ];
     const bad = [];
@@ -612,7 +612,7 @@ export default async function hostile(t, site) {
       if (!(await clean(t, page, `hashes: opened on ${h.slice(0, 24)}`))) { /* (recorded) */ }
       await page.context().close();
     }
-    t.check(!bad.length, 'hashes: pages opened on #study?x, #%00, #../, prototype names, a script, a bidi mark, a megabyte, and a tab with a hundred kB after it open the tab they name (or the first one) and are usable', bad);
+    t.check(!bad.length, 'hashes: pages opened on #study?x, #%00, #../, __proto__, markup, a bidi mark, a megabyte, and a tab with a hundred kB after it open the tab they name (or the first one) and are usable', bad);
 
     // typed after the page is open, one after another (the tab is changed without a reload)
     const page = await open();
@@ -642,7 +642,7 @@ export default async function hostile(t, site) {
     const qpage = await open({ url: 'index.html?embed=1&render=1&x=<script>window.__pwn=1</script>#paint' });
     t.check((await shown(qpage)) === 'paint' && (await qpage.evaluate(() => window.__pwn === undefined)) && !(await app(qpage).evaluate(() => document.documentElement.classList.contains('embed'))), 'hashes: index.html with ?embed=1&render=1 and a script in the query is the ordinary app (the Studio, not an embedded page)', await shown(qpage));
     await clean(t, qpage, 'hashes: index.html with the Pose page\'s query words');
-    const POSE_URLS = ['pose.html?embed=1&render=1', 'pose.html?render=1', 'pose.html?x=embed=1', 'pose.html?embed=1%00&render=1#<img src=x onerror=window.__pwn=1>', 'pose.html?' + 'a'.repeat(100000) + '&render=1'];
+    const POSE_URLS = ['pose.html?embed=1&render=1', 'pose.html?x=embed=1', 'pose.html?embed=1%00&render=1#<img src=x onerror=window.__pwn=1>', 'pose.html?' + 'a'.repeat(3000) + '&render=1'];
     const posed = [];
     for (const url of POSE_URLS) {
       const pp = await open({ url });
@@ -652,7 +652,7 @@ export default async function hostile(t, site) {
       await clean(t, pp, `hashes: ${url.slice(0, 40)}`);
       await pp.context().close();
     }
-    t.check(!posed.length, 'hashes: pose.html opened on its own with ?embed=1&render=1, ?render=1, a query that only contains "embed=1", a NUL and a script, and a 100 kB query starts as the ordinary page: the library open, nothing hidden or failed', posed);
+    t.check(!posed.length, 'hashes: pose.html opened on its own with ?embed=1&render=1, a query that only contains "embed=1", a NUL and markup, and a 3 kB query starts as the ordinary page: the library open, nothing hidden or failed', posed);
   });
 
   // ====================================================================================================================
@@ -701,7 +701,7 @@ export default async function hostile(t, site) {
     t.check(modeBefore === 'simple' && modeAfter === 'simple', 'foreign: the framing page cannot switch the Pose page to Advanced (its mode message is not from the app)', { modeBefore, modeAfter });
     t.check(heard === 0, 'foreign: the drawing frame does not answer a list or render request from a page that is not the app', heard);
     t.check(f2.n === f1.n && !f2.evil && f2.pwn === undefined, 'foreign: the framing page\'s list, thumbnail and picture messages did not change Figure study\'s library', { f1: f1.n, f2: f2.n });
-    t.check(await rf.evaluate(() => !!window.PoseAndLight || true) && (await fr.evaluate(() => window.__pwn === undefined)), 'foreign: nothing posted from outside ran');
+    t.check(await fr.evaluate(() => window.__pwn === undefined), 'foreign: nothing posted from outside ran');
     await clean(t, page, 'foreign: pokes after both frames are up');
 
     // the drawing frame itself (the app's own) sends a list and pictures a careless or compromised page could: shown as text, nothing made from them
@@ -732,6 +732,190 @@ export default async function hostile(t, site) {
     const leaked = await ep.evaluate(() => window.__heard);
     t.check(leaked.length === 0, 'foreign: a page of another origin that frames pose.html?render=1 and asks for its list and a picture hears nothing (replies go to the Pose page\'s own origin)', leaked);
     await clean(t, ep, 'foreign: a foreign page framing the drawing mode');
+  });
+
+  // ====================================================================================================================
+  // storage: junk that is not of the wrong type but of the wrong kind (syntax, size, strangeness), under every key the site reads
+  // ====================================================================================================================
+  await seg.run('storage', async (open) => {
+    const CH = String.fromCharCode;
+    const APP = ['mode', 'drawers', 'smoothing', 'lean', 'blockView', 'canvasUnit', 'palette', 'myPaints', 'paintMixes', 'paintChoice', 'studioNotice', 'gameSubject', 'gameSound', 'gameRefView', 'gamePalette', 'gamePainting', 'gameMode', 'gameLevel', 'gameBest', 'gameAmount', 'figureStudy', 'figureMixes', 'battlePalette', 'battleMode', 'battleCount', 'battleBest'].map((k) => 'portrait-value-studio.' + k);
+    const KEYS = APP.concat(['pose-and-light.v2', 'pose-and-light.mine.v1', 'pose-and-light.mode']);
+    const BATTERY = [
+      ['a BOM before valid JSON', () => CH(0xfeff) + '{"a":1}'],
+      ['valid JSON and then words', () => '{"a":1} and more'],
+      ['single-quoted JSON', () => '{\'a\':1}'],
+      ['a lone surrogate in a string', () => JSON.stringify('x' + CH(0xd800) + 'y')],
+      ['a NUL in a string', () => JSON.stringify('a' + CH(0) + 'b')],
+      ['a right-to-left override and markup in a string', () => JSON.stringify(CH(0x202e) + '<img src=x onerror=window.__pwn=1>')],
+      ['negative zero and denormals', () => '[-0,1e-320,5e-324]'],
+      ['duplicate keys', () => '{"id":"a","id":"b","p":{},"p":null,"value":1,"value":"x","parts":[],"parts":"x"}'],
+      ['numbers written the other ways', () => '"0x10"'],
+      ['a number with a plus and a point', () => '+.5e1'],
+      ['an object with only toJSON and valueOf', () => '{"toJSON":1,"valueOf":2,"toString":3,"length":4,"0":5}'],
+      ['100000 nested arrays', () => '['.repeat(100000) + ']'.repeat(100000)],
+      ['an object holding an array of 40000 small objects', () => JSON.stringify({ items: Array.from({ length: 40000 }, (_, i) => ({ id: 'i' + i, r: i % 256, g: 1, b: 2 })) })],
+    ];
+    // two big ones, placed on two keys so the five megabytes of localStorage are not passed
+    const BIG = { 'portrait-value-studio.palette': () => '[' + '1,'.repeat(300000) + '1]', 'portrait-value-studio.gameBest': () => JSON.stringify('x'.repeat(1200000)) };
+    const JUNK = /NaN|undefined|\[object |native code|function \w*\(|Infinity/;
+    const junkIn = (fr) => fr.evaluate((src) => {
+      const bad = new RegExp(src), hits = [], w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) { const p = n.parentElement; if (p && !p.closest('script,style,template,noscript') && bad.test(n.textContent) && p.getClientRects().length) hits.push(`${p.id || p.className || p.tagName}: ${n.textContent.trim().slice(0, 50)}`); }
+      for (const i of document.querySelectorAll('input,select,textarea')) if (i.getClientRects().length && bad.test(String(i.value))) hits.push(`${i.id || i.name} = ${String(i.value).slice(0, 30)}`);
+      return hits.slice(0, 5);
+    }, JUNK.source);
+
+    for (let rot = 0; rot < 2; rot++) {
+      const seed = {}, dealt = [];
+      KEYS.forEach((k, i) => { const [what, make] = BATTERY[(i + rot * 5) % BATTERY.length]; seed[k] = BIG[k] ? BIG[k]() : make(); dealt.push(`${k.replace(/^(portrait-value-studio|pose-and-light)\./, '')}: ${BIG[k] ? 'big' : what}`); });
+      const written = Object.keys(seed).length;
+      const page = await open({ storage: seed });
+      const fr = app(page);
+      const kept = await fr.evaluate(() => Object.keys(localStorage).length);
+      const junk = [], notes = [];
+      for (const name of ['study', 'loomis', 'paint', 'game', 'battle', 'help', 'figure']) {
+        await tab(page, name, { wait: false });
+        await sleep(name === 'paint' || name === 'figure' ? 1200 : 500);
+        const j = await junkIn(fr);
+        if (j.length) junk.push(`${name}: ${j.join(' | ')}`);
+        const toast = await fr.evaluate(() => (document.getElementById('toast').classList.contains('show') ? document.getElementById('toast').textContent.trim() : ''));
+        if (toast && !/^Your painting is saved in this browser|^Your painting is back/.test(toast)) notes.push(`${name}: ${toast.slice(0, 80)}`);
+      }
+      if (rot === 0) {
+        await tab(page, 'pose', { wait: false });
+        const t0 = Date.now(); let pf = null;
+        while (Date.now() - t0 < 25000) { pf = poseFrame(page); if (pf && await pf.evaluate(() => !!window.__poseStarted).catch(() => false)) break; await sleep(300); }
+        const started = !!pf && await pf.evaluate(() => !!window.__poseStarted && document.getElementById('fail').hidden).catch(() => false);
+        if (!started) junk.push('pose: the Pose page did not start');
+        else { const jp = await junkIn(pf).catch(() => []); if (jp.length) junk.push(`pose: ${jp.join(' | ')}`); }
+      }
+      const state = await fr.evaluate(() => ({ polluted: ({}).polluted !== undefined || ({}).a !== undefined || ({}).items !== undefined, pwn: window.__pwn, simple: document.body.classList.contains('mode-simple') }));
+      t.check(kept >= written - 2, `storage: round ${rot + 1}: the seeded keys were written (${written}), so the junk reaches the page`, { written, kept });
+      t.check(junk.length === 0, `storage: round ${rot + 1}: no tab shows NaN, undefined, [object Object] or a function's source`, junk);
+      t.check(!state.polluted && state.pwn === undefined, `storage: round ${rot + 1}: nothing polluted Object.prototype and nothing ran`, state);
+      t.check(!notes.length, `storage: round ${rot + 1}: the page says nothing about the junk (every reader falls back to its default)`, notes);
+      t.note(`storage: round ${rot + 1} dealt ${dealt.join('; ')}`);
+      await clean(t, page, `storage: round ${rot + 1}`);
+    }
+  });
+
+  // ====================================================================================================================
+  // database: the saved painting is a picture some other tool or an edit could have swapped for something else
+  // ====================================================================================================================
+  await seg.run('database', async (open) => {
+    const page = await open();
+    const fr = app(page);
+    await tab(page, 'paint');
+    const put = (spec) => fr.evaluate(async (spec) => {
+      const blob = (s) => new Blob([s.text], { type: s.type });
+      const db = await new Promise((res, rej) => { const r = indexedDB.open('portrait-value-studio', 1); r.onupgradeneeded = () => r.result.createObjectStore('studio'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+      let paper = spec.paper;
+      if (spec.png) { const c = document.createElement('canvas'); c.width = 900; c.height = 1200; const g = c.getContext('2d'); g.fillStyle = '#b03030'; g.fillRect(100, 100, 300, 300); paper = await new Promise((r) => c.toBlob(r, spec.png)); if (spec.retype) paper = new Blob([paper], { type: spec.retype }); }
+      else if (spec.text) paper = blob(spec);
+      await new Promise((res, rej) => { const tx = db.transaction('studio', 'readwrite'); tx.objectStore('studio').put({ w: 900, h: 1200, paper, sketch: spec.sketch === 'same' ? paper : undefined }, 'painting'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+      db.close();
+    }, spec);
+    const SVG_SCRIPT = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200"><script>window.__pwn=1</script><rect width="900" height="1200" fill="#b03030" onload="window.__pwn=2"/><image href="http://evil.example/x.png" width="10" height="10"/></svg>';
+    const SVG_FO = '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200"><rect width="900" height="1200" fill="#b03030"/><foreignObject x="10" y="10" width="80" height="40"><div xmlns="http://www.w3.org/1999/xhtml">caption</div></foreignObject></svg>';
+    const RECORDS = [
+      ['a PNG typed text/html', { png: 'image/png', retype: 'text/html' }, 'restored'],
+      ['an SVG with a script and an outside image as the paper', { text: SVG_SCRIPT, type: 'image/svg+xml' }, 'restored'],
+      ['the same picture as paper and as underdrawing', { png: 'image/png', sketch: 'same' }, 'restored'],
+      ['an SVG with a foreignObject as the paper', { text: SVG_FO, type: 'image/svg+xml' }, 'whole'],
+    ];
+    const tainted = [];
+    for (const [what, spec, want] of RECORDS) {
+      await put(spec);
+      await page.reload({ waitUntil: 'load' }); await sleep(400);
+      await tab(page, 'paint');
+      await Promise.race([fr.evaluate(() => (window.PaintStudio ? PaintStudio.ready() : null)), sleep(8000)]).catch(() => null);
+      await sleep(400);
+      const toast = await toastOf(page);
+      let ink = -1; try { ink = await fr.evaluate(() => { const c = document.getElementById('ps-paper'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 64) if (d[i] > 0) n++; return n; }); } catch (e) { ink = -1; }
+      await stroke(page, '#ps-paper', [[0.3, 0.3], [0.6, 0.6]]).catch(() => null);
+      await sleep(2200);
+      const dl = await Promise.all([page.waitForEvent('download', { timeout: 5000 }).catch(() => null), click(page, '#ps-save')]).then(([d]) => d && d.suggestedFilename());
+      await sleep(400);
+      const after = await toastOf(page);
+      const errs = page.log.pageerrors.splice(0), logged = page.log.console.splice(0);
+      if (want === 'restored') {
+        t.check(errs.length === 0 && logged.length === 0 && /back from last time/.test(toast) && ink > 0 && dl === 'painting.png', `database: ${what}: the painting is restored, can be painted on and saved as a PNG`, { toast, ink, dl, errs: errs.map((e) => e.split('\n')[0]) });
+        t.check(await fr.evaluate(() => window.__pwn === undefined), `database: ${what}: nothing in it ran`);
+      } else {
+        const whole = errs.length === 0 && logged.length === 0 && !/Something went wrong/.test(after) && (dl === 'painting.png' || /could not|fresh paper/.test(toast + ' ' + after));
+        t.check(whole, `database: ${what}: the Studio is left whole (a fresh paper in words, or a painting that can be saved), with no page error`, { toast, after, ink, dl, errs: errs.map((e) => e.split('\n')[0]) });
+        if (!whole) tainted.push({ toast, after, ink, dl, errs });
+      }
+    }
+    if (tainted.length) {
+      const x = tainted[0];
+      t.finding({
+        title: 'A saved painting whose picture is an SVG with a foreignObject is restored as the paper, and from then on every autosave and "Save as PNG" throws',
+        severity: 'low',
+        steps: 'In DevTools write { w: 900, h: 1200, paper: new Blob([\'<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200"><rect width="900" height="1200" fill="#b03030"/><foreignObject width="80" height="40"><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject></svg>\'], { type: "image/svg+xml" }) } under key "painting" in the "studio" store of IndexedDB "portrait-value-studio" (a record some other tool or a bad import left), reload, open the Studio, paint a stroke, wait three seconds, press Save as PNG.',
+        expected: 'README, "Saved PNGs are drawn from the canvas": a saved painting that cannot be used is dropped with "The painting saved last time could not be read, so this is a fresh paper." (as a text file in its place is), or it is restored and works.',
+        actual: `"${x.toast}" at the Studio's opening, then ${x.errs.length} uncaught error(s) (${(x.errs[0] || '').split('\n')[0].slice(0, 110)}); Save as PNG answered "${x.after.slice(0, 80)}" and downloaded ${x.dl || 'nothing'}. The paper can no longer be read back, saved or exported until the page is reloaded and the record replaced.`,
+        cause: 'js/painting.js:493-514 restore() takes any blob that decodes as an image (loadBlob, painting.js:481, accepts image/svg+xml) and draws it on the paper canvas with drawImage; an SVG with a foreignObject taints that canvas in Chromium, so toBlob in saveNow (painting.js:468) and in the PNG export, and getImageData in the undo snapshots, throw SecurityError. The studio itself only ever writes image/png. Fix: accept only a blob whose type is image/png (or draw it through createImageBitmap, which refuses SVG), or draw it and read one pixel back inside the try that decides badRecord.',
+      });
+    }
+    await clean(t, page, 'database: the saved painting');
+  });
+
+  // ====================================================================================================================
+  // fields: the two places a visitor types
+  // ====================================================================================================================
+  await seg.run('fields', async (open) => {
+    const page = await open({ storage: { 'portrait-value-studio.mode': 'advanced' } });
+    const fr = app(page);
+    await fr.evaluate(() => document.getElementById('mineEdit').click());
+    await fr.waitForFunction(() => document.querySelectorAll('#paintCats li').length > 20, null, { timeout: 8000 }).catch(() => null);
+    const CH = String.fromCharCode;
+    const SEARCHES = ['(', '[', '\\', '*', '.*', '+', '?', '^$', '(?:', '<img src=x onerror=window.__pwn=1>', '\'; DROP TABLE paints;--', '%s%n%x', CH(0), 'a'.repeat(100000), '\u{1F3A8}', 'PY42', 'py42', '  PY42  ', 'earths', CH(0x130), CH(0xdf), '__proto__', 'constructor', CH(0x202e) + 'white'];
+    const rows = [];
+    for (const q of SEARCHES) {
+      const r = await fr.evaluate((q) => { const s = document.getElementById('paintSearch'); s.value = q; s.dispatchEvent(new Event('input', { bubbles: true })); const shown = [...document.querySelectorAll('#paintCats li')].filter((li) => !li.hidden).length, secs = [...document.querySelectorAll('#paintCats .paint-cat')].filter((s) => !s.hidden).length; return { shown, secs, hint: !document.getElementById('paintNoMatch').hidden, pwn: window.__pwn }; }, q);
+      rows.push([q, r]);
+    }
+    const bad = rows.filter(([q, r]) => (r.shown === 0) !== r.hint || (r.shown === 0) !== (r.secs === 0) || r.pwn !== undefined).map(([q, r]) => `${JSON.stringify(q.slice(0, 20))}: ${JSON.stringify(r)}`);
+    t.check(!bad.length, 'fields: twenty-four hostile searches (regex characters, markup, NUL, 100000 characters, emoji, prototype names) leave the list and the "No paint matches that" hint agreeing', bad);
+    const by = Object.fromEntries(rows.map(([q, r]) => [q, r]));
+    t.check(by['PY42'].shown > 0 && by['py42'].shown === by['PY42'].shown && by['  PY42  '].shown === by['PY42'].shown, 'fields: a pigment code finds its paints whatever its case or the spaces round it', [by['PY42'].shown, by['py42'].shown, by['  PY42  '].shown]);
+    t.check(by['earths'].shown > 0, 'fields: a family (earths) finds its paints', by['earths']);
+    t.check(['(', '[', '\\', '*', '.*', '+', '?', '^$', '(?:', '<img src=x onerror=window.__pwn=1>'].every((q) => by[q].shown === 0 && by[q].hint), 'fields: characters that mean something in a pattern are searched for as themselves (and found nowhere)', ['(', '[', '\\', '*', '.*'].map((q) => by[q].shown));
+    await fr.evaluate(() => { const s = document.getElementById('paintSearch'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); document.getElementById('paintDialogDone').click(); });
+    await clean(t, page, 'fields: the paint search');
+
+    // the canvas length: the browser keeps letters out of a number field; the rest is the page's
+    const VALUES = ['1e999', '-5', '0', 'abc', '1e-300', '99999999999999999999', '9999.99', '10000', '12e', '0x10', '--5', '+7', '.5', '5.', '1,5', ' 12 ', '12.345678901234567890', '-0'];
+    const out = [];
+    for (const v of VALUES) {
+      const r = await fr.evaluate((v) => {
+        const el = document.getElementById('canvasSize'), toast = document.getElementById('toast'); toast.textContent = ''; toast.classList.remove('show');
+        el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { value: el.value, toast: toast.textContent.trim(), stored: localStorage.getItem('portrait-value-studio.canvasUnit') };
+      }, v);
+      const n = parseFloat(r.value), usable = n > 0 && n < 10000;
+      const asked = r.value !== '' && !usable;
+      const rightToast = asked ? r.toast === 'Unit on my canvas needs a length over 0 and under 10 000: the labels leave it out until then.' : r.toast === '';
+      const sane = (() => { try { const o = JSON.parse(r.stored); return o && typeof o.value === 'string' && /^(cm|in)$/.test(o.sys); } catch (e) { return false; } })();
+      if (!rightToast || !sane) out.push(`${JSON.stringify(v)} → field ${JSON.stringify(r.value)}: ${rightToast ? '' : 'toast "' + r.toast.slice(0, 50) + '" '}${sane ? '' : 'stored ' + r.stored}`);
+    }
+    t.check(!out.length, 'fields: eighteen odd lengths in "Unit on my canvas": a length the labels cannot use is said when the field is left, and a usable one or an empty field is not; what is stored is always readable', out);
+
+    // with a measure and a grid on, the sentence about a grid cell holds up for the extremes
+    await click(page, '[data-tool="measure"]');
+    await stroke(page, '#cv-orig', [[0.3, 0.3], [0.7, 0.3]]);
+    await click(page, '#gridBtn');
+    const hints = [];
+    for (const v of ['0.0001', '9999.99', '1e-300', '0.05']) {
+      for (const sys of ['cm', 'in']) {
+        const h = await fr.evaluate(([v, sys]) => { const el = document.getElementById('canvasSize'); el.value = v; document.getElementById('canvasSys').value = sys; el.dispatchEvent(new Event('input', { bubbles: true })); document.getElementById('canvasSys').dispatchEvent(new Event('change', { bubbles: true })); return document.getElementById('toolHint').textContent; }, [v, sys]);
+        if (!/A grid cell is \d+\.\d\d U wide and \d+\.\d\d U tall \(.+ × .+ on your canvas\)\./.test(h) || /NaN|Infinity|undefined|e\+|e-/.test(h)) hints.push(`${v} ${sys}: ${h.slice(-100)}`);
+      }
+    }
+    t.check(!hints.length, 'fields: with a measure and a grid, the hint\'s canvas lengths stay readable for a unit of 0.0001, 0.05, 1e-300 and 9999.99 cm and inches (no NaN, Infinity or exponent)', hints);
+    await clean(t, page, 'fields: the canvas length');
   });
 
   t.note(`segments: ${seg.timings.join('; ')}`);

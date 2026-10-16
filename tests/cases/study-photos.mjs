@@ -15,7 +15,7 @@
 // game do with it; the heaviest settings on the biggest photo; the keyboard for every other control; dark mode's
 // histogram; the phone's drawers and long file names; and odd drops and pastes.
 import fs from 'node:fs';
-import { openPage, clean, tab, makeImage, dropFiles, dropText, pasteFile, textFile, brokenImage, svgImage, storageGet, storageKeys, click, text, visible, hscroll, screenshot, stroke, sleep, DESKTOP, PHONE } from '../lib.mjs';
+import { openPage, clean, tab, makeImage, dropFiles, dropText, pasteFile, textFile, brokenImage, svgImage, storageGet, storageKeys, click, text, visible, hscroll, screenshot, stroke, sleep, DESKTOP, PHONE, newTab } from '../lib.mjs';
 
 const SAMPLE_LABEL = 'Sample study · a painted stand-in. Load, drop or paste a portrait to use your own.';
 const NO_SIZE = /That image has no usable size\. Use a JPG, PNG or WebP photo\./;
@@ -133,6 +133,49 @@ const pngVsCanvas = (page, buf, id) => page.evaluate(async ([b64, id]) => {
 }, [buf.toString('base64'), id]);
 // the page as it is right now, as a visitor would see the Study tab's settings
 const ui = (page) => page.evaluate(() => ({ simple: document.body.classList.contains('mode-simple'), smoothing: document.querySelector('input[name="smoothing"]:checked').value, lean: document.getElementById('lean').value, leanOut: document.getElementById('leanOut').value, palettePressed: document.querySelector('[data-block-view="palette"]').getAttribute('aria-pressed'), drawers: [...document.querySelectorAll('.rail details.drawer')].filter((d) => d.open).map((d) => d.dataset.drawer), header: document.getElementById('valuesState').textContent.trim(), toast: document.getElementById('toast').textContent, label: document.getElementById('source').textContent.trim(), busy: document.getElementById('busy').hidden, inForce: Studio.settings().smoothing }));
+
+// a GIF written here, since the case ships no picture: a 256-entry gray table, LZW codes of 9 bits, and a clear code
+// every 100 pixels, so every code is a literal and the decoder's table never reaches a width change
+function gifFile(name, w, h, pixel) {
+  const px = []; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) px.push(pixel(x, y) & 255);
+  const codes = [256];
+  px.forEach((v, i) => { if (i > 0 && i % 100 === 0) codes.push(256); codes.push(v); });
+  codes.push(257);
+  const bytes = []; let bits = 0, nbits = 0;
+  for (const c of codes) { bits |= c << nbits; nbits += 9; while (nbits >= 8) { bytes.push(bits & 255); bits >>= 8; nbits -= 8; } }
+  if (nbits > 0) bytes.push(bits & 255);
+  const sub = []; for (let i = 0; i < bytes.length; i += 255) { const chunk = bytes.slice(i, i + 255); sub.push(chunk.length, ...chunk); }
+  const table = []; for (let i = 0; i < 256; i++) table.push(i, i, i);
+  return { name, mimeType: 'image/gif', buffer: Buffer.from([...Buffer.from('GIF89a'), w & 255, w >> 8, h & 255, h >> 8, 0xf7, 0, 0, ...table, 0x2c, 0, 0, 0, 0, w & 255, w >> 8, h & 255, h >> 8, 0, 8, ...sub, 0, 0x3b]) };
+}
+// the Simple palette list and the one Best match badge that shows, read in the order the list is in
+const paletteList = (page) => page.evaluate(() => {
+  const items = [...document.querySelectorAll('#presetList li')];
+  const shown = items.filter((li) => getComputedStyle(li).display !== 'none');
+  const badges = [...document.querySelectorAll('#presetList .preset-best, #presetList .preset-best-simple')].filter((b) => getComputedStyle(b).display !== 'none' && getComputedStyle(b.closest('li')).display !== 'none').map((b) => b.closest('li').dataset.preset);
+  return {
+    mode: document.body.classList.contains('mode-simple') ? 'simple' : 'advanced',
+    shown: shown.map((li) => ({ id: li.dataset.preset, name: li.querySelector('.preset-name').textContent, why: li.querySelector('.preset-why') ? li.querySelector('.preset-why').textContent : '' })),
+    badges, used: document.getElementById('blockViewPalette').textContent,
+    pressed: [...document.querySelectorAll('#presetList .preset[aria-pressed="true"]')].map((b) => b.closest('li').dataset.preset),
+  };
+});
+const bareName = (name) => name.replace(/\s*\(.*\)$/, '').replace(/ palette$/i, '');
+// the histogram's bar columns (any bar-colored pixel above the value ramp) and the split marks (accent, full height)
+const histogramCols = (page) => page.evaluate(() => {
+  const c = document.getElementById('hist'); const W = c.width, H = c.height; const d = c.getContext('2d').getImageData(0, 0, W, H).data;
+  const probe = document.createElement('canvas'); probe.width = probe.height = 1; const pg = probe.getContext('2d');
+  pg.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(); pg.fillRect(0, 0, 1, 1); const ac = pg.getImageData(0, 0, 1, 1).data;
+  const isAccent = (i) => Math.abs(d[i] - ac[0]) < 12 && Math.abs(d[i + 1] - ac[1]) < 12 && Math.abs(d[i + 2] - ac[2]) < 12;
+  const bar = [], mark = [];
+  for (let x = 0; x < W; x++) {
+    let nb = 0, na = 0;
+    for (let y = 0; y < H - 10; y++) { const i = (y * W + x) * 4; if (d[i + 3] < 200) continue; if (isAccent(i)) na++; else nb++; }
+    if (nb > 0) bar.push(x);
+    if (na > H * 0.5) mark.push(x);
+  }
+  return { W, H, cw: c.clientWidth, dpr: window.devicePixelRatio, bar, mark, t1: +document.getElementById('t1').value, t2: +document.getElementById('t2').value };
+});
 
 export default async function studyPhotos(t, site) {
   // ---- the sample on the first load, and the file kinds through the file input (desktop) ----
@@ -1248,4 +1291,176 @@ export default async function studyPhotos(t, site) {
     await page.context().close();
   }
   t.note('Left out of the coverage list, each for a reason: a GIF (it needs a hand-made LZW stream; a BMP stands in for "a picture the browser opens that is not JPG, PNG or WebP"); a drop that announces Files but carries none (a DataTransfer cannot be made so in a page); a toast replaced by a text drop right after a photo cleared the marks (a race of two messages, said in the toast\'s own words either way); a reload in the middle of Study.process at 1400 px (the first block reloads mid-load already) and Forget pressed in a second tab while this one reads a photo (multitab covers Forget across tabs).');
+
+  // ==== round 2: the gaps the first pass left out, then the Study's controls, readouts and histogram at their ends ====
+
+  // ---- a GIF, which the first pass could not drive: the browser opens it, so the Study takes it at its size ----
+  {
+    const page = await openPage(site);
+    const r = await loadKind(page, gifFile('ramp.gif', 80, 60, (x, y) => Math.round((x / 79) * 255) ^ ((x - 40) ** 2 + (y - 30) ** 2 < 300 ? 255 : 0)));
+    t.check(r.loaded && r.label === 'ramp.gif · 80 × 60 px' && same(r.prep, [80, 60]) && r.toast === '', 'a GIF is opened like a JPG or PNG: the Study takes it at 80 × 60 px with no note', { label: r.label, prep: r.prep, toast: r.toast });
+    await clean(t, page, 'gif');
+    await page.context().close();
+  }
+
+  // ---- a drop that announces Files and carries none (a file promise that did not resolve, a folder some file managers
+  // send): said, the way an empty file is; the drop hint goes and the study stays ----
+  {
+    const page = await openPage(site);
+    await resetToast(page);
+    const fake = { types: ['Files'], files: [], items: [] };
+    await page.evaluate((fake) => { for (const type of ['dragenter', 'drop']) { const e = new Event(type, { bubbles: true, cancelable: true }); Object.defineProperty(e, 'dataTransfer', { value: fake }); window.dispatchEvent(e); } }, fake);
+    await sleep(400);
+    const said = await toast(page);
+    const hintHidden = await page.evaluate(() => document.getElementById('dropHint').hidden);
+    const label = (await study(page)).label;
+    const said1 = t.check(said !== '' && hintHidden && label === SAMPLE_LABEL, 'a drop that announces files but carries none is said so, the drop hint goes and the study stays', { toast: said, hintHidden, label });
+    if (!said1) t.finding({
+      title: 'A drop that announces files but carries none does nothing and says nothing',
+      severity: 'low',
+      steps: '1. Open the Study tab (the sample, or any photo). 2. Drag an item whose data is marked as files but carries no file (a folder dragged from some file managers, or a file promise that did not resolve) over the page and let go.',
+      expected: 'The page says why no picture was taken, as it does for an empty file ("That is an empty file or a folder. Choose a JPG, PNG or WebP photo.", js/app.js:488) and for a text drop ("That was text, not a picture. ..."). The drop hint goes away.',
+      actual: `No toast (${JSON.stringify(said)}); the drop hint goes and the study is unchanged. Measured with a dispatched dragenter and drop whose dataTransfer has types ["Files"] and no files: nothing is said at any point.`,
+      cause: 'js/app.js:652 takes `files.find(...) || files[0]`, which is undefined for an empty list, and js/app.js:653 passes it to loadForTab, then loadFile and readImage (js/app.js:478, `if (!file) return;`), which return without a message. The drop handler only speaks when the drag has no Files type at all (js/app.js:644-648).',
+    });
+    await clean(t, page, 'a drop with no file');
+    await page.context().close();
+  }
+
+  // ---- a reload while a 1400 px study of a 3000 × 2000 photo is being worked out: the page comes back as the sample, and takes a photo ----
+  {
+    const page = await openPage(site);
+    await setSelect(page, 'detail', '1400');
+    await page.setInputFiles('#file', await makeImage(page, { width: 3000, height: 2000, type: 'image/jpeg', name: 'reload-mid.jpg' }));
+    await page.waitForFunction(() => !document.getElementById('busy').hidden, null, { timeout: 15000 }).catch(() => null);
+    await sleep(150);
+    await page.reload({ waitUntil: 'load' }); await sleep(300); await busyHidden(page);
+    const after = await study(page);
+    t.check(after.label === SAMPLE_LABEL && after.zones === 3 && after.busy, 'a reload while a 1400 px study is being worked out: the sample comes back with its three studies, and the page is idle', { label: after.label, zones: after.zones, idle: after.busy });
+    const again = await loadKind(page, await makeImage(page, { width: 800, height: 600, name: 'after-reload.png' }));
+    t.check(again.loaded && again.label === 'after-reload.png · 800 × 600 px' && again.toast === '', 'after that reload a photo loads at once', { label: again.label, toast: again.toast });
+    await clean(t, page, 'reload while a 1400 px study is worked out');
+    await page.context().close();
+  }
+
+  // ---- Forget pressed in a second tab while this one reads a 6000 × 4000 photo: nothing is kept afterwards, and this tab's studies are drawn ----
+  {
+    const a = await openPage(site);
+    const b = await newTab(site, a);
+    await tab(b, 'help');
+    await a.setInputFiles('#file', await makeImage(a, { width: 6000, height: 4000, type: 'image/jpeg', name: 'forget-race.jpg' }));
+    await sleep(60);
+    await click(b, '#forgetBtn'); await sleep(300);
+    await Promise.all([
+      a.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null),
+      b.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null),
+      click(b, '#forgetBtn'),
+    ]);
+    await sleep(2500); await busyHidden(a);
+    const keys = await storageKeys(a);
+    const after = await study(a);
+    t.check(keys.length === 0 && after.zones === 3 && after.busy, "Forget pressed in tab B while tab A reads a photo: nothing is kept afterwards, and tab A's studies are drawn", { keys, label: after.label, zones: after.zones });
+    await clean(t, a, 'forget while tab A reads'); await clean(t, b, 'forget in tab B');
+    await a.context().close();
+  }
+
+  // ---- Simple and Advanced on Colors and paints: Simple offers three palettes, each with its reason; the best of them is marked
+  // Best match and is the palette in use until one is chosen. Advanced lists all ten, with one Best match. A choice survives a reload ----
+  {
+    const page = await openPage(site);
+    await page.evaluate(() => { document.getElementById('drawer-colors').open = true; });
+    await page.waitForFunction(() => document.querySelectorAll('#presetList li').length === 10, null, { timeout: 20000 }).catch(() => null);
+    const WHY = { zorn: 'Four colors. The easiest way to mix skin.', primary: 'A yellow, a red and a blue. Mix every color yourself.', rembrandt: 'Earth colors, for the old-master look.' };
+    const sim = await paletteList(page);
+    t.check(sim.mode === 'simple' && sim.shown.map((x) => x.id).sort().join() === 'primary,rembrandt,zorn' && sim.shown.every((x) => x.why === WHY[x.id]), 'Simple offers three palettes, each with its reason: Zorn, Three primaries and Rembrandt\'s earths', sim.shown);
+    t.check(sim.badges.length === 1 && sim.badges[0] === sim.shown[0].id && sim.used.startsWith(bareName(sim.shown[0].name)) && sim.pressed.length === 0, 'Simple: one Best match, on the best of the three, and until one is chosen that is the palette in use', { badges: sim.badges, used: sim.used, first: sim.shown[0].name });
+    await clickWait(page, '[data-mode="advanced"]');
+    const adv = await paletteList(page);
+    const bestAdv = adv.shown.find((x) => x.id === adv.badges[0]);
+    t.check(adv.mode === 'advanced' && adv.shown.length === 10 && adv.badges.length === 1 && !!bestAdv && adv.used.startsWith(bareName(bestAdv.name)), 'Advanced lists all ten palettes with one visible Best match, and the palette in use is that best one', { shown: adv.shown.length, badges: adv.badges, used: adv.used });
+    await clickWait(page, '[data-mode="simple"]');
+    await page.evaluate(() => document.querySelector('#presetList li[data-preset="primary"] .preset').click()); await sleep(300);
+    await page.reload({ waitUntil: 'load' }); await sleep(400);
+    await page.evaluate(() => { document.getElementById('drawer-colors').open = true; });
+    await page.waitForFunction(() => document.querySelectorAll('#presetList li').length === 10, null, { timeout: 20000 }).catch(() => null);
+    const back = await paletteList(page);
+    const pName = (back.shown.find((x) => x.id === 'primary') || { name: '' }).name;
+    t.check(back.mode === 'simple' && same(back.pressed, ['primary']) && back.used.startsWith(bareName(pName)) && pName !== '', 'a palette chosen in Simple is still the one in use after a reload, and the list shows it pressed', { pressed: back.pressed, used: back.used, name: pName });
+    await clean(t, page, 'simple palettes');
+    await page.context().close();
+  }
+
+  // ---- Colors and paints at their ends and back: Colors in each value at 1 and 6 (3 again gives the same colors as before), Lean
+  // toward lighter tones at Off and at 100%, and Paints on the palette at 3 and at 10 with its readout and a Suggest at 3 ----
+  {
+    const page = await openPage(site);
+    await clickWait(page, '[data-mode="advanced"]');
+    await page.evaluate(() => { document.getElementById('drawer-colors').open = true; });
+    const snap = () => page.evaluate(() => { const r = Studio.result(); return { n: r.blockColors.length, rgb: r.blockColors.map((c) => [c.r, c.g, c.b].join(',')).join(';'), state: document.getElementById('colorsState').textContent.trim(), out: document.getElementById('colorsOut').value, leanOut: document.getElementById('leanOut').value }; });
+    const base = await snap();
+    await setRange(page, 'colors', 1); const one = await snap();
+    await setRange(page, 'colors', 6); const six = await snap();
+    await setRange(page, 'colors', 3); const back = await snap();
+    t.check(one.out === '1' && one.n >= 1 && one.n <= 9 && one.state === '1 per value' && six.out === '6' && six.n > 3 && six.n <= 24 && six.state === '6 per value' && back.rgb === base.rgb, 'Colors in each value at 1 and at 6: at most 3 × (k + 2) block colors (a shape may take up to two colors of its own per value), the header says so, and 3 again gives the colors it gave at first', { one: [one.n, one.state], six: [six.n, six.state], same: back.rgb === base.rgb });
+    await setRange(page, 'lean', 0); const off = await snap();
+    await setRange(page, 'lean', 100); const full = await snap();
+    await setRange(page, 'lean', 60); const def = await snap();
+    t.check(off.leanOut === 'Off' && full.leanOut === '100%' && def.leanOut === '60%' && off.rgb !== full.rgb && def.rgb === base.rgb, 'Lean toward lighter tones: Off reads Off, 100% reads 100%, the two give different colors, and 60% gives the first colors back', { off: off.leanOut, full: full.leanOut, differ: off.rgb !== full.rgb, back: def.rgb === base.rgb });
+    await page.evaluate(() => document.getElementById('srcMine').click()); await sleep(300);
+    const readout = async (v) => { await page.evaluate((v) => { const e = document.getElementById('paintMax'); e.value = v; e.dispatchEvent(new Event('input', { bubbles: true })); }, v); return page.evaluate(() => document.getElementById('paintMaxOut').value); };
+    const lo = await readout(3), hi = await readout(10), mid = await readout(6);
+    t.check(lo === '3 + white' && hi === '10 + white' && mid === '6 + white', 'Paints on the palette reads 3 + white at its low end, 10 + white at its top and 6 + white at its default', { lo, hi, mid });
+    await readout(3);
+    await page.evaluate(() => document.getElementById('suggestBtn').click()); await sleep(200);
+    await page.waitForFunction(() => { const b = document.getElementById('suggestBtn'); return !b.disabled && /Suggest again/.test(b.textContent); }, null, { timeout: 120000 }).catch(() => null);
+    const sug = await page.evaluate(() => ({ chips: document.querySelectorAll('#resultPaints li').length, match: document.getElementById('resultMatch').textContent }));
+    t.check(sug.chips >= 1 && sug.chips <= 4 && /Mixes \d+ of \d+/.test(sug.match), 'Suggest a palette at 3 gives at most three paints and white, with its match count', sug);
+    await clean(t, page, 'colors and paints at their ends');
+    await page.context().close();
+  }
+
+  // ---- the value scale and the split readouts at their ends: the splits read V 0.1 to V 9.9, a top split is held one step under the
+  // other, each zone reads its gray, and the grays at their ends read V 0.0 and V 10.0 and paint black and white ----
+  {
+    const page = await openPage(site);
+    await clickWait(page, '[data-mode="advanced"]');
+    await page.evaluate(() => { document.getElementById('drawer-values').open = true; });
+    const reads = () => page.evaluate(() => {
+      const r = Studio.result(); const v = (id) => document.getElementById(id).value;
+      return { t1: +v('t1'), t2: +v('t2'), t1o: document.getElementById('t1Out').value, t2o: document.getElementById('t2Out').value, header: document.getElementById('valuesState').textContent.trim(), zones: [...document.querySelectorAll('#zones li .meta')].map((e) => e.textContent), tones: [...document.querySelectorAll('#zones .tone')].map((e) => e.style.background), shares: r.zoneShare.reduce((a, b) => a + b, 0) };
+    });
+    await setRange(page, 't1', 1); await setRange(page, 't2', 3);
+    const low = await reads();
+    t.check(low.t1o === 'V 0.1' && low.t2o === 'V 0.3' && low.header === 'Splits at V 0.1 and 0.3 · Simplify 3' && Math.abs(low.shares - 1) < 0.01, 'the lowest splits read V 0.1 and V 0.3, the header says so, and the three zones still hold every pixel', low);
+    await setRange(page, 't1', 98); const top = await reads();
+    t.check(top.t1 === 97 && top.t2 === 99 && top.t1o === 'V 9.7' && top.t2o === 'V 9.9' && top.header === 'Splits at V 9.7 and 9.9 · Simplify 3', 'a top split of 98 is held one step under the other (V 9.7 and V 9.9), and the readouts say the same', top);
+    await setRange(page, 't1', 35); await setRange(page, 't2', 65);
+    const mid = await reads();
+    t.check(mid.zones.length === 3 && mid.zones.every((z) => /^V \d+\.\d · \d+%$/.test(z)) && mid.zones[0].startsWith('V 2.0') && mid.zones[1].startsWith('V 5.0') && mid.zones[2].startsWith('V 8.5'), 'at the defaults each zone reads its gray: V 2.0, V 5.0 and V 8.5', mid.zones);
+    await setRange(page, 'g0', 0); await setRange(page, 'g2', 100);
+    const ends = await page.evaluate(() => ({ outs: [0, 1, 2].map((i) => document.getElementById('g' + i + 'Out').value), tones: [...document.querySelectorAll('#zones .tone')].map((e) => e.style.background), zones: [...document.querySelectorAll('#zones li .meta')].map((e) => e.textContent) }));
+    t.check(ends.outs[0] === 'V 0.0' && ends.outs[2] === 'V 10.0' && ends.zones[0].startsWith('V 0.0') && ends.zones[2].startsWith('V 10.0') && /rgb\(0, 0, 0\)/.test(ends.tones[0]) && /rgb\(255, 255, 255\)/.test(ends.tones[2]), 'the grays at their ends read V 0.0 and V 10.0 in the zones and paint pure black and white', ends);
+    await clean(t, page, 'value scale and split readouts');
+    await page.context().close();
+  }
+
+  // ---- the histogram: a flat tone puts every pixel in the one bin it belongs to (50% gray in 53, white in 99, black in 0), the
+  // split marks stand at the splits, and its bitmap is as wide as it is shown ----
+  {
+    const page = await openPage(site);
+    await clickWait(page, '[data-mode="advanced"]');
+    await page.evaluate(() => { document.getElementById('drawer-values').open = true; }); await sleep(200);
+    for (const [name, bg, bin] of [['flat-middle.png', [128, 128, 128], 53], ['flat-white.png', [255, 255, 255], 99], ['flat-black.png', [0, 0, 0], 0]]) {
+      await loadKind(page, await paintPng(page, { width: 300, height: 400, name, bg }));
+      const h = await histogramCols(page);
+      const lo = Math.floor((bin / 100) * h.W), hi = Math.floor(((bin + 1) / 100) * h.W);
+      t.check(h.bar.length > 0 && h.bar.every((x) => x >= lo - 1 && x <= hi) && Math.abs(h.W - Math.round(h.cw * h.dpr)) <= 1, `a ${name.replace('.png', '')} photo's bars stand only in bin ${bin} (x ${lo}–${hi} of ${h.W})`, { bars: h.bar.length ? [h.bar[0], h.bar[h.bar.length - 1]] : [], W: h.W, cw: h.cw });
+    }
+    await splits(page, 27, 46); await sleep(60);
+    const m = await histogramCols(page);
+    t.check(m.mark.length >= 2 && m.mark.some((x) => Math.abs(x - 0.27 * m.W) <= 2) && m.mark.some((x) => Math.abs(x - 0.46 * m.W) <= 2), 'the split marks stand at V 2.7 and V 4.6 on the histogram', { marks: m.mark, W: m.W, t1: m.t1, t2: m.t2 });
+    await clean(t, page, 'histogram bars and marks');
+    await page.context().close();
+  }
+  t.note('Round 2 closed these from the first pass\'s list: the GIF (written in the case, the first note above is out of date for it); a drop that announces Files but carries none (now a finding); a reload in the middle of a 1400 px study; Forget in a second tab while this one reads a photo. Still left out: the toast race (a marks-cleared message and a text drop at once: the later message replaces the earlier one by design, so there is no defect to assert).');
 }

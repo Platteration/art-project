@@ -8,7 +8,7 @@
 // hostile saved state for the two keys the tools read, the tools under a touch on a 390 px phone, and
 // keyboard-only operation.
 import fs from 'node:fs';
-import { openPage, clean, tab, PHONE, DESKTOP, makeImage, loadPhoto, pasteFile, textFile, brokenImage, svgImage, storageGet, click, text, visible, hscroll, sleep, app, newTab, axe } from '../lib.mjs';
+import { openPage, clean, tab, PHONE, DESKTOP, makeImage, loadPhoto, dropFiles, pasteFile, textFile, brokenImage, svgImage, storageGet, click, text, visible, hscroll, sleep, app, newTab, axe } from '../lib.mjs';
 
 const PALETTE_KEY = 'portrait-value-studio.palette';
 const CANVAS_KEY = 'portrait-value-studio.canvasUnit';
@@ -151,6 +151,30 @@ async function pngRead(page, buf, { points = [], columns = [], rects = [], pills
     return { size: [c.width, c.height], px: pts.map(([fx, fy]) => at(fx, fy)), cols: cols.map(column), rects: rs.map(share), pills: pl.map(pill) };
   }, [buf.toString('base64'), points, columns, rects, pills]);
 }
+
+// ---- helpers of round 2 ---------------------------------------------------------------------------------------------
+// a page at a device-pixel ratio (openPage cannot set one): the same listeners as openPage, in a context of its own
+async function openRetina(site, dpr) {
+  const context = await site.browser.newContext({ viewport: DESKTOP, deviceScaleFactor: dpr });
+  const page = await context.newPage();
+  const log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
+  page.log = log;
+  page.on('pageerror', (e) => log.pageerrors.push(String(e.stack || e.message).slice(0, 400)));
+  page.on('console', (m) => { if (m.type() === 'error' && !/GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i.test(m.text())) log.console.push(m.text().slice(0, 300)); });
+  page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) log.offsite.push(u); });
+  page.on('requestfailed', (r) => { const u = r.url(); if (!u.startsWith('blob:') && (r.failure() || {}).errorText !== 'net::ERR_ABORTED') log.failed.push(u); });
+  await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${(e.blockedURI || '').slice(0, 60)}`); }); });
+  await page.goto(site.base, { waitUntil: 'load' });
+  await sleep(400);
+  return page;
+}
+// a PNG of vertical bands of flat tones, drawn in the page
+async function bandsPng(page, bands, { width = 600, height = 300, name = 'bands.png' } = {}) {
+  const url = await page.evaluate(([w, h, bands]) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); bands.forEach((col, i) => { g.fillStyle = col; g.fillRect((i * w) / bands.length, 0, w / bands.length + 1, h); }); return c.toDataURL('image/png'); }, [width, height, bands]);
+  return { name, mimeType: 'image/png', buffer: Buffer.from(url.split(',')[1], 'base64') };
+}
+// CIE L* of a #RRGGBB color, from the sRGB values (its own formula, not the page's)
+const lstarOf = (hex) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); const Y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; return Y > 0.008856 ? 116 * Math.cbrt(Y) - 16 : 903.3 * Y; };
 
 export default async function studyTools(t, site) {
   // ---- magnifier and picked colors ------------------------------------------------------------------------
@@ -1716,4 +1740,122 @@ export default async function studyTools(t, site) {
 
   t.note('Not covered here (deliberately): the device-pixel-ratio 2 and 3 run (needs its own browser context with deviceScaleFactor, which openPage cannot set); the over-200-color palette PNG at half size; a photo pasted while the check drawer is open.');
   t.note('The "Save as PNG of a big picked-colors list" finding (the 1,573-color claim): palSave widens the columns past 60 colors (app.js 1118, cols = max(min(6, n), ceil(n / 60))), so the rows stay near 60 and the canvas is far from 65,535 px at that size; that finding\'s cause is stale, and only a width past 32,767 px would fail.');
+
+  // ==== round 2: the device-pixel-ratio runs, the palette PNG past 200 colors, a paste with the check drawer open, a photo
+  // replaced while a tool is in use, and the magnifier's value on known tones ====
+
+  // ---- a retina screen: the overlays are drawn at the screen's density and the marks land where they were drawn; the saved PNG
+  // is the study's size, not the screen's; the magnifier reads the pixel under the pointer (each ratio has its own context) ----
+  for (const dpr of [2, 3]) {
+    const page = await openRetina(site, dpr);
+    const first = await page.evaluate(() => { const c = document.getElementById('cv-orig'); const o = c.nextElementSibling; return { dpr: window.devicePixelRatio, cw: c.offsetWidth, ch: c.offsetHeight, ow: o.width, oh: o.height }; });
+    t.check(first.dpr === dpr && Math.abs(first.ow - Math.round(first.cw * dpr)) <= 1 && Math.abs(first.oh - Math.round(first.ch * dpr)) <= 1, `at a device-pixel ratio of ${dpr} the overlay is drawn at ${dpr}× the picture's size`, first);
+    await setTool(page, 'line');
+    const b = await box(page);
+    await page.mouse.move(b.x + 0.2 * b.width, b.y + 0.5 * b.height); await page.mouse.down();
+    await page.mouse.move(b.x + 0.8 * b.width, b.y + 0.5 * b.height, { steps: 8 }); await page.mouse.up(); await sleep(150);
+    const ink = await page.evaluate(() => { const o = document.getElementById('cv-orig').nextElementSibling; const d = o.getContext('2d').getImageData(0, 0, o.width, o.height).data; let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1; for (let y = 0; y < o.height; y++) for (let x = 0; x < o.width; x++) { if (d[(y * o.width + x) * 4 + 3] > 200) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } } return { x0, x1, y0, y1, W: o.width, H: o.height }; });
+    const tol = 6 * dpr;
+    t.check(ink.x1 >= 0 && Math.abs(ink.x0 - 0.2 * ink.W) <= tol && Math.abs(ink.x1 - 0.8 * ink.W) <= tol && Math.abs((ink.y0 + ink.y1) / 2 - 0.5 * ink.H) <= tol, `at ${dpr}× a line dragged from 20% to 80% of the width is drawn there (within ${tol} px)`, ink);
+    const dl = await download(page, () => click(page, '[data-save="orig"]'));
+    const d = dl ? pngDims(dl.buf) : null;
+    const prep = await page.evaluate(() => { const p = Studio.prep(); return { w: p.w, h: p.h }; });
+    t.check(!!d && d.w === prep.w && d.h === prep.h, `at ${dpr}× the saved photo PNG is the study's size, not the screen's`, { png: d, prep });
+    await setTool(page, 'sample');
+    await hover(page, 0.3, 0.6);
+    const l = await loupe(page);
+    const around = await page.evaluate(() => { const c = document.getElementById('cv-orig'); const g = c.getContext('2d'); const x = Math.floor(0.3 * c.width), y = Math.floor(0.6 * c.height); const out = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const p = g.getImageData(x + dx, y + dy, 1, 1).data; out.push('#' + [p[0], p[1], p[2]].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase()); } return out; });
+    t.check(l.shown && around.includes(l.hex), `at ${dpr}× the magnifier reads the pixel under the pointer`, { loupe: l.hex, around });
+    await clean(t, page, `retina ${dpr}×`);
+    await page.context().close();
+  }
+
+  // ---- picked colors past 200: Save as PNG takes more, smaller columns and half-size type; 200 colors keep the full size; the
+  // first and the last tiles hold the first and the last colors picked ----
+  for (const n of [200, 201]) {
+    const list = Array.from({ length: n }, (_, i) => ({ r: (i * 37 + 11) % 256, g: (i * 91 + 3) % 256, b: (i * 53 + 7) % 256 }));
+    const page = await openPage(site, { storage: { [PALETTE_KEY]: list } });
+    const dl = await download(page, () => click(page, '#palSave'));
+    const k = n > 200 ? 0.5 : 1;
+    const sw = 180 * k, gap = 16 * k, pad = 24 * k, lab = 54 * k;
+    const cols = Math.max(Math.min(6, n), Math.ceil(n / 60)), rows = Math.ceil(n / cols);
+    const want = [pad * 2 + cols * sw + (cols - 1) * gap, pad * 2 + rows * (sw + lab) + (rows - 1) * gap];
+    const d = dl ? pngDims(dl.buf) : null;
+    t.check(!!dl && dl.name === 'sample-study-palette.png' && !!d && d.w === want[0] && d.h === want[1], `${n} picked colors: the palette PNG is ${want[0]} × ${want[1]} px (${cols} columns of tiles)`, { name: dl && dl.name, png: d, want });
+    const tile = (i) => [(pad + (i % cols) * (sw + gap) + sw / 2) / want[0], (pad + Math.floor(i / cols) * (sw + lab + gap) + sw / 2) / want[1]];
+    const px = dl ? await pngRead(page, dl.buf, { points: [tile(0), tile(n - 1)] }) : null;
+    const pick = (i) => '#' + [list[i].r, list[i].g, list[i].b].map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+    t.check(!!px && hexOf(px.px[0]) === pick(0) && hexOf(px.px[1]) === pick(n - 1), `${n} picked colors: the first and the last tiles hold the first and the last colors`, { png: px && px.px.map(hexOf), want: [pick(0), pick(n - 1)] });
+    await clean(t, page, `palette PNG at ${n} colors`);
+    await page.context().close();
+  }
+
+  // ---- a photo pasted while the How close did I get? drawer is open is the painting, and the study keeps its photo and its line ----
+  {
+    const page = await openPage(site);
+    await setTool(page, 'line');
+    await dragFrac(page, [0.2, 0.25], [0.8, 0.25]);
+    await page.evaluate(() => { document.getElementById('drawer-check').open = true; });
+    await sleep(300);
+    await pasteFile(page, await makeImage(page, { width: 500, height: 600, name: 'pasted-painting.png', draw: 'flat' }));
+    const s = await page.evaluate(() => ({ art: document.getElementById('artSource').textContent.trim(), study: document.getElementById('source').textContent.trim(), lines: +(document.querySelector('[data-tool="line"]').dataset.count || 0) }));
+    t.check(/pasted-painting\.png/.test(s.art) && /Sample study/.test(s.study) && s.lines === 1, 'a photo pasted with the check drawer open is the painting: the study keeps its photo and its line', s);
+    await clean(t, page, 'paste with the check drawer open');
+    await page.context().close();
+  }
+
+  // ---- a photo replaced while a tool is in use: the magnifier with the pointer over the photo, a pick straight after, a plumb point
+  // held down while a photo is dropped on the picture, and the grid, which a new photo leaves on ----
+  {
+    const page = await openPage(site);
+    await setTool(page, 'sample');
+    await click(page, '#gridBtn');
+    await hover(page, 0.5, 0.42);
+    await pasteFile(page, await makeImage(page, { width: 600, height: 800, draw: 'white', name: 'white-swap.png' }));
+    const swapped = await loupe(page);
+    const shownOk = t.check(!swapped.shown || swapped.hex === '#FFFFFF', 'a photo pasted with the pointer over it: the magnifier shows the new photo under the pointer, not the old one', swapped);
+    if (!shownOk) t.finding({
+      title: 'After a photo is pasted with the pointer over it, the magnifier keeps showing the old photo\'s color until the pointer moves',
+      severity: 'low',
+      steps: '1. Open the Study tab with the sample. Keep the magnifier on (it is on at the start) and rest the pointer on the photo. 2. Paste a different photo (Ctrl+V) without moving the pointer. 3. Read the magnifier, or the hex code it shows, before moving the pointer.',
+      expected: 'The magnifier shows the pixels under the pointer on the photo now shown ("hover any image to see the pixels under the pointer magnified", README), or is hidden until the pointer moves.',
+      actual: `The loupe stays open with the old photo's color (${JSON.stringify(swapped)}) and the new photo is white at that point (#FFFFFF). It shows the new color only after the pointer moves a pixel.`,
+      cause: 'js/app.js:566-598 (useSource) replaces the photo and clears the marks but neither hides the loupe nor refreshes state.hover; the loupe is only redrawn by a pointer event (js/app.js:836-845, showLoupeFor), and the stale sample is still in state.hover from the earlier hover.',
+    });
+    await tapAt(page, 0.5, 0.42);
+    const picked = (await swatches(page)).map((s) => s.hex);
+    t.check(picked.length === 1 && picked[0] === '#FFFFFF' && (await pressed(page, '#gridBtn')) === 'true', 'a pick straight after the swap takes the new photo\'s color, and the grid stays on', { picked, grid: await pressed(page, '#gridBtn') });
+    await setTool(page, 'plumb');
+    await tapAt(page, 0.6, 0.6);
+    const before = await count(page, 'plumb');
+    const b = await box(page);
+    await page.mouse.move(Math.round(b.x + 0.6 * b.width), Math.round(b.y + 0.6 * b.height)); await page.mouse.down();
+    await dropFiles(page, '#cv-orig', [await makeImage(page, { width: 500, height: 500, name: 'dropped-mid-plumb.png', draw: 'flat' })]);
+    await page.waitForFunction(() => /dropped-mid-plumb/.test(document.getElementById('source').textContent), null, { timeout: 15000 }).catch(() => null);
+    await sleep(200);
+    await page.mouse.up(); await sleep(100);
+    const afterUp = await count(page, 'plumb');
+    await page.keyboard.press('Control+z'); await sleep(150);
+    const undone = await count(page, 'plumb');
+    t.check(before === 1 && afterUp === 0 && undone === 0, 'a plumb point held down while a photo is dropped goes with the old photo, and Ctrl+Z does not bring it back', { before, afterUp, undone });
+    await clean(t, page, 'photo replaced mid-use');
+    await page.context().close();
+  }
+
+  // ---- the magnifier's value on known tones: each band's hex, and its value on the 0–10 scale to a tenth (CIE L*/10) ----
+  {
+    const bands = ['#000000', '#808080', '#ffffff', '#ff0000', '#00ff00', '#404040'];
+    const page = await openPage(site);
+    await loadPhoto(page, await bandsPng(page, bands), { settle: 400 });
+    const got = [];
+    for (let i = 0; i < bands.length; i++) {
+      await hover(page, (i + 0.5) / bands.length, 0.5);
+      const l = await loupe(page);
+      got.push({ band: bands[i], hex: l.hex, val: l.val, want: (lstarOf(bands[i]) / 10).toFixed(1) });
+    }
+    t.check(got.every((g) => g.hex === g.band.toUpperCase() && Math.abs(parseFloat(g.val.replace('V ', '')) - parseFloat(g.want)) <= 0.1), 'the magnifier reads each known tone: its hex, and its value on the 0–10 scale to a tenth', got);
+    await clean(t, page, 'magnifier on known tones');
+    await page.context().close();
+  }
+  t.note('Round 2 closed from the first pass\'s list: the device-pixel-ratio 2 and 3 runs (each its own context), the palette PNG past 200 colors (both sides of the 200 line, its tiles read back), and a photo pasted while the check drawer is open. Still left out: a Copy the Study lines that carries the Loomis head together with the Study marks (the head needs a fitted head, which loomis.mjs builds; its head copy is covered there), and the toast race between the marks-cleared message and a text drop.');
 }
