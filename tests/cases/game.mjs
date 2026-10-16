@@ -38,6 +38,10 @@ const setAmount = (page, idx) => page.evaluate((i) => { const r = document.getEl
 const pickNumber = (page, k) => page.evaluate((k) => document.querySelector(`.game-number[data-number="${k}"]`).click(), k);
 // a tap on a paint (a keyboard click: detail 0, which the paint takes as one tap)
 const tapPaint = (page, code, times = 1) => page.evaluate(([code, n]) => { const b = [...document.querySelectorAll('.game-paint')].find((b) => b.querySelector('.game-paint-code').textContent === code); if (!b) throw new Error('no paint ' + code); for (let i = 0; i < n; i++) b.click(); }, [code, times]);
+// the clock's readout once a tick has drawn it after the page clock was moved on (its 250 ms tick, not a fixed sleep,
+// decides when): a readout that differs from the one before the move, or reads as a moved-on clock should
+const timerMoved = (page, before) => page.waitForFunction((b) => document.getElementById('gameTimer').textContent !== b, before, { timeout: 5000 }).catch(() => null);
+const timerReads = (page, re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('gameTimer').textContent), re.source, { timeout: 5000 }).catch(() => null);
 const play = (page) => page.evaluate(() => ({
   timer: document.getElementById('gameTimer').textContent, timerLabel: document.getElementById('gameTimer').getAttribute('aria-label'), low: document.getElementById('gameTimer').classList.contains('is-low'),
   progress: document.getElementById('gameProgress').textContent, lock: document.getElementById('gameLock').textContent,
@@ -528,7 +532,8 @@ export default async function game(t, site) {
     t.check(p.looking && p.lock === 'Ready: hide it' && p.timer === '0:10' && p.timerLabel === 'Time left to memorize' && p.toggle === 'Memorize this' && !p.collapsed && p.progress === 'Memorize the colors. The reference hides soon.' && p.next === true, 'Memory: a 10-second look with the clock waiting, Ready: hide it, Next ▸ off', [p.lock, p.timer, p.toggle, p.progress, p.next]);
     await tapPaint(page, 'TW');
     t.check((await play(page)).parts.startsWith('Empty'), 'Memory: painting during the look is refused');
-    await page.clock.fastForward(3000); await sleep(300);
+    const looked = (await play(page)).timer;
+    await page.clock.fastForward(3000); await timerMoved(page, looked);
     p = await play(page);
     t.check(p.timer === '0:07' && p.looking, 'Memory: the look counts down', p.timer);
     await click(page, '#gameLock'); await sleep(100);
@@ -544,7 +549,9 @@ export default async function game(t, site) {
     await page.clock.fastForward(3500); await sleep(300);
     p = await play(page);
     t.check(p.collapsed && p.toggle === 'Peek · 2 left (−10 s)', 'the peek ends after 3 seconds, two left', [p.collapsed, p.toggle]);
-    for (let i = 0; i < 2; i++) { await click(page, '#gameRefToggle'); await page.clock.fastForward(3500); await sleep(300); }
+    let before = '';
+    for (let i = 0; i < 2; i++) { await click(page, '#gameRefToggle'); before = (await play(page)).timer; await page.clock.fastForward(3500); await sleep(300); }
+    await timerMoved(page, before);
     p = await play(page);
     t.check(p.collapsed && p.toggle === 'No peeks left' && /^4:(1[5-9]|20)$/.test(p.timer), 'three peeks used: No peeks left, 30 seconds gone', [p.toggle, p.timer]);
     await click(page, '#gameRefToggle'); await sleep(100);
@@ -559,7 +566,7 @@ export default async function game(t, site) {
     await page.clock.fastForward(10500); await sleep(400);
     p = await play(page);
     t.check(!p.looking && p.lock === 'Lock in portrait' && p.collapsed && p.timer === '5:00', 'Memory: the look ends by itself after 10 seconds', [p.looking, p.lock, p.timer]);
-    await page.clock.fastForward(4 * 60 * 1000 + 52 * 1000); await sleep(300);
+    await page.clock.fastForward(4 * 60 * 1000 + 52 * 1000); await timerReads(page, /^0:0\d$/);
     await click(page, '#gameRefToggle'); await sleep(100);
     p = await play(page);
     t.check(p.collapsed && p.toast === 'Not enough time left to peek' && p.toggle === 'Peek · 3 left (−10 s)', 'a peek with under 10 seconds left is refused and said', [p.toast, p.toggle, p.timer]);
