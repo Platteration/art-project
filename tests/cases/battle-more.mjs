@@ -392,7 +392,7 @@ export default async function battleMore(t, site) {
     await page.evaluate(() => { window.__nodes = 0; for (const n of ['createOscillator', 'createBufferSource']) { const o = AudioContext.prototype[n]; AudioContext.prototype[n] = function () { window.__nodes++; return o.apply(this, arguments); }; } });
     await start(page, { count: '2' });
     await answer(page, true, 'tap');
-    await sleep(200);
+    await page.waitForFunction(() => window.__nodes > 0, null, { timeout: 10000 }).catch(() => null); // (the audio context may wake after the tap on a loaded machine)
     const onNodes = await page.evaluate(() => window.__nodes);
     t.check((await page.evaluate(() => GameSound.on())) && onNodes > 0, 'with the sound on, a tap on a swatch makes a sound (audio nodes created)', onNodes);
     await page.evaluate(() => document.getElementById('gameSound').click());
@@ -413,14 +413,16 @@ export default async function battleMore(t, site) {
   await block(t, site, 'early quit', async () => {
     const page = await openPage(site, { url: '#battle' });
     await start(page, { count: '2' });
-    const at = await page.evaluate(() => performance.now());
-    if (at < 2900) {
-      await click(page, '#vb-quit');
+    // the guard reads the page's own clock (performance.now): for the one synchronous ✕ it is held at one second, so that the page
+    // is "in its first three seconds" however long a loaded machine took to reach Start (a real page that young is a fast machine's)
+    const at = 1000;
+    {
+      await page.evaluate(() => { const real = performance.now; performance.now = () => 1000; try { document.getElementById('vb-quit').click(); } finally { performance.now = real; } });
       const b = await board(page);
       const ok = b.setup && !b.play && b.toast === 'Tap ✕ again to quit this battle';
-      t.check(ok, 'a single ✕ right after the page opened asks to tap again, like any other time', { at: Math.round(at), setup: b.setup, play: b.play, game: b.game, toast: b.toast });
+      t.check(ok, 'a single ✕ in the page\'s first three seconds (its clock held at 1 s) asks to tap again, like any other time', { at: Math.round(at), setup: b.setup, play: b.play, game: b.game, toast: b.toast });
       if (!ok) t.finding({ title: 'In the first 3 seconds after the page opens, one tap on ✕ quits the battle with no "tap again"', severity: 'low', steps: 'Open the site at #battle (or reload it there) and within 3 seconds press Start the battle, then tap ✕ once.', expected: 'The toast "Tap ✕ again to quit this battle" and the game goes on, as it does later (the README: tap ✕ twice).', actual: `The battle ends at once and the setup shows (here ${Math.round(at)} ms after the page opened, no toast). Cause: battle.js line 434 starts quitArmed at 0, and line 437 arms only when performance.now() - quitArmed > 3000, so for the page's first 3 s the guard reads as already armed.` });
-    } else t.note(`the page took ${Math.round(at)} ms to reach Start, past the 3 s window the early-✕ check needs; not checked this run`);
+    }
     await clean(t, page, 'early quit');
     await page.context().close();
   });
