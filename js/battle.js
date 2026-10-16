@@ -133,8 +133,9 @@
     }
     if (!best) {
       // the palette can't make the pair asked for at this level: take the nearest it can
-      const a = usable[rnd(usable.length)];
-      const sorted = usable.filter((c) => c !== a).sort((x, y) => Math.abs(Math.abs(measure(q.kind, x) - measure(q.kind, a)) - (lo + hi) / 2) - Math.abs(Math.abs(measure(q.kind, y) - measure(q.kind, a)) - (lo + hi) / 2));
+      // (one at least the band's low end apart when it has one: nearer than that is closer than the eye can tell)
+      const a = usable[rnd(usable.length)], gap = (c) => Math.abs(measure(q.kind, c) - measure(q.kind, a));
+      const sorted = usable.filter((c) => c !== a).sort((x, y) => (gap(x) < lo) - (gap(y) < lo) || Math.abs(gap(x) - (lo + hi) / 2) - Math.abs(gap(y) - (lo + hi) / 2));
       best = [a, sorted[0] || a];
     }
     const colors = Math.random() < 0.5 ? best : [best[1], best[0]];
