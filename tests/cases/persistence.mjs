@@ -19,7 +19,9 @@
 //   forget      Forget my work on this device with the keys, the painting and the poses all there, and three tabs open
 //   midway      a reload in the middle of a Studio stroke, a game, a battle, a Figure study class and a pose drag
 //   limits      the fifty boards (Paint by numbers and Value battle), the twelve poses and what is one past them
-import { openPage, newTab, clean, tab, app, poseFrame, stroke, click, text, visible, sleep, storageGet, DESKTOP } from '../lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { openPage, newTab, clean, tab, app, poseFrame, stroke, click, text, visible, sleep, storageGet, makeImage, loadPhoto, DESKTOP } from '../lib.mjs';
 
 const P = 'portrait-value-studio.', PL = 'pose-and-light.';
 const ONLY = (process.env.PERSIST_ONLY || '').split(',').filter(Boolean);
@@ -164,6 +166,17 @@ seg('visit', 25, async (t, site, pages) => {
   t.check(J(await keysOf(pose)) === J([PL + 'mine.v1', PL + 'mode', PL + 'v2']), 'Save this pose and the mode switch add pose-and-light.mine.v1 and pose-and-light.mode, the keys the README lists', await keysOf(pose));
   const kept = JSON.parse(await storageGet(pose, PL + 'mine.v1'));
   t.check(Array.isArray(kept) && kept.length === 1 && !JSON.stringify(kept).includes('data:') && typeof kept[0].p === 'object' && JSON.stringify(kept).length < 4000, 'a saved pose is joint angles and a viewpoint, no picture (the Privacy table)', { n: kept.length, bytes: JSON.stringify(kept).length });
+  const readme = fs.readFileSync(path.join(site.root, 'README.md'), 'utf8');
+  const claims = /Save this pose\*\* keeps up to 12 of your own, with pictures, in this browser/.test(readme);
+  t.check(!claims, 'the README says the same thing twice about saved poses: joint angles and a viewpoint, no pictures', claims ? 'Pose library: "keeps up to 12 of your own, with pictures, in this browser"' : '');
+  if (claims) t.finding({
+    title: 'The README says saved poses are kept "with pictures"; the Privacy section, and the code, say no pictures',
+    severity: 'low',
+    steps: '1. Read README.md, "Pose library" (Pose and light): "Save this pose keeps up to 12 of your own, with pictures, in this browser". 2. Read "Privacy": "up to twelve saved poses as joint angles and a viewpoint, no pictures (pose-and-light.mine.v1)". 3. Open Pose and light, Save this pose, and read localStorage pose-and-light.mine.v1.',
+    expected: 'One statement. The Privacy section is the list of what the site keeps and what Forget clears, so it must be the true one.',
+    actual: `The stored pose is ${JSON.stringify(kept).length} bytes of joint angles and a viewpoint with no data: URL or image; the pictures in the library are drawn again from them each time the page opens. The Pose library paragraph says they are kept.`,
+    cause: 'README.md, Pose and light, "Pose library" paragraph (the sentence ends "with pictures, in this browser"); js/pose.js changeMine (about 1396) stores { id, p, view } only.',
+  });
   await clean(t, page, 'visit: app'); await clean(t, pose, 'visit: Pose and light');
 });
 
@@ -206,8 +219,18 @@ seg('roundtrip', 60, async (t, site, pages) => {
   await line(page, 0.8);
   const strokeDone = Date.now();
   const locked = await lockMix(page, 2);
+  // the mix locked in Figure study's own copy of the Studio is kept under its own key
+  const figMixes = await app(page).evaluate(() => { document.querySelectorAll('#fs-paints .ps-paint')[2].click(); document.getElementById('fs-lock').click(); return document.querySelectorAll('#fs-mixes .ps-mix').length; });
+  // (what the Study tab does not keep: noted below)
+  await tab(page, 'study');
+  await setRange(page, 'simplify', 9); await setRange(page, 'colors', 5);
+  await openStudio(page);
   const rec = await waitRecord(page, (r) => r.sketchShown === false && r.savedAt > strokeDone);
   const before = await dumpOf(page);
+  const KNOWN = ['palette', 'canvasUnit', 'smoothing', 'blockView', 'lean', 'drawers', 'mode', 'battlePalette', 'battleCount', 'battleMode', 'battleBest', 'myPaints', 'figureStudy', 'figureMixes', 'gameAmount', 'gameSound', 'gameBest', 'gameLevel', 'gamePalette', 'gameSubject', 'gamePainting', 'gameRefView', 'gameMode', 'paintMixes', 'studioNotice', 'paintChoice'].map((k) => P + k);
+  t.check(Object.keys(before).every((k) => KNOWN.includes(k)), 'every key written is one of the 26 the code names (and the README\'s Privacy table describes by what they hold)', Object.keys(before).filter((k) => !KNOWN.includes(k)));
+  t.check(P + 'figureMixes' in before && figMixes >= 1, 'a mix locked in Figure study\'s own paper is kept under figureMixes', { figMixes, stored: before[P + 'figureMixes'] });
+  t.note(`keys this segment wrote: ${Object.keys(before).map((k) => k.replace(P, '')).join(', ')}; keys the code can write that it did not: ${KNOWN.filter((k) => !(k in before)).map((k) => k.replace(P, '')).join(', ')}`);
   t.check(!!rec && rec.canvas && rec.canvas.ground === 'wash' && rec.canvas.weave === 'linen' && Math.abs(rec.canvas.washStr - 0.45) < 0.01, 'the Studio saved its ground, wash strength and texture with the painting', rec);
   t.check(turned.w > turned.h && !!rec && rec.w === turned.w && rec.h === turned.h, 'the Studio saved the paper turned to landscape, at its size', { turned, rec });
 
@@ -249,8 +272,10 @@ seg('roundtrip', 60, async (t, site, pages) => {
     t.check((await band(page, ...BOTTOM)) > 100, `${label}: the stroke is on the paper`, await band(page, ...BOTTOM));
     t.check((await pressed(page, '[data-sketch-show="0"]')) === 'true', `${label}: the underdrawing is still hidden`, await pressed(page, '[data-sketch-show="0"]'));
     t.check((await mixCount(page)) === locked, `${label}: the locked mix is among the Studio's mixes (${locked} in all)`, await mixCount(page));
+    t.check((await app(page).evaluate(() => document.querySelectorAll('#fs-mixes .ps-mix').length)) === figMixes, `${label}: the mix locked in Figure study is among its mixes (${figMixes} in all)`, await app(page).evaluate(() => document.querySelectorAll('#fs-mixes .ps-mix').length));
     t.check(await toastNow(page) === '' || /back from last time/.test(await toastNow(page)), `${label}: the Studio says its painting is back, and nothing worse`, await toastNow(page));
     await tab(page, 'study');
+    if (round === 1) t.note(`not kept across a reload (the README promises none of it): the Simplify slider set to 9 reads ${await val(page, '#simplify')} and Colors in each value set to 5 reads ${await val(page, '#colors')} after it`);
     await clean(t, page, `roundtrip ${label}`);
   }
   t.note(`the Studio's wash after the reload is "${wash.name}" (one of ${wash.n} buttons); ${painting}`);
@@ -777,6 +802,7 @@ seg('midway', 75, async (t, site, pages) => {
   await tab(page, 'figure', { wait: false });
   await app(page).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
   t.check(await app(page).evaluate(() => document.getElementById('fig-timed').checked && document.getElementById('fig-t60').checked && !document.getElementById('fig-setup').hidden), 'Figure study opens on its setup, still Timed at a minute a pose');
+  t.check(await app(page).evaluate(() => document.getElementById('fig-back').hidden && document.getElementById('fig-review').hidden), 'and offers no drawings to go back to: a class\'s drawings last until the page is closed (the Help tab)');
   await openStudio(page);
   t.check((await band(page, ...BOTTOM)) > full * 0.9, 'the class\'s drawing did not touch the Studio\'s painting', await band(page, ...BOTTOM));
   const rec = await record(page);
@@ -880,6 +906,29 @@ seg('limits-poses', 45, async (t, site, pages) => {
   const mine = await app2.evaluate(() => [...document.querySelectorAll('#tab-figure [data-pose-id^="mine-"]')].map((b) => b.dataset.poseId));
   t.check(mine.length === 12 && !mine.includes('mine-seed-0'), 'Figure study offers the newest twelve of thirteen saved poses', mine);
   await clean(t, page, 'limits: poses'); await clean(t, app2, 'limits: Figure study');
+});
+
+
+// ---- segment: bestkey ---------------------------------------------------------------------------------------------------------------
+// README, Privacy: "best scores for your own photos are keyed by the photo's file name and size, the reduced size for a very large photo"
+seg('bestkey', 45, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await appUp(page);
+  await put(page, { [P + 'gameMode']: '"relaxed"' });
+  await reload(page);
+  await loadPhoto(page, await makeImage(page, { width: 600, height: 800, type: 'image/jpeg', name: 'sitter.jpg' }), { settle: 800 });
+  await tab(page, 'game'); await gameReady(page);
+  const g = await gameLock(page);
+  let ks = Object.keys(JSON.parse(await storageGet(page, P + 'gameBest') || '{}'));
+  t.check(g.popup && ks.length === 1 && /^sitter:600x800\|medium\|[a-z-]+\|relaxed$/.test(ks[0]), 'a best for a photo is kept under its file name (without the extension) and size', ks);
+  await tab(page, 'study');
+  await loadPhoto(page, await makeImage(page, { width: 5600, height: 4400, type: 'image/jpeg', quality: 0.3, name: 'huge.jpg', draw: 'flat' }), { settle: 1500 });
+  await tab(page, 'game'); await gameReady(page);
+  const g2 = await gameLock(page);
+  ks = Object.keys(JSON.parse(await storageGet(page, P + 'gameBest') || '{}'));
+  const huge = ks.find((k) => k.startsWith('huge:'));
+  t.check(g2.popup && !!huge && /^huge:2800x2200\|/.test(huge), 'a very large photo (5600 × 4400) is keyed by the reduced size it was reduced to (2800 × 2200)', ks);
+  await clean(t, page, 'bestkey');
 });
 
 
