@@ -778,8 +778,9 @@ async function dropDuringPoseBlock(t, page) {
   const dropped = await makeImage(page, { width: 520, height: 680, name: 'dropped-photo.png' });
   await pasteFile(page, pasted);
   await dropFiles(page, 'body', [dropped]);
-  await page.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
-  const s = await page.evaluate(() => { const c = window.FigureStudy.state(); return { ref: document.getElementById('fs-refName').textContent, running: c.running, held: c.held, shot: !!c.shot, draw: !document.querySelector('.fig-studio').hidden, tab: window.Studio.tab(), busy: !document.getElementById('busy').hidden }; });
+  // (the dropped photo is read after the pasted one is prepared: the work is over once it is the source and Updating… is down)
+  await page.waitForFunction(() => { const b = document.querySelector('#source strong'); return !!b && b.textContent === 'dropped-photo.png' && document.getElementById('busy').hidden; }, null, { timeout: 30000 }).catch(() => null);
+  const s = await page.evaluate(() => { const c = window.FigureStudy.state(); return { source: (document.querySelector('#source strong') || {}).textContent, ref: document.getElementById('fs-refName').textContent, running: c.running, held: c.held, shot: !!c.shot, draw: !document.querySelector('.fig-studio').hidden, tab: window.Studio.tab(), busy: !document.getElementById('busy').hidden }; });
   t.check(s.ref === name && s.running && !s.held && s.shot && s.draw && s.tab === 'figure' && !s.busy, 'drop: a photo pasted and another dropped during a pose leave the pose as the reference, the clock running, the class on screen', { s, name });
   await stroke(page, '#fs-paper', [[0.3, 0.3], [0.6, 0.6]]);
   t.check((await inked(page, '#fs-paper')) > 50, 'drop: the paper still takes a stroke');
