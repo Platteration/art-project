@@ -393,6 +393,8 @@ function groupB(t, site) {
       await page.setViewportSize(DESKTOP); await frames(page);
       await tab(page, name, { wait: false });
       if (name === 'pose' || name === 'figure') await settle(page, name, 30000, true);
+      // (the frame sizes itself once its page has said how tall it is: wait for that, or the first height read is none)
+      if (name === 'pose') await page.waitForFunction(() => /^\d+px$/.test(document.getElementById('poseFrame').style.height), null, { timeout: 30000 }).catch(() => null);
       const h0 = name === 'pose' ? await page.evaluate(() => document.getElementById('poseFrame').style.height) : null;
       const seen = [];
       for (const w of widths) {
@@ -411,6 +413,7 @@ function groupB(t, site) {
         await page.setViewportSize(PHONE); await frames(page);
         const grew = await page.waitForFunction((h) => document.getElementById('poseFrame').style.height !== h, h0, { timeout: 6000 }).then(() => true).catch(() => false);
         const h1 = await page.evaluate(() => document.getElementById('poseFrame').style.height);
+        if (!/^\d+px$/.test(h0 || '')) bad.push(`pose: the frame had no height at 1400 (${JSON.stringify(h0)})`);
         if (!grew) bad.push(`pose: the frame stayed ${h0} at phone width`);
         t.note(`the Pose frame is ${h0} at 1400 wide and ${h1} at 390`);
       }
