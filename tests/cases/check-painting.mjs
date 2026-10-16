@@ -1339,8 +1339,11 @@ export default async function checkPainting(t, site) {
     t.check(mixed && view.pressed === 'true' && s.badge === exampleBadge, 'the Palette block view remembered: the check scores the example as with Photo (it compares the photo\'s colors)', { mixed, view, badge: s.badge, withPhoto: exampleBadge });
     if (view.differ) t.note(`With the Palette view (${view.name}) remembered, the Study's color-block panel shows the palette's mixes while the check's Reference blocks and the accuracy map show the photo's colors (${view.differ} of 5 points differ); the README does not say which the check shows, and the page does not say why its two sets of blocks differ.`);
     await openAlign(page);
+    // the photo moved, so the panel's note has words for axe to measure (empty, its contrast is never read)
+    await setRange(page, 'alignX', 5);
+    const note = (await state(page)).alignState;
     let v = await axe(page);
-    t.check(v.length === 0, 'axe: no violations with the drawer, its scorecard, list and map, and the align panel open', v);
+    t.check(v.length === 0 && note !== '', 'axe: no violations with the drawer, its scorecard, list and map, and the align panel open with its note', { note, v });
     await page.emulateMedia({ colorScheme: 'dark' }); await sleep(400);
     v = await axe(page);
     t.check(v.length === 0, 'axe, dark: no violations with the same open', v);

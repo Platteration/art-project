@@ -12,7 +12,8 @@
 // by hand; every script blocked one at a time and made
 // to throw one at a time, and two or all of them at once, each read against js/guard.js's TAB_OF (the menu item,
 // the panel, the guide's jump button, the menu's name, the note, the keyboard walk); styles.css, the fonts, the
-// icons, three.js, pose.html's scripts and the guide's pictures missing; axe on every tab at both widths.
+// icons, three.js, pose.html's scripts and the guide's pictures missing; the guard and one module missing together; the whole app in
+// another site's sandboxed frame (the README's own embedding test); the guide's twelve parts; axe on every tab at both widths.
 // Steps are independent, each on contexts of its own, and run on a small pool of workers (PVS_WORKERS, default 3)
 // longest first, so the case stays inside its time budget on a shared machine. PVS_STEPS=<regexp> runs the steps
 // whose names match, for working on one.
@@ -57,7 +58,7 @@ const frameMode = (page) => { const f = poseFrame(page); return f ? f.evaluate((
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const timings = [];
 // what a step cost when measured on a busy machine, in seconds (longest first keeps the workers even); the default is 15
-const COSTS = [[/^heavy route/, 65], [/^modes/, 50], [/live resize/, 45], [/^pose\.html alone/, 40], [/storage blocked/, 36], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 25], [/hostile keys/, 24], [/forget during a figure/, 21], [/^route #/, 15], [/three|pose scripts/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20], [/sandboxed frame/, 40]];
+const COSTS = [[/^heavy route/, 65], [/^modes/, 50], [/live resize/, 45], [/^pose\.html alone/, 40], [/storage blocked/, 36], [/^axe/, 34], [/dark/, 27], [/^route #(check|game)/, 25], [/hostile keys/, 24], [/forget during a figure/, 21], [/^route #/, 15], [/three|pose scripts/, 25], [/reduced motion/, 20], [/guard\.js blocked/, 20], [/sandboxed frame/, 35], [/guard and a module/, 24]];
 const jobs = [];
 let sharedIdFinding = false;
 // a step registers itself; the pool at the end of the case runs them
@@ -904,6 +905,26 @@ function groupD(t, site) {
     s = await notesOf(page);
     t.check(/no-js/.test(s.cls) && s.nojs === 'block' && s.tabs === 'none' && s.help === 'block', 'guard.js and app.js blocked: the no-js fallback shows the guide and the note', s);
     await page.context().close();
+  });
+
+  // the guard and one module missing together: the safety net is the thing that takes a missing part off the page, so this is the
+  // partial copy the README warns of ("fonts/ and js/guard.js are runtime files the page needs, so a partial copy breaks it"). What
+  // must still hold is that nothing throws and the page stands; what the visitor then finds is noted, not counted as a defect
+  step(t, 'the guard and a module blocked together', async () => {
+    const left = {};
+    for (const m of ['palette', 'subjects', 'game', 'painting', 'figure', 'loomis', 'battle']) {
+      const page = await openPage(site, { block: [site.base + 'js/guard.js', site.base + `js/${m}.js`] });
+      await frames(page);
+      const s = await notesOf(page);
+      const own = { palette: null, subjects: 'game', game: 'game', painting: 'paint', figure: 'figure', loomis: 'loomis', battle: 'battle' }[m];
+      if (own) { await click(page, `[data-tab="${own}"]`); await sleep(400); }
+      const shown = await shownPanels(page);
+      t.check(shown.length === 1 && page.log.pageerrors.length === 0 && (await violations(page)).length === 0 && page.log.offsite.length === 0, `guard.js and ${m}.js blocked: no page error, no violation, one panel shows`, { shown, errors: page.log.pageerrors });
+      t.check(!/no-js/.test(s.cls) && s.old === 'none', `guard.js and ${m}.js blocked: the app itself starts (the standing note is for the scripts it cannot start without)`, s);
+      left[m] = `${own ? own + ' tab opens ' + shown.join() : 'no tab of its own'}, note ${s.nojs === 'block' ? 'standing' : s.part === 'block' ? 'part' : 'none'}`;
+      await page.context().close();
+    }
+    t.note(`guard.js missing together with one module: nothing tells the visitor and the module's own tab stays on the menu (${Object.entries(left).map(([m, x]) => `${m}.js: ${x}`).join('; ')}); the README says a partial copy breaks the page, so this is a noted limit of the safety net, not a defect`);
   });
 
   // the Palette part of the page, with palette.js missing: the guard's rule for it is "palette" (no tab, the paints part)
