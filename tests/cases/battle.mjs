@@ -786,6 +786,8 @@ async function gaps(t, site) {
     const before = { s: await state(page), u: await ui(page) };
     // the battle must come through each arrival with its round, its pin and its tab
     const intact = async (label) => {
+      // (the studies are redrawn behind the board and "Updating…" is up until they are: the overlay must go, not be gone at once)
+      await page.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 30000 }).catch(() => null);
       const s = await state(page), u = await ui(page);
       const lay = await page.evaluate(() => ({ top: document.getElementById('vb-play').getBoundingClientRect().top, tabsBottom: document.querySelector('.tabs').getBoundingClientRect().bottom, tab: Studio.tab(), hint: !document.getElementById('dropHint').hidden, busy: !document.getElementById('busy').hidden, scrollY: scrollY }));
       t.check(s && s.i === before.s.i && !s.answered && s.streak === before.s.streak && u.question === before.u.question && u.play && !u.setup && u.pinned && u.focus && lay.tab === 'battle' && !lay.hint && !lay.busy && lay.top >= lay.tabsBottom - 1 && lay.scrollY === 0, `${label}: the battle goes on: the same round and question, still pinned below the tabs, the tab not switched, no overlay left`, { i: s && s.i, streak: s && s.streak, question: u.question, pinned: u.pinned, lay });
