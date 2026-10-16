@@ -800,6 +800,7 @@ export default async function pose(t, site) {
           for (let i = 0; i < d.length; i += 16) {
             n++; const r = d[i], gr = d[i + 1], bl = d[i + 2], mx = Math.max(r, gr, bl), mn = Math.min(r, gr, bl);
             if (mx - mn <= 8) { bins.add(Math.round(r / 16)); continue; }
+            if (mx < 48) continue;          // (a near-black pixel's hue is noise: the outline's dark edge reads 24° there)
             let hue = mx === r ? 60 * (((gr - bl) / (mx - mn)) % 6) : mx === gr ? 60 * ((bl - r) / (mx - mn) + 2) : 60 * ((r - gr) / (mx - mn) + 4);
             if (hue < 0) hue += 360;
             if (hue >= 25 && hue <= 70) yellow++; else { other++; if (others.length < 4) others.push([r, gr, bl]); }
