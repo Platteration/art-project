@@ -123,13 +123,15 @@ async function feed(page, file, { selector = '#file', limit = 20000, labelId = '
 }
 // a drop of items on the page: { file } or { type, data }, as another window's drag would carry them
 async function dropItems(page, items, selector = 'body') {
-  await app(page).evaluate(async ([sel, items]) => {
+  return app(page).evaluate(async ([sel, items]) => {
     const el = document.querySelector(sel), dt = new DataTransfer();
     for (const it of items) {
       if (it.file) { const bin = atob(it.file.b64), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); dt.items.add(new File([bytes], it.file.name, { type: it.file.mimeType })); }
       else dt.setData(it.type, it.data);
     }
-    for (const type of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const claimed = {};
+    for (const type of ['dragenter', 'dragover', 'drop']) { const e = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }); el.dispatchEvent(e); claimed[type] = e.defaultPrevented; }
+    return claimed;
   }, [selector, items]);
 }
 const fileItem = (f) => ({ file: { name: f.name, mimeType: f.mimeType, b64: f.buffer.toString('base64') } });
