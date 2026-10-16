@@ -14,6 +14,12 @@
 // size (the reference, the paper at 4×), the palette in Simple and Advanced, narrow and short windows, Forget right
 // after changes, the Figure study's copy, and the low ones (sheets, pointers, pen pressure, blend, layers, the well,
 // keyboard, the PNG failure advice, blocked localStorage, junk keys, subjects.js missing, dark theme, two tabs).
+// Section J (round 2) adds: a reload in the middle of a stroke and a stroke made just before a reload or a closed tab, Clear in
+// the first seconds after the page loads, every size slider past its ends and the marks at the smallest and the largest size,
+// Undo across 24 steps of every tool (only the last 20 come back, in reverse order, each on its own layer), Ctrl+Z in the middle of
+// a stroke, saved PNGs (the same file from any view, no metadata, every ground with every texture), a wash of each paint, a mix in
+// the well when the palette changes, Turn the paper twice, the palette through different photos, and the reference on very wide and
+// very tall photos.
 import fs from 'node:fs';
 import { openPage, newTab, clean, tab, DESKTOP, PHONE, PROTO_NAMES, stroke, storageKeys, storageGet, click, text, visible, hscroll, screenshot, sleep, makeImage, loadPhoto, textFile, dropFiles, dropText, axe } from '../lib.mjs';
 
@@ -535,8 +541,9 @@ export default async function studio(t, site) {
   await click(page, '#ps-canvasBtn'); await click(page, '#ps-root [data-ground="gray"]'); await click(page, '#ps-root [data-weave="paper"]');
   await click(page, '#ps-brushBtn'); await click(page, '#ps-brushBtn'); await click(page, '#ps-root [data-sketch-show="0"]'); await click(page, '#ps-root [data-brush="chisel"]');
   await click(page, '#ps-orient');
-  const since = Date.now();
   await stroke(page, '#ps-paper', [[0.2, 0.3], [0.6, 0.6]]);
+  // (the time is taken once the stroke has ended: a save already due from the clicks before it can fall in the middle of a slow stroke, and its record is then not the finished painting)
+  const since = Date.now();
   const saved = { paper: await alphaInk(page, '#ps-paper'), sketch: await alphaInk(page, '#ps-sketch') };
   const rec = await waitSaved(page, since);
   t.check(rec && rec.w === 1200 && rec.h === 900 && rec.paperBlob && rec.sketchBlob && rec.canvas && rec.canvas.ground === 'gray' && rec.canvas.weave === 'paper' && rec.canvas.washStr === 0.6 && rec.sketchShown === false, 'the autosave record holds the turned paper, both pictures as blobs, the canvas settings and the hidden underdrawing', rec);
@@ -1499,7 +1506,7 @@ export async function reloadMidStroke(t, site) {
   // letting go on the new page draws nothing and throws nothing
   await guard(t, 'round 2: reload in the middle of a stroke', async () => {
     const page = await openPage(site, { url: '#paint' }); await studioReady(page);
-    const since = Date.now(); await stroke(page, '#ps-paper', PATH_A); await waitSaved(page, since, 30000);
+    await stroke(page, '#ps-paper', PATH_A); const since = Date.now(); await waitSaved(page, since, 30000);
     const a0 = await inkIn(page, '#ps-paper', ...BOXA);
     const [hx, hy] = await holdStroke(page, [[0.6, 0.5], [0.85, 0.65]]);
     const during = await inkIn(page, '#ps-paper', 0.55, 0.45, 0.35, 0.25);

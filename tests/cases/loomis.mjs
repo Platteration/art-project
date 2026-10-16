@@ -12,6 +12,9 @@
 // dots close together; a profile; the far side dashed; a resize; Draw it in the Studio pressed again; Save PNG while
 // hidden and mid-sequence; the drag extremes; the narrow widths; a pixel ratio of 2; a sandboxed save; the words and
 // labels; keyboard focus; dark theme; the model's numbers; drags cut short; a dropped or pasted photo; small and wide photos.
+// Round 2 adds: the head drawn into the Studio (where it lands, one step to undo, with the Study tab's own grid and line, and while the
+// Studio's saved painting is still being read back), the head through the Study's Working size and Simple / Advanced and on the Check my
+// painting panels, the two saved PNGs of one head, the fit on 120 random heads, and the arrows and the face-length drag at their limits.
 import fs from 'node:fs';
 import { openPage, clean, tab, DESKTOP, PHONE, makeImage, loadPhoto, textFile, brokenImage, svgImage, click, text, visible, hscroll, screenshot, sleep, storageGet, PROTO_NAMES, dropFiles, pasteFile, axe, app, stroke } from '../lib.mjs';
 
@@ -446,6 +449,8 @@ export default async function loomis(t, site) {
     t.check(!midPress.s.pending && !s.pending && s.step === 0 && !(await loupe(page)).shown && c.step === '1 of 8', 'a photo loaded during a press: the press places nothing on the new photo and the loupe is gone on release', { pendingDuring: midPress.s.pending, loupeDuring: midPress.loupe.shown, after: s.pending });
     // a 24-megapixel photo
     await loadPhoto(page, await makeImage(page, { width: 6000, height: 4000, type: 'image/jpeg', quality: 0.6, name: 'big.jpg' }), { settle: 1500 });
+    // (the photo is on the stage once it is wider than tall: a loaded machine can need longer than the settle for 24 megapixels)
+    await page.waitForFunction(() => { const p = document.getElementById('lh-photo'); return p.width > p.height; }, null, { timeout: 60000 }).catch(() => null);
     c = await card(page);
     const bigMarks = await marksFor(page, { s: 0.12, cy: 0.3 });
     await sequence(page, bigMarks);
