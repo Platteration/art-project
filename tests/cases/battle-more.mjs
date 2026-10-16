@@ -19,7 +19,23 @@ const starsFor = (streak) => STARS.filter((m) => streak >= m).length;
 
 // ---- helpers of this case -------------------------------------------------------------------------------
 
-// the setup's controls, then Start; resolves once the board shows its swatches
+// The wait budget. Every wait here (the fixed sleeps are settles, not waits) goes through limit(), miss(), waitFor(), navigated() or until(). A wait that misses (its own
+// limit reached, its condition never true) marks the block it is in, and each later wait in that block gives up after QUICK ms
+// instead of its own limit. So a block broken by one regression costs its first generous wait and a few seconds per step, not a
+// generous wait per step, and the next block still runs inside the case's time limit. A loop stops at its first miss (need()).
+// A block that never misses waits exactly as long as it always did. block() starts each block with a clean budget.
+const QUICK = 2000;
+let budget = { missed: null }; // the running block's first wait that missed, or null
+const limit = (ms) => (budget.missed ? Math.min(ms, QUICK) : ms);
+const miss = (what) => { if (!budget.missed) budget.missed = what; return false; };
+// a page wait: true when its condition came; otherwise the wait is marked missed under the name `what`
+const waitFor = (page, fn, arg, ms, what) => page.waitForFunction(fn, arg, { timeout: limit(ms) }).then(() => true, () => miss(what));
+// a navigation (a reload) the page must make: true when it came
+const navigated = (page, ms, what) => page.waitForNavigation({ waitUntil: 'load', timeout: limit(ms) }).then(() => true, () => miss(what));
+// a loop's step that cannot go on without its wait: when the wait missed, one failing check says what did not come, and the loop stops
+const need = (t, ok, what) => { if (!ok) t.check(false, what); return !!ok; };
+
+// the setup's controls, then Start; resolves true once the board shows its swatches
 async function start(page, { palette = 'zorn', count = '2', mode = 'streak', timeout = 30000 } = {}) {
   await page.evaluate(([p, c, m]) => {
     const sel = document.getElementById('vb-palette');
@@ -28,7 +44,7 @@ async function start(page, { palette = 'zorn', count = '2', mode = 'streak', tim
     document.querySelector(`input[name="vbMode"][value="${m}"]`).click();
     document.getElementById('vb-start').click();
   }, [palette, count, mode]);
-  await page.waitForFunction(() => !document.getElementById('vb-play').hidden && document.querySelectorAll('.vb-swatch').length > 0, null, { timeout }).catch(() => null);
+  return waitFor(page, () => !document.getElementById('vb-play').hidden && document.querySelectorAll('.vb-swatch').length > 0, null, timeout, 'Start did not show the board');
 }
 // the round as the page holds it (ValueBattle.state() is the live game, exposed for tests), with the line
 // the page should say for a right answer, built the way battle.js builds it
@@ -72,30 +88,34 @@ async function answer(page, right, how = 'click') {
   else if (r.mode === 'pick') picks = [right ? r.answer : (r.answer + 1) % r.n];
   else picks = right ? r.answer : r.answer.slice().reverse();
   if (how === 'key') { if (picks === 'same') await press(page, ['ArrowDown']); else if (r.mode === 'pair') await press(page, picks.map((i) => (i === 0 ? 'ArrowLeft' : 'ArrowRight'))); else await press(page, picks.map((i) => String(i + 1))); }
-  else if (how === 'tap') { if (picks === 'same') await page.locator('.vb-choice[data-choice="same"]').click(); else for (const i of picks) await page.locator(`.vb-swatch[data-index="${i}"]`).click(); }
+  else if (how === 'tap') { if (picks === 'same') await page.locator('.vb-choice[data-choice="same"]').click({ timeout: limit(30000) }); else for (const i of picks) await page.locator(`.vb-swatch[data-index="${i}"]`).click({ timeout: limit(30000) }); }
   else await page.evaluate((picks) => { if (picks === 'same') document.querySelector('.vb-choice[data-choice="same"]').click(); else picks.forEach((i) => document.querySelector(`.vb-swatch[data-index="${i}"]`).click()); }, picks);
   return r;
 }
 const next = (page) => click(page, '#vb-next');
 // the pop-up's button by a real click: the id is doubled in the markup (see the first step), so the board's copy
-const closeMiss = (page) => page.locator('#vb-board #vb-missNext').click({ timeout: 20000 }).catch(() => null); // (a pop-up that never came fails the check that waits for what follows, not the block)
-const waitRound = (page, n) => page.waitForFunction((n) => document.getElementById('vb-score').textContent === `Round ${n}`, n, { timeout: 20000 }).then(() => true).catch(() => false);
-const waitShown = (page, sel) => page.waitForFunction((s) => !document.querySelector(s).hidden, sel, { timeout: 20000 }).then(() => true).catch(() => false);
-const waitPct = (page, n) => page.waitForFunction((n) => document.getElementById('vb-pct').textContent === String(n), n, { timeout: 20000 }).then(() => true).catch(() => false);
+const closeMiss = (page) => page.locator('#vb-board #vb-missNext').click({ timeout: limit(20000) }).then(() => true, () => miss('the miss pop-up\'s button did not come')); // (a pop-up that never came fails the check that waits for what follows, not the block)
+const waitRound = (page, n) => waitFor(page, (n) => document.getElementById('vb-score').textContent === `Round ${n}`, n, 20000, `Round ${n} did not come`);
+const waitShown = (page, sel) => waitFor(page, (s) => !document.querySelector(s).hidden, sel, 20000, `${sel} did not show`);
+const waitPct = (page, n) => waitFor(page, (n) => document.getElementById('vb-pct').textContent === String(n), n, 20000, `the score did not count up to ${n}`);
 // the quit guard arms by the page's clock: ✕ within the first 3 s of the page's life is a bug checked on its own
-const afterThree = (page) => page.waitForFunction(() => performance.now() > 3100, null, { timeout: 5000 }).catch(() => null);
-async function quit(page) { await afterThree(page); await click(page, '#vb-quit'); await click(page, '#vb-quit'); await page.waitForFunction(() => !document.getElementById('vb-setup').hidden, null, { timeout: 15000 }).catch(() => null); }
+const afterThree = (page) => waitFor(page, () => performance.now() > 3100, null, 5000, 'the page clock did not pass 3 s');
+async function quit(page) { await afterThree(page); await click(page, '#vb-quit'); await click(page, '#vb-quit'); await waitFor(page, () => !document.getElementById('vb-setup').hidden, null, 15000, 'the setup did not come back after ✕ ✕'); }
 const rects = (page, sels) => page.evaluate((sels) => { const W = innerWidth, H = innerHeight; const r = (e) => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), t: Math.round(b.top), r: Math.round(b.right), b: Math.round(b.bottom), in: b.left >= -0.5 && b.top >= -0.5 && b.right <= W + 0.5 && b.bottom <= H + 0.5 && b.width > 0 && b.height > 0 }; }; const out = { W, H, scrollH: document.documentElement.scrollHeight, bodyOverflow: getComputedStyle(document.body).overflow, tabs: getComputedStyle(document.querySelector('.tabs')).display, topbar: getComputedStyle(document.querySelector('.topbar')).display }; for (const s of sels) out[s] = [...document.querySelectorAll(s)].map(r); return out; }, sels);
 const allIn = (lay, sels) => sels.every((s) => lay[s].length > 0 && lay[s].every((x) => x.in));
 // wait for a condition that a page reload may interrupt (an evaluate that throws counts as not yet); true when it came
-async function until(fn, ms = 30000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await Promise.resolve().then(fn).catch(() => false)) return true; await sleep(250); } return false; }
+async function until(fn, ms = 30000, what = 'a condition') { const lim = limit(ms), t0 = Date.now(); while (Date.now() - t0 < lim) { if (await Promise.resolve().then(fn).catch(() => false)) return true; await sleep(250); } return miss(what); }
 // one block of this case: a throw in it fails a check of its own (with the line that threw) and the next block runs;
-// the pages the block opened are closed either way
+// the pages the block opened are closed either way. A wait that missed in it is noted (the first one), see the budget above.
 async function block(t, site, name, fn) {
   const before = new Set(site.browser.contexts());
+  budget = { missed: null };
   try { await fn(); }
   catch (e) { t.check(false, `${name}: the block ran to its end`, String((e && e.stack) || e).split('\n').slice(0, 3).join(' | ')); }
-  finally { for (const c of site.browser.contexts()) if (!before.has(c)) await c.close().catch(() => null); }
+  finally {
+    if (budget.missed) t.note(`${name}: the first wait to miss was "${budget.missed}"; the waits after it in this block gave up after ${QUICK / 1000} s`);
+    for (const c of site.browser.contexts()) if (!before.has(c)) await c.close().catch(() => null);
+  }
 }
 
 export default async function battleMore(t, site) {
@@ -166,7 +186,8 @@ export default async function battleMore(t, site) {
       if (r.answer === 'same') await press(page, ['=']); else await answer(page, true, 'key');
       b = await board(page);
       t.check(b.answer === `Right! ${r.why}`, `round ${k + 1} right: the line says ${r.answer === 'same' ? 'both lean the same way' : 'which leans where'}`, { line: b.answer, want: r.why });
-      await press(page, ['Enter']); await waitRound(page, k + 3);
+      await press(page, ['Enter']);
+      if (!need(t, await waitRound(page, k + 2), `round ${k + 2} did not come after Next ▸`)) break;
     }
     // the streak flourish at five
     r = await round(page);
@@ -179,9 +200,9 @@ export default async function battleMore(t, site) {
     await next(page); await waitRound(page, 7);
     // Both the same on a non-tie (play on to a round whose answer is not a tie), then the miss pop-up
     let played = 6;
-    for (let k = 0; k < 6; k++) { r = await round(page); if (r.answer !== 'same') break; await answer(page, true); played++; await next(page); await waitRound(page, played + 1); }
+    for (let k = 0; k < 6; k++) { r = await round(page); if (r.answer !== 'same') break; await answer(page, true); played++; await next(page); if (!need(t, await waitRound(page, played + 1), `round ${played + 1} did not come after Next ▸ (looking for a round without a tie)`)) break; }
     t.check(r.answer !== 'same', 'a round without a tie came up to miss on purpose', r.answer);
-    await page.locator('.vb-choice[data-choice="same"]').click();
+    await page.locator('.vb-choice[data-choice="same"]').click({ timeout: limit(30000) });
     t.check(await waitShown(page, '#vb-miss'), 'Both the same on a non-tie shows the miss pop-up');
     b = await board(page);
     t.check(b.missWhy === r.why && /Not quite/.test(await text(page, '#vb-missKicker')), 'the pop-up says Not quite and the right answer in words', { why: b.missWhy, want: r.why });
@@ -260,7 +281,7 @@ export default async function battleMore(t, site) {
     await press(page, [String(r.answer[0] + 1)]);
     b = await board(page);
     t.check(b.badges.filter(Boolean).length === 1 && JSON.stringify((await round(page)).picked) === JSON.stringify([r.answer[0]]), 'tapping the same swatch again is ignored', { badges: b.badges });
-    await page.locator('#vb-undo').click();
+    await page.locator('#vb-undo').click({ timeout: limit(30000) });
     b = await board(page);
     t.check(b.badges.every((x) => x === '') && b.undo && (await round(page)).picked.length === 0, 'Start the round over clears the numbers and hides itself', { badges: b.badges, undo: b.undo });
     await answer(page, true, 'tap'); b = await board(page);
@@ -293,7 +314,7 @@ export default async function battleMore(t, site) {
     await quit(page);
     await start(page, { count: 'mix' });
     const counts = [];
-    for (let k = 0; k < 6; k++) { r = await round(page); counts.push(r.n); await answer(page, true); await next(page); await waitRound(page, k + 2); }
+    for (let k = 0; k < 6; k++) { r = await round(page); counts.push(r.n); await answer(page, true); await next(page); if (!need(t, await waitRound(page, k + 2), `Mix: round ${k + 2} did not come after Next ▸`)) break; }
     t.check(JSON.stringify(counts.slice(0, 3).sort()) === '[2,3,4]' && JSON.stringify(counts.slice(3).sort()) === '[2,3,4]', 'Mix deals two, three and four in every three rounds', counts);
     await quit(page);
     await clean(t, page, 'three and four colors');
@@ -312,10 +333,11 @@ export default async function battleMore(t, site) {
       const got = [...b.answer.matchAll(/V (\d+\.\d)/g)].map((m) => +m[1]);
       log.push({ i: r.i, key: r.key, kind: r.kind, answer: r.answer, d: +r.d.toFixed(2), lo: +r.lo.toFixed(2), hi: +r.hi.toFixed(2), labels: r.labels, line: b.answer, ok: b.answer === `Right! ${r.why}`, reported: got });
       if (r.kind === 'value' && r.answer === 'same' && r.labels[0] !== r.labels[1] && !tieDiffers) tieDiffers = { round: r.i + 1, line: b.answer, Ls: r.Ls };
-      await next(page); await waitRound(page, k + 2);
+      await next(page);
+      if (!need(t, await waitRound(page, k + 2), `thirty rounds: round ${k + 2} did not come after Next ▸`)) break;
     }
     const value = log.filter((x) => x.kind === 'value' && x.answer !== 'same'), temp = log.filter((x) => x.kind === 'temp' && x.answer !== 'same');
-    t.check(log.every((x) => x.ok), 'every one of the lines (thirty or more) says Right! with the values the page holds', log.filter((x) => !x.ok).slice(0, 3));
+    t.check(log.length >= 30 && log.every((x) => x.ok), 'every one of the lines (thirty or more) says Right! with the values the page holds', log.filter((x) => !x.ok).slice(0, 3));
     t.check(value.every((x) => x.d >= x.lo - 1e-6 && x.d <= x.hi + 1e-6), 'every value round sits in its round\'s L* band', value.filter((x) => !(x.d >= x.lo - 1e-6 && x.d <= x.hi + 1e-6)));
     t.check(value.every((x) => x.d >= 1.6) && temp.every((x) => x.d >= 0.08), 'no round is closer than the floor (1.6 L*, 0.08 in warmth)', { minValue: Math.min(...value.map((x) => x.d)), minTemp: Math.min(...temp.map((x) => x.d)) });
     const early = value.filter((x) => x.i < 6).map((x) => x.d), late = value.filter((x) => x.i >= 24).map((x) => x.d);
@@ -362,7 +384,7 @@ export default async function battleMore(t, site) {
     t.check(p1.left === p2.left && p1.time === p2.time && b.missNext === 'Next ▸' && b.missWhy === r.why, 'the clock pauses while the miss shows, whose button says Next ▸', { p1, p2, btn: b.missNext });
     await closeMiss(page);
     t.check(await waitRound(page, 3), 'Next ▸ deals round 3');
-    const resumed = await page.waitForFunction((was) => document.getElementById('vb-time').textContent !== was, p2.time, { timeout: 5000 }).then(() => true).catch(() => false);
+    const resumed = await waitFor(page, (was) => document.getElementById('vb-time').textContent !== was, p2.time, 10000, 'the clock did not run again after the pop-up closed');
     t.check(resumed, 'the clock runs again after the pop-up closes', await text(page, '#vb-time'));
     // Enter on the clock's miss pop-up must deal exactly one round
     const atRound = +(await text(page, '#vb-score')).replace('Round ', '');
@@ -392,7 +414,7 @@ export default async function battleMore(t, site) {
     await page.evaluate(() => { window.__nodes = 0; for (const n of ['createOscillator', 'createBufferSource']) { const o = AudioContext.prototype[n]; AudioContext.prototype[n] = function () { window.__nodes++; return o.apply(this, arguments); }; } });
     await start(page, { count: '2' });
     await answer(page, true, 'tap');
-    await page.waitForFunction(() => window.__nodes > 0, null, { timeout: 10000 }).catch(() => null); // (the audio context may wake after the tap on a loaded machine)
+    // (no wait: the tap's own call makes the audio nodes, battle.js tapSwatch → GameSound.keyDown → unlockAudio and snap, all synchronous)
     const onNodes = await page.evaluate(() => window.__nodes);
     t.check((await page.evaluate(() => GameSound.on())) && onNodes > 0, 'with the sound on, a tap on a swatch makes a sound (audio nodes created)', onNodes);
     await page.evaluate(() => document.getElementById('gameSound').click());
@@ -413,16 +435,13 @@ export default async function battleMore(t, site) {
   await block(t, site, 'early quit', async () => {
     const page = await openPage(site, { url: '#battle' });
     await start(page, { count: '2' });
-    // the guard reads the page's own clock (performance.now): for the one synchronous ✕ it is held at one second, so that the page
-    // is "in its first three seconds" however long a loaded machine took to reach Start (a real page that young is a fast machine's)
-    const at = 1000;
-    {
-      await page.evaluate(() => { const real = performance.now; performance.now = () => 1000; try { document.getElementById('vb-quit').click(); } finally { performance.now = real; } });
-      const b = await board(page);
-      const ok = b.setup && !b.play && b.toast === 'Tap ✕ again to quit this battle';
-      t.check(ok, 'a single ✕ in the page\'s first three seconds (its clock held at 1 s) asks to tap again, like any other time', { at: Math.round(at), setup: b.setup, play: b.play, game: b.game, toast: b.toast });
-      if (!ok) t.finding({ title: 'In the first 3 seconds after the page opens, one tap on ✕ quits the battle with no "tap again"', severity: 'low', steps: 'Open the site at #battle (or reload it there) and within 3 seconds press Start the battle, then tap ✕ once.', expected: 'The toast "Tap ✕ again to quit this battle" and the game goes on, as it does later (the README: tap ✕ twice).', actual: `The battle ends at once and the setup shows (here ${Math.round(at)} ms after the page opened, no toast). Cause: battle.js line 434 starts quitArmed at 0, and line 437 arms only when performance.now() - quitArmed > 3000, so for the page's first 3 s the guard reads as already armed.` });
-    }
+    // the guard reads the page's own clock (performance.now): for the one synchronous ✕ the clock is held at 1000 ms, so that the
+    // page is "in its first three seconds" however long a loaded machine took to reach Start (a real page that young is a fast machine's)
+    await page.evaluate(() => { const real = performance.now; performance.now = () => 1000; try { document.getElementById('vb-quit').click(); } finally { performance.now = real; } });
+    const b = await board(page);
+    const ok = b.setup && !b.play && b.toast === 'Tap ✕ again to quit this battle';
+    t.check(ok, 'a single ✕ in the page\'s first three seconds (the page clock held at 1 s for the tap) asks to tap again, like any other time', { setup: b.setup, play: b.play, game: b.game, toast: b.toast });
+    if (!ok) t.finding({ title: 'In the first 3 seconds after the page opens, one tap on ✕ quits the battle with no "tap again"', severity: 'low', steps: 'Open the site at #battle (or reload it there) and within 3 seconds press Start the battle, then tap ✕ once. (The check holds the page clock at 1 s for that one tap, with performance.now stubbed for the click and restored after it.)', expected: 'The toast "Tap ✕ again to quit this battle" and the game goes on, as it does later (the README: tap ✕ twice).', actual: 'The battle ends at once and the setup shows, with no toast, for a ✕ tapped with the page clock at 1 s. Cause: the guard in js/battle.js (grep -n quitArmed) arms only when performance.now() - quitArmed > 3000. With quitArmed at 0 (its value before), that difference is under 3000 in the first 3 s of the page, so the first ✕ quits. The guard now starts at -1e9, so this finding would mean that start value has moved back.' });
     await clean(t, page, 'early quit');
     await page.context().close();
   });
@@ -517,7 +536,7 @@ export default async function battleMore(t, site) {
     const page = await openPage(site, { url: '#battle', storage: { [K.mine]: ['TW', 'LW'] } });
     let b = await board(page);
     t.check(b.options.includes('My paints (2)'), 'two whites ticked: My paints (2) is offered', b.options);
-    await start(page, { palette: 'mine', count: '2', timeout: 1500 });
+    await start(page, { palette: 'mine', count: '2', timeout: 10000 });
     b = await board(page);
     const whitesOk = page.log.pageerrors.length === 0 && (b.swatches === 2 || !b.setup);
     t.check(whitesOk, 'Start with two whites either deals a round or says the paints cannot make colors', { errors: page.log.pageerrors.map((e) => e.split('\n')[0]), swatches: b.swatches, setup: b.setup, play: b.play });
@@ -545,12 +564,12 @@ export default async function battleMore(t, site) {
     const tick = async (codes, untick = []) => {
       await tab(page, 'study');
       await page.evaluate(() => { document.querySelector('[data-mode="advanced"]').click(); document.getElementById('drawer-colors').open = true; document.getElementById('srcMine').click(); });
-      await page.waitForFunction(() => !document.getElementById('minePane').hidden, null, { timeout: 3000 }).catch(() => null);
+      await waitFor(page, () => !document.getElementById('minePane').hidden, null, 10000, 'the My paints pane did not open');
       await click(page, '#mineEdit');
-      await page.waitForFunction(() => document.getElementById('paintDialog').open && document.querySelectorAll('#paintCats input').length > 0, null, { timeout: 3000 }).catch(() => null);
+      await waitFor(page, () => document.getElementById('paintDialog').open && document.querySelectorAll('#paintCats input').length > 0, null, 10000, 'the paint dialog did not open');
       await page.evaluate(([codes, untick]) => { for (const c of codes) { const b = document.querySelector(`#paintCats input[value="${c}"]`); if (!b.checked) b.click(); } for (const c of untick) { const b = document.querySelector(`#paintCats input[value="${c}"]`); if (b.checked) b.click(); } }, [codes, untick]);
       await click(page, '#paintDialogDone');
-      await page.waitForFunction(() => !document.getElementById('paintDialog').open, null, { timeout: 3000 }).catch(() => null);
+      await waitFor(page, () => !document.getElementById('paintDialog').open, null, 10000, 'the paint dialog did not close');
     };
     await tick(['TW']);
     await tab(page, 'battle');
@@ -591,7 +610,7 @@ export default async function battleMore(t, site) {
     await click(page, '#vb-quit');
     await tab(page, 'study');
     await page.evaluate(() => { document.getElementById('srcMine').click(); });
-    await click(page, '#mineEdit'); await page.waitForFunction(() => document.getElementById('paintDialog').open, null, { timeout: 3000 }).catch(() => null);
+    await click(page, '#mineEdit'); await waitFor(page, () => document.getElementById('paintDialog').open, null, 10000, 'the paint dialog did not open');
     await click(page, '#paintNone'); await click(page, '#paintDialogDone');
     await tab(page, 'battle');
     b = await board(page);
@@ -621,11 +640,11 @@ export default async function battleMore(t, site) {
     await press(page, ['Enter']);
     t.check((await board(page)).score === 'Round 1' && !(await round(page)).answered, 'Enter with nothing answered does nothing');
     await page.setViewportSize(PHONE);
-    await page.waitForFunction(() => document.getElementById('vb-board').getBoundingClientRect().width === 390, null, { timeout: 3000 }).catch(() => null);
+    await waitFor(page, () => document.getElementById('vb-board').getBoundingClientRect().width === 390, null, 10000, 'the board did not refit to a phone width');
     let lay = await rects(page, ['#vb-board', '.vb-swatch', '#vb-choices', '#vb-bar']);
     t.check(allIn(lay, ['#vb-board', '.vb-swatch', '#vb-choices', '#vb-bar']) && lay['#vb-board'][0].r === 390 && lay['#vb-board'][0].b === 844 && lay.tabs === 'none', 'resized to a phone mid-round: the board refits to the 390 × 844 screen', { board: lay['#vb-board'][0], swatches: lay['.vb-swatch'] });
     await page.setViewportSize(DESKTOP);
-    await page.waitForFunction(() => document.getElementById('vb-board').getBoundingClientRect().width > 1000, null, { timeout: 3000 }).catch(() => null);
+    await waitFor(page, () => document.getElementById('vb-board').getBoundingClientRect().width > 1000, null, 10000, 'the board did not refit to the window');
     lay = await rects(page, ['#vb-board', '.vb-swatch', '#vb-choices']);
     const tabsBottom = await page.evaluate(() => document.querySelector('.tabs').getBoundingClientRect().bottom);
     t.check(allIn(lay, ['#vb-board', '.vb-swatch', '#vb-choices']) && lay['#vb-board'][0].t >= tabsBottom && lay.tabs !== 'none', 'resized back: the board sits below the tabs again, inside the window', { board: lay['#vb-board'][0], tabsBottom: Math.round(tabsBottom) });
@@ -636,13 +655,13 @@ export default async function battleMore(t, site) {
     b = await board(page);
     const radios = await page.evaluate(() => ({ count: document.querySelector('input[name="vbCount"]:checked').value, mode: document.querySelector('input[name="vbMode"]:checked').value }));
     t.check(!b.setup && b.play && !b.game && radios.count === '2' && JSON.parse(await storageGet(page, K.best))['zorn:2:streak'] === 3 && b.best === 'Your best streak here: 3 in a row.', 'a reload mid-round: the setup with the count remembered, the best untouched, no game', { setup: b.setup, radios, best: b.best });
-    // Forget mid-battle, from the Help tab (the tabs are in view on a wide screen)
+    // Forget mid-battle, from the Help tab (the tabs are in view on a wide screen): both taps in one call, as the Forget block below does
     await start(page, { count: '2' });
     await answer(page, true); await next(page); await waitRound(page, 2);
     await tab(page, 'help');
-    await click(page, '#forgetBtn'); await sleep(200);
-    await Promise.all([page.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), click(page, '#forgetBtn')]);
-    await sleep(800);
+    await Promise.all([navigated(page, 15000, 'the reload after Forget did not come'), page.evaluate(() => { const b = document.getElementById('forgetBtn'); b.click(); b.click(); }).catch(() => null)]);
+    await until(async () => (await storageKeys(page)).length === 0, 15000, 'the keys left after Forget');
+    await sleep(500); // an absence to show: a short settle after the reload, so a write the reloaded page makes would be seen (as the Forget block below)
     const after = await page.evaluate(() => ({ keys: Object.keys(localStorage).filter((k) => /^(portrait-value-studio|pose-and-light)\./.test(k)), game: !!(window.ValueBattle && ValueBattle.state()) }));
     await tab(page, 'battle');
     b = await board(page);
@@ -691,19 +710,19 @@ export default async function battleMore(t, site) {
     await a.bringToFront();
     await tab(a, 'help');
     // both taps of Forget in one go: its first tap disarms after five seconds, which a loaded machine can take between two calls
-    await Promise.all([a.waitForNavigation({ waitUntil: 'load', timeout: 60000 }).catch(() => null), a.evaluate(() => { const b = document.getElementById('forgetBtn'); b.click(); b.click(); }).catch(() => null)]);
-    t.check(await until(async () => (await storageKeys(a)).length === 0, 30000), 'Forget in tab A leaves no key of the site in the tab that pressed it', await storageKeys(a));
+    await Promise.all([navigated(a, 60000, 'the reload after Forget in tab A did not come'), a.evaluate(() => { const b = document.getElementById('forgetBtn'); b.click(); b.click(); }).catch(() => null)]);
+    t.check(await until(async () => (await storageKeys(a)).length === 0, 30000, 'tab A keys after Forget'), 'Forget in tab A leaves no key of the site in the tab that pressed it', await storageKeys(a));
     // tab B hears the marker (its reload is held) and its battle is finished while the page still has the game
-    const heard = await until(() => tabB.evaluate(() => window.__held.length > 0), 60000);
+    const heard = await until(() => tabB.evaluate(() => window.__held.length > 0), 60000, 'tab B heard the Forget marker');
     await tabB.bringToFront();
     await answer(tabB, false); await waitShown(tabB, '#vb-miss'); await closeMiss(tabB);
     const finished = (await waitShown(tabB, '#vb-popup')) && (await waitPct(tabB, 1));
     const inWindow = await storageKeys(tabB).catch(() => ['(tab B had already reloaded)']);
     t.check(finished, 'tab B: its battle could be finished (See the score) after Forget was pressed in tab A', { heard, finished });
     // let tab B go on to its reload, and wait for both other tabs to have restarted
-    await Promise.all([tabB.waitForNavigation({ waitUntil: 'load', timeout: 60000 }).catch(() => null), tabB.evaluate(() => { for (const f of window.__held.splice(0)) f(); }).catch(() => null)]);
-    const bReloaded = await until(() => tabB.evaluate(() => !window.__alive), 60000);
-    const cReloaded = await until(() => tabC.evaluate(() => !window.__alive), 60000);
+    await Promise.all([navigated(tabB, 60000, 'tab B did not reload'), tabB.evaluate(() => { for (const f of window.__held.splice(0)) f(); }).catch(() => null)]);
+    const bReloaded = await until(() => tabB.evaluate(() => !window.__alive), 60000, 'tab B did not restart');
+    const cReloaded = await until(() => tabC.evaluate(() => !window.__alive), 60000, 'tab C did not restart');
     await sleep(500); // an absence to show: nothing to wait for, so a short settle after the last reload
     const left = await storageKeys(a), leftB = await storageKeys(tabB), leftC = await storageKeys(tabC);
     t.check(left.length === 0 && leftB.length === 0 && leftC.length === 0, 'Forget in one tab, then a battle finished in another before it restarted: when the tabs have settled no key of the site is kept', { a: left, b: leftB, c: leftC, heard, bReloaded, cReloaded });
@@ -719,9 +738,9 @@ export default async function battleMore(t, site) {
     const page = await openPage(site, { url: '#game' });
     const modes = () => page.evaluate(() => ({ game: document.body.classList.contains('game-focus'), battle: document.body.classList.contains('battle-focus') }));
     await tab(page, 'game');
-    await page.waitForFunction(() => !document.getElementById('gameStart').disabled, null, { timeout: 150000 }).catch(() => null);
+    await waitFor(page, () => !document.getElementById('gameStart').disabled, null, 150000, 'the Paint by numbers Start button did not come up');
     await click(page, '#gameStart');
-    await page.waitForFunction(() => !document.getElementById('gamePlay').hidden && document.querySelectorAll('#gameNumbers .game-number').length > 0, null, { timeout: 120000 }).catch(() => null);
+    await waitFor(page, () => !document.getElementById('gamePlay').hidden && document.querySelectorAll('#gameNumbers .game-number').length > 0, null, 120000, 'the Paint by numbers board did not come');
     const g0 = await modes();
     await tab(page, 'battle');
     await start(page, { count: '2' });
@@ -735,7 +754,7 @@ export default async function battleMore(t, site) {
     await quit(page);
     await tab(page, 'game');
     await click(page, '#gameQuit'); await click(page, '#gameQuit');
-    await page.waitForFunction(() => !document.getElementById('gameSetup').hidden, null, { timeout: 5000 }).catch(() => null);
+    await waitFor(page, () => !document.getElementById('gameSetup').hidden, null, 10000, 'the Paint by numbers setup did not come back');
     const end = await modes();
     t.check(!end.game && !end.battle, 'both quit: neither focus mode is left on the page', end);
     await clean(t, page, 'both games on a desktop');
@@ -792,27 +811,31 @@ export default async function battleMore(t, site) {
     const streakSeen = [];
     for (const k of [1, 2, 4, 5, 7, 8, 11, 12, 19, 20]) {
       await page.evaluate((k) => { ValueBattle.state().streak = k; }, k);
-      await answer(page, false); await waitShown(page, '#vb-miss'); await closeMiss(page); await waitShown(page, '#vb-popup'); await waitPct(page, k);
+      await answer(page, false);
+      if (!need(t, await waitShown(page, '#vb-miss'), `the star table: the miss pop-up did not show at streak ${k}`)) break;
+      await closeMiss(page);
+      if (!need(t, (await waitShown(page, '#vb-popup')) && (await waitPct(page, k)), `the star table: the score pop-up did not count up to ${k}`)) break;
       const s = await page.evaluate(() => ({ stars: document.querySelectorAll('#vb-stars .game-star.is-on').length, grade: document.getElementById('vb-grade').textContent }));
       streakSeen.push([k, s.stars, s.grade]);
       await click(page, '#vb-again');
     }
     const starsOf = (k) => [20, 12, 8, 5, 2].filter((m) => k >= m).length;
     const gradeOf = ['Keep looking', 'Warming up', 'Getting there', 'Good eye', 'Sharp eye!', 'Eagle eye!'];
-    t.check(streakSeen.every(([k, s, g]) => s === starsOf(k) && g === gradeOf[s]), 'stars by the streak at every boundary: 2 → one star, 5 → two, 8 → three, 12 → four, 20 → five (and one short of each)', streakSeen);
+    t.check(streakSeen.length === 10 && streakSeen.every(([k, s, g]) => s === starsOf(k) && g === gradeOf[s]), 'stars by the streak at every boundary: 2 → one star, 5 → two, 8 → three, 12 → four, 20 → five (and one short of each)', streakSeen);
     await click(page, '#vb-settings');
     const clockSeen = [];
     let first = true;
     for (const [mode, right, want] of [['60', 1, 1], ['60', 3, 2], ['60', 6, 3], ['60', 7, 4], ['60', 10, 5], ['120', 5, 1], ['120', 6, 2], ['300', 34, 3], ['300', 50, 5]]) {
       if (!first) await click(page, '#vb-settings');
-      await start(page, { count: '2', mode });
+      const started = await start(page, { count: '2', mode });
       first = false;
+      if (!need(t, started, `the clock (${mode} s): Start did not show the board`)) break;
       await page.evaluate((r) => { ValueBattle.state().right = r; ValueBattle.state().left = 0.3; }, right);
-      await waitShown(page, '#vb-popup'); await waitPct(page, right);
+      if (!need(t, (await waitShown(page, '#vb-popup')) && (await waitPct(page, right)), `the clock (${mode} s): the score pop-up did not count up to ${right}`)) break;
       const s = await page.evaluate(() => ({ stars: document.querySelectorAll('#vb-stars .game-star.is-on').length, grade: document.getElementById('vb-grade').textContent }));
       clockSeen.push([mode, right, s.stars, want]);
     }
-    t.check(clockSeen.every(([m, r, s, w]) => s === w), 'stars on the clock by right answers a minute, whatever the clock: 1 right in a minute is one star, 3 two, 6 three, 7 four, 10 five; 5 right in two minutes (2.5 a minute) is one star; 34 in five (6.8 a minute) is three', clockSeen);
+    t.check(clockSeen.length === 9 && clockSeen.every(([m, r, s, w]) => s === w), 'stars on the clock by right answers a minute, whatever the clock: 1 right in a minute is one star, 3 two, 6 three, 7 four, 10 five; 5 right in two minutes (2.5 a minute) is one star; 34 in five (6.8 a minute) is three', clockSeen);
     await clean(t, page, 'star table');
     await page.context().close();
   });
