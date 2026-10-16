@@ -1362,6 +1362,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
   transition: opacity 0.18s, transform 0.18s;
   z-index: 70;
   max-width: calc(100% - 32px);
+  overflow-wrap: break-word; /* a long file name in the message wraps inside the box, not past it (the box keeps its width) */
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 /* with the Studio's (or a Figure class's) tool strip along the bottom of a phone, the note sits above it */

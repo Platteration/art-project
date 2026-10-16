@@ -547,7 +547,7 @@ export default async function studyPhotos(t, site) {
       { title: 'pasted PNG', file: await makeImage(page, { width: 700, height: 500, name: 'shot.png' }), name: 'shot.png', dims: [700, 500] },
       { title: 'pasted transparent PNG', file: await makeImage(page, { draw: 'transparent', name: 'cut.png' }), name: 'cut.png', dims: [600, 800], corner: [127, 127, 127] },
       { title: 'pasted broken image', file: brokenImage('clip.jpg'), reject: NOT_OPENED },
-      { title: 'pasted text file (no image on the clipboard)', file: textFile(), nothing: true },
+      { title: 'pasted text file (no image on the clipboard)', file: textFile(), reject: NOT_IMAGE },   // refused in words, as the same file dropped is
       { title: 'pasted 1 × 1 PNG', file: await makeImage(page, { width: 1, height: 1, name: 'dot.png' }), reject: TOO_SMALL },
     ];
     for (const p of pastes) {

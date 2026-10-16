@@ -356,10 +356,10 @@
     document.querySelector(`input[name="gameSubject"][value="${painting ? 'painting' : 'photo'}"]`).checked = true;
     els.photoPane.hidden = painting;
     els.paintingPane.hidden = !painting;
-    const key = Studio.source() ? Studio.sourceKey() : '';
-    els.photoName.textContent = !key ? 'Load a photo to paint from it.'
-      : key.startsWith('sample-study:') ? 'Painting from the sample portrait. Load your own photo to paint from it.'
-      : `Painting from ${Studio.sourceTitle() || key.replace(/:\d+x\d+$/, '')}.`;
+    // the sample is told by the Study tab's flag, not by its name: a photo called sample-study is named as a photo
+    els.photoName.textContent = !Studio.source() ? 'Load a photo to paint from it.'
+      : Studio.isSample() ? 'Painting from the sample portrait. Load your own photo to paint from it.'
+      : `Painting from ${Studio.sourceTitle() || Studio.sourceBase()}.`;
     if (painting) els.paintingName.textContent = `You've been dealt a portrait after ${Subjects.painterOf(subject.id)}.`;
   }
 

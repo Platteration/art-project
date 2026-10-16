@@ -579,8 +579,9 @@
     state.source = img;
     state.baseName = baseName || 'portrait';
     state.sourceTitle = title || '';
-    window.dispatchEvent(new CustomEvent('studio:source')); // a new reference photo (its studies follow with studio:result)
     setSourceLabel(name, img.naturalWidth || img.width, img.naturalHeight || img.height, false);
+    window.dispatchEvent(new CustomEvent('studio:source')); // a new reference photo (its studies follow with studio:result)
+    els.loupe.hidden = true; state.hover = null; // the magnifier showed the old photo's pixels; the next move shows the new one's
     const marks = [
       state.lines.length && 'reference lines', state.measures.length && 'measures', state.plumbs.length && 'plumb lines',
     ].filter(Boolean);
@@ -631,6 +632,16 @@
     els.file.value = '';
   });
 
+  // What a drop or a paste with no file in it is told: its text or link is not a photo (nothing is said for other
+  // data). A link, or a page's html holding a picture, is a picture still on the web; other html is copied words.
+  // A file that is not a picture is refused by readImage, the same way for both.
+  function notPicture(data, pasted) {
+    const types = Array.from((data && data.types) || []);
+    const html = types.includes('text/html') ? data.getData('text/html') : '';
+    if (types.includes('text/uri-list') || /<img\b/i.test(html)) toast(`Save the picture to your device first, then ${pasted ? 'load or drop' : 'drop'} the file here.`, 5000);
+    else if (html || types.includes('text/plain')) toast('That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one.', 5000);
+  }
+
   let dragDepth = 0;
   const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
   window.addEventListener('dragenter', (e) => {
@@ -652,23 +663,24 @@
     e.preventDefault();
     dragDepth = 0;
     els.dropHint.hidden = true;
-    if (!hasFiles(e)) {
-      const types = Array.from((e.dataTransfer && e.dataTransfer.types) || []);
-      if (types.includes('text/uri-list') || types.includes('text/html')) toast('Save the picture to your device first, then drop the file here.', 5000);
-      else if (types.includes('text/plain')) toast('That was text, not a picture. Drop a JPG, PNG or WebP photo, or paste one.', 5000);
-      return;
-    }
+    if (!hasFiles(e)) { notPicture(e.dataTransfer); return; }
     // one photo at a time: of several files the first that looks like a picture is taken (a text file
     // dropped beside a photo does not win), and the drop says so, whether or not that one loads
     const files = Array.from(e.dataTransfer.files);
+    if (!files.length) { toast('That drop held no file. Save the picture to your device first, then drop the file here.', 5000); return; }
     const pick = files.find((f) => !f.type || f.type === 'application/octet-stream' || f.type.startsWith('image/')) || files[0];
     loadForTab(pick, files.length > 1 ? `Of the ${files.length} files dropped, only ${pick.name || 'the first'} was taken.` : '');
   });
   window.addEventListener('paste', (e) => {
     // pasting into a field (the canvas length) is for the field, even with a picture on the clipboard too
     if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
-    const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find((i) => i.type.startsWith('image/'));
-    if (item) loadForTab(item.getAsFile());
+    const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+    const files = items.filter((i) => i.kind === 'file');
+    // a picture first; a file that is not one (a PDF, a text file) goes to readImage, which refuses it as a drop does
+    const item = items.find((i) => i.type.startsWith('image/')) || files[0];
+    if (!item) { notPicture(e.clipboardData, true); return; }
+    const file = item.getAsFile();
+    loadForTab(file, files.length > 1 ? `Of the ${files.length} files pasted, only ${(file && file.name) || 'the first'} was taken.` : '');
   });
 
   // ---- Control events -----------------------------------------------------
@@ -2781,6 +2793,14 @@
     return segs;
   }
 
+  // The name a best score is kept under. The built-in sample keeps 'sample-study' (its scores were saved under it);
+  // a visitor's photo is named by its file, but one whose file is called sample-study is not the sample, so it
+  // gets a name of its own and never shares the sample's scores.
+  function sourceKeyName() {
+    if (state.isSample) return 'sample-study';
+    return state.baseName === 'sample-study' ? 'sample-study/photo' : state.baseName; // a file's name never holds a '/'
+  }
+
   window.Studio = {
     marks,
     tool: () => state.tool,
@@ -2791,8 +2811,10 @@
     prep: () => state.prep,
     savePng,
     openDialog,
-    sourceKey: () => state.source && `${state.baseName}:${state.source.width}x${state.source.height}`,
+    sourceKey: () => state.source && `${sourceKeyName()}:${state.source.width}x${state.source.height}`,
     sourceTitle: () => state.sourceTitle,
+    sourceBase: () => state.baseName, // a photo's name without its extension (its key's name, unless it is sample-study)
+    isSample: () => state.isSample,
     settings,
     tab: () => state.tab,
     addColor,
