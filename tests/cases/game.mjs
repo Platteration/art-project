@@ -1873,7 +1873,13 @@ async function spotThroughPaste(t, site) {
 //     the keys a game writes, where focus goes when a game or its score is left, the Analysis's own buttons
 // ================================================================================================
 const GAME_KEYS = ['gameLevel', 'gamePalette', 'gameMode', 'gameSubject', 'gamePainting', 'gameRefView', 'gameAmount', 'gameSound', 'gameBest'].map(K);
-const focusOf = (page) => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.tagName.toLowerCase()) : null; });
+// where focus is once the page has had its frames (a focused element that was hidden is let go of at the next one)
+const focusOf = (page) => page.evaluate(async () => {
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const a = document.activeElement;
+  if (!a || a === document.body || a === document.documentElement) return 'body';
+  return (a.id || a.tagName.toLowerCase()) + (a.getClientRects().length ? '' : ' (hidden)');
+});
 async function afterTheGame(t, site) {
   const page = await openPage(site, { url: '#game' });
   await ready(page);
@@ -1913,7 +1919,7 @@ async function afterTheGame(t, site) {
   await ready(page);
   const toSetupFocus = await focusOf(page);
   t.check((await setup(page)).shown, 'the Analysis’s own Change settings returns to the setup', await setup(page));
-  const keepsFocus = t.check(toSetupFocus !== 'body', 'Change settings leaves focus on a control, not on the page', toSetupFocus);
+  const keepsFocus = t.check(toSetupFocus !== 'body' && !/\(hidden\)$/.test(toSetupFocus), 'Change settings leaves focus on a control, not on the page', toSetupFocus);
   // a reload with the score on screen: the setup, with the best
   await page.reload({ waitUntil: 'load' }); await sleep(500); await ready(page);
   await setPalette(page, 'zorn'); await ready(page); // (a new board takes its suggested palette: back to the one played)
@@ -1923,7 +1929,7 @@ async function afterTheGame(t, site) {
   await click(page, '#gameStart'); await playing(page);
   await click(page, '#gameQuit'); await click(page, '#gameQuit'); await ready(page);
   const quitFocus = await focusOf(page);
-  const quitOk = t.check(quitFocus !== 'body', '✕ twice leaves focus on a control of the setup, not on the page', quitFocus);
+  const quitOk = t.check(quitFocus !== 'body' && !/\(hidden\)$/.test(quitFocus), '✕ twice leaves focus on a control of the setup, not on the page', quitFocus);
   if (!(keepsFocus && quitOk)) t.finding({
     title: 'Focus is lost to the page when a game is quit or the score is left for the setup',
     severity: 'low',
