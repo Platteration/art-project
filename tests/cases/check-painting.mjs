@@ -786,6 +786,8 @@ export default async function checkPainting(t, site) {
     if (!t.check(fixedBefore.wbUndo && s.wbUndo && s.alignState === fixedBefore.alignState && !/already neutral/.test(s.toast), 'a click on the gray fill a moved photo leaves is not taken as the painting\'s neutral spot: the fix stays', { fixedBefore: fixedBefore.alignState, after: s.alignState, toast: s.toast, wbUndo: s.wbUndo, picking: s.picking, clicked: grayFill })) {
       t.finding({ title: 'A pick on the gray fill beside a moved photo removes the color fix and calls #7F7F7F the painting\'s neutral', severity: 'medium', steps: 'Open index.html#check and load a photo of a painting that has a warm-tinted white spot (rgb 231, 215, 184). Open "Line up the photo and fix its colors", set Move left / right to +20%, press Fix color cast and click the spot (now 20% further right): "Color cast removed". Press Fix color cast again and click the flat gray strip down the left side of Your painting, the part the moved photo no longer covers. Twice, with the same result.', expected: 'The strip is not the painting (the map hatches it as left out): the click is refused or ignored with a word that the spot is outside the photo, and the fix the visitor made stays.', actual: `The toast says "${s.toast}", Remove color fix disappears and the panel's note goes from "${fixedBefore.alignState}" to "${s.alignState}": the fix is silently undone, and the gray the page itself painted in (${cssHex(grayFill)}) is reported as a color of the painting.`, cause: 'js/app.js pickNeutral (line 2567) averages prep.photo, the aligned canvas that alignArt fills with #7f7f7f where the photo does not reach (line 2321), without looking at prep.mask; a gray patch then takes the "already neutral" branch (line 2596), which sets the gains back to [1, 1, 1].' });
     }
+    // (fixed at bc7f7ff) and the visitor is told why, with picking left on for a spot on the painting itself
+    t.check(/outside (your|the) painting/i.test(s.toast) && s.picking, 'a click on the gray fill says the spot is outside the painting, and picking stays on for a spot on it', { toast: s.toast, picking: s.picking });
     if (s.picking) { await page.keyboard.press('Escape'); await sleep(50); }
     await clean(t, page, 'the color fix through moves, fits and a new reference');
     await page.context().close();
@@ -1159,6 +1161,13 @@ export default async function checkPainting(t, site) {
     const squashCrop = [s.color, s.value, s.shapes];
     await fit('stretch'); s = await state(page);
     t.check(s.color >= 97 && s.value >= 96 && +s.shapes.slice(0, -1) >= 96 && squashCrop[0] < s.color - 5, 'a photo squashed to half its width: Stretch to match brings it back (about 100), Crop to match does not', { crop: squashCrop, stretch: [s.color, s.value, s.shapes] });
+    await fit('crop');
+    // the reverse: drawn twice as wide, Crop keeps only the middle half of it, Stretch brings the whole back
+    t.check(await loadArt(page, (await variant(page, 'widened.png', { kind: 'squash', w: 1200, h: 750 })).file), 'the reference stretched to 1200 × 750 loads');
+    s = await state(page);
+    const wideCrop = [s.color, s.value, s.shapes];
+    await fit('stretch'); s = await state(page);
+    t.check(s.color >= 97 && s.value >= 96 && +s.shapes.slice(0, -1) >= 96 && wideCrop[0] < s.color - 5, 'a photo stretched to twice its width: Stretch to match brings it back (about 100), Crop to match does not', { crop: wideCrop, stretch: [s.color, s.value, s.shapes] });
     await fit('crop');
     // Move changed and the tab switched inside the check's short wait: back on the Study tab the score is the new position's
     await page.evaluate(() => { const e = document.getElementById('alignX'); e.value = 5; e.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('[data-tab="help"]').click(); });
