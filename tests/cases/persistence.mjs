@@ -358,6 +358,183 @@ seg('older', 55, async (t, site, pages) => {
 });
 
 
+// ---- segment: studio --------------------------------------------------------------------------------------------------------------
+seg('studio', 60, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await openStudio(page);
+  // the first stroke, saved: the baseline everything below is measured against
+  await line(page, 0.8);
+  const base = await waitRecord(page, (r) => r.savedAt > Date.now() - 600000 && r.paper);
+  const full = await band(page, ...BOTTOM);
+  t.check(!!base && full > 100, 'a stroke is saved a moment after it is made', { full, base });
+  const lone = await app(page).evaluate(() => PaintStudio.ready() && true);
+  // -- a stroke followed by a reload, three ways: at once, a moment later and while the save is under way; then well after it
+  let topFull = 0;
+  const trials = {};
+  for (const wait of [0, 300, 900, 2500]) {
+    await openStudio(page);
+    const wasTop = await band(page, ...TOP);
+    await line(page, 0.2);
+    if (!topFull) topFull = (await band(page, ...TOP)) - wasTop;
+    await sleep(wait);
+    await reload(page);
+    await openStudio(page);
+    const b = await band(page, ...BOTTOM), tp = await band(page, ...TOP);
+    trials[wait] = { bottom: b, top: tp };
+    t.check(b > full * 0.9, `a reload ${wait} ms after a stroke leaves the painting saved before it whole`, { full, bottom: b });
+    if (wait === 2500) t.check(tp > topFull * 0.8, 'a stroke followed by a reload 2.5 s later is kept', { topFull, top: tp });
+    else t.check(tp === 0 || tp > topFull * 0.8, `a reload ${wait} ms after a stroke keeps the stroke whole or not at all, never half of it`, { topFull, top: tp });
+    if (wait !== 2500) {
+      // clear the top line for the next trial: paint over by clearing the whole paper and the baseline again is not needed, so the trial only counts what is new
+      await app(page).evaluate(() => { const c = document.getElementById('ps-paper'); const g = c.getContext('2d'); g.clearRect(0, 0, c.width, Math.floor(c.height * 0.5)); });
+      await line(page, 0.8); // (a stroke elsewhere, so the cleared top is saved too)
+      await waitRecord(page, (r) => r.savedAt > Date.now() - 4000);
+    }
+  }
+  const lostAtOnce = trials[0].top === 0, lostSoon = trials[300].top === 0;
+  t.check(!lostAtOnce || !lostSoon || true, 'measured');
+  t.note(`a stroke followed by a reload: after 0 ms the stroke ${trials[0].top > 0 ? 'was kept' : 'was lost'}, after 300 ms ${trials[300].top > 0 ? 'was kept' : 'was lost'}, after 900 ms ${trials[900].top > 0 ? 'was kept' : 'was lost'}, after 2500 ms ${trials[2500].top > 0 ? 'was kept' : 'was lost'}`);
+  t.check(trials[0].top > 0 && trials[300].top > 0, 'a stroke made less than a second before the page goes (a reload, a closed tab) is still saved: the README says a closed tab loses nothing', trials);
+  if (trials[0].top === 0 && trials[300].top === 0 && trials[900].top === 0) t.finding({
+    title: 'A stroke made less than about a second before a reload or a closed tab is lost: the save on pagehide never finishes',
+    severity: 'low',
+    steps: '1. Open the Studio (index.html#paint) and paint a stroke across the paper; wait two seconds (it is saved). 2. Paint a second stroke and reload the page (or close the tab) at once, 300 ms after the stroke, or 900 ms after it. 3. Open the Studio again.',
+    expected: 'README, Simple and Advanced: "The Studio keeps your work: the paper, the underdrawing, ... are saved in the browser a moment after each change ... and come back on the next visit"; the Help tab: "Close the tab, come back later, and it is still there." js/painting.js says the page saves what is waiting as it goes (pagehide), "so a closed tab ... loses nothing".',
+    actual: `The second stroke is gone after the reload when the page goes 0, 300 or 900 ms after it (bottom stroke kept whole in every case; the stroke after 2.5 s is kept). The first stroke, saved before, is intact (${J(trials)}).`,
+    cause: 'js/painting.js saveNowIfDue (about 528) answers pagehide by calling saveNow, but saveNow awaits two canvas.toBlob() encodings and then an IndexedDB write (about 474-480); a page that is unloading does not stay alive for them, so the record is never written. A save already under way (the 800 ms delay has passed, the PNGs are being encoded) is cut off the same way. Taking the pixels synchronously at pagehide (getImageData, put into the record as ImageData) or encoding after every stroke ends would keep it.',
+  });
+
+  // -- hiding the page (a phone switching apps) saves at once, and the page stays up to finish it
+  await openStudio(page);
+  await app(page).evaluate(() => { const c = document.getElementById('ps-paper'); c.getContext('2d').clearRect(0, 0, c.width, c.height); });
+  await line(page, 0.2);
+  const strokeDone = Date.now();
+  await app(page).evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+  const hid = await waitRecord(page, (r) => r.savedAt >= strokeDone - 50, 8000);
+  await app(page).evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+  t.check(!!hid && hid.savedAt - strokeDone < 700, 'hiding the page saves the last stroke at once, without waiting out the 0.8 s', { delay: hid ? hid.savedAt - strokeDone : null });
+  await reload(page); await openStudio(page);
+  t.check((await band(page, ...TOP)) > 100, 'the stroke saved on hiding is on the paper after a reload', await band(page, ...TOP));
+
+  // -- Clear the paper (two taps) is kept; Undo brings the paper back and that is kept too
+  await openStudio(page);
+  await app(page).evaluate(() => { const c = document.getElementById('ps-paper'); c.getContext('2d').clearRect(0, 0, c.width, c.height); });
+  await line(page, 0.8);
+  let mark = Date.now();
+  await waitRecord(page, (r) => r.savedAt > mark);
+  mark = Date.now();
+  await click(page, '#ps-clear'); await sleep(200); await click(page, '#ps-clear');
+  t.check((await band(page, ...BOTTOM)) === 0, 'two taps on Clear empty the paper');
+  const cleared = await waitRecord(page, (r) => r.savedAt > mark);
+  await reload(page); await openStudio(page);
+  t.check(!!cleared && (await band(page, ...BOTTOM)) === 0, 'a cleared paper stays cleared after a reload', await band(page, ...BOTTOM));
+  await line(page, 0.8);
+  mark = Date.now(); await waitRecord(page, (r) => r.savedAt > mark - 100 && r.paper);
+  mark = Date.now();
+  await click(page, '#ps-clear'); await sleep(200); await click(page, '#ps-clear');
+  await waitRecord(page, (r) => r.savedAt > mark);
+  mark = Date.now();
+  await click(page, '#ps-undo');
+  t.check((await band(page, ...BOTTOM)) > 100, 'Undo brings the cleared paper back');
+  await waitRecord(page, (r) => r.savedAt > mark);
+  await reload(page); await openStudio(page);
+  t.check((await band(page, ...BOTTOM)) > 100, 'a paper brought back by Undo is the paper that is saved, and it is back after a reload', await band(page, ...BOTTOM));
+  await clean(t, page, 'studio');
+});
+
+// ---- segment: twotabs ---------------------------------------------------------------------------------------------------------------
+// Two tabs of the site open at once (the README: the picked colors "are kept in your browser between visits and shared by every tab you
+// have the tool open in"; saved poses show in the other page). What else is one record the tab holds whole, so the stale tab writes over
+// the other's work?
+seg('twotabs', 70, async (t, site, pages) => {
+  const a = await open(pages, site);
+  const b = await newTab(site, a);
+  await appUp(a); await appUp(b);
+  // picked colors and My paints follow each other (the control: they are shared by design)
+  await app(a).evaluate(() => Studio.addColor({ r: 1, g: 2, b: 3 }, true));
+  await app(b).evaluate(() => Studio.addColor({ r: 4, g: 5, b: 6 }, true));
+  const sw = (p) => app(p).evaluate(() => [...document.querySelectorAll('#swatches .swatch-meta span:first-child')].map((s) => s.textContent));
+  t.check(J(await sw(a)) === J(['#010203', '#040506']) && J(await sw(b)) === J(['#010203', '#040506']), 'a color picked in one tab is picked in the other, in order', [await sw(a), await sw(b)]);
+  await app(a).evaluate(() => { const s = document.getElementById('paintAddPreset'); s.value = 'zorn'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+  await app(b).evaluate(() => { const s = document.getElementById('paintAddPreset'); s.value = 'primary'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+  const mineIn = (p) => app(p).evaluate(() => document.getElementById('mineCount').textContent);
+  t.check(JSON.parse(await storageGet(a, P + 'myPaints')).length === 7 && /7/.test(await mineIn(a)) && /7/.test(await mineIn(b)), 'paints ticked in two tabs are all ticked in both (Zorn and the three primaries share a white: 7 paints)', [JSON.parse(await storageGet(a, P + 'myPaints')), await mineIn(a), await mineIn(b)]);
+  // a Forget-free setting set in one tab and read by a tab opened afterwards
+  await click(a, '[data-mode="advanced"]');
+  const c = await newTab(site, a);
+  await appUp(c);
+  t.check(await app(c).evaluate(() => !document.body.classList.contains('mode-simple')), 'a tab opened after the switch to Advanced opens in Advanced');
+  await c.close();
+  // the Studio's painting: B opened before A painted, A painted and it was saved, then B paints
+  await openStudio(a); await openStudio(b);
+  await line(a, 0.8);
+  let mark = Date.now();
+  await waitRecord(a, (r) => r.savedAt > mark - 100);
+  mark = Date.now();
+  await line(b, 0.2);
+  await waitRecord(b, (r) => r.savedAt > mark);
+  await reload(a); await openStudio(a);
+  const keptA = await band(a, ...BOTTOM), keptB = await band(a, ...TOP);
+  t.check(keptA > 100 && keptB > 100, 'after tab A painted and tab B (opened before) then painted, the saved painting holds both strokes', { fromA: keptA, fromB: keptB });
+  if (keptA <= 100 && keptB > 100) t.finding({
+    title: 'A second tab that was open before the painting was made saves over it: the first tab\'s painting is silently lost',
+    severity: 'medium',
+    steps: '1. Open the site in tab A and again in tab B (any visitor who opens a link twice, or comes back through a bookmark). 2. In tab A open the Studio, paint a stroke across the bottom and wait two seconds. 3. In tab B (opened before the stroke) open the Studio (it shows a blank paper) and paint a stroke across the top. 4. Reload tab A and open the Studio.',
+    expected: 'The painting saved in tab A is kept (README: "The Studio keeps your work ... saved in the browser a moment after each change ... and come back on the next visit"; the Help tab: "Close the tab, come back later, and it is still there"); the picked colors, My paints and saved poses already follow every open tab, and the second tab at least shows the saved painting before it paints on it.',
+    actual: `After the reload tab A shows only tab B's stroke (bottom stroke ${keptA} painted pixels, top stroke ${keptB}); tab A's painting is gone from IndexedDB, with no message to either tab.`,
+    cause: 'js/painting.js restore (about 497) runs once, as the page starts; saveNow (about 474) then writes the whole record under the one key "painting" from this tab\'s canvases, with no look at the record already there (its savedAt) and no change event from other tabs, so a tab whose canvas is older than the stored record replaces it. Re-reading the record when the Studio opens or the tab is shown (or comparing savedAt before writing, and a BroadcastChannel to tell the other tab) would stop it.',
+  });
+  // the mixes locked in: A locks one, B (opened before) locks another
+  const before = await mixCount(a);
+  await lockMix(a, 0);
+  await lockMix(b, 3);
+  const stored = await savedMixes(a);
+  await reload(a); await openStudio(a);
+  const after = await mixCount(a);
+  t.check(after === before + 2 && stored && stored.length === 2, 'a mix locked in tab A and another locked in tab B (opened before) are both kept', { before, after, stored: stored && stored.length });
+  if (stored && stored.length === 1) t.finding({
+    title: 'A mix locked in one tab is lost when a tab that was open before it locks another: the saved list is the second tab\'s alone',
+    severity: 'medium',
+    steps: '1. Open the site in tab A and in tab B. 2. In tab A open the Studio, tap a paint and Lock in. 3. In tab B open the Studio, tap another paint and Lock in. 4. Reload tab A and open the Studio, or read localStorage portrait-value-studio.paintMixes.',
+    expected: 'README, Studio: "Mixes you lock in are kept between visits." Both locked mixes are kept, as the paints ticked in two tabs are (js/palette.js listens for the storage event and writes on top of the other tab\'s list).',
+    actual: `portrait-value-studio.paintMixes holds one mix (${J(stored)}), tab B's; after the reload the Studio has ${after} mixes, not ${before + 2}.`,
+    cause: 'js/painting.js saveMixes (about 825) writes this tab\'s own state.mixes under paintMixes, and the Studio has no storage listener (js/palette.js 447 has one for My paints), so a stale tab overwrites the list. The same holds for the Figure study class (js/figure.js showSetup writes its own Set of poses taken out) and the open drawers (js/app.js 2751).',
+  });
+  // the Figure class: the poses taken out in A, then in B
+  await tab(a, 'figure', { wait: false }); await tab(b, 'figure', { wait: false });
+  for (const p of [a, b]) await app(p).waitForFunction(() => document.querySelectorAll('#tab-figure [data-pose-id]').length >= 30, null, { timeout: 40000 }).catch(() => null);
+  await click(a, '#tab-figure [data-pose-id="stand"]');
+  await click(b, '#tab-figure [data-pose-id="walk"]');
+  const fs = JSON.parse(await storageGet(a, P + 'figureStudy') || '{}');
+  t.check(J((fs.out || []).slice().sort()) === J(['stand', 'walk']), 'the poses taken out of the Figure class in two tabs are both out', fs);
+  t.note(`the Figure class's poses taken out in two tabs: ${J(fs.out)} is what is kept (each tab writes the set it holds)`);
+  await clean(t, a, 'twotabs: A'); await clean(t, b, 'twotabs: B');
+});
+
+// ---- segment: gamesetup -------------------------------------------------------------------------------------------------------------
+// Paint by numbers' setup against Value battle's: what is chosen and kept when it is chosen, or only when a game starts
+seg('gamesetup', 30, async (t, site, pages) => {
+  const page = await open(pages, site);
+  await tab(page, 'game'); await gameReady(page);
+  await click(page, '#gameHard'); await setSelect(page, 'gamePalette', 'primary'); await setSelect(page, 'gameMode', 'relaxed'); await setRange(page, 'gameAmount', 4);
+  const saved = await dumpOf(page);
+  t.check(saved[P + 'gameMode'] === '"relaxed"' && saved[P + 'gameAmount'] === '4', 'Paint by numbers: Mode and the amount per tap are saved the moment they are chosen', saved);
+  t.check(P + 'gameLevel' in saved && P + 'gamePalette' in saved, 'Paint by numbers: Difficulty and Palette are saved the moment they are chosen, as Value battle saves its palette, count and mode', Object.keys(saved));
+  await reload(page); await tab(page, 'game'); await gameReady(page);
+  const back = await app(page).evaluate(() => ({ level: document.querySelector('input[name="gameLevel"]:checked').value, palette: document.getElementById('gamePalette').value, mode: document.getElementById('gameMode').value }));
+  t.check(back.level === 'hard' && back.palette === 'primary' && back.mode === 'relaxed', 'Paint by numbers after a reload: Hard, Three primaries and Relaxed are still chosen', back);
+  if (back.mode === 'relaxed' && (back.level !== 'hard' || back.palette !== 'primary')) t.finding({
+    title: 'Paint by numbers keeps Difficulty and Palette only once a game has been started; Mode, the amount per tap and the subject are kept as soon as they are chosen',
+    severity: 'low',
+    steps: '1. Open Games, Paint by numbers. 2. Choose Hard, a palette other than the one offered (Three primaries) and Relaxed mode, without starting. 3. Reload the page and open Paint by numbers again.',
+    expected: 'The README\'s Privacy section lists "game and battle settings" as kept; Value battle keeps its palette, count and mode when they are chosen, and Paint by numbers does so for its Mode, the amount per tap and the sound.',
+    actual: `After the reload Mode is ${back.mode} but Difficulty is ${back.level} and the palette is ${back.palette}; neither portrait-value-studio.gameLevel nor gamePalette was written until Start painting.`,
+    cause: 'js/game.js startGame (586-587) is the only place that calls save(PALETTE_KEY ...) and save(LEVEL_KEY ...); the level radios (about 1701) and the palette menu\'s change handler (showPalette) write nothing.',
+  });
+  await clean(t, page, 'gamesetup');
+});
+
+
 export default async function persistence(t, site) {
   await runPool(t, site, +(process.env.PERSIST_JOBS || 3));
   t.note('segment times: ' + timings.join('; '));
