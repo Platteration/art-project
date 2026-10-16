@@ -628,7 +628,8 @@ for (const kind of ['full', 'blocked']) {
     if (kind === 'full') {
       await dropFiller(other);
       const back = await dumpOf(other);
-      t.check(back[P + 'mode'] === 'advanced' && back[P + 'lean'] === '40' && back[P + 'palette'] === J([{ r: 9, g: 8, b: 7 }]), `${L}: the values saved before the storage was full are as they were (Advanced, lean 40, one picked color)`, back);
+      // (a value replaced by one no longer than it fits in a full storage, so the lean slider's "70" may well have been kept: it is the picked color, which grew, that must be whole)
+      t.check(back[P + 'mode'] === 'advanced' && ['40', '70'].includes(back[P + 'lean']) && back[P + 'palette'] === J([{ r: 9, g: 8, b: 7 }]), `${L}: the values saved before the storage was full are whole (Advanced, a lean of 40 or 70, the one picked color: the new one was refused, the old one not touched)`, back);
     } else {
       t.check((await siteKeys(other)).length === 0, `${L}: nothing the site wrote while it was blocked reached the storage`, await siteKeys(other));
       t.check((await record(other)) === null, `${L}: nor a painting in the database`);
@@ -657,6 +658,9 @@ for (const kind of ['full', 'blocked']) {
     const wantNote = kind === 'full' ? /^This pose could not be kept for next time: browser storage is full\.$/ : /^This pose cannot be kept for next time: this browser does not let the site keep it\.$/;
     t.check(note.shown && wantNote.test(note.text), `${L}: the rail says the pose cannot be kept for next time, and why`, note);
     t.check(await page.evaluate(() => PoseAndLight.pose.hipR.x < -40), `${L}: the figure takes the pose for this visit`);
+    // (a full storage lets go of the pose stored before, so the room it frees is filled again before the next write)
+    if (kind === 'full') t.check(await page.evaluate((k) => localStorage.getItem(k) === null, PL + 'v2'), `${L}: a pose that could not be stored lets go of the one stored before, so the next visit does not offer an older one`);
+    if (kind === 'full') await fillStorage(page);
     await page.evaluate(() => document.getElementById('savePose').click());
     const btn = await page.evaluate(() => document.getElementById('savePose').textContent);
     t.check(btn === `In the library for this visit only: ${kind === 'full' ? 'storage is full' : 'storage is off'}`, `${L}: Save this pose says it is in the library for this visit only`, btn);
