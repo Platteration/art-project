@@ -95,7 +95,9 @@ export default async function appShell(t, site) {
     t.check(s.learnOpen && s.learnExpanded === 'true' && s.active === 'tabStudyBtn', `menus ${round}: ArrowDown on Learning tools opens it with the open page focused`, s);
     await page.keyboard.press('ArrowDown'); s = await shell(page);
     t.check(s.active === 'tabLoomisBtn', `menus ${round}: ArrowDown moves to the next item`, s.active);
-    await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); s = await shell(page);
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); s = await shell(page);
+    t.check(s.active === 'tabTraceBtn', `menus ${round}: ArrowDown reaches Trace onto paper, after Pose and light`, s.active);
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); s = await shell(page);
     t.check(s.active === 'tabStudyBtn', `menus ${round}: ArrowDown wraps from the last item to the first`, s.active);
     await page.keyboard.press('ArrowUp'); s = await shell(page);
     t.check(s.active === 'tabHelpBtn', `menus ${round}: ArrowUp wraps from the first item to the last`, s.active);
@@ -124,11 +126,11 @@ export default async function appShell(t, site) {
     // edge: Tab out of the open menu: the menu should not stay open behind the focus
     await page.evaluate(() => document.querySelectorAll('.tab-menu').forEach((m) => { m.hidden = true; }));
     await page.focus('#tabLearnBtn'); await page.keyboard.press('ArrowDown');
-    for (let i = 0; i < 4; i++) await page.keyboard.press('Tab');
+    for (let i = 0; i < 5; i++) await page.keyboard.press('Tab');
     s = await shell(page);
-    const left = s.active !== 'tabStudyBtn' && s.active !== 'tabLoomisBtn' && s.active !== 'tabPoseBtn' && s.active !== 'tabHelpBtn';
+    const left = s.active !== 'tabStudyBtn' && s.active !== 'tabLoomisBtn' && s.active !== 'tabPoseBtn' && s.active !== 'tabTraceBtn' && s.active !== 'tabHelpBtn';
     t.check(left && !s.learnOpen, `menus ${round}: Tab out of the Learning menu closes it`, s);
-    if (left && s.learnOpen && round === 2) t.finding({ title: 'Tab out of an open tab menu leaves the menu open behind the focus', severity: 'low', steps: 'Focus Learning tools, press ArrowDown (the menu opens), press Tab four times: the focus leaves the menu for the Studio button.', expected: 'The menu closes when the focus leaves it (a keyboard visitor otherwise has an open menu covering the page with nothing to close it but Escape).', actual: `The menu stays open with aria-expanded="true"; nothing closes it on focusout (${SRC.menuKeys} handles only ArrowDown, ArrowUp and Escape; the pointerdown at ${SRC.pointerdown} is for the mouse). Focus on ${s.active}`, cause: `${SRC.menuKeys}-${SRC.pointerdown}: no focusout handler on the menu` });
+    if (left && s.learnOpen && round === 2) t.finding({ title: 'Tab out of an open tab menu leaves the menu open behind the focus', severity: 'low', steps: 'Focus Learning tools, press ArrowDown (the menu opens), press Tab five times: the focus leaves the menu for the Studio button.', expected: 'The menu closes when the focus leaves it (a keyboard visitor otherwise has an open menu covering the page with nothing to close it but Escape).', actual: `The menu stays open with aria-expanded="true"; nothing closes it on focusout (${SRC.menuKeys} handles only ArrowDown, ArrowUp and Escape; the pointerdown at ${SRC.pointerdown} is for the mouse). Focus on ${s.active}`, cause: `${SRC.menuKeys}-${SRC.pointerdown}: no focusout handler on the menu` });
     await page.keyboard.press('Escape');
     // mouse: a double click toggles open then closed; a click outside closes
     await page.click('#tabLearnBtn'); await page.click('#tabLearnBtn'); s = await shell(page);
@@ -183,8 +185,8 @@ export default async function appShell(t, site) {
     }));
     t.check(help.steps === 4 && help.goes.join() === 'study,paint,check', 'help: four steps with buttons to Study, Studio and Check a painting', help.goes);
     t.note('help: step 2 (Look at the shapes) has no jump button; steps 1, 3 and 4 do. The README says "with buttons that jump to the part they describe".');
-    const want = ['help-start', 'help-study', 'help-tools', 'help-loomis', 'help-pose', 'help-colors', 'help-studio', 'help-figure', 'help-check', 'help-game', 'help-battle', 'help-tips'];
-    t.check(help.parts.map((p) => p.id).join() === want.join(), 'help: the twelve parts the README lists, in order', help.parts.map((p) => p.id));
+    const want = ['help-start', 'help-study', 'help-tools', 'help-loomis', 'help-pose', 'help-trace', 'help-colors', 'help-studio', 'help-figure', 'help-check', 'help-game', 'help-battle', 'help-tips'];
+    t.check(help.parts.map((p) => p.id).join() === want.join(), 'help: the thirteen parts the README lists, in order', help.parts.map((p) => p.id));
     t.check(help.parts.every((p) => p.h3) && help.parts.every((p) => p.id === 'help-tips' || p.shots > 0) && help.forgetInTips, 'help: every part has a heading, every part but Good to know has a screenshot, Forget sits under Good to know', help.parts);
     // README: "a few things good to know (nothing is uploaded, the Studio autosaves, where Undo is)"
     t.check(/Nothing is uploaded/.test(help.tips) && /saves your painting as you go/.test(help.tips) && /Undo is everywhere/.test(help.tips), 'help: Good to know says nothing is uploaded, the Studio saves as you go, and where Undo is', help.tips.slice(0, 300));
@@ -200,7 +202,7 @@ export default async function appShell(t, site) {
     t.check(fs.readdirSync(path.join(site.root, 'img', 'help')).filter((f) => f.endsWith('.jpg')).every((f) => shots.some((s) => s.src === 'img/help/' + f)), 'help: every file in img/help/ is shown by the guide', fs.readdirSync(path.join(site.root, 'img', 'help')));
     // README: "400 px wide, twice their display width": the first picture of each part, at the desktop width
     const firsts = await page.evaluate(() => [...document.querySelectorAll('#tab-help .help-part figure.phone')].filter((f, i, all) => all.findIndex((g) => g.closest('.help-part') === f.closest('.help-part')) === i).map((f) => ({ w: Math.round(f.querySelector('img').getBoundingClientRect().width), cap: !!(f.querySelector('figcaption') || {}).textContent })));
-    t.check(firsts.length === 11 && firsts.every((f) => f.w >= 170 && f.w <= 220 && f.cap), 'help: each part\'s first screenshot shows at about half its 400 px (170 to 220 px), with a caption', firsts);
+    t.check(firsts.length === 12 && firsts.every((f) => f.w >= 170 && f.w <= 220 && f.cap), 'help: each part\'s first screenshot shows at about half its 400 px (170 to 220 px), with a caption', firsts);
     // the jump buttons
     await click(page, '[data-go="paint"]'); await waitShown(page, 'tab-paint');
     let s = await shell(page);
@@ -761,7 +763,7 @@ export default async function appShell(t, site) {
     }));
     t.check(resp && resp.status() === 404 && nf.notFound && /Page not found/.test(nf.title) && /isn’t here/.test(nf.h1), '404: a folder address gets the not-found page with status 404', { status: resp && resp.status(), ...nf });
     t.check(/Bricolage/.test(nf.font) && nf.styled === '12px', '404: styles.css and the fonts apply (root-absolute paths)', { font: nf.font, radius: nf.styled });
-    t.check(nf.links.join() === '/,/#paint,/#game,/#battle,/#loomis,/#pose,/#figure,/#help', '404: the home link and the seven hash shortcuts, root-absolute', nf.links);
+    t.check(nf.links.join() === '/,/#paint,/#game,/#battle,/#loomis,/#pose,/#trace,/#figure,/#help', '404: the home link and the eight hash shortcuts, root-absolute', nf.links);
     const headers = fs.readFileSync(path.join(site.root, '_headers'), 'utf8');
     const hostCsp = (/Content-Security-Policy:\s*(.+)/.exec(headers) || [, ''])[1].trim();
     const indexCsp = (/http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(fs.readFileSync(path.join(site.root, 'index.html'), 'utf8')) || [, ''])[1];

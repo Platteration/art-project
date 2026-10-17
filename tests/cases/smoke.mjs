@@ -25,7 +25,7 @@ export default async function smoke(t, site) {
   }
 
   // hash routes, a wrong one included
-  for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#pose', '#figure', '#battle', '#nonsense']) {
+  for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#pose', '#trace', '#figure', '#battle', '#nonsense']) {
     const page = await openPage(site, { url: h });
     const shown = await page.evaluate(() => [...document.querySelectorAll('.tabpanel')].filter((p) => !p.hidden).map((p) => p.id));
     const want = { '#check': 'tab-study', '#nonsense': 'tab-study' }[h] || 'tab-' + h.slice(1);
@@ -124,6 +124,7 @@ export default async function smoke(t, site) {
     ['js/painting.js', { note: 'part', hidden: ['paint', 'figure', 'loomis'] }],
     ['js/battle.js', { note: 'part', hidden: ['battle'] }],
     ['js/loomis.js', { note: 'part', hidden: ['loomis'] }],
+    ['js/trace.js', { note: 'part', hidden: ['trace'] }],
     ['js/figure.js', { note: 'part', hidden: ['figure'] }],
     ['js/palette.js', { note: 'part', hidden: [] }],
     ['fonts.css', { note: 'none', hidden: [] }],

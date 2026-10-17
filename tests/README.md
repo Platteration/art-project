@@ -1,8 +1,9 @@
 # Tests
 
 Playwright drives the real site in headless Chromium, served from a loopback server that sends the
-same Content-Security-Policy header every host sends (`tests/serve.mjs`), so what passes here is what
-a visitor gets. Nothing here is part of the published site: `git archive` leaves `tests/`,
+same Content-Security-Policy and Permissions-Policy headers every host sends (`tests/serve.mjs`), so what
+passes here is what a visitor gets. Chromium runs with a fake camera whose permission is granted
+(`--use-fake-device-for-media-stream`, `--use-fake-ui-for-media-stream`), for Trace onto paper. Nothing here is part of the published site: `git archive` leaves `tests/`,
 `package.json` and `node_modules/` out, and the host configs refuse them.
 
 ```sh

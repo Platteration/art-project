@@ -33,7 +33,7 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), paint: $('tab-paint'), figure: $('tab-figure'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
+    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), trace: $('tab-trace'), paint: $('tab-paint'), figure: $('tab-figure'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -475,7 +475,7 @@
 
   // The last file chosen wins: a read still under way when another file is chosen for the same
   // place (two files in the same instant) shows nothing and says nothing when it finishes.
-  const readJobs = { photo: 0, art: 0 };
+  const readJobs = { photo: 0, art: 0, trace: 0 };
   // extra: a sentence about how the file arrived (the others dropped with it), said before any refusal
   // and with the photo's own note on success
   function readImage(file, done, slot = 'photo', extra = '') {
@@ -504,7 +504,7 @@
       // viewBox, where the browser gives it none: Chromium gives such an SVG 300 x 150, and it loads as
       // that), and one under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
-        refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
+        refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${{ art: 'check', trace: 'trace' }[slot] || 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
         return;
       }
       // a picture the browser draws but will not let the page read back (an SVG with a foreignObject) would
@@ -557,8 +557,9 @@
     return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
-  // the tabs that show the loaded photo (the Studio and the Loomis head follow it; the game's setup takes it)
-  const SHOWS_PHOTO = ['study', 'paint', 'loomis', 'game'];
+  // the tabs that show the loaded photo (the Studio and the Loomis head follow it; the game's setup takes it; Trace onto
+  // paper puts it over the camera, which keeps running)
+  const SHOWS_PHOTO = ['study', 'paint', 'loomis', 'game', 'trace'];
   function loadFile(file, extra) {
     readImage(file, (img, note) => {
       // a photo loaded where it is not shown: from the guide or Pose and light, Study the photo opens with it;
@@ -649,7 +650,7 @@
     e.preventDefault();
     dragDepth++;
     els.dropHint.firstElementChild.textContent =
-      checking() ? 'Drop your painting to check it' : 'Drop the portrait to load it';
+      checking() ? 'Drop your painting to check it' : state.tab === 'trace' ? 'Drop the photo to trace it' : 'Drop the portrait to load it';
     els.dropHint.hidden = false;
   });
   // Every drag over the page is claimed, so dropping text, a link or a picture from another tab can
@@ -2223,11 +2224,11 @@
 
   // ---- Tabs ---------------------------------------------------------------
 
-  // Four sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, How to use),
+  // Four sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, Trace onto paper, How to use),
   // Studio, Figure study, and Games (a menu: Paint by numbers and Value battle). A menu's button shows
   // which of its pages is open.
-  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', help: 'learn', paint: 'paint', figure: 'figure', game: 'games', battle: 'games' };
-  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', help: 'How to use', paint: 'Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
+  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', trace: 'learn', help: 'learn', paint: 'paint', figure: 'figure', game: 'games', battle: 'games' };
+  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', trace: 'Trace onto paper', help: 'How to use', paint: 'Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
   const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), figure: $('tabFigureBtn'), games: $('tabGamesBtn') };
   const groupSubs = { learn: $('tabLearnSub'), games: $('tabGamesSub') };
   function closeMenus() {
@@ -2817,6 +2818,9 @@
     prep: () => state.prep,
     savePng,
     openDialog,
+    // the photo checks every way in uses (the type, the size, an SVG that cannot be read back, a huge photo reduced), for a
+    // module with a photo of its own: done(picture, note) only for a picture that passed, a refusal is said in the toast
+    readImage: (file, done, slot, extra) => readImage(file, done, slot, extra),
     sourceKey: () => state.source && `${sourceKeyName()}:${state.source.width}x${state.source.height}`,
     sourceTitle: () => state.sourceTitle,
     sourceBase: () => state.baseName, // a photo's name without its extension (its key's name, unless it is sample-study)
@@ -2855,7 +2859,7 @@
   }
   // the address's #part opens that part: at load, and whenever it changes later (Back and Forward between two
   // of them, a link followed, one typed); an address with none, met by going Back, is the Study tab
-  const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
+  const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#trace': 'trace', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
   function routeHash(e) {
     // a shortcut typed by hand matches however it is written: #Help, #help/ and #loomis?x name their tabs
     const h = location.hash.toLowerCase().replace(/[/?&].*$/, '');

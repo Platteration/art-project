@@ -4,7 +4,7 @@
 //   withSite(opts, async (site) => { ... })      a server on a free port and a browser; site = { base, browser, root }
 //   openPage(site, { viewport, url, storage, block, dark, sandbox })   a page with page.log (errors, violations, requests)
 //   clean(t, page, label)                         records checks: no page error, console error, violation, off-site request
-//   tab(page, name)                               opens a tab (study, loomis, pose, help, paint, figure, game, battle) and waits for it
+//   tab(page, name)                               opens a tab (study, loomis, pose, trace, help, paint, figure, game, battle) and waits for it
 //   makeImage(page, { width, height, type, draw }), loadPhoto(page, file), dropFiles(...), dropText(...), pasteFile(...)
 //   stroke(page, selector, points), inked(page, selector), storageKeys(page), screenshot(page, name), axe(page)
 //   checker()  →  t.check(ok, name, detail) / t.finding({ title, severity, steps, expected, actual }) / t.note(text)
@@ -18,7 +18,7 @@ import { serve } from './serve.mjs';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DESKTOP = { width: 1400, height: 900 };
 export const PHONE = { width: 390, height: 844 };
-export const TABS = ['study', 'loomis', 'pose', 'help', 'paint', 'figure', 'game', 'battle'];
+export const TABS = ['study', 'loomis', 'pose', 'trace', 'help', 'paint', 'figure', 'game', 'battle'];
 export const PROTO_NAMES = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
 const NOISE = /GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -27,7 +27,8 @@ export async function withSite(opts, fn) {
   if (typeof opts === 'function') { fn = opts; opts = {}; }
   const root = opts.root || process.env.PVS_ROOT || ROOT;
   const site = await serve(root);
-  const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+  // a fake camera, its permission granted (Trace onto paper): nothing else asks for a camera
+  const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   try { return await fn({ base: site.base, browser, root }); } finally { await browser.close(); await site.close(); }
 }
 

@@ -327,6 +327,17 @@ const FLOW = {
     await sweep(t, page, acc, ctx, 'pose library', { targets: ['app', 'pose'], how: 'Pose and light, then Poses (the library dialog open)' });
     await poseFrame(page).evaluate(() => document.getElementById('libClose').click()); await sleep(200);
   },
+  async trace(t, page, acc, ctx) {
+    await resize(page, PHONE);
+    await tab(page, 'trace'); await sleep(400);
+    await sweep(t, page, acc, ctx, 'set up', { how: 'Learning tools, Trace onto paper: the card with Start camera, the camera off' });
+    await click(page, '#tr-start');
+    await app(page).waitForFunction(() => document.getElementById('tr-video').videoWidth > 0, null, { timeout: 10000 }).catch(() => null);
+    await click(page, '#tr-useStudy'); await click(page, '#tr-setFrame'); await click(page, '#tr-showFrame'); await click(page, '#tr-lock');
+    await app(page).evaluate(() => { const t = document.getElementById('toast'); t.classList.remove('show'); }); await sleep(400);
+    await sweep(t, page, acc, ctx, 'tracing', { how: 'Trace onto paper: the camera on (the fake camera), the Study photo over it, the frame set and shown, the photo locked' });
+    await click(page, '#tr-camera');
+  },
   async help(t, page, acc, ctx) {
     await resize(page, PHONE);
     await tab(page, 'help'); await sleep(400);

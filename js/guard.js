@@ -175,7 +175,7 @@
   // that module did not start, and its tab is taken off the menu (a module cannot do that for itself).
   var booting = true;
   window.addEventListener('load', function () { booting = false; });
-  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', figure: 'figure', subjects: 'game', palette: 'palette' };
+  var TAB_OF = { app: 'all', painting: 'paint', game: 'game', battle: 'battle', loomis: 'loomis', trace: 'trace', figure: 'figure', subjects: 'game', palette: 'palette' };
 
   // Capture phase, so failed resource loads (which don't bubble) are seen here too. A script or the
   // stylesheet failing to load shows the standing note at the top of the page, not a passing toast,

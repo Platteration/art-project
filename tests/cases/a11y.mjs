@@ -1026,6 +1026,11 @@ export default async function a11y(t, site) {
     await run(page, 'Games menu open');
     await page.keyboard.press('Escape');
     await tab(page, 'loomis'); await run(page, 'Loomis head');
+    await tab(page, 'trace'); await run(page, 'Trace onto paper');
+    await click(page, '#tr-start');
+    await waitFor(page, () => document.getElementById('tr-video').videoWidth > 0, null, 10000);
+    await click(page, '#tr-useStudy'); await click(page, '#tr-setFrame'); await click(page, '#tr-showFrame'); await click(page, '#tr-lock');
+    await run(page, 'Trace onto paper with the camera on, a photo, the frame shown and the photo locked');
     await tab(page, 'help'); await run(page, 'How to use');
     await tab(page, 'paint');
     await waitFor(page, () => window.PaintStudio && document.querySelectorAll('#ps-paints .ps-paint').length > 0, null, 20000);

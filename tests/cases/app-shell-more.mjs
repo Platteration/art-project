@@ -13,7 +13,7 @@
 // to throw one at a time, and two or all of them at once, each read against js/guard.js's TAB_OF (the menu item,
 // the panel, the guide's jump button, the menu's name, the note, the keyboard walk); styles.css, the fonts, the
 // icons, three.js, pose.html's scripts and the guide's pictures missing; the guard and one module missing together; the whole app in
-// another site's sandboxed frame (the README's own embedding test); the guide's twelve parts; axe on every tab at both widths.
+// another site's sandboxed frame (the README's own embedding test); the guide's thirteen parts; axe on every tab at both widths.
 // Steps are independent, each on contexts of its own, and run on a small pool of workers (PVS_WORKERS, default 3)
 // longest first, so the case stays inside its time budget on a shared machine. PVS_STEPS=<regexp> runs the steps
 // whose names match, for working on one.
@@ -23,7 +23,7 @@ import { openPage, clean, tab, app, TABS, DESKTOP, PHONE, poseFrame, stroke, ink
 
 const PVS = (k) => 'portrait-value-studio.' + k;
 // every key the app reads (js/app.js, palette.js, painting.js, figure.js, game.js, battle.js, pose.js)
-const APP_KEYS = ['palette', 'canvasUnit', 'smoothing', 'blockView', 'lean', 'drawers', 'mode', 'battlePalette', 'battleCount', 'battleMode', 'battleBest', 'myPaints', 'figureStudy', 'figureMixes', 'gameAmount', 'gameSound', 'gameBest', 'gameLevel', 'gamePalette', 'gameSubject', 'gamePainting', 'gameRefView', 'gameMode', 'paintMixes', 'studioNotice', 'paintChoice'].map(PVS);
+const APP_KEYS = ['palette', 'canvasUnit', 'smoothing', 'blockView', 'lean', 'drawers', 'mode', 'battlePalette', 'battleCount', 'battleMode', 'battleBest', 'myPaints', 'figureStudy', 'figureMixes', 'gameAmount', 'gameSound', 'gameBest', 'gameLevel', 'gamePalette', 'gameSubject', 'gamePainting', 'gameRefView', 'gameMode', 'paintMixes', 'studioNotice', 'paintChoice', 'trace'].map(PVS);
 const POSE_KEYS = ['pose-and-light.v2', 'pose-and-light.mine.v1', 'pose-and-light.mode'];
 const ALL_KEYS = APP_KEYS.concat(POSE_KEYS);
 const BIG = JSON.stringify(Array.from({ length: 5000 }, (_, i) => (i % 3 === 0 ? 'constructor' : i % 3 === 1 ? { id: '__proto__', p: { x: 'NaN' }, view: 'toString' } : i)));
@@ -153,11 +153,11 @@ function groupA(t, site) {
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Tab');
       const tabbed = { focus: await active(page), menu: await menuOf(page, 'tabLearnMenu') };
-      await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
       const left = { focus: await active(page), menu: await menuOf(page, 'tabLearnMenu') };
       const closes = left.menu.hidden;
-      t.check(closes, `${label}: Tab out of an open menu closes it`, { afterOneTab: tabbed, afterFourTabs: left });
-      if (!closes && label === 'desktop') t.finding({ title: 'A tab menu stays open, and its button says expanded, after Tab moves focus out of it', severity: 'low', steps: 'Focus Learning tools (Tab to it), press ArrowDown so the menu opens, then press Tab four times: focus walks every item and lands on Studio.', expected: 'The menu closes when focus leaves it (as it does on Esc or a click elsewhere), and aria-expanded goes back to false.', actual: `The menu stays open with aria-expanded="true" while focus is on ${left.focus}; only Esc, a click elsewhere or picking an item closes it (js/app.js 2237-2248: the menu closes on Escape, on pointerdown outside and on a pick, never on focusout).` });
+      t.check(closes, `${label}: Tab out of an open menu closes it`, { afterOneTab: tabbed, afterFiveTabs: left });
+      if (!closes && label === 'desktop') t.finding({ title: 'A tab menu stays open, and its button says expanded, after Tab moves focus out of it', severity: 'low', steps: 'Focus Learning tools (Tab to it), press ArrowDown so the menu opens, then press Tab five times: focus walks every item and lands on Studio.', expected: 'The menu closes when focus leaves it (as it does on Esc or a click elsewhere), and aria-expanded goes back to false.', actual: `The menu stays open with aria-expanded="true" while focus is on ${left.focus}; only Esc, a click elsewhere or picking an item closes it (js/app.js 2237-2248: the menu closes on Escape, on pointerdown outside and on a pick, never on focusout).` });
       await page.keyboard.press('Escape');
       // Esc with focus nowhere near the menu still closes it (the document listener)
       await page.evaluate(() => { document.getElementById('tabGamesBtn').click(); document.activeElement.blur(); });
@@ -186,11 +186,11 @@ function groupA(t, site) {
     t.check(steps.length === 4, 'the guide opens with a four-step path', steps);
     t.note(`the four steps and their buttons: ${steps.map((s) => `${s.text} → ${s.go || 'no button'}`).join('; ')} (the README says "buttons that jump to the part they describe"; step 2, Look at the shapes, has none, which reads as intended: it describes the Study tab step 1 leads to)`);
     // README, How to use: "one part at a time, each with phone screenshots in a phone frame: getting around, the Study tab's pictures, the
-    // drawing tools, the Loomis head, Pose and light, colors and paints, the Studio and its sheets, Figure study, How close did I get?,
+    // drawing tools, the Loomis head, Pose and light, Trace onto paper, colors and paints, the Studio and its sheets, Figure study, How close did I get?,
     // Paint by numbers, Value battle, and a few things good to know (nothing is uploaded, the Studio autosaves, where Undo is)"
     const parts = await page.evaluate(() => [...document.querySelectorAll('#tab-help .help-part')].map((p) => ({ id: p.id, h3: (p.querySelector('h3') || {}).textContent || '', frames: p.querySelectorAll('.help-shots figure.phone img').length, label: (p.querySelector('.help-shots') || document.body).getAttribute('aria-label') || '', text: p.textContent, forget: !!p.querySelector('#forgetBtn') })));
-    const promised = [[/^Getting around$/i, 1], [/^Study the photo$/i, 1], [/drawing tools/i, 1], [/^Loomis head$/i, 1], [/^Pose and light$/i, 1], [/colors and paints/i, 1], [/^Studio$/i, 1], [/^Figure study$/i, 1], [/how close did i get\?/i, 1], [/^Paint by numbers$/i, 1], [/^Value battle$/i, 1], [/good to know/i, 0]];
-    t.check(parts.length === promised.length && promised.every(([re, shots], i) => parts[i] && re.test(parts[i].h3) && (shots ? parts[i].frames >= shots : parts[i].frames === 0)), 'the guide has the twelve parts the README names, in order, each (but the last) with phone screenshots', parts.map((p) => `${p.h3} (${p.frames})`));
+    const promised = [[/^Getting around$/i, 1], [/^Study the photo$/i, 1], [/drawing tools/i, 1], [/^Loomis head$/i, 1], [/^Pose and light$/i, 1], [/^Trace onto paper$/i, 1], [/colors and paints/i, 1], [/^Studio$/i, 1], [/^Figure study$/i, 1], [/how close did i get\?/i, 1], [/^Paint by numbers$/i, 1], [/^Value battle$/i, 1], [/good to know/i, 0]];
+    t.check(parts.length === promised.length && promised.every(([re, shots], i) => parts[i] && re.test(parts[i].h3) && (shots ? parts[i].frames >= shots : parts[i].frames === 0)), 'the guide has the thirteen parts the README names, in order, each (but the last) with phone screenshots', parts.map((p) => `${p.h3} (${p.frames})`));
     const tips = parts[parts.length - 1] || { text: '', forget: false };
     t.check(/Nothing is uploaded/.test(tips.text) && /saves your painting as you go/.test(tips.text) && /Undo is everywhere/.test(tips.text) && tips.forget, 'Good to know says nothing is uploaded, that the Studio saves as you go and where Undo is, and holds the Forget button the Privacy section points to', { forgetInIt: tips.forget });
     const framed = await page.evaluate(() => { const f = document.querySelector('#tab-help figure.phone img'); const g = getComputedStyle(f); return { radius: g.borderRadius, border: g.borderTopWidth, shadow: g.boxShadow !== 'none' }; });
@@ -208,7 +208,7 @@ function groupA(t, site) {
     await page.evaluate(async () => { for (const i of document.querySelectorAll('#tab-help img')) { i.scrollIntoView(); await new Promise((r) => setTimeout(r, 40)); } });
     await page.waitForFunction(() => [...document.querySelectorAll('#tab-help img')].every((i) => i.complete), null, { timeout: 20000 }).catch(() => null);
     const imgs = await page.evaluate(() => [...document.querySelectorAll('#tab-help img')].map((i) => ({ src: i.getAttribute('src'), w: i.getAttribute('width'), h: i.getAttribute('height'), nw: i.naturalWidth, nh: i.naturalHeight, alt: (i.alt || '').length })));
-    t.check(imgs.length === 30 && imgs.every((i) => i.w && i.h), 'every guide screenshot (30) has width and height attributes', imgs.filter((i) => !i.w || !i.h));
+    t.check(imgs.length === 31 && imgs.every((i) => i.w && i.h), 'every guide screenshot (31) has width and height attributes', imgs.filter((i) => !i.w || !i.h));
     t.check(imgs.every((i) => i.nw > 0 && i.nh > 0), 'every guide screenshot loads', imgs.filter((i) => !(i.nw > 0)));
     t.check(imgs.every((i) => i.nw === +i.w && i.nh === +i.h), 'every guide screenshot is the size its attributes say (400 × 774)', imgs.filter((i) => i.nw !== +i.w || i.nh !== +i.h));
     t.check(imgs.every((i) => i.alt > 10), 'every guide screenshot has an alt text', imgs.filter((i) => i.alt <= 10));
@@ -438,7 +438,7 @@ function groupB(t, site) {
     const policy = (/Content-Security-Policy:\s*(.+)/.exec(fs.readFileSync(path.join(site.root, '_headers'), 'utf8')) || [, ''])[1].trim();
     const meta = await page.evaluate(() => (document.querySelector('meta[http-equiv="Content-Security-Policy"]') || {}).content || '');
     t.check(meta === policy, 'the 404 page carries the same policy as _headers in its meta tag', { meta, policy });
-    t.check(info.links.join() === '/,/#paint,/#game,/#battle,/#loomis,/#pose,/#figure,/#help', 'its links: the app and the seven shortcuts', info.links);
+    t.check(info.links.join() === '/,/#paint,/#game,/#battle,/#loomis,/#pose,/#trace,/#figure,/#help', 'its links: the app and the eight shortcuts', info.links);
     for (const href of info.links) { const r = await fetch(site.base + href.replace(/^\//, '').split('#')[0]); t.check(r.status === 200, `404 page link ${href} resolves`, r.status); }
     t.check(/Bricolage/i.test(info.font) && info.fonts === 'loaded', 'the 404 page loads the site\'s typefaces', { font: info.font, fonts: info.fonts });
     await Promise.all([page.waitForNavigation({ waitUntil: 'load', timeout: 15000 }).catch(() => null), page.locator('a[href="/#battle"]').click()]);
@@ -699,7 +699,7 @@ function groupC(t, site) {
     await clean(t, page, `route ${h} with every key ${label}`);
     await page.context().close();
   }
-  for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#battle', '#study']) {
+  for (const h of ['#check', '#game', '#paint', '#help', '#loomis', '#trace', '#battle', '#study']) {
     step(t, `route ${h} with every hostile state`, async () => { for (const vi of ROUTE_STATES) await openRoute(h, vi, false); });
   }
   step(t, 'route #nonsense with hostile state', async () => { for (const vi of [/prototype/, /5000/, /different/].map(stateIndex)) await openRoute('#nonsense', vi, false); });
@@ -762,18 +762,19 @@ const BLOCKED = [
   ['js/palette.js', { note: 'part', hidden: [], paints: true }],
   ['js/subjects.js', { note: 'part', hidden: ['game'], gamesSub: 'Value battle', url: '#game', menus: { tabGamesBtn: ['tabBattleBtn'] } }],
   ['js/game.js', { note: 'part', hidden: ['game'], gamesSub: 'Value battle', url: '#game', menus: { tabGamesBtn: ['tabBattleBtn'] } }],
-  ['js/painting.js', { note: 'part', hidden: ['figure', 'loomis', 'paint'], url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
+  ['js/painting.js', { note: 'part', hidden: ['figure', 'loomis', 'paint'], url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabTraceBtn', 'tabHelpBtn'] } }],
   ['js/figure.js', { note: 'part', hidden: ['figure'], url: '#figure' }],
-  ['js/loomis.js', { note: 'part', hidden: ['loomis'], url: '#loomis', menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
+  ['js/loomis.js', { note: 'part', hidden: ['loomis'], url: '#loomis', menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabTraceBtn', 'tabHelpBtn'] } }],
+  ['js/trace.js', { note: 'part', hidden: ['trace'], url: '#trace', menus: { tabLearnBtn: ['tabStudyBtn', 'tabLoomisBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
   ['js/battle.js', { note: 'part', hidden: ['battle'], url: '#battle', gamesSub: 'Paint by numbers', menus: { tabGamesBtn: ['tabGameBtn'] } }],
 ];
 // two or more at once
 const PAIRS = [
   [['js/game.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'game'], groups: ['games'], url: '#battle' }],
   [['js/painting.js', 'js/subjects.js'], { note: 'part', hidden: ['figure', 'game', 'loomis', 'paint'], gamesSub: 'Value battle', url: '#figure', fromStudio: true }],
-  [['js/loomis.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'loomis'], url: '#loomis', menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'], tabGamesBtn: ['tabGameBtn'] } }],
+  [['js/loomis.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'loomis'], url: '#loomis', menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabTraceBtn', 'tabHelpBtn'], tabGamesBtn: ['tabGameBtn'] } }],
   [['js/palette.js', 'js/figure.js'], { note: 'part', hidden: ['figure'], paints: true, url: '#figure' }],
-  [['js/palette.js', 'js/subjects.js', 'js/game.js', 'js/painting.js', 'js/figure.js', 'js/loomis.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'figure', 'game', 'loomis', 'paint'], groups: ['games'], paints: true, url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
+  [['js/palette.js', 'js/subjects.js', 'js/game.js', 'js/painting.js', 'js/figure.js', 'js/loomis.js', 'js/trace.js', 'js/battle.js'], { note: 'part', hidden: ['battle', 'figure', 'game', 'loomis', 'paint', 'trace'], groups: ['games'], paints: true, url: '#paint', fromStudio: true, menus: { tabLearnBtn: ['tabStudyBtn', 'tabPoseBtn', 'tabHelpBtn'] } }],
 ];
 const shortName = (f) => f.replace(/^js\//, '').replace(/\.js$/, '');
 const readSite = (site, f) => fs.readFileSync(path.join(site.root, f), 'utf8');
@@ -1046,7 +1047,7 @@ function groupD(t, site) {
     }
   });
 
-  // the guide's pictures: all thirty missing, at both widths
+  // the guide's pictures: all thirty-one missing, at both widths
   step(t, 'guide pictures 404', async () => {
     for (const [label, viewport] of [['phone', PHONE], ['desktop', DESKTOP]]) {
       const page = await openPage(site, { viewport, notFound: [site.base + 'img/help/*'], url: '#help' });
@@ -1056,11 +1057,11 @@ function groupD(t, site) {
         const imgs = [...document.querySelectorAll('#tab-help img')];
         return { n: imgs.length, loaded: imgs.filter((i) => i.naturalWidth > 0).length, noAlt: imgs.filter((i) => (i.alt || '').length <= 10).length, collapsed: imgs.filter((i) => { const r = i.getBoundingClientRect(); return r.width < 20 || r.height < 20; }).length, captions: [...document.querySelectorAll('#tab-help figcaption')].filter((c) => c.getClientRects().length).length, parts: document.querySelectorAll('#tab-help .help-part').length, steps: document.querySelectorAll('#tab-help .help-steps li').length };
       });
-      t.check(s.n === 30 && s.loaded === 0 && s.noAlt === 0 && s.collapsed === 0, `${label}: all thirty guide pictures missing: each keeps its alt text and its frame`, s);
-      t.check(s.captions >= 30 && s.parts >= 10 && s.steps === 4, `${label}: all thirty pictures missing: the guide's text and captions are all there`, s);
-      t.check((await hscroll(page)) <= 0, `${label}: all thirty pictures missing: no horizontal scroll`, await hscroll(page));
-      t.check((await notesOf(page)).nojs === 'none', `${label}: all thirty pictures missing: no note (a picture of a guide is not the app)`);
-      t.check(page.log.console.every((m) => /status of 404/.test(m)), `${label}: all thirty pictures missing: the console holds only the browser's own 404 lines`, page.log.console.slice(0, 3));
+      t.check(s.n === 31 && s.loaded === 0 && s.noAlt === 0 && s.collapsed === 0, `${label}: all thirty-one guide pictures missing: each keeps its alt text and its frame`, s);
+      t.check(s.captions >= 30 && s.parts >= 10 && s.steps === 4, `${label}: all thirty-one pictures missing: the guide's text and captions are all there`, s);
+      t.check((await hscroll(page)) <= 0, `${label}: all thirty-one pictures missing: no horizontal scroll`, await hscroll(page));
+      t.check((await notesOf(page)).nojs === 'none', `${label}: all thirty-one pictures missing: no note (a picture of a guide is not the app)`);
+      t.check(page.log.console.every((m) => /status of 404/.test(m)), `${label}: all thirty-one pictures missing: the console holds only the browser's own 404 lines`, page.log.console.slice(0, 3));
       await screenshot(page, `app-shell-more-nopictures-${label}`);
       dropLogged(page, /status of 404/);
       await clean(t, page, `${label} guide pictures 404`);

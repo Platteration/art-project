@@ -576,7 +576,7 @@ export default async function studyTools(t, site) {
     t.check((await counts()) === '1,0,0' && (await toastShown(page)) === 'Line removed', 'Ctrl+Z then takes the newest line');
     // Ctrl+Z on another tab: does it still reach the Study's marks?
     const undidOn = [];
-    const TAB_NAMES = { help: 'How to use', loomis: 'Loomis head', game: 'Paint by numbers', battle: 'Value battle' };
+    const TAB_NAMES = { help: 'How to use', loomis: 'Loomis head', trace: 'Trace onto paper', game: 'Paint by numbers', battle: 'Value battle' };
     for (const name of Object.keys(TAB_NAMES)) {
       await setTool(page, 'line'); await dragFrac(page, [0.2, 0.15 + undidOn.length * 0.1], [0.8, 0.15 + undidOn.length * 0.1]);
       const before = await counts();

@@ -1,7 +1,8 @@
-// Fails if any copy of the Content Security Policy differs from the others, if the
-// @font-face rules live anywhere but fonts.css, if a third-party origin creeps back
-// into a served page, or if a page or script holds something the policy refuses
-// (an inline style or script, a string turned into markup). Run: node scripts/check-policy.mjs
+// Fails if any copy of the Content Security Policy differs from the others, if the three
+// copies of the Permissions-Policy (the host configs) differ, if the @font-face rules live
+// anywhere but fonts.css, if a third-party origin creeps back into a served page, or if a
+// page or script holds something the policy refuses (an inline style or script, a string
+// turned into markup). Run: node scripts/check-policy.mjs
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
@@ -13,7 +14,7 @@ const meta = (file) => {
 };
 const headerLine = (file, re) => {
   const m = re.exec(read(file));
-  if (!m) throw new Error(`${file}: no CSP header found`);
+  if (!m) throw new Error(`${file}: no header found for ${re}`);
   return m[1];
 };
 
@@ -35,6 +36,22 @@ for (const [file, policy] of Object.entries(copies)) {
 }
 if (distinct.length !== 1) {
   console.error(`FAIL: ${distinct.length} different CSP copies`);
+  failed = true;
+}
+
+// The Permissions-Policy is a header only (a <meta> cannot carry it): the three host configs send the same one. It
+// allows the camera for this site alone (Trace onto paper) and keeps the rest off.
+const permissions = {
+  '_headers': headerLine('_headers', /Permissions-Policy:\s*(.+)/),
+  '.htaccess': headerLine('.htaccess', /Permissions-Policy "([^"]+)"/),
+  'deploy/nginx.conf': headerLine('deploy/nginx.conf', /Permissions-Policy "([^"]+)"/),
+};
+for (const [file, policy] of Object.entries(permissions)) {
+  console.log(`${file}: Permissions-Policy sha1 ${createHash('sha1').update(norm(policy)).digest('hex').slice(0, 8)}`);
+}
+const distinctPermissions = [...new Set(Object.values(permissions).map(norm))];
+if (distinctPermissions.length !== 1) {
+  console.error(`FAIL: ${distinctPermissions.length} different Permissions-Policy copies`);
   failed = true;
 }
 
@@ -75,4 +92,4 @@ for (const file of readdirSync(new URL('../js/', import.meta.url)).filter((f) =>
 }
 
 if (failed) process.exit(1);
-console.log('PASS: all CSP copies identical, fonts only in fonts.css, no third-party origins');
+console.log('PASS: all CSP copies identical, the Permissions-Policy copies identical, fonts only in fonts.css, no third-party origins');

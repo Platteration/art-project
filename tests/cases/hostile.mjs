@@ -679,7 +679,7 @@ export default async function hostile(t, site) {
       ['#HELP', 'help'], ['#Loomis/', 'loomis'], ['#game?x=1&y=2', 'game'], ['#battle&x', 'battle'], ['#help/../../etc/passwd', 'help'],
       ['#__proto__', null], ['#constructor', null], ['#hasOwnProperty', null], ['#%00', null], ['#../', null], ['#help#x', null], ['#%68elp', null], ['#help%20', null],
       ['#<svg onload=window.__pwn=1>', null], ['#' + 'z'.repeat(500000), null],
-      ['#paint', 'paint'], ['#', 'study'], ['#study?x', 'study'], ['#check', 'study'], ['#loomis', 'loomis'], ['', 'study'],
+      ['#paint', 'paint'], ['#', 'study'], ['#study?x', 'study'], ['#check', 'study'], ['#loomis', 'loomis'], ['#Trace', 'trace'], ['', 'study'],
     ];
     const changes = [];
     let now = await shown(page);
