@@ -819,6 +819,7 @@ async function edgeCases(t, site) {
     await setRange(page, 'tr-size', 150);
     const H = await centre(page, 'tr-hit');
     await page.mouse.move(H.x, H.y); await page.mouse.down(); await page.mouse.move(H.x + 70, H.y - 25, { steps: 4 }); await page.mouse.up();
+    const selected = await app(page).evaluate(() => String(getSelection()));
     await click(page, '#tr-lock'); await click(page, '#tr-setFrame'); await click(page, '#tr-showFrame'); await settled(page);
     const set = await st(page), still = await page.evaluate(() => document.getElementById('tr-ghost').toDataURL().length);
     let k = await tracks(page); const g0 = k.gum;
@@ -839,6 +840,10 @@ async function edgeCases(t, site) {
     k = await tracks(page); s = await st(page);
     const asked = await app(page).evaluate(() => window.__asked);
     t.check(s.live && k.live === 1 && k.held === 1 && asked === 2, 'the tab left and opened again while the browser was still being asked: one camera runs (the request made on return), the first request\'s tracks are stopped', { live: s.live, k, asked });
+    // a drag and a double click on the photo select no text of the page
+    await page.dblclick('#tr-hit'); await page.mouse.move(H.x, H.y); await page.mouse.down(); await page.mouse.move(H.x - 300, H.y + 200, { steps: 4 }); await page.mouse.up();
+    const selected2 = await app(page).evaluate(() => String(getSelection()));
+    t.check(selected === '' && selected2 === '', 'dragging the photo and double-clicking it select no text of the page', { selected, selected2 });
     // the permission taken back while away: the card asks for a tap, nothing is requested
     await permission(page, 'denied');
     await tab(page, 'study'); await tab(page, 'trace'); await sleep(500);
@@ -1088,6 +1093,51 @@ async function edgeCases(t, site) {
     const b2 = await boxes(pre);
     t.check(near(b2.cx, b1.cx, 0.01) && near(b2.cy, b1.cy, 0.01) && near(b2.pw, b1.pw, 0.01), 'the camera started after the photo was placed: the photo keeps its place and size as fractions of the picture', { before: [b1.cx, b1.cy, b1.pw], after: [b2.cx, b2.cy, b2.pw] });
     await clean(t, pre, 'a photo before the camera');
+
+    // a big file chosen and Study photo pressed before the file has been read: which photo is over the camera in the end? (observed, not asserted: the README is silent)
+    const slow = grayPng(8000, 6000, 'slow.png');
+    const order = async () => {
+      const p = await recorded(site, { url: '#trace' }); pages.push(p);
+      await startCamera(p);
+      return app(p).evaluate(async (b64) => {
+        const bin = atob(b64), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const input = document.getElementById('tr-file'), dt = new DataTransfer(); dt.items.add(new File([bytes], 'slow.png', { type: 'image/png' })); input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('tr-useStudy').click();
+        const first = Trace.state.photo && Trace.state.photo.name;
+        await new Promise((r) => setTimeout(r, 3000));
+        return { afterStudyPhoto: first, settled: Trace.state.photo && Trace.state.photo.name };
+      }, slow.buffer.toString('base64'));
+    };
+    const o1 = await order(), o2 = await order();
+    t.note(`a big file chosen and then Study photo pressed before the file was read: the photo over the camera is ${o1.afterStudyPhoto} at once and ${o1.settled} once the file has been read (run 1), ${o2.afterStudyPhoto} then ${o2.settled} (run 2): the file read last replaces the Study photo pressed after it, and nothing shows while a big photo is being read`);
+  });
+
+  // ---- the Learning tools and Games menus open over the tool, and their items are what a click reaches ---------------------------
+  await seg(t, 'edge: menus over the tool', async (pages) => {
+    for (const vp of [DESKTOP, { width: 1024, height: 768 }, { width: 800, height: 600 }]) {
+      const page = await recorded(site, { url: '#trace', viewport: vp }); pages.push(page);
+      await startCamera(page); await click(page, '#tr-useStudy');
+      for (const btn of ['#tabLearnBtn', '#tabGamesBtn']) {
+        const at = await app(page).evaluate((b) => { const r = document.querySelector(b).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }, btn);
+        await page.mouse.click(...at); await sleep(300);
+        const r = await app(page).evaluate((b) => {
+          const btnEl = document.querySelector(b), menu = document.getElementById(btnEl.getAttribute('aria-controls'));
+          return { open: btnEl.getAttribute('aria-expanded'), items: [...menu.querySelectorAll('.tab-item:not([hidden])')].map((it) => { const q = it.getBoundingClientRect(), hit = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return [it.id, !!hit && it.contains(hit)]; }) };
+        }, btn);
+        t.check(r.open === 'true' && r.items.length >= 2 && r.items.every(([, ok]) => ok), `${vp.width} wide, the camera running: the ${btn === '#tabLearnBtn' ? 'Learning tools' : 'Games'} menu opens over the tool and every item is what a click at its middle reaches`, r);
+        await page.keyboard.press('Escape'); await sleep(200);
+      }
+      // a real click on an item leaves the tool (the camera goes off), a real click on Trace onto paper comes back
+      await page.mouse.click(...(await app(page).evaluate(() => { const r = document.querySelector('#tabLearnBtn').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }))); await sleep(300);
+      await page.mouse.click(...(await app(page).evaluate(() => { const r = document.getElementById('tabStudyBtn').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }))); await sleep(500);
+      let s = await st(page);
+      t.check(s.tab === 'study' && !s.live, `${vp.width} wide: a click on Study the photo in the menu leaves the tool, and the camera goes off`, { tab: s.tab, live: s.live });
+      await page.mouse.click(...(await app(page).evaluate(() => { const r = document.querySelector('#tabLearnBtn').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }))); await sleep(300);
+      await page.mouse.click(...(await app(page).evaluate(() => { const r = document.getElementById('tabTraceBtn').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }))); await sleep(500);
+      s = await st(page);
+      t.check(s.tab === 'trace' && s.photoShown, `${vp.width} wide: a click on Trace onto paper in the menu comes back to the tool, the photo still over it`, { tab: s.tab, photo: s.photoShown });
+      await clean(t, page, `menus at ${vp.width}`);
+    }
   });
 
   // ---- pinch to the smallest and the largest, drag off the screen, Fit back, Lock (a phone, real fingers through CDP) --------
