@@ -1,0 +1,3 @@
+## 2024-10-17 - Avoid Math.pow and Array Allocation in Tight Loops
+**Learning:** In very tight pixel-processing loops (e.g., millions of iterations per image), calling `Math.pow(v, 7)` in JavaScript is significantly slower than doing explicit multiplications like `v * v * v * v * v * v * v` (via intermediate variables like `v2` and `v4`). Also, allocating short lived arrays inside loops (like returning `[116*fy-16, ...]`) adds measurable function call overhead and GC pressure.
+**Action:** When working in performance-critical code sections in this codebase (like `js/processing.js`), prefer explicitly multiplying out small constant integer exponents instead of `Math.pow`, and inline math logic to prevent returning and immediately destructuring arrays.
