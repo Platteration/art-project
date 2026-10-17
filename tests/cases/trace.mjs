@@ -641,7 +641,7 @@ async function twice(probe) { const a = await probe(), b = await probe(); return
 const INTRO_RE = /camera picture stays on this device/;
 const SECOND_CAMERA = () => {
   const md = navigator.mediaDevices, list = md.enumerateDevices.bind(md), ask = md.getUserMedia.bind(md);
-  md.enumerateDevices = () => list().then((all) => (all.some((d) => d.kind === 'videoinput' && d.deviceId) ? all.concat([{ kind: 'videoinput', deviceId: 'second-camera', label: 'Front camera', groupId: 'g2' }]) : all));
+  md.enumerateDevices = () => list().then((all) => (!window.__noSecond && all.some((d) => d.kind === 'videoinput' && d.deviceId) ? all.concat([{ kind: 'videoinput', deviceId: 'second-camera', label: 'Front camera', groupId: 'g2' }]) : all));
   md.getUserMedia = (c) => (c && c.video && c.video.deviceId && c.video.deviceId.exact === 'second-camera' ? ask({ audio: false, video: true }) : ask(c));
 };
 // every stream's tracks, the wake lock's books, and how often the browser was asked
@@ -781,6 +781,15 @@ async function edgeCases(t, site) {
     k = await tracks(two);
     const olderEnded = await app(two).evaluate(() => window.__streams.slice(0, -1).every((x) => x.getTracks().every((tr) => tr.readyState === 'ended')));
     t.check(back && k.gum - g0 === 1 && k.live === 1 && k.held === 1 && olderEnded, 'Switch pressed twice in one breath: one new request, one camera running, the old one stopped, one wake lock', { asked: k.gum - g0, k, olderEnded });
+    // a camera unplugged and plugged in again while the camera runs (devicechange): Switch goes and comes back, the camera runs on
+    await app(two).evaluate(() => { window.__noSecond = true; navigator.mediaDevices.dispatchEvent(new Event('devicechange')); });
+    await sleep(300);
+    s = await st(two);
+    const gone = !s.shown.switch && s.live;
+    await app(two).evaluate(() => { window.__noSecond = false; navigator.mediaDevices.dispatchEvent(new Event('devicechange')); });
+    await sleep(300);
+    s = await st(two);
+    t.check(gone && s.shown.switch && s.live, 'the second camera unplugged while the camera runs (devicechange): Switch goes, the camera runs on; plugged in again, Switch is back', { gone, back: s.shown.switch, live: s.live });
     await click(two, '#tr-camera'); await settled(two);
     s = await st(two); const g1 = (await tracks(two)).gum;
     await click(two, '#tr-switch'); await sleep(300);
@@ -1015,6 +1024,12 @@ async function edgeCases(t, site) {
       const s = await st(page);
       t.check(s.photo && s.photo.name === file.name && s.photo.w === want[0] && s.photo.h === want[1], `${label} is accepted over the camera at its own size`, s.photo);
     }
+    // a phone's JPEG that is stored sideways with an EXIF orientation of 6 (turn it a quarter): over the camera as the browser shows it, 300 × 200, not 200 × 300
+    const jpg = (await makeImage(page, { width: 200, height: 300, type: 'image/jpeg', name: 'upright.jpg' })).buffer;
+    const exif = Buffer.from([0xff, 0xe1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0]);
+    await chosen(page, { name: 'sideways.jpg', mimeType: 'image/jpeg', buffer: Buffer.concat([jpg.subarray(0, 2), exif, jpg.subarray(2)]) });
+    const sideways = (await st(page)).photo;
+    t.check(sideways && sideways.name === 'sideways.jpg' && sideways.w === 300 && sideways.h === 200, 'a JPEG with EXIF orientation 6 goes over the camera turned as the browser shows it (300 × 200, not 200 × 300)', sideways);
     // a chooser closed with nothing chosen
     const was = JSON.stringify((await st(page)).photo);
     await app(page).evaluate(() => { const i = document.getElementById('tr-file'); i.value = ''; i.dispatchEvent(new Event('change', { bubbles: true })); });
