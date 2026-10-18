@@ -357,10 +357,21 @@ export default async function trace(t, site) {
     t.check(near(s.ghostOpacity, 0.7, 0.01) && JSON.parse(await storageGet(page, KEY)).frame === 70, 'Frame strength 70%: the frame shows at 0.7, and it is remembered', s.ghostOpacity);
     await click(page, '[data-mode="simple"]'); await settled(page);
     t.check(near((await st(page)).ghostOpacity, 0.4, 0.01), 'Simple shows the frame at the default 40%', (await st(page)).ghostOpacity);
-    // Set frame again takes a new still (the fake camera's picture moves on)
-    const p1 = await page.evaluate(() => { const c = document.getElementById('tr-ghost'); return c.toDataURL().length; });
-    await sleep(700); await click(page, '#tr-setFrame');
-    const p2 = await page.evaluate(() => document.getElementById('tr-ghost').toDataURL().length);
+    // Set frame again takes a new still: told apart by a fingerprint of its pixels (the video and the still drawn at one small
+    // size), once the live picture has moved on from the first still (the fake camera's picture changes as time passes)
+    await app(page).evaluate(() => {
+      window.__fp = (src) => {
+        const c = document.createElement('canvas'); c.width = 320; c.height = 180;
+        const g = c.getContext('2d'); g.drawImage(src, 0, 0, c.width, c.height);
+        const d = g.getImageData(0, 0, c.width, c.height).data;
+        let h = 0; for (let i = 0; i < d.length; i += 4) h = (h * 31 + d[i] + 7 * d[i + 1] + 13 * d[i + 2]) % 1000000007;
+        return h;
+      };
+    });
+    const p1 = await app(page).evaluate(() => window.__fp(document.getElementById('tr-ghost')));
+    await app(page).waitForFunction((p) => window.__fp(document.getElementById('tr-video')) !== p, p1, { timeout: 8000 }).catch(() => null);
+    await click(page, '#tr-setFrame');
+    const p2 = await app(page).evaluate(() => window.__fp(document.getElementById('tr-ghost')));
     t.check(p1 !== p2 && (await st(page)).ghostShown, 'Set frame again takes a new still (shown, as the frame was on)', { p1, p2 });
     await click(page, '#tr-showFrame'); await settled(page);
     s = await st(page);
@@ -616,6 +627,8 @@ export default async function trace(t, site) {
 
   // ---- edge cases: the tool pushed the way hands, phones and files push it (the playtester's block, at the end of this file) ----
   await edgeCases(t, site);
+  // ---- what the reviews of the build found, each pinned (the end of this file) ----------------------------------------------
+  await reviewFixes(t, site);
 }
 
 // =====================================================================================================================
@@ -1522,4 +1535,206 @@ async function fuzzRun(site, pages, seed, steps, granted) {
   }
   for (const m of page.log.pageerrors.concat(page.log.console)) errors.push(m.slice(0, 120));
   return { bad, errors, counts };
+}
+
+// =====================================================================================================================
+// The reviews' findings, pinned: the focus when the camera starts, a lens that will not open, the photo's size when the
+// camera's picture takes another shape, Set frame before a picture is there, the strip and the toast on a small phone.
+// =====================================================================================================================
+
+// a second camera that is listed but never opens (some phones list lenses that do not), counted by the page's record
+const BROKEN_LENS = () => {
+  const md = navigator.mediaDevices, list = md.enumerateDevices.bind(md), ask = md.getUserMedia.bind(md);
+  md.enumerateDevices = () => list().then((all) => (all.some((d) => d.kind === 'videoinput' && d.deviceId) ? all.concat([{ kind: 'videoinput', deviceId: 'second-camera', label: 'Back lens', groupId: 'g2' }]) : all));
+  md.getUserMedia = (c) => (c && c.video && c.video.deviceId && c.video.deviceId.exact === 'second-camera' ? Promise.reject(new DOMException('another app has it', 'NotReadableError')) : ask(c));
+};
+const focusKey = async (page, selector, key = 'Enter') => { await page.focus(selector); await page.keyboard.press(key); };
+
+async function reviewFixes(t, site) {
+  // ---- the keyboard's focus is never dropped to the page by Start camera or Switch -------------------------------------
+  await seg(t, 'review: the focus when the camera starts', async (pages) => {
+    const page = await recorded(site, { url: '#trace', init: SECOND_CAMERA }); pages.push(page);
+    await click(page, '[data-mode="advanced"]');
+    await focusKey(page, '#tr-start');
+    t.check(await live(page, 10000), 'Enter on Start camera starts the camera');
+    await settled(page);
+    let s = await st(page);
+    t.check(!s.card && (await active(page)) === 'tr-camera', 'after Enter on Start camera the card has gone and the focus is on Camera (now Stop camera), not on the page', { card: s.card, focus: await active(page) });
+    // Switch from the keyboard: the button is off while the camera changes over, and has the focus again after
+    await page.waitForFunction(() => Trace.state.cameras.length === 2, null, { timeout: 5000 }).catch(() => null);
+    const g0 = (await tracks(page)).gum;
+    await focusKey(page, '#tr-switch');
+    await page.waitForFunction((n) => window.__gum.length > n && Trace.state.stream && !Trace.state.starting, g0, { timeout: 10000 }).catch(() => null);
+    await settled(page);
+    t.check((await tracks(page)).gum === g0 + 1 && (await st(page)).live && (await active(page)) === 'tr-switch', 'after Enter on Switch the camera has changed over and the focus is on Switch', { asked: (await tracks(page)).gum - g0, focus: await active(page) });
+    // a refusal: the card stays, and the focus is on Start camera again (it was off while the browser was asked)
+    await click(page, '#tr-camera'); await settled(page);
+    await app(page).evaluate(() => { window.__gumError = 'NotAllowedError'; });
+    await focusKey(page, '#tr-start');
+    await app(page).waitForFunction(() => /refused/.test(document.getElementById('tr-say').textContent), null, { timeout: 8000 }).catch(() => null);
+    await settled(page);
+    s = await st(page);
+    t.check(!s.live && s.card && s.start && !s.startOff && (await active(page)) === 'tr-start', 'a refused camera: the card says so and the focus is on Start camera, ready to try again', { say: s.say.slice(0, 40), focus: await active(page) });
+    await app(page).evaluate(() => { window.__gumError = null; });
+    // the visitor moves the focus while the browser is asked: the answer does not take it back
+    await slowCamera(page, 900);
+    await focusKey(page, '#tr-start');
+    await page.focus('#tr-choose');
+    await live(page, 10000); await settled(page);
+    t.check((await st(page)).live && (await active(page)) === 'tr-choose', 'a visitor who moved the focus to Photo while the browser was being asked keeps it there when the camera comes on', { focus: await active(page) });
+    // a mouse press on Start camera puts the focus on Camera too, without a keyboard ring
+    await click(page, '#tr-camera'); await settled(page);
+    await page.click('#tr-start');
+    await live(page, 10000); await settled(page);
+    const ring = await app(page).evaluate(() => ({ id: document.activeElement && document.activeElement.id, visible: document.activeElement.matches(':focus-visible') }));
+    t.check(ring.id === 'tr-camera' && !ring.visible, 'a mouse press on Start camera: the focus is on Camera, with no keyboard focus ring', ring);
+    await clean(t, page, 'the focus when the camera starts');
+  });
+
+  // ---- a lens that is listed but will not open: the default camera instead, not a button that asks for it again --------
+  await seg(t, 'review: a lens that will not open', async (pages) => {
+    const page = await recorded(site, { url: '#trace', init: BROKEN_LENS }); pages.push(page);
+    await click(page, '[data-mode="advanced"]');
+    await startCamera(page);
+    await page.waitForFunction(() => Trace.state.cameras.length === 2, null, { timeout: 5000 }).catch(() => null);
+    await click(page, '#tr-setFrame'); await click(page, '#tr-showFrame');
+    const g0 = (await tracks(page)).gum;
+    await click(page, '#tr-switch');
+    await app(page).waitForFunction((n) => window.__gum.length >= n + 2 && Trace.state.stream && !Trace.state.starting, g0, { timeout: 10000 }).catch(() => null);
+    await settled(page);
+    let s = await st(page);
+    const asked = await page.evaluate((n) => window.__gum.slice(n).map((x) => JSON.parse(x).video), g0);
+    const dev = await app(page).evaluate(() => Trace.state.deviceId);
+    t.check(s.live && !s.card && dev === '' && asked.length === 2 && asked[0].deviceId && asked[0].deviceId.exact === 'second-camera' && asked[1].facingMode && asked[1].facingMode.ideal === 'environment', 'Switch to a lens that will not open (NotReadableError): the default camera is asked for next and runs, with no error left on the card and no lens remembered', { live: s.live, card: s.card, dev, asked });
+    t.check(!s.frame && !s.ghostShown && (await tracks(page)).live === 1 && (await tracks(page)).held === 1, 'and the frame of the first camera is let go, one camera runs, one screen lock is held', { frame: s.frame, k: await tracks(page) });
+    // Start camera after a stop asks for the default camera, not the lens again
+    await click(page, '#tr-camera'); await settled(page);
+    const g1 = (await tracks(page)).gum;
+    await startCamera(page);
+    const next = await page.evaluate((n) => window.__gum.slice(n).map((x) => JSON.parse(x).video), g1);
+    t.check(next.length === 1 && next[0].facingMode && next[0].facingMode.ideal === 'environment', 'Start camera after that asks for the default camera once, as at the first start', next);
+    // a chosen lens that will not open at Start (it worked before): the default one, and a frame taken from the lens goes
+    await click(page, '#tr-setFrame');
+    await app(page).evaluate(() => { Trace.state.deviceId = 'second-camera'; });
+    await click(page, '#tr-camera'); await settled(page);
+    await click(page, '#tr-camera');
+    await live(page, 10000); await settled(page);
+    s = await st(page);
+    t.check(s.live && !s.frame && (await app(page).evaluate(() => Trace.state.deviceId)) === '', 'Start camera with a remembered lens that will not open: the default camera runs, and the frame taken from the lens is let go', { live: s.live, frame: s.frame });
+    // asked again and again, it never gets stuck
+    for (let i = 0; i < 3; i++) { await click(page, '#tr-switch'); await settled(page); await sleep(300); }
+    await live(page, 10000);
+    t.check((await st(page)).live && (await tracks(page)).live === 1, 'Switch pressed three more times: the camera is on, one stream live', await tracks(page));
+    await clean(t, page, 'a lens that will not open');
+  });
+
+  // ---- the photo keeps its size (the Size read-out) when the camera's picture takes another shape --------------------------
+  await seg(t, 'review: a size kept across a new picture shape', async (pages) => {
+    const page = await recorded(site, { url: '#trace' }); pages.push(page);
+    await click(page, '[data-mode="advanced"]');
+    // with no photo: the Size slider reads 100% to a screen reader too
+    const none = await app(page).evaluate(() => { const e = document.getElementById('tr-size'); return { text: e.getAttribute('aria-valuetext'), out: document.getElementById('tr-sizeOut').textContent, off: e.disabled }; });
+    t.check(none.off && none.text === '100% of the fitted size' && none.out === '100%', 'with no photo the Size slider says 100% of the fitted size (not its raw number)', none);
+    // a photo sized before the camera runs keeps its size when the camera's picture gives the view its shape
+    await click(page, '#tr-useStudy'); await setRange(page, 'tr-size', 150); await settled(page);
+    const before = await st(page), b0 = await boxes(page);
+    await startCamera(page); await sleep(400); await settled(page);
+    let s = await st(page), b = await boxes(page);
+    t.check(near(s.pct, before.pct, 1) && near(b.cx, b0.cx, 0.01) && near(b.cy, b0.cy, 0.01) && s.size === before.size, 'a photo sized with the camera off keeps its Size (and its centre over the view) when the camera comes on and gives the view its shape', { before: [before.pct, b0.cx, b0.cy], after: [s.pct, b.cx, b.cy], size: [before.size, s.size] });
+    // the picture 16:9 becoming 4:3 (a phone turned gives a new size too)
+    await drag(page, 50, -30);
+    s = await st(page); b = await boxes(page);
+    const pct = s.pct, cx = b.cx, cy = b.cy;
+    const applied = await app(page).evaluate(async () => { try { await Trace.state.stream.getVideoTracks()[0].applyConstraints({ width: { exact: 640 }, height: { exact: 480 } }); return 'ok'; } catch (err) { return String(err); } });
+    await app(page).waitForFunction(() => document.getElementById('tr-video').videoWidth === 640, null, { timeout: 8000 }).catch(() => null);
+    await sleep(400); await settled(page);
+    s = await st(page); b = await boxes(page);
+    if (applied !== 'ok') t.note(`the fake camera would not change its size (${applied}): the size-kept check did not apply`);
+    t.check(applied !== 'ok' || (s.vw === 640 && near(s.pct, pct, 1) && near(b.cx, cx, 0.01) && near(b.cy, cy, 0.01)), 'the camera\'s picture changing shape (16:9 to 4:3): the photo keeps its Size read-out and its centre over the picture', { applied, video: [s.vw, s.vh], pct: [pct, s.pct], centre: [[cx, cy], [b.cx, b.cy]] });
+    // a fitted photo stays fitted
+    await click(page, '#tr-fit'); await settled(page);
+    await app(page).evaluate(async () => { await Trace.state.stream.getVideoTracks()[0].applyConstraints({ width: { exact: 1280 }, height: { exact: 720 } }).catch(() => null); });
+    await app(page).waitForFunction(() => document.getElementById('tr-video').videoWidth === 1280, null, { timeout: 8000 }).catch(() => null);
+    await sleep(400); await settled(page);
+    s = await st(page); b = await boxes(page);
+    t.check(s.place.fitted && s.pct === 100 && fitsPicture(b) && (near(b.photo.w, b.wrap.w, 2) || near(b.photo.h, b.wrap.h, 2)), 'a fitted photo stays fitted when the picture changes shape again', { fitted: s.place.fitted, pct: s.pct });
+    await clean(t, page, 'a size kept across a new picture shape');
+    async function drag(pg, dx, dy) { const C = await centre(pg); await pg.mouse.move(C.x, C.y); await pg.mouse.down(); await pg.mouse.move(C.x + dx, C.y + dy, { steps: 4 }); await pg.mouse.up(); await settled(pg); }
+  });
+
+  // ---- Set frame waits for a picture, not just a size -----------------------------------------------------------------
+  await seg(t, 'review: Set frame waits for a picture', async (pages) => {
+    const page = await recorded(site, { url: '#trace' }); pages.push(page);
+    // the video says it has its size but no picture yet (readyState 1, as before its first frame arrives)
+    await app(page).evaluate(() => { window.__ready = 1; Object.defineProperty(document.getElementById('tr-video'), 'readyState', { configurable: true, get: () => window.__ready }); });
+    await startCamera(page); await sleep(500); await settled(page);
+    let s = await st(page);
+    const g0 = await app(page).evaluate(() => { const g = document.getElementById('tr-ghost'); return `${g.width}x${g.height}`; });
+    await app(page).evaluate(() => document.getElementById('tr-setFrame').click());
+    t.check(s.live && s.vw > 0 && s.off.setFrame === 'tr-whyCamera' && !(await st(page)).frame && (await app(page).evaluate(() => { const g = document.getElementById('tr-ghost'); return `${g.width}x${g.height}`; })) === g0, 'the camera has told its size but has no picture yet: Set frame is off with its reason, and pressed anyway it keeps nothing', { off: s.off.setFrame, size: s.vw });
+    await app(page).evaluate(() => { window.__ready = 4; document.getElementById('tr-video').dispatchEvent(new Event('loadeddata')); });
+    await settled(page);
+    s = await st(page);
+    await click(page, '#tr-setFrame');
+    const g = await picture(page, 'tr-ghost');
+    t.check(!s.off.setFrame && (await st(page)).frame && g.spread > 40 && g.opaque > 0.95, 'once the picture is there (loadeddata) Set frame comes on and keeps a real still', { off: s.off.setFrame, ghost: g });
+    await clean(t, page, 'Set frame waits for a picture');
+  });
+
+  // ---- the strip, the sliders and the toast on small phones ------------------------------------------------------------------
+  await seg(t, 'review: the strip on small phones', async (pages) => {
+    const open = async (vp, mode) => {
+      const context = await site.browser.newContext({ viewport: vp, hasTouch: true, isMobile: true });
+      await context.addInitScript(([k, v]) => { try { localStorage.setItem(k, v); } catch (e) { /* none */ } }, ['portrait-value-studio.mode', mode]);
+      const page = await context.newPage();
+      page.log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
+      page.on('pageerror', (e) => page.log.pageerrors.push(String(e.message).slice(0, 300)));
+      page.on('console', (m) => { if (m.type() === 'error') page.log.console.push(m.text().slice(0, 300)); });
+      page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) page.log.offsite.push(u); });
+      await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${e.blockedURI}`); }); });
+      await page.addInitScript(SECOND_CAMERA);
+      await page.addInitScript(RECORD);
+      pages.push(page);
+      await page.goto(site.base + '#trace', { waitUntil: 'load' });
+      await page.waitForFunction(() => window.Trace && Studio.result(), null, { timeout: 30000 }).catch(() => null);
+      await startCamera(page); await page.waitForFunction(() => Trace.state.cameras.length === 2, null, { timeout: 5000 }).catch(() => null);
+      await click(page, '#tr-useStudy'); await sleep(300); await settled(page);
+      return page;
+    };
+    const measure = (page) => app(page).evaluate(() => {
+      const shown = (e) => e.getBoundingClientRect().width > 0 && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none';
+      const W = innerWidth, H = innerHeight;
+      const btns = [...document.querySelectorAll('#tr-strip button')].filter(shown).map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10, off: r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1 }; });
+      const ranges = [...document.querySelectorAll('#tr-strip input[type=range]')].filter(shown).map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, h: Math.round(r.height * 10) / 10, off: r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1 }; });
+      // a caption with one word must stay on one line (a long cell breaks it in the middle otherwise)
+      const caps = [...document.querySelectorAll('#tr-strip .tr-cap')].filter(shown).map((c) => { const rg = document.createRange(); rg.selectNodeContents(c); const lines = new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size; return { text: c.textContent, lines, one: !/\s/.test(c.textContent.trim()) }; });
+      const wrap = document.getElementById('tr-wrap').getBoundingClientRect();
+      return { btns, ranges, caps, wrapH: Math.round(wrap.height), capsHidden: [...document.querySelectorAll('#tr-strip .tr-cap')].filter((c) => !c.closest('[hidden]') && getComputedStyle(c.closest('button')).display !== 'none' && c.getBoundingClientRect().width === 0).length, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    });
+    for (const [w, h, modes] of [[320, 568, ['simple', 'advanced']], [360, 640, ['simple', 'advanced']], [375, 667, ['simple', 'advanced']], [390, 844, ['simple', 'advanced']], [430, 932, ['advanced']], [844, 390, ['advanced']], [568, 320, ['advanced']]]) {
+      for (const mode of modes) {
+        const page = await open({ width: w, height: h }, mode);
+        const m = await measure(page);
+        const small = w < 375 || (mode === 'advanced' && w <= 480 && h > w);
+        t.check(m.btns.length >= (mode === 'simple' ? 8 : 10) && m.btns.every((x) => !x.off && x.w >= 40 && x.h >= 40), `${w} × ${h}, ${mode}: every button of the strip is on the screen and at least 40 × 40`, m.btns.filter((x) => x.off || x.w < 40 || x.h < 40));
+        t.check(m.ranges.length >= (mode === 'simple' ? 2 : 3) && m.ranges.every((x) => !x.off && x.h >= 40), `${w} × ${h}, ${mode}: every slider is on the screen and at least 40 px tall`, m.ranges);
+        t.check(m.capsHidden === 0 && m.caps.length >= m.btns.length - 1 && m.caps.filter((x) => x.one).every((x) => x.lines === 1) && m.sideways <= 0 && m.wrapH >= 100, `${w} × ${h}, ${mode}: every button shows its caption, no one-word caption is broken across lines, the camera picture keeps room, no sideways scroll`, { caps: m.caps.filter((x) => x.one && x.lines !== 1), shown: m.caps.length, buttons: m.btns.length, hidden: m.capsHidden, wrapH: m.wrapH, sideways: m.sideways });
+        if (small) await screenshot(page, `trace-strip-${w}x${h}-${mode}`);
+        await clean(t, page, `strip ${w} x ${h} ${mode}`);
+        await page.context().close().catch(() => null);
+      }
+    }
+    // the toast on a 320 px phone: as wide as its words allow (not half the screen), clear of the card's button
+    const page = await open({ width: 320, height: 568 }, 'simple');
+    await armToast(page); await click(page, '#tr-setFrame');
+    await toastMatch(page, /Frame set/);
+    await click(page, '#tr-camera'); await settled(page); await sleep(300);
+    const r = await app(page).evaluate(() => {
+      const t = document.getElementById('toast'), b = document.getElementById('tr-start'), q = t.getBoundingClientRect(), s = b.getBoundingClientRect();
+      const ix = Math.max(0, Math.min(q.right, s.right) - Math.max(q.left, s.left)), iy = Math.max(0, Math.min(q.bottom, s.bottom) - Math.max(q.top, s.top));
+      return { shown: t.classList.contains('show'), w: Math.round(q.width), h: Math.round(q.height), left: Math.round(q.left), right: Math.round(q.right), covers: +((ix * iy) / (s.width * s.height)).toFixed(2), vw: innerWidth };
+    });
+    t.check(r.shown && r.w >= 240 && r.left >= 0 && r.right <= r.vw && r.covers === 0, 'on a 320 px phone the Frame note is as wide as the picture allows (not half the screen), inside the screen, and does not cover the card\'s Start camera button', r);
+    await clean(t, page, 'the toast on a small phone');
+  });
 }

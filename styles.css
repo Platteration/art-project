@@ -1695,10 +1695,11 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tr-range { flex: 1 1 140px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 6px; }
 .tr-range label { font: 600 0.72rem/1.3 var(--body); color: var(--muted); }
 .tr-range output { font: 500 0.74rem var(--mono); color: var(--muted); }
-.tr-range input[type="range"] { grid-column: 1 / -1; height: 30px; }
+.tr-range input[type="range"] { grid-column: 1 / -1; height: 40px; }
 .tr-range input:disabled { opacity: 0.45; }
-/* the toast sits at the foot of the camera's picture, clear of the strip (trace.js measures the stage) */
-body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 20px); max-width: var(--tr-toast-w, calc(100% - 32px)); }
+/* the toast sits at the foot of the camera's picture, clear of the strip (trace.js measures the stage); width: max-content, or
+   the note is only as wide as the room to the right of its centre (half the picture: a few words a line, and tall) */
+body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 20px); width: max-content; max-width: var(--tr-toast-w, calc(100% - 32px)); }
 /* a screen wider than it is tall (a phone on its side, a laptop): the strip stands down the left, the camera's picture
    beside it; upright (a phone, a tablet held upright) it runs along the bottom, which leaves the picture the most room */
 @media (orientation: landscape) {
@@ -1709,18 +1710,25 @@ body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 
   .tr-ic { min-width: 0; max-width: none; min-height: 52px; }
   .tr-sliders { display: grid; gap: 6px; padding: 0 2px; }
 }
-/* a small phone on its side (568 × 320): five buttons a row and slimmer sliders, so the whole strip fits the height */
+/* a small phone on its side (568 × 320): five buttons a row, so the whole strip fits the height */
 @media (orientation: landscape) and (max-height: 430px) {
   .tr-strip { gap: 6px; }
   .tr-btns { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; }
   .tr-ic { min-height: 46px; padding: 2px 0; }
   .tr-sliders { gap: 2px; }
-  .tr-range input[type="range"] { height: 26px; }
 }
 /* phones: the header and tabs step aside (above), so the strip leads back with ← */
 @media (max-width: 759px), (max-height: 559px) { .tr-ic.ps-exit { display: grid; } }
-/* the narrowest phones upright: the icons alone, all on one row */
-@media (max-width: 374px) and (orientation: portrait) { .tr-cap { display: none; } .tr-ic { flex-basis: 32px; min-width: 32px; min-height: 44px; } }
+/* a phone upright: the buttons in rows of equal cells, each as wide as a finger and with its caption (Simple has eight, in
+   two rows of four where a row of eight would be too narrow; Advanced has ten, in two rows of five) */
+@media (max-width: 374px) and (orientation: portrait) {
+  .tr-btns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; }
+  .tr-btns .tr-ic { min-width: 0; max-width: none; font-size: 0.7rem; }
+}
+@media (max-width: 480px) and (orientation: portrait) {
+  body:not(.mode-simple) .tr-btns { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; }
+  body:not(.mode-simple) .tr-btns .tr-ic { min-width: 0; max-width: none; font-size: 0.7rem; }
+}
 @media (prefers-reduced-motion: reduce) { body.tab-trace .toast { transition: none; } }
 
 /* ---- Value battle: one primer-gray board holds the bar, the colors and the answers ---- */
