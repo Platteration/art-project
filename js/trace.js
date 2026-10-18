@@ -171,6 +171,7 @@
     const now = (track && track.getSettings && track.getSettings().deviceId) || state.deviceId;
     const i = state.cameras.findIndex((c) => c.deviceId === now);
     state.deviceId = state.cameras[(i + 1) % state.cameras.length].deviceId;
+    dropFrame('The frame showed the other camera\'s view, so it is gone: set it again from this camera.');
     stop(true); // a phone opens one camera at a time: the one on goes off first
     state.wanted = true;
     start();
@@ -198,6 +199,16 @@
   window.addEventListener('pagehide', () => { if (state.stream || state.starting) stop(true); });
 
   // ---- The frame: the camera's view of the paper, kept to line it up again ------------------------------------------
+  // a frame only lines up with the camera it was taken from, at the shape it was taken at: another camera, or the same one
+  // giving a picture of another shape, would leave it drawn over a view it cannot match, so it is let go and asked for again
+  function dropFrame(why) {
+    if (!state.frame) return;
+    state.frame = false;
+    state.frameShown = false;
+    ghost.width = ghost.height = 1;
+    render();
+    Studio.toast(why, 5000);
+  }
   function setFrame() {
     if (!state.stream || !video.videoWidth) return;
     const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
@@ -425,7 +436,12 @@
   window.addEventListener('orientationchange', () => setTimeout(layout, 60));
   if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }
   if (window.ResizeObserver) new ResizeObserver(() => fitView()).observe(stage);
-  ['loadedmetadata', 'resize', 'playing'].forEach((type) => video.addEventListener(type, () => { fitView(); render(); }));
+  ['loadedmetadata', 'resize', 'playing'].forEach((type) => video.addEventListener(type, () => {
+    if (state.frame && video.videoWidth && Math.abs(ghost.width / ghost.height - video.videoWidth / video.videoHeight) > 0.01) {
+      dropFrame('The camera picture changed shape, so the frame no longer lines up with it: set it again.');
+    }
+    fitView(); render();
+  }));
 
   // ---- What the strip and the card show ------------------------------------------------------------------------------
   // a control off says why (a screen reader reads the reason with it; the card and the status line say it on screen)
