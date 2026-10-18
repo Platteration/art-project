@@ -1,0 +1,3 @@
+# Portrait Value Studio: the app is index.html; pose.html is Pose and light on its own.
+User-agent: *
+Allow: /

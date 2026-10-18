@@ -1,0 +1,1318 @@
+<!doctype html>
+<!-- Portrait Value Studio. Copyright (c) 2026 Platteration. MIT License: see /LICENSE. -->
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; frame-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
+<title>Portrait Value Studio</title>
+<meta name="description" content="Load a portrait photo and see its dark, middle and light shapes and its big colors, pick paints and mixes, paint it in the Studio, then check how close you got. Everything runs in your browser and photos never leave your device.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="theme-color" content="#efe7d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#152019" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Portrait Value Studio">
+<meta property="og:description" content="See a portrait's dark, middle and light shapes and its big colors, pick paints, paint it, then check how close you got. Runs entirely in your browser.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<script src="js/guard.js"></script>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="oldbrowser-note" role="alert" hidden><strong>This browser is too old for Portrait Value Studio.</strong> Use a current Safari, Chrome, Edge or Firefox (2022 or later). The guide below still reads.</div>
+<div class="partfail-note" role="alert" hidden><strong>Part of Portrait Value Studio did not start.</strong> Reload the page. If it happens again, a script was blocked or failed, and only the parts that started are shown.</div>
+<div class="nojs-note" role="alert"><strong>Portrait Value Studio has not started.</strong> Everything runs in your browser and nothing is uploaded, but the studies, the Studio and the games are drawn with JavaScript. If JavaScript is off, turn it on for this site; otherwise check your connection. Then reload the page. The guide below still reads without it.</div>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Portrait Value Studio</h1>
+      <p>Load a portrait. See its dark, middle and light shapes and its big colors, pick paints, paint it in the Studio, then check how close you got.</p>
+      <p class="brand-privacy">Photos stay on your device. Nothing is uploaded.</p>
+    </div>
+    <div class="topbar-actions">
+      <span class="pill-switch mode-switch" role="group" aria-label="Simple or advanced controls"><button type="button" data-mode="simple" aria-pressed="true" title="Just the controls you need">Simple</button><button type="button" data-mode="advanced" aria-pressed="false" title="Every setting">Advanced</button></span>
+      <input type="file" id="file" accept="image/*" class="visually-hidden">
+      <label for="file" class="btn btn-primary">Load photo</label>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Sections">
+    <div class="tab-group" data-group="learn">
+      <button type="button" class="tab" id="tabLearnBtn" aria-current="true" aria-haspopup="menu" aria-expanded="false" aria-controls="tabLearnMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2z"/></svg><span class="tab-text"><span>Learning tools</span><span class="tab-sub" id="tabLearnSub">Study the photo</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="tab-menu" id="tabLearnMenu" role="menu" hidden>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabStudyBtn" data-tab="study" aria-checked="true"><span>Study the photo</span><small>Dark, middle, light; colors and paints; how close you got</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabLoomisBtn" data-tab="loomis" aria-checked="false"><span>Loomis head</span><small>Mark the features, get the head construction</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabPoseBtn" data-tab="pose" aria-checked="false"><span>Pose and light</span><small>Pose a wooden figure, move one lamp, see its values</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabTraceBtn" data-tab="trace" aria-checked="false"><span>Trace onto paper</span><small>Your photo over the camera, to trace it onto paper</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabHelpBtn" data-tab="help" aria-checked="false"><span>How to use</span><small>Every part of the app, with pictures</small></button>
+      </div>
+    </div>
+    <button type="button" class="tab" id="tabPaintBtn" data-tab="paint" aria-current="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1.5-5L16 4.5l3.5 3.5L9 18.5 4 20z"/><path d="M13.5 7l3.5 3.5"/><path d="M4 20c2.5 0 4-1.5 4-3.5"/></svg><span class="tab-text"><span>Studio</span><span class="tab-sub">Paint on the paper</span></span></button>
+    <button type="button" class="tab" id="tabFigureBtn" data-tab="figure" aria-current="false"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg><span class="tab-text"><span>Figure study</span><span class="tab-sub">Draw from a pose</span></span></button>
+    <div class="tab-group" data-group="games">
+      <button type="button" class="tab" id="tabGamesBtn" aria-current="false" aria-haspopup="menu" aria-expanded="false" aria-controls="tabGamesMenu"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2s-.8-1.5-.8-2.5S14 15 15 15h2a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.3" fill="currentColor"/><circle cx="10.5" cy="7" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8" r="1.3" fill="currentColor"/></svg><span class="tab-text"><span>Games</span><span class="tab-sub" id="tabGamesSub">Paint by numbers</span></span><svg class="tab-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="tab-menu" id="tabGamesMenu" role="menu" hidden>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabGameBtn" data-tab="game" aria-checked="false"><span>Paint by numbers</span><small>Mix every number's color against the clock</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabBattleBtn" data-tab="battle" aria-checked="false"><span>Value battle</span><small>Two colors: which is darker, lighter, cooler or warmer?</small></button>
+        <p class="tab-menu-note" role="none">More games are on the way.</p>
+      </div>
+    </div>
+  </nav>
+
+  <div class="layout">
+    <aside class="rail" aria-label="Tools and settings">
+      <h2 class="visually-hidden">Settings for the studies</h2>
+      <details class="drawer" id="drawer-values" data-drawer="values">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg><span class="drawer-name">Dark, middle, light</span></span><span class="drawer-state" id="valuesState"></span></summary>
+        <div class="drawer-body">
+          <fieldset class="field simple-only">
+            <legend>Detail</legend>
+            <div class="seg seg-full">
+              <input type="radio" name="detailPreset" id="dpSoft" value="soft"><label for="dpSoft">Soft</label>
+              <input type="radio" name="detailPreset" id="dpNormal" value="normal" checked><label for="dpNormal">Normal</label>
+              <input type="radio" name="detailPreset" id="dpSharp" value="sharp"><label for="dpSharp">Sharp</label>
+            </div>
+            <p class="hint">Soft keeps only the big shapes. Sharp keeps smaller ones too.</p>
+          </fieldset>
+          <div class="field advanced">
+            <div class="field-head"><label for="simplify">Simplify</label><output id="simplifyOut" for="simplify"></output></div>
+            <input type="range" id="simplify" min="0" max="10" step="1" value="3">
+            <p class="hint">Blurs small details so the big shapes stand out.</p>
+          </div>
+          <fieldset class="field advanced">
+            <legend>Smoothing</legend>
+            <div class="seg seg-full">
+              <input type="radio" name="smoothing" id="smoothSoft" value="soft"><label for="smoothSoft">Soft</label>
+              <input type="radio" name="smoothing" id="smoothEdge" value="edge" checked><label for="smoothEdge">Edge-aware</label>
+            </div>
+            <p class="hint">Edge-aware keeps the photo’s sharp edges. Soft blurs everything evenly, for rounder shapes.</p>
+          </fieldset>
+          <div class="field advanced">
+            <div class="field-head"><label for="merge">Merge small shapes</label><output id="mergeOut" for="merge"></output></div>
+            <input type="range" id="merge" min="0" max="10" step="1" value="4">
+            <p class="hint">Joins tiny specks into the shape around them.</p>
+          </div>
+          <div class="field advanced">
+            <div class="field-head"><label for="detail">Working size</label></div>
+            <select id="detail">
+              <option value="600">600 px (fastest)</option>
+              <option value="900" selected>900 px</option>
+              <option value="1400">1400 px (most detail)</option>
+            </select>
+          </div>
+          <div class="advanced">
+          <div class="group-head">
+            <h3>Where dark, middle and light split</h3>
+            <button type="button" class="btn btn-small" id="autoSplit">Auto split</button>
+          </div>
+          <canvas id="hist" class="hist" aria-label="Value histogram with the two split points"></canvas>
+          <div class="field">
+            <div class="field-head"><label for="t1">Shadow / middle split</label><output id="t1Out" for="t1"></output></div>
+            <input type="range" id="t1" min="1" max="98" step="1" value="35">
+          </div>
+          <div class="field">
+            <div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div>
+            <input type="range" id="t2" min="2" max="99" step="1" value="65">
+          </div>
+          </div>
+
+          <fieldset class="field advanced">
+            <legend>Gray values</legend>
+            <div class="seg seg-full">
+              <input type="radio" name="grayMode" id="grayCustom" value="custom" checked><label for="grayCustom">Set values</label>
+              <input type="radio" name="grayMode" id="grayAvg" value="average"><label for="grayAvg">Photo average</label>
+            </div>
+          </fieldset>
+          <div id="customGrays" class="advanced">
+            <div class="field">
+              <div class="field-head"><label for="g0">Shadow value</label><output id="g0Out" for="g0"></output></div>
+              <input type="range" id="g0" min="0" max="100" step="1" value="20">
+            </div>
+            <div class="field">
+              <div class="field-head"><label for="g1">Middle value</label><output id="g1Out" for="g1"></output></div>
+              <input type="range" id="g1" min="0" max="100" step="1" value="50">
+            </div>
+            <div class="field">
+              <div class="field-head"><label for="g2">Light value</label><output id="g2Out" for="g2"></output></div>
+              <input type="range" id="g2" min="0" max="100" step="1" value="85">
+            </div>
+          </div>
+
+          <ol class="zones" id="zones" aria-label="The three values"></ol>
+          <label class="check" for="outlines"><input type="checkbox" id="outlines"> Draw an outline around every shape</label>
+        </div>
+      </details>
+      <details class="drawer" id="drawer-colors" data-drawer="colors">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.5-1.3-1.7-1.3-3 0-1 .8-1.7 2-1.7H17a4 4 0 0 0 4-4C21 6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7" r="1.2" fill="currentColor"/></svg><span class="drawer-name">Colors and paints</span></span><span class="drawer-state" id="colorsState"></span></summary>
+        <div class="drawer-body">
+          <div class="field">
+            <div class="field-head"><label for="colors">Colors in each value</label><output id="colorsOut" for="colors"></output></div>
+            <input type="range" id="colors" min="1" max="6" step="1" value="3">
+            <p class="hint">How many colors each of the three values is split into. Every color shown is one that is really in the photo. A shape that its group's color doesn't fit, such as a face sharing a group with the wall, gets a closer color or one of its own.</p>
+          </div>
+          <div class="field advanced">
+            <div class="field-head"><label for="lean">Lean toward lighter tones</label><output id="leanOut" for="lean"></output></div>
+            <input type="range" id="lean" min="0" max="100" step="10" value="60">
+            <p class="hint">At Off, each group takes its most common color, which in a lit face sits on the darker side of the group. Slide up to take it from the group's lighter tones instead, so lit skin keeps its lights. Applies to the game and to Check my painting too.</p>
+          </div>
+          <button type="button" class="btn" id="addBlocks">Add block colors to picked colors</button>
+          <div class="paints" id="paints">
+            <h3>Paints to use</h3>
+            <div class="seg seg-full advanced" role="radiogroup" aria-label="Choose paints from">
+              <input type="radio" name="paintSource" id="srcPreset" value="preset" checked><label for="srcPreset">Known palettes</label>
+              <input type="radio" name="paintSource" id="srcMine" value="mine"><label for="srcMine">My paints</label>
+            </div>
+            <div class="paint-pane" id="presetPane">
+              <p class="hint">Best match first. Pick one to see how to mix each color.</p>
+              <ul class="preset-list" id="presetList"></ul>
+            </div>
+            <div class="paint-pane advanced" id="minePane" hidden>
+              <div class="mine-row">
+                <p class="mine-count" id="mineCount"></p>
+                <button type="button" class="btn btn-small" id="mineEdit">Choose my paints</button>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="paintMax">Paints on the palette</label><output id="paintMaxOut" for="paintMax"></output></div>
+                <input type="range" id="paintMax" min="3" max="10" step="1" value="6">
+                <p class="hint">Not counting white. Fewer paints keep the colors in harmony.</p>
+              </div>
+              <button type="button" class="btn" id="suggestBtn">Suggest a palette</button>
+            </div>
+            <div class="paint-result" id="paintResult" hidden>
+              <div class="result-head">
+                <h3 id="resultName"></h3>
+                <span class="result-match" id="resultMatch"></span>
+              </div>
+              <ul class="paint-chips" id="resultPaints"></ul>
+              <p class="hint" id="resultAbout"></p>
+              <h3>Mixes for this study</h3>
+              <ol class="mix-list" id="mixList" aria-live="polite"></ol>
+              <p class="hint">Starting recipes, darkest first. Real paints differ a little, so adjust by eye.</p>
+            </div>
+          </div>
+        </div>
+      </details>
+      <details class="drawer" id="drawer-swatches" data-drawer="swatches">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="drawer-name">Picked colors</span></span><span class="drawer-state" id="swatchesState"></span></summary>
+        <div class="drawer-body">
+          <div class="palette-head">
+            <h3 class="visually-hidden" id="palTitle" tabindex="-1">Picked colors <span class="count" id="palCount"></span></h3>
+            <div class="palette-actions">
+              <button type="button" class="btn btn-small" id="palSort">Sort dark to light</button>
+              <button type="button" class="btn btn-small" id="palCopy">Copy hex codes</button>
+              <button type="button" class="btn btn-small" id="palSave">Save as PNG</button>
+              <button type="button" class="btn btn-small btn-danger" id="palClear">Clear</button>
+            </div>
+          </div>
+          <ul class="swatches" id="swatches"></ul>
+          <p class="empty" id="palEmpty">Move over any picture to see a color, then click or tap to keep it here.</p>
+          <textarea id="copyFallback" class="copy-fallback" readonly hidden aria-label="Hex codes to copy"></textarea>
+        </div>
+      </details>
+      <details class="drawer" id="drawer-check" data-drawer="check">
+        <summary><span class="drawer-title"><svg class="drawer-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M8.5 13.5l2.5 2.5 5-5.5"/></svg><span class="drawer-name">How close did I get?</span></span><span class="drawer-state" id="checkState"></span></summary>
+        <div class="drawer-body">
+          <p class="source" id="artSource"></p>
+          <p class="hint">Take a photo of your painting straight on, in good light, framed like the reference. Or use the painting on the Studio tab. It is compared shape by shape below the studies.</p>
+          <div class="check-actions">
+            <input type="file" id="artFile" accept="image/*" class="visually-hidden">
+            <label for="artFile" class="btn btn-primary">Load a photo of my painting</label>
+            <button type="button" class="btn" id="artFromStudio">Use my Studio painting</button>
+            <label class="inline-field" for="artFit">Fit
+              <select id="artFit">
+                <option value="crop" selected>Crop to match</option>
+                <option value="stretch">Stretch to match</option>
+              </select>
+            </label>
+          </div>
+          <details class="align" id="alignPanel" hidden>
+            <summary>Line up the photo and fix its colors <span class="align-state" id="alignState"></span></summary>
+            <div class="align-body">
+              <div class="align-grid">
+                <div class="field">
+                  <div class="field-head"><label for="onion">Show reference on top</label><output id="onionOut" for="onion"></output></div>
+                  <input type="range" id="onion" min="0" max="100" step="5" value="0">
+                  <p class="hint">Fade the reference over your painting, then move it until they line up.</p>
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignX">Move left / right</label><output id="alignXOut" for="alignX"></output></div>
+                  <input type="range" id="alignX" min="-20" max="20" step="0.2" value="0">
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignY">Move up / down</label><output id="alignYOut" for="alignY"></output></div>
+                  <input type="range" id="alignY" min="-20" max="20" step="0.2" value="0">
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignScale">Size</label><output id="alignScaleOut" for="alignScale"></output></div>
+                  <input type="range" id="alignScale" min="80" max="125" step="0.5" value="100">
+                </div>
+                <div class="field">
+                  <div class="field-head"><label for="alignRot">Rotate</label><output id="alignRotOut" for="alignRot"></output></div>
+                  <input type="range" id="alignRot" min="-15" max="15" step="0.25" value="0">
+                </div>
+              </div>
+              <div class="align-actions">
+                <button type="button" class="btn btn-small" id="alignReset">Reset position</button>
+                <button type="button" class="btn btn-small" id="wbPick">Fix color cast</button>
+                <button type="button" class="btn btn-small" id="wbUndo" hidden>Remove color fix</button>
+                <p class="hint" id="wbStatus">Warm or cool light in the room changes every color in a photo. Press <strong>Fix color cast</strong>, then tap a spot that should be white or gray, like the edge of the paper.</p>
+              </div>
+            </div>
+          </details>
+        </div>
+      </details>
+    </aside>
+
+    <nav class="toolstrip" aria-label="Tools">
+      <button type="button" class="tool-btn" data-tool="sample" aria-pressed="true" title="Color magnifier"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/><circle cx="10" cy="10" r="2.5" fill="currentColor"/></svg><span class="tool-name">Magnifier</span></button>
+      <button type="button" class="tool-btn" data-tool="line" aria-pressed="false" title="Draw lines"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19 20 5"/><circle cx="4" cy="19" r="1.8" fill="currentColor"/><circle cx="20" cy="5" r="1.8" fill="currentColor"/></svg><span class="tool-name">Lines</span></button>
+      <button type="button" class="tool-btn" data-tool="measure" aria-pressed="false" title="Measure in units"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg><span class="tool-name">Measure</span></button>
+      <button type="button" class="tool-btn" data-tool="plumb" aria-pressed="false" title="Plumb lines and levels"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M3 15h18" stroke-dasharray="2.5 2"/><path d="M12 11c-2.2 2.4-3 4-3 5.5a3 3 0 0 0 6 0c0-1.5-.8-3.1-3-5.5z" fill="currentColor"/></svg><span class="tool-name">Plumb</span></button>
+      <span class="tool-sep" aria-hidden="true"></span>
+      <button type="button" class="tool-btn" id="gridBtn" aria-label="Grid: off" title="Grid: off, 3 × 3, 4 × 4"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg><span class="tool-name">Grid</span><span class="tool-badge" id="gridBadge" hidden></span></button>
+    </nav>
+
+    <main class="work">
+      <div class="tool-options" id="toolOptions">
+        <div class="tool-group line-tools">
+          <span class="tool-label" id="lineColorLabel">Line color</span>
+          <div class="line-colors" role="radiogroup" aria-labelledby="lineColorLabel">
+            <input type="radio" name="lineColor" id="lcRed" value="#e5322d" checked><label for="lcRed" title="Red"><span class="visually-hidden">Red</span></label>
+            <input type="radio" name="lineColor" id="lcCyan" value="#1ec8ec"><label for="lcCyan" title="Cyan"><span class="visually-hidden">Cyan</span></label>
+            <input type="radio" name="lineColor" id="lcYellow" value="#ffd21f"><label for="lcYellow" title="Yellow"><span class="visually-hidden">Yellow</span></label>
+            <input type="radio" name="lineColor" id="lcWhite" value="#ffffff"><label for="lcWhite" title="White"><span class="visually-hidden">White</span></label>
+            <input type="radio" name="lineColor" id="lcBlack" value="#111111"><label for="lcBlack" title="Black"><span class="visually-hidden">Black</span></label>
+          </div>
+          <button type="button" class="btn btn-small" id="lineUndo">Undo line</button>
+          <button type="button" class="btn btn-small" id="lineClear">Clear lines</button>
+        </div>
+        <div class="tool-group measure-tools">
+          <button type="button" class="btn btn-small" id="measureUnit">Make last line the unit</button>
+          <button type="button" class="btn btn-small" id="measureUndo">Undo measure</button>
+          <button type="button" class="btn btn-small" id="measureClear">Clear measures</button>
+          <span class="canvas-unit">
+            <label class="tool-label" for="canvasSize">Unit on my canvas</label>
+            <input type="number" id="canvasSize" inputmode="decimal" min="0" step="0.1">
+            <select id="canvasSys" aria-label="Centimeters or inches">
+              <option value="cm" selected>cm</option>
+              <option value="in">in</option>
+            </select>
+          </span>
+        </div>
+        <div class="tool-group plumb-tools">
+          <button type="button" class="btn btn-small" id="plumbUndo">Undo plumb line</button>
+          <button type="button" class="btn btn-small" id="plumbClear">Clear plumb lines</button>
+        </div>
+        <p class="tool-hint" id="toolHint"></p>
+      </div>
+
+
+
+      <section class="tabpanel" id="tab-study">
+        <div class="work-bar">
+          <p class="source" id="source"></p>
+          <div class="seg" role="radiogroup" aria-label="Show">
+            <input type="radio" name="view" id="vAll" value="all" checked><label for="vAll">All three</label>
+            <input type="radio" name="view" id="vOrig" value="orig"><label for="vOrig">Photo</label>
+            <input type="radio" name="view" id="vValue" value="value"><label for="vValue">Values</label>
+            <input type="radio" name="view" id="vBlock" value="block"><label for="vBlock">Shapes</label>
+          </div>
+        </div>
+
+        <div class="panels" id="panels" data-view="all">
+          <figure class="panel" data-panel="orig">
+            <figcaption><span>Photo</span><button type="button" class="btn btn-ghost" data-save="orig">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-orig" class="view" aria-label="Original photo"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel" data-panel="value">
+            <figcaption><span>Dark, middle, light</span><button type="button" class="btn btn-ghost" data-save="value">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-value" class="view" aria-label="Three-value study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+          <figure class="panel" data-panel="block">
+            <figcaption><span>Big color shapes</span><span class="pill-switch block-view" role="group" aria-label="Color the blocks with"><button type="button" data-block-view="photo" aria-pressed="true" title="The colors in the photo">Photo</button><button type="button" data-block-view="palette" aria-pressed="false" id="blockViewPalette">Palette</button></span><button type="button" class="btn btn-ghost" data-save="block">Save PNG</button></figcaption>
+            <div class="matte"><canvas id="cv-block" class="view" aria-label="Color-block study"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+          </figure>
+        </div>
+
+        <section class="check-section" id="checkSection" hidden aria-label="Check my painting">
+          <div class="check-empty" id="checkEmpty">
+            <h3>No painting yet</h3>
+            <p>Load a photo of your painting, or use the one on the Studio tab. You can also drop or paste a photo while this drawer is open.</p>
+          </div>
+
+          <div class="check-body" id="checkBody" hidden>
+            <div class="scorecard">
+              <div class="score-main">
+                <span class="score-label">Color score</span>
+                <div class="score-figure"><span class="score-num" id="scoreColor">0</span><span class="score-of">/ 100</span></div>
+                <span class="score-grade" id="scoreGrade"></span>
+              </div>
+              <dl class="score-sub">
+                <div>
+                  <dt>Light and dark score</dt>
+                  <dd><span id="scoreValue">0</span><span class="meter"><span id="meterValue"></span></span></dd>
+                </div>
+                <div>
+                  <dt>Shapes in the right place</dt>
+                  <dd><span id="scoreShapes">0%</span><span class="meter"><span id="meterShapes"></span></span></dd>
+                </div>
+              </dl>
+              <p class="hint">Color score: how close your colors are to the reference, shape by shape. Light and dark score: how close your lights and darks are, ignoring color. Shapes in the right place: how much of your picture lands in the same dark, middle or light area.</p>
+            <details class="more"><summary>Show the details</summary><p class="hint">Each shape in the reference's color blocks is compared with your painting over the same pixels, using the CIEDE2000 color difference (ΔE). A shape scores 100 − 2.5 × ΔE, weighted by its area. The light-and-dark score uses lightness only: 100 − 5 × |ΔL*|.</p></details>
+            </div>
+            <div class="fixes">
+              <h3>What to fix first</h3>
+              <ol class="fix-list" id="fixList"></ol>
+            </div>
+          </div>
+
+          <div class="panels panels-check" id="checkPanels" hidden>
+            <figure class="panel">
+              <figcaption><span>Reference blocks</span></figcaption>
+              <div class="matte"><canvas id="cv-refblock" class="view" aria-label="Reference color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            </figure>
+            <figure class="panel">
+              <figcaption><span>Your painting</span></figcaption>
+              <div class="matte"><canvas id="cv-art" class="view" aria-label="Your painting, aligned to the reference"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            </figure>
+            <figure class="panel">
+              <figcaption><span>Your blocks</span><button type="button" class="btn btn-ghost" data-save="artblock">Save PNG</button></figcaption>
+              <div class="matte"><canvas id="cv-artblock" class="view" aria-label="Your painting as color blocks"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+            </figure>
+            <figure class="panel">
+              <figcaption><span>Accuracy by shape</span><button type="button" class="btn btn-ghost" data-save="diff">Save PNG</button></figcaption>
+              <div class="matte"><canvas id="cv-diff" class="view" aria-label="The reference's color blocks, each labelled with how closely your painting matches it"></canvas><canvas class="overlay" aria-hidden="true"></canvas></div>
+              <p class="hint">Each shape shows how close your color is: 100% is a perfect match. The white labels are the biggest differences, numbered as in the list. Hover or tap a shape to compare the two colors.</p>
+            </figure>
+          </div>
+        </section>
+      </section>
+
+      <section class="tabpanel" id="tab-loomis" hidden>
+        <div class="ps lh" id="lh-root">
+          <div class="lh-card" id="lh-card">
+            <p class="lh-step" id="lh-stepLabel">1 of 8</p>
+            <p class="lh-ask" id="lh-ask"></p>
+            <p class="lh-sub" id="lh-sub"></p>
+            <div class="lh-acts">
+              <button type="button" class="btn btn-primary" id="lh-lock" disabled>Lock in</button>
+              <button type="button" class="btn btn-ghost" id="lh-skip" hidden>Skip</button>
+              <button type="button" class="btn btn-ghost" id="lh-back" disabled>Back</button>
+              <button type="button" class="btn btn-primary" id="lh-cardStudio" hidden>Draw it in the Studio</button>
+              <button type="button" class="btn btn-ghost" id="lh-refit" hidden>Back to the fit</button>
+            </div>
+          </div>
+          <div class="ps-stage" id="lh-stage">
+            <div class="lh-wrap" id="lh-wrap">
+              <canvas id="lh-photo" aria-hidden="true"></canvas>
+              <canvas id="lh-overlay" tabindex="0" role="application" aria-label="The photo: tap the feature asked for, or move the crosshair with the arrow keys (Shift for bigger steps) and press Enter" aria-describedby="lh-ask"></canvas>
+            </div>
+            <div class="lh-loupe" id="lh-loupe" hidden aria-hidden="true"><canvas id="lh-loupeCanvas"></canvas></div>
+          </div>
+          <nav class="ps-strip" aria-label="Loomis head tools">
+            <button type="button" class="ps-ic ps-exit" id="lh-exit" title="Leave" aria-label="Leave the Loomis head"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <button type="button" class="ps-ic" data-open-file title="Load a photo" aria-label="Load a photo"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg></button>
+            <span class="ps-sep"></span>
+            <button type="button" class="ps-ic" id="lh-undo" title="Back one mark" aria-label="Back one mark" disabled><svg viewBox="0 0 24 24"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-reset" title="Start over" aria-label="Start over" disabled><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v5h5"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-show" title="Show or hide the head" aria-label="Show or hide the head" aria-pressed="true" disabled><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+            <span class="ps-sep"></span>
+            <button type="button" class="ps-ic" id="lh-studio" title="Draw it in the Studio" aria-label="Draw it in the Studio" disabled><svg viewBox="0 0 24 24"><path d="M5 19l1-4L16 5l3 3L9 18l-4 1z"/><path d="M14 7l3 3"/></svg></button>
+            <button type="button" class="ps-ic" id="lh-save" title="Save as PNG" aria-label="Save as PNG" disabled><svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 19h16"/></svg></button>
+          </nav>
+        </div>
+      </section>
+
+      <section class="tabpanel pose-panel" id="tab-pose" hidden>
+        <iframe class="pose-frame" id="poseFrame" title="Pose and light: a wooden drawing figure and one lamp" data-src="pose.html?embed=1"></iframe>
+      </section>
+
+      <section class="tabpanel" id="tab-trace" hidden>
+        <div class="ps tr" id="tr-root">
+          <div class="tr-stage" id="tr-stage">
+            <div class="tr-wrap" id="tr-wrap">
+              <video class="tr-video" id="tr-video" playsinline muted autoplay disablepictureinpicture aria-hidden="true"></video>
+              <canvas class="tr-ghost" id="tr-ghost" hidden aria-hidden="true"></canvas>
+              <canvas class="tr-photo" id="tr-photo" hidden aria-hidden="true"></canvas>
+            </div>
+            <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −" aria-describedby="tr-status"></div>
+            <p class="tr-status" id="tr-status" role="status"></p>
+            <div class="tr-card" id="tr-card">
+              <h2 class="tr-title">Trace onto paper</h2>
+              <p class="tr-say" id="tr-say" aria-live="polite">Fix your phone above the paper, camera down (on a stand, or a glass or a stack of books under it). Start the camera, choose the photo to trace, and draw over it on the paper. The camera picture stays on this device.</p>
+              <button type="button" class="btn btn-primary" id="tr-start" aria-describedby="tr-say">Start camera</button>
+            </div>
+          </div>
+          <nav class="tr-strip" id="tr-strip" aria-label="Trace onto paper tools">
+            <div class="tr-btns">
+              <button type="button" class="ps-ic ps-exit tr-ic" id="tr-exit" title="Leave" aria-label="Leave Trace onto paper"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+              <button type="button" class="tr-ic" id="tr-camera" aria-label="Start camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H8l1.5-2h5L16 7h3.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><span class="tr-cap">Camera</span></button>
+              <button type="button" class="tr-ic" id="tr-choose" aria-label="Choose a photo" title="Choose a photo to trace"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span class="tr-cap">Photo</span></button>
+              <button type="button" class="tr-ic" id="tr-useStudy" aria-label="Use the Study photo" title="Trace the photo on Study the photo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1.5"/><circle cx="12" cy="10" r="3"/><path d="M6.5 19c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/></svg><span class="tr-cap">Study photo</span></button>
+              <button type="button" class="tr-ic" id="tr-fit" title="Fit the photo to the camera picture, centred"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span class="tr-cap">Fit</span></button>
+              <button type="button" class="tr-ic" id="tr-lock" aria-pressed="false" title="Lock the photo in place: drags and pinches do nothing"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span class="tr-cap">Lock</span></button>
+              <button type="button" class="tr-ic" id="tr-setFrame" title="Keep the camera's view of the paper now, to line it up again later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg><span class="tr-cap">Set frame</span></button>
+              <button type="button" class="tr-ic" id="tr-showFrame" aria-pressed="false" title="Show the kept view faintly over the camera"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="13" height="12" rx="1" stroke-dasharray="2.5 2"/><rect x="8" y="7.5" width="13" height="12" rx="1"/></svg><span class="tr-cap">Show frame</span></button>
+              <button type="button" class="tr-ic advanced" id="tr-switch" hidden aria-label="Switch camera" title="Use the other camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H8l1.5-2h5L16 7h3.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M9 13a3 3 0 0 1 5.4-1.8M15 13a3 3 0 0 1-5.4 1.8"/><path d="M14.6 9.6v1.8h-1.8M9.4 16.4v-1.8h1.8"/></svg><span class="tr-cap">Switch</span></button>
+              <button type="button" class="tr-ic advanced" id="tr-turn" title="Turn the photo a quarter turn, for paper the other way round"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="9.5" width="11" height="11" rx="1"/><path d="M12 4h2.5a5 5 0 0 1 5 5v2"/><path d="M17.3 9.2l2.2 2.3 2.2-2.3"/></svg><span class="tr-cap">Turn 90°</span></button>
+            </div>
+            <div class="tr-sliders">
+              <div class="tr-range">
+                <label for="tr-transparency">Transparency</label><output id="tr-transparencyOut" for="tr-transparency">50%</output>
+                <input type="range" id="tr-transparency" min="0" max="100" step="1" value="50">
+              </div>
+              <div class="tr-range">
+                <label for="tr-size">Size</label><output id="tr-sizeOut" for="tr-size">100%</output>
+                <input type="range" id="tr-size" min="0" max="200" step="1" value="107">
+              </div>
+              <div class="tr-range advanced">
+                <label for="tr-strength">Frame strength</label><output id="tr-strengthOut" for="tr-strength">40%</output>
+                <input type="range" id="tr-strength" min="10" max="80" step="1" value="40">
+              </div>
+            </div>
+            <span class="visually-hidden" id="tr-whyCamera">Start the camera first.</span>
+            <span class="visually-hidden" id="tr-whyFrame">Set a frame first: Set frame keeps the camera's view of the paper.</span>
+            <span class="visually-hidden" id="tr-whyPhoto">Choose a photo first.</span>
+            <span class="visually-hidden" id="tr-whyLocked">The photo is locked: press Lock again to move or size it.</span>
+          </nav>
+          <input type="file" id="tr-file" accept="image/*" class="visually-hidden" tabindex="-1" aria-label="Choose a photo to trace">
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-paint" hidden>
+        <div class="ps" id="ps-root">
+          <div class="ps-stage" id="ps-stage">
+            <div class="ps-paper-wrap" id="ps-paperWrap">
+              <canvas id="ps-ground" class="ps-layer-ground" width="900" height="1200" aria-hidden="true"></canvas>
+              <canvas id="ps-sketch" class="ps-layer-sketch" width="900" height="1200" aria-hidden="true"></canvas>
+              <canvas id="ps-paper" class="ps-layer-paper" width="900" height="1200" aria-label="Drawing paper"></canvas>
+              <canvas id="ps-weave" class="ps-layer-weave" width="900" height="1200" aria-hidden="true"></canvas>
+            </div>
+            <figure class="ps-ref" id="ps-refFig" hidden>
+              <div class="pill-switch" role="group" aria-label="Show the reference as">
+                <button type="button" data-ref-view="original" aria-pressed="true">Original</button>
+                <button type="button" data-ref-view="values" aria-pressed="false">Values</button>
+                <button type="button" data-ref-view="blocks" aria-pressed="false">Blocks</button>
+              </div>
+              <div class="ps-frame"><canvas id="ps-refCanvas" aria-label="The reference"></canvas></div>
+            </figure>
+            <div class="ps-status" id="ps-status">Chisel · M</div>
+
+            <section class="ps-sheet ps-sheet-small" id="ps-brushSheet" hidden aria-label="Brushes">
+              <h2>Brushes <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
+              <div class="ps-brush-row" role="group" aria-label="Brush">
+                <button type="button" class="ps-ic" data-brush="chisel" aria-pressed="true" title="Chisel brush" aria-label="Chisel brush"><svg viewBox="0 0 24 24"><path d="M4 19l9-9 3 3-9 9H4z" fill="currentColor" stroke="none"/><path d="M14 9l2.5-2.5a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2L17 12"/></svg><span class="ps-sub" id="ps-chiselSub">M</span></button>
+                <button type="button" class="ps-ic" data-brush="round" aria-pressed="false" title="Round brush" aria-label="Round brush"><svg viewBox="0 0 24 24"><circle cx="8.5" cy="15.5" r="4.5" fill="currentColor" stroke="none"/><path d="M12 12l6.5-6.5a1.4 1.4 0 0 1 2 2L14 14"/></svg><span class="ps-sub" id="ps-roundSub">18</span></button>
+                <button type="button" class="ps-ic" data-brush="pencil" aria-pressed="false" title="Pencil" aria-label="Pencil"><svg viewBox="0 0 24 24"><path d="M5 19l1-4L16 5l3 3L9 18l-4 1z"/><path d="M14 7l3 3"/><path d="M6 15l3 3"/></svg><span class="ps-sub" id="ps-pencilSub">HB</span></button>
+                <button type="button" class="ps-ic" data-brush="sketch" aria-pressed="false" title="Underdrawing" aria-label="Underdrawing, on its own layer"><svg viewBox="0 0 24 24"><path d="M5 19l1-4L16 5l3 3L9 18l-4 1z" stroke-dasharray="2 2"/><path d="M14 7l3 3"/><rect x="3" y="3" width="18" height="18" rx="2" opacity=".35"/></svg><span class="ps-sub" id="ps-sketchSub">HB</span></button>
+                <button type="button" class="ps-ic" data-brush="blend" aria-pressed="false" title="Blend (fan brush)" aria-label="Blend with a fan brush"><svg viewBox="0 0 24 24"><path d="M12 13V21"/><path d="M12 13C8 13 5 10 4 5c3 2 5 4 8 4s5-2 8-4c-1 5-4 8-8 8z" fill="currentColor" fill-opacity=".35"/><path d="M12 13 8.5 6M12 13v-4M12 13l3.5-7"/></svg><span class="ps-sub" id="ps-blendSub">60</span></button>
+              </div>
+              <div class="ps-opts" id="ps-chiselOpts">
+                <span class="ps-label">Size</span>
+                <div class="ps-seg" role="group" aria-label="Chisel size">
+                  <button type="button" data-chisel="s" aria-pressed="false">Small</button>
+                  <button type="button" data-chisel="m" aria-pressed="true">Medium</button>
+                  <button type="button" data-chisel="l" aria-pressed="false">Large</button>
+                </div>
+                <p class="hint">A flat tip at a fixed angle: thick one way, thin the other.</p>
+              </div>
+              <div class="ps-opts" id="ps-roundOpts" hidden>
+                <div class="ps-row"><span class="ps-label">Scale</span><output id="ps-roundOut">18 px</output></div>
+                <input type="range" id="ps-roundSize" min="3" max="64" value="18" aria-label="Round brush size">
+              </div>
+              <div class="ps-opts" id="ps-pencilOpts" hidden>
+                <span class="ps-label">Color</span>
+                <div class="ps-seg" role="group" aria-label="Pencil color">
+                  <button type="button" data-pcolor="black" aria-pressed="true">Black</button>
+                  <button type="button" data-pcolor="white" aria-pressed="false">White</button>
+                </div>
+                <span class="ps-label">Lead</span>
+                <div class="ps-seg" role="group" aria-label="Lead">
+                  <button type="button" data-lead="graphite" aria-pressed="true">Graphite</button>
+                  <button type="button" data-lead="charcoal" aria-pressed="false">Charcoal</button>
+                </div>
+                <span class="ps-label">Hardness</span>
+                <div class="ps-seg" role="group" aria-label="Hardness">
+                  <button type="button" data-hard="hard" aria-pressed="false">2H</button>
+                  <button type="button" data-hard="medium" aria-pressed="true">HB</button>
+                  <button type="button" data-hard="soft" aria-pressed="false">4B</button>
+                </div>
+                <div class="ps-row"><span class="ps-label">Size</span><output id="ps-pencilOut">3 px</output></div>
+                <input type="range" id="ps-pencilSize" min="1" max="30" value="3" aria-label="Pencil size">
+                <p class="hint" id="ps-pencilHint">Light is pale and fine; Dark builds up fast. Press harder with a pen for more.</p>
+              </div>
+              <div class="ps-opts" id="ps-sketchOpts" hidden>
+                <p class="hint">The underdrawing sits on its own layer under the paint. Paint over it freely: it never mixes in.</p>
+                <span class="ps-label">Color</span>
+                <div class="ps-seg" role="group" aria-label="Underdrawing color"><button type="button" data-scolor="black" aria-pressed="true">Black</button><button type="button" data-scolor="white" aria-pressed="false">White</button></div>
+                <span class="ps-label">Lead</span>
+                <div class="ps-seg" role="group" aria-label="Lead"><button type="button" data-slead="graphite" aria-pressed="true">Graphite</button><button type="button" data-slead="charcoal" aria-pressed="false">Charcoal</button></div>
+                <span class="ps-label">Hardness</span>
+                <div class="ps-seg" role="group" aria-label="Hardness"><button type="button" data-shard="hard" aria-pressed="false">Hard</button><button type="button" data-shard="medium" aria-pressed="true">Medium</button><button type="button" data-shard="soft" aria-pressed="false">Soft</button></div>
+                <div class="ps-row"><span class="ps-label">Size</span><output id="ps-sketchOut">3 px</output></div>
+                <input type="range" id="ps-sketchSize" min="1" max="30" value="3" aria-label="Underdrawing size">
+                <div class="ps-toggle"><span class="ps-label">Layer</span><div class="ps-seg" role="group" aria-label="Underdrawing layer"><button type="button" data-sketch-show="1" aria-pressed="true">Shown</button><button type="button" data-sketch-show="0" aria-pressed="false">Hidden</button></div></div>
+                <div class="ps-row"><button type="button" class="btn ps-follow" id="ps-sketchFromStudy">Copy the Study lines</button><button type="button" class="btn btn-danger" id="ps-sketchClear">Clear the underdrawing</button></div>
+                <p class="hint ps-follow">Draws the grid, lines, measures and plumb lines from the Study tab on this layer in pencil, with the lead, hardness, size and color set here, fitted to the paper as the reference would be.</p>
+              </div>
+              <div class="ps-opts" id="ps-blendOpts" hidden>
+                <div class="ps-row"><span class="ps-label">Size</span><output id="ps-blendOut">60 px</output></div>
+                <input type="range" id="ps-blendSize" min="20" max="140" value="60" aria-label="Fan brush size">
+                <div class="ps-row"><span class="ps-label">Strength</span><output id="ps-blendStrOut">40%</output></div>
+                <input type="range" id="ps-blendStr" min="10" max="80" value="40" aria-label="Blend strength">
+                <p class="hint">Drags the paint already on the paper to soften edges. Adds no paint of its own.</p>
+              </div>
+            </section>
+            <section class="ps-sheet ps-sheet-small" id="ps-canvasSheet" hidden aria-label="Canvas">
+              <h2>Canvas <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
+              <span class="ps-label">Ground</span>
+              <div class="ps-seg" role="group" aria-label="Ground">
+                <button type="button" data-ground="raw" aria-pressed="true">Raw</button>
+                <button type="button" data-ground="wash" aria-pressed="false">Toned wash</button>
+                <button type="button" data-ground="gray" aria-pressed="false">Gray</button>
+              </div>
+              <div class="ps-opts" id="ps-washOpts" hidden>
+                <div class="ps-row"><span class="ps-label">Wash from the palette</span><output id="ps-washName"></output></div>
+                <div class="ps-wash-row" id="ps-washRow"></div>
+                <div class="ps-row"><span class="ps-label">Strength</span><output id="ps-washOut">30%</output></div>
+                <input type="range" id="ps-washStr" min="10" max="60" value="30" aria-label="Wash strength">
+              </div>
+              <p class="hint" id="ps-groundHint">Raw canvas: pale and warm. The painting stays as it is when the ground changes.</p>
+              <div class="ps-toggle"><span class="ps-label">Canvas texture</span><div class="ps-seg" role="group" aria-label="Canvas texture"><button type="button" data-weave="off" aria-pressed="true">Off</button><button type="button" data-weave="linen" aria-pressed="false">Linen</button><button type="button" data-weave="paper" aria-pressed="false">Paper</button></div></div>
+              <div class="ps-row"><button type="button" class="btn" id="ps-save">Save as PNG</button><p class="hint">The ground, underdrawing, paint and texture in one picture.</p></div>
+            </section>
+            <section class="ps-sheet ps-sheet-small" id="ps-refSheet" hidden aria-label="Reference">
+              <h2>Reference <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
+              <div class="ps-seg ps-follow" role="group" aria-label="Paint from">
+                <button type="button" data-ref-kind="studio" aria-pressed="true">The Study photo</button>
+                <button type="button" data-ref-kind="painting" aria-pressed="false">A portrait</button>
+              </div>
+              <p class="hint" id="ps-refName">The reference from the Study tab, with its studies as that tab makes them.</p>
+              <div class="ps-row ps-follow">
+                <button type="button" class="btn" data-open-file>Load a photo</button>
+                <button type="button" class="btn" id="ps-refAnother" hidden>Another portrait</button>
+              </div>
+              <span class="ps-label">Show it as</span>
+              <div class="ps-seg" role="group" aria-label="Show the reference as">
+                <button type="button" data-ref-view="original" aria-pressed="true">Original</button>
+                <button type="button" data-ref-view="values" aria-pressed="false">Values</button>
+                <button type="button" data-ref-view="blocks" aria-pressed="false">Blocks</button>
+              </div>
+              <p class="hint" id="ps-refViewHint">Values shows dark, middle and light. Blocks shows the big color shapes. Both come from the Study tab.</p>
+              <div class="ps-row"><span class="ps-label">Size</span><output id="ps-refSizeOut">36%</output></div>
+              <input type="range" id="ps-refSize" min="20" max="70" value="36" aria-label="Reference size">
+              <div class="ps-toggle"><span class="ps-label">On the paper</span><div class="ps-seg" role="group" aria-label="Reference shown"><button type="button" data-ref-show="1" aria-pressed="true">Shown</button><button type="button" data-ref-show="0" aria-pressed="false">Hidden</button></div></div>
+            </section>
+            <section class="ps-sheet ps-sheet-small" id="ps-eraserSheet" hidden aria-label="Eraser">
+              <h2>Eraser <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
+              <div class="ps-row"><span class="ps-label">Size</span><output id="ps-eraserOut">24 px</output></div>
+              <input type="range" id="ps-eraserSize" min="4" max="100" value="24" aria-label="Eraser size">
+            </section>
+            <section class="ps-sheet ps-sheet-small" id="ps-viewSheet" hidden aria-label="Zoom and pan">
+              <h2>Zoom and pan <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
+              <div class="ps-row"><span class="ps-label">Zoom</span><output id="ps-zoomOut">100%</output></div>
+              <input type="range" id="ps-zoom" min="100" max="400" step="5" value="100" aria-label="Zoom">
+              <div class="ps-row"><span class="ps-label">Pan across</span><output id="ps-panXOut">centre</output></div>
+              <input type="range" id="ps-panX" min="-100" max="100" value="0" aria-label="Pan across" disabled>
+              <div class="ps-row"><span class="ps-label">Pan up and down</span><output id="ps-panYOut">centre</output></div>
+              <input type="range" id="ps-panY" min="-100" max="100" value="0" aria-label="Pan up and down" disabled>
+              <div class="ps-row"><button type="button" class="btn" id="ps-fitBtn">Fit to screen</button><p class="hint">Zoom in for detail; pan slides the paper under the brush.</p></div>
+            </section>
+            <section class="ps-sheet" id="ps-paintSheet" hidden aria-label="Paints">
+              <h2>Paints <button type="button" class="ps-x" data-close aria-label="Close">×</button></h2>
+              <select id="ps-palette" aria-label="Palette"></select>
+              <ul class="ps-paints" id="ps-paints"></ul>
+              <div class="ps-row"><span class="ps-label">Amount per tap</span><output id="ps-amountOut">1 part</output></div>
+              <input type="range" id="ps-amount" min="0" max="4" value="2" aria-label="Amount per tap">
+              <div class="ps-well">
+                <span class="ps-chip ps-empty" id="ps-wellChip"></span>
+                <h3>Mixing well</h3>
+                <p id="ps-wellParts">Empty. Tap a paint to start a mix.</p>
+                <div class="ps-acts">
+                  <button type="button" class="btn btn-primary" id="ps-lock" disabled>Lock in</button>
+                  <button type="button" class="btn" id="ps-wellUndo" disabled>Undo</button>
+                  <button type="button" class="btn btn-danger" id="ps-wellClear" disabled>Clear</button>
+                </div>
+              </div>
+              <span class="ps-label">My mixes <small class="ps-mix-note" id="ps-mixNote">· skin tones from this palette to start</small></span>
+              <div class="ps-mixes" id="ps-mixes"></div>
+              <div class="ps-row ps-picked" id="ps-picked" hidden>
+                <p id="ps-pickedRecipe"></p>
+                <span class="ps-acts"><button type="button" class="btn btn-danger" id="ps-dropMix">Remove</button></span>
+              </div>
+            </section>
+          </div>
+          <nav class="ps-strip" aria-label="Painting tools">
+            <button type="button" class="ps-ic ps-exit" id="ps-exit" title="Leave the studio" aria-label="Leave the studio"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <button type="button" class="ps-ic" id="ps-brushBtn" aria-pressed="true" aria-expanded="false" title="Brushes" aria-label="Brushes"><svg viewBox="0 0 24 24" id="ps-brushIcon"><path d="M4 19l9-9 3 3-9 9H4z" fill="currentColor" stroke="none"/><path d="M14 9l2.5-2.5a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2L17 12"/></svg><span class="ps-sub" id="ps-brushSub">M</span></button>
+            <button type="button" class="ps-ic" data-ps-tool="eraser" aria-pressed="false" title="Eraser" aria-label="Eraser"><svg viewBox="0 0 24 24"><path d="M4 16l8-8 6 6-5 5H8z"/><path d="M12 8l5-3 4 4-3 5" fill="currentColor" fill-opacity=".35"/><path d="M4 21h16"/></svg><span class="ps-sub" id="ps-eraserSub">24</span></button>
+            <span class="ps-sep"></span>
+            <button type="button" class="ps-ic ps-color" id="ps-colorBtn" aria-expanded="false" title="Paints and mixing" aria-label="Paints and mixing"><span class="ps-dot" id="ps-colorDot"></span></button>
+            <button type="button" class="ps-ic" id="ps-refBtn" aria-expanded="false" title="Reference" aria-label="Reference"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><circle cx="12" cy="10.5" r="3"/><path d="M6.5 19c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/></svg></button>
+            <button type="button" class="ps-ic" id="ps-canvasBtn" aria-expanded="false" title="Canvas: ground, texture and saving" aria-label="Canvas: ground, texture and saving"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M3 14h18M8 4v16M14 4v16" opacity=".5"/></svg></button>
+            <span class="ps-sep"></span>
+            <button type="button" class="ps-ic" id="ps-viewBtn" aria-expanded="false" title="Zoom and pan" aria-label="Zoom and pan"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/><path d="M8 10.5h5M10.5 8v5"/></svg><span class="ps-sub" id="ps-zoomSub">1×</span></button>
+            <button type="button" class="ps-ic" id="ps-undo" title="Undo" aria-label="Undo" disabled><svg viewBox="0 0 24 24"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
+            <button type="button" class="ps-ic" id="ps-orient" title="Turn the paper" aria-label="Turn the paper"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="11" height="15" rx="1.5"/><path d="M19 9v9a2 2 0 0 1-2 2h-6"/><path d="M14 17l-3 3 3 3" /></svg></button>
+            <button type="button" class="ps-ic" id="ps-clear" title="Clear the paper" aria-label="Clear the paper"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13"/></svg></button>
+          </nav>
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-figure" hidden>
+        <div class="game-setup" id="fig-setup">
+          <div class="game-card">
+            <h2 class="game-title">Figure study</h2>
+            <p class="game-lede">Draw the wooden figure the way an art class draws from a model. The poses keep coming from the pose library, in a random order, until you stop the class. After each pose you get stars, and the pose's gesture laid over your drawing: a stick figure made from the model's own joints.</p>
+            <fieldset class="field">
+              <legend>Class</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Class">
+                <input type="radio" name="figClass" id="fig-relaxed" value="relaxed" checked><label for="fig-relaxed">Relaxed<small>no time limit</small></label>
+                <input type="radio" name="figClass" id="fig-timed" value="timed"><label for="fig-timed">Timed<small>a time limit on each pose</small></label>
+              </div>
+            </fieldset>
+            <fieldset class="field" id="fig-times" hidden>
+              <legend>Time for each pose</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Time for each pose">
+                <input type="radio" name="figTime" id="fig-t10" value="10"><label for="fig-t10">10 s<small>gesture</small></label>
+                <input type="radio" name="figTime" id="fig-t30" value="30" checked><label for="fig-t30">30 s<small>gesture</small></label>
+                <input type="radio" name="figTime" id="fig-t60" value="60"><label for="fig-t60">1 min<small>shapes</small></label>
+                <input type="radio" name="figTime" id="fig-t300" value="300"><label for="fig-t300">5 min<small>study</small></label>
+                <input type="radio" name="figTime" id="fig-t600" value="600"><label for="fig-t600">10 min<small>study</small></label>
+              </div>
+              <p class="hint">Short poses are for the gesture: one line for the whole movement. Long poses have time for the shapes and the light.</p>
+            </fieldset>
+            <div class="field">
+              <span class="fig-label">Poses</span>
+              <p class="hint" id="fig-mix">Every pose in the library is in the class. Tap a pose, or a group's button, to take it out.</p>
+            </div>
+            <p class="game-best" id="fig-plan"></p>
+            <button type="button" class="btn btn-primary game-start" id="fig-start" disabled>Start drawing</button>
+            <button type="button" class="btn game-start" id="fig-back" hidden>Back to your drawings</button>
+          </div>
+          <div class="game-card fig-library">
+            <div class="field-head"><h3>Pose library</h3><button type="button" class="btn btn-small" id="fig-all" hidden>Take them all out</button></div>
+            <p class="hint" id="fig-libNote" aria-live="polite">Setting up the poses…</p>
+            <div id="fig-poses"></div>
+          </div>
+        </div>
+        <div class="fig-review" id="fig-review" hidden>
+          <div class="game-card fig-review-head">
+            <h2 class="game-title" id="fig-reviewTitle" tabindex="-1">Your figure drawings</h2>
+            <p class="game-lede" id="fig-reviewLede"></p>
+            <div class="fig-review-acts">
+              <div class="pill-switch" role="group" aria-label="The gesture over each drawing"><button type="button" data-fig-gesture="1" aria-pressed="true">Gestures shown</button><button type="button" data-fig-gesture="0" aria-pressed="false">Hidden</button></div>
+              <button type="button" class="btn btn-primary" id="fig-again">Draw again</button>
+              <button type="button" class="btn" id="fig-new">New class</button>
+            </div>
+            <p class="hint fig-key"><span class="fig-key-item"><span class="fig-swatch fig-sw-action"></span>Line of action</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-bones"></span>Stick figure</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-tilt"></span>Shoulder and hip tilt</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-miss"></span>No marks near it</span></p>
+          </div>
+          <div class="fig-cards" id="fig-cards"></div>
+        </div>
+        <!-- moved into Figure study's copy of the Studio when it is set up -->
+        <div class="fig-bar" id="fig-bar">
+          <div class="fig-now"><span class="fig-count" id="fig-count">Pose 1</span><span class="fig-name" id="fig-name"></span></div>
+          <p class="visually-hidden" id="fig-say" role="status" aria-live="assertive"></p>
+          <div class="fig-clock" id="fig-clock" role="timer" aria-label="Time left">0:00</div>
+          <div class="fig-acts">
+            <button type="button" class="btn btn-small fig-btn" id="fig-pause" aria-label="Pause the clock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg><span class="fig-btn-text">Pause</span></button>
+            <button type="button" class="btn btn-small btn-primary fig-btn" id="fig-done" aria-label="Done: see how this pose went"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span>Done</span></button>
+            <button type="button" class="fig-end" id="fig-end" aria-label="Stop the class" title="Stop the class"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+        </div>
+        <!-- the card after each pose, over the paper -->
+        <div class="fig-result" id="fig-result" hidden>
+          <div class="game-popup fig-popup" id="fig-popup" role="dialog" aria-labelledby="fig-kicker" aria-describedby="fig-stars fig-grade">
+            <p class="game-kicker" id="fig-kicker">Pose 1 done</p>
+            <p class="game-pct"><span id="fig-pct">0</span><span class="game-pct-sign">%</span></p>
+            <p class="game-pct-label">gesture match</p>
+            <div class="game-stars" id="fig-stars" role="img" aria-label="">
+              <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+              <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+              <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+              <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+              <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+            </div>
+            <p class="game-grade" id="fig-grade"></p>
+            <div class="fig-pair fig-popup-pair"><canvas id="fig-drawing" role="img" aria-label="Your drawing, with the pose's gesture over it"></canvas><img id="fig-pose" alt=""></div>
+            <p class="fig-key"><span class="fig-key-item"><span class="fig-swatch fig-sw-action"></span>Line of action</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-bones"></span>Stick figure</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-tilt"></span>Tilt</span> <span class="fig-key-item"><span class="fig-swatch fig-sw-miss"></span>No marks near it</span></p>
+            <ul class="fig-tips" id="fig-tips"></ul>
+            <div class="game-popup-actions">
+              <button type="button" class="btn btn-primary" id="fig-nextPose">Next pose</button>
+              <button type="button" class="btn" id="fig-stop">Stop class</button>
+            </div>
+          </div>
+        </div>
+        <iframe class="fig-render" id="fig-render" title="Pose pictures for Figure study" aria-hidden="true" tabindex="-1" data-src="pose.html?render=1"></iframe>
+      </section>
+      <section class="tabpanel" id="tab-game" hidden>
+        <div class="game-setup" id="gameSetup">
+          <div class="game-card">
+            <h2 class="game-title">Paint by numbers</h2>
+            <p class="game-lede">Your picture becomes a numbered puzzle. Pick a number, then tap paints to mix its color, a part at a time (a slider sets how much a tap adds). Match the colors, then lock in your portrait for a score.</p>
+            <fieldset class="field">
+              <legend>Paint from</legend>
+              <div class="seg seg-full" role="radiogroup" aria-label="Paint from">
+                <input type="radio" name="gameSubject" id="gameFromPhoto" value="photo" checked><label for="gameFromPhoto">My photo</label>
+                <input type="radio" name="gameSubject" id="gameFromPainting" value="painting"><label for="gameFromPainting">A painting</label>
+              </div>
+              <div class="game-from" id="gameFromPhotoPane">
+                <p class="hint" id="gamePhotoName"></p>
+                <button type="button" class="btn btn-small" data-open-file>Load another photo</button>
+              </div>
+              <div class="game-from" id="gameFromPaintingPane" hidden>
+                <p class="hint" id="gamePaintingName" aria-live="polite"></p>
+                <button type="button" class="btn btn-small" id="gameReroll">Another painting</button>
+              </div>
+            </fieldset>
+            <fieldset class="field">
+              <legend>Difficulty</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Difficulty">
+                <input type="radio" name="gameLevel" id="gameEasy" value="easy"><label for="gameEasy">Easy<small>Big shapes · 6 min</small></label>
+                <input type="radio" name="gameLevel" id="gameMedium" value="medium" checked><label for="gameMedium">Medium<small>Smaller shapes · 5 min</small></label>
+                <input type="radio" name="gameLevel" id="gameHard" value="hard"><label for="gameHard">Hard<small>More colors · 8 min</small></label>
+              </div>
+            </fieldset>
+            <div class="field">
+              <label for="gameMode">Mode</label>
+              <select id="gameMode">
+                <option value="classic">Classic: beat the clock</option>
+                <option value="relaxed">Relaxed: no clock</option>
+                <option value="memory">Memory: the reference hides</option>
+                <option value="value">Value first: greys, then color</option>
+                <option value="mystery">Mystery palette: random paints</option>
+              </select>
+              <p class="hint" id="gameModeAbout"></p>
+            </div>
+            <div class="field">
+              <div class="field-head"><label for="gamePalette" id="gamePaletteLabel">Palette</label><button type="button" class="btn btn-small" id="gameDeal" hidden>Deal again</button></div>
+              <select id="gamePalette"></select>
+              <span class="paint-dots" id="gamePaletteDots"></span>
+              <p class="hint" id="gamePaletteHint"></p>
+            </div>
+            <button type="button" class="btn btn-primary game-start" id="gameStart">Start painting</button>
+            <p class="game-best" id="gameBest"></p>
+          </div>
+          <figure class="game-preview">
+            <div class="matte"><canvas id="gamePreview" aria-label="Preview of the numbered portrait"></canvas></div>
+            <figcaption class="hint" id="gamePreviewNote"></figcaption>
+          </figure>
+        </div>
+
+        <div class="game-play" id="gamePlay" hidden>
+          <div class="game-bar">
+            <div class="game-timer" id="gameTimer" role="timer" aria-label="Time left">0:00</div>
+            <p class="game-progress" id="gameProgress"></p>
+            <button type="button" class="game-icon-btn" id="gameSound" aria-pressed="true" aria-label="Sound" title="Sound on"><svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/></svg><svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg></button>
+            <button type="button" class="game-icon-btn" id="gameQuit" aria-label="Quit this game" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            <button type="button" class="btn btn-primary" id="gameLock">Lock in portrait</button>
+          </div>
+          <div class="game-boards">
+            <figure class="game-board">
+              <div class="matte"><canvas id="gameCanvas" aria-label="Numbered portrait. Choose a number below, or tap a shape."></canvas></div>
+              <div class="game-spot" id="gameSpot" role="status" aria-live="polite"></div>
+            </figure>
+            <figure class="game-ref" id="gameRefFig">
+              <div class="game-ref-head">
+                <button type="button" class="game-ref-toggle" id="gameRefToggle" aria-expanded="true" aria-controls="gameRef">Reference</button>
+                <div class="pill-switch game-ref-view" role="group" aria-label="Show the reference as">
+                  <button type="button" data-ref-view="photo" aria-pressed="true">Photo</button>
+                  <button type="button" data-ref-view="blocks" aria-pressed="false">Blocks</button>
+                </div>
+              </div>
+              <div class="matte"><canvas id="gameRef" aria-label="The reference"></canvas></div>
+            </figure>
+          </div>
+          <div class="game-mixer">
+            <ol class="game-numbers" id="gameNumbers" aria-label="Numbers to paint"></ol>
+            <div class="game-mix">
+              <div class="game-value" id="gameValue" hidden>
+                <div class="game-value-head">
+                  <span class="game-value-chip" id="gameValueChip"></span>
+                  <div class="game-value-text">
+                    <h3 id="gameValueTitle"></h3>
+                    <p class="game-mix-parts" id="gameValueText" aria-live="polite"></p>
+                  </div>
+                  <button type="button" class="btn btn-small btn-danger" id="gameValueClear">Clear</button>
+                </div>
+                <input type="range" class="game-value-range" id="gameValueRange" min="0" max="100" step="0.5" value="50" aria-label="Value of this number, from black (0) to white (10)">
+                <p class="hint game-value-hint">Slide to the value you see in the reference: black at the left, white at the right. Every shape with this number takes it.</p>
+              </div>
+              <div class="game-mix-head">
+                <span class="game-mix-chip" id="gameMixChip"></span>
+                <div class="game-mix-text">
+                  <h3 id="gameMixTitle"></h3>
+                  <p class="game-mix-parts" id="gameMixParts" aria-live="polite"></p>
+                </div>
+                <div class="game-mix-actions">
+                  <button type="button" class="btn btn-small" id="gameUndo">Undo</button>
+                  <button type="button" class="btn btn-small btn-danger" id="gameClear">Clear</button>
+                  <button type="button" class="btn btn-small" id="gameCopy" aria-pressed="false">Copy mix</button>
+                </div>
+              </div>
+              <div class="game-copy" id="gameCopyBar" role="status" hidden>
+                <span id="gameCopyText"></span>
+                <button type="button" class="btn btn-small" id="gameCopyDone">Done</button>
+              </div>
+              <div class="field game-amount">
+                <div class="field-head"><label for="gameAmount">Amount<span class="wide-only"> per tap</span></label><output id="gameAmountOut" for="gameAmount"></output></div>
+                <input type="range" id="gameAmount" min="0" max="4" step="1" value="2">
+                <button type="button" class="game-icon-btn game-quick-undo" id="gameQuickUndo" aria-label="Undo the last tap" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9a5 5 0 0 1 0 10h-2"/></svg></button>
+              </div>
+              <ul class="game-paints" id="gamePaints" aria-label="Paints: each tap adds the amount above"></ul>
+              <div class="game-paint-scroll" id="gamePaintScroll" aria-hidden="true"><div class="game-paint-scroll-thumb"></div></div>
+              <p class="hint">Tap a paint to add it; hold to keep adding. Use small amounts for a touch of a strong paint, large ones for a pile of white. Every shape with the same number takes the same mix. On a phone, drag the reference to move it.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="game-result" id="gameResult" hidden>
+          <div class="game-final">
+            <div class="matte game-final-matte">
+              <div class="game-final-wrap" id="gameFinalWrap">
+                <canvas id="gameFinal" aria-label="Your finished portrait"></canvas>
+                <canvas id="gameFinalTarget" class="game-final-target" aria-hidden="true"></canvas>
+                <div class="game-final-handle" id="gameFinalHandle" role="slider" tabindex="0" aria-label="Compare your portrait with the colors to match" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span></span></div>
+                <span class="game-final-tag tag-yours" aria-hidden="true">Yours</span>
+                <span class="game-final-tag tag-target" aria-hidden="true">Target</span>
+              </div>
+              <div class="game-popup" id="gamePopup" role="group" aria-labelledby="gameKicker" aria-describedby="gameStars gameGrade">
+                <button type="button" class="game-popup-close" id="gamePopupClose" aria-label="Hide the score to see your portrait">×</button>
+                <p class="game-kicker" id="gameKicker">Portrait locked in</p>
+                <p class="game-pct"><span id="gamePct">0</span><span class="game-pct-sign">%</span></p>
+                <p class="game-pct-label">color match</p>
+                <div class="game-stars" id="gameStars" role="img" aria-label="">
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                  <span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span>
+                </div>
+                <p class="game-grade" id="gameGrade"></p>
+                <p class="game-newbest" id="gameNewBest" hidden>New best!</p>
+                <div class="game-popup-actions">
+                  <button type="button" class="btn btn-primary" id="gameAnalyze" aria-expanded="false" aria-controls="gameAnalysis">Analyze</button>
+                  <button type="button" class="btn" data-game="again">Play again</button>
+                  <button type="button" class="btn" data-game="share">Share card</button>
+                  <button type="button" class="btn btn-ghost" data-game="new">Change settings</button>
+                </div>
+              </div>
+              <div class="game-show-bar" id="gameShowBar" hidden>
+                <button type="button" class="btn btn-small" id="gameShowScore">Show score</button>
+                <button type="button" class="btn btn-small" id="gameCompare" aria-pressed="false">Compare with target</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="game-analysis" id="gameAnalysis" hidden>
+            <div class="game-score">
+              <h3 class="game-zones-title">Analysis</h3>
+              <p class="game-points"><span id="gamePoints">0</span> <span class="game-points-unit">points</span></p>
+              <dl class="game-breakdown" id="gameBreakdown"></dl>
+              <div class="game-again">
+                <button type="button" class="btn btn-primary" data-game="again">Play again</button>
+                <button type="button" class="btn" data-game="share">Share card</button>
+                <button type="button" class="btn" data-game="new">Change settings</button>
+              </div>
+            </div>
+            <div class="game-compare">
+              <figure><figcaption>Your portrait</figcaption><div class="matte"><canvas id="gameYours"></canvas></div></figure>
+              <figure><figcaption>The colors to match</figcaption><div class="matte"><canvas id="gameTarget"></canvas></div></figure>
+              <figure><figcaption>The reference</figcaption><div class="matte"><canvas id="gamePhoto"></canvas></div></figure>
+            </div>
+            <h3 class="game-zones-title">Number by number, furthest off first</h3>
+            <ol class="game-zones" id="gameZones"></ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="tabpanel" id="tab-battle" hidden>
+        <div class="game-setup" id="vb-setup">
+          <div class="game-card">
+            <h2 class="game-title">Value battle</h2>
+            <p class="game-lede">Colors mixed from the same palette. Which is darker, lighter, cooler or warmer? With three or four, find the darkest, the lightest, or put them all in order. Every round is a little harder than the last. How long can your streak go?</p>
+            <div class="field">
+              <label for="vb-palette">Palette</label>
+              <select id="vb-palette"></select>
+              <p class="hint">Every color is mixed from these paints.</p>
+            </div>
+            <fieldset class="field">
+              <legend>Colors in a round</legend>
+              <div class="seg seg-full" role="radiogroup" aria-label="Colors in a round">
+                <input type="radio" name="vbCount" id="vbCount2" value="2"><label for="vbCount2">2</label>
+                <input type="radio" name="vbCount" id="vbCount3" value="3"><label for="vbCount3">3</label>
+                <input type="radio" name="vbCount" id="vbCount4" value="4"><label for="vbCount4">4</label>
+                <input type="radio" name="vbCount" id="vbCountMix" value="mix" checked><label for="vbCountMix">Mix</label>
+              </div>
+              <p class="hint">Tap a color to answer. With two, a button says they are the same. With three or four, tap the darkest or the lightest, or tap them in order.</p>
+            </fieldset>
+            <fieldset class="field">
+              <legend>Mode</legend>
+              <div class="seg seg-full game-levels" role="radiogroup" aria-label="Mode">
+                <input type="radio" name="vbMode" id="vbModeStreak" value="streak" checked><label for="vbModeStreak">Streak<small>until a miss</small></label>
+                <input type="radio" name="vbMode" id="vbMode1" value="60"><label for="vbMode1">1 min<small>on the clock</small></label>
+                <input type="radio" name="vbMode" id="vbMode2" value="120"><label for="vbMode2">2 min<small>on the clock</small></label>
+                <input type="radio" name="vbMode" id="vbMode5" value="300"><label for="vbMode5">5 min<small>on the clock</small></label>
+              </div>
+              <p class="hint">Streak ends at the first miss. On the clock, get as many right as you can; a miss only costs the time to read the answer.</p>
+            </fieldset>
+            <p class="game-best" id="vb-best"></p>
+            <button type="button" class="btn btn-primary game-start" id="vb-start">Start the battle</button>
+          </div>
+          <div class="game-card vb-about">
+            <h3>What you are looking at</h3>
+            <p class="hint"><strong>Value</strong> is how light or dark a color is, with the color ignored. Squint and the darker one goes darker first.</p>
+            <p class="hint"><strong>Temperature</strong> is which way a color leans: toward orange and yellow is warm, toward blue is cool. A gray-green can be cooler than a pink that is just as dark.</p>
+            <p class="hint">Some rounds are a tie. "Both the same" is a real answer, not a trick.</p>
+            <p class="hint">The first rounds are easy. Each one after is a little closer, until the colors are a hair apart. One miss ends the streak.</p>
+          </div>
+        </div>
+        <div class="vb-play" id="vb-play" hidden>
+          <div class="vb-board" id="vb-board">
+            <div class="vb-bar" id="vb-bar">
+              <span class="vb-round" id="vb-round">Streak 0</span>
+              <span class="vb-score" id="vb-score">Round 1</span>
+              <span class="vb-time" id="vb-time" hidden>1:00</span>
+              <button type="button" class="vb-quit" id="vb-quit" aria-label="Quit this battle" title="Quit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </div>
+            <div class="vb-stage">
+              <p class="vb-question" id="vb-question">Which color is darker in value?</p>
+              <div class="vb-swatches" id="vb-swatches" role="group" aria-labelledby="vb-question" data-count="2"></div>
+              <p class="vb-answer" id="vb-answer" aria-live="polite"></p>
+              <div class="vb-controls" id="vb-choices">
+                <button type="button" class="btn vb-choice" data-choice="same">Both the same</button>
+                <button type="button" class="btn vb-undo" id="vb-undo" hidden>Start the round over</button>
+                <button type="button" class="btn btn-primary vb-next" id="vb-next" hidden>Next ▸</button>
+              </div>
+            </div>
+            <div class="game-popup vb-miss" id="vb-miss" role="group" aria-labelledby="vb-missKicker" aria-describedby="vb-missWhy" hidden>
+              <p class="game-kicker" id="vb-missKicker">Not quite</p>
+              <p class="vb-miss-why" id="vb-missWhy"></p>
+              <div class="vb-chips" id="vb-missChips"></div>
+              <div class="game-popup-actions">
+                <button type="button" class="btn btn-primary" id="vb-missNext">See the score</button>
+              </div>
+            </div>
+            <div class="game-popup" id="vb-popup" role="group" aria-labelledby="vb-kicker" aria-describedby="vb-stars vb-grade" hidden>
+              <p class="game-kicker" id="vb-kicker">Streak over</p>
+              <p class="game-pct"><span id="vb-pct">0</span></p>
+              <p class="game-pct-label" id="vb-pctLabel">in a row</p>
+              <div class="game-stars" id="vb-stars" role="img" aria-label=""><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span><span class="game-star"><svg class="star-empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg><svg class="star-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.5l-5.9 3.1 1.2-6.5L2.5 9.5l6.6-.9z"/></svg></span></div>
+              <p class="game-grade" id="vb-grade"></p>
+              <p class="game-newbest" id="vb-newBest" hidden>New best!</p>
+              <div class="game-popup-actions">
+                <button type="button" class="btn btn-primary" id="vb-again">Play again</button>
+                <button type="button" class="btn btn-ghost" id="vb-settings">Change settings</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tabpanel help" id="tab-help" aria-label="How to use" hidden>
+        <div class="help-intro">
+          <h2 class="help-title">How to use Portrait Value Studio</h2>
+          <p class="help-lede">Everything here runs in your browser. Your photos and paintings stay on your device. Here is the whole app, one part at a time, with pictures from a phone.</p>
+          <ol class="help-steps">
+            <li><strong>Load a photo.</strong> Or keep the sample portrait. <button type="button" class="btn btn-small" data-go="study">Go to Study the photo</button></li>
+            <li><strong>Look at the shapes.</strong> See where the darks, middles and lights are, and which big colors there are.</li>
+            <li><strong>Paint it in the Studio.</strong> Copy the lines, mix the colors, paint. <button type="button" class="btn btn-small" data-go="paint">Go to Studio</button></li>
+            <li><strong>Check how close you got.</strong> Score your painting shape by shape. <button type="button" class="btn btn-small" data-go="check">Check a painting</button></li>
+          </ol>
+        </div>
+
+        <section class="help-part" id="help-start">
+          <div class="help-text">
+            <h3>Getting around</h3>
+            <ol>
+              <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
+              <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
+              <li>The four big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, Trace onto paper, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Figure study</strong> is a drawing class with the wooden figure as the model. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Getting around"><figure class="phone"><img width="400" height="774" src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo, the four big buttons and the Learning tools menu open under the first" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
+        </section>
+
+        <section class="help-part" id="help-study">
+          <div class="help-text">
+            <h3>Study the photo</h3>
+            <p>The app makes two pictures from the photo.</p>
+            <ol>
+              <li><strong>Dark, middle, light</strong> turns the photo into three grays. Paint these three shapes first and a portrait already looks right.</li>
+              <li><strong>Big color shapes</strong> splits each gray into a few colors that are really in the photo.</li>
+              <li>Use <strong>All three / Photo / Values / Shapes</strong> to see one picture big. <strong>Save PNG</strong> keeps a picture on your device.</li>
+              <li>In <strong>Dark, middle, light</strong>, the Detail switch chooses how much to simplify. Soft keeps only the big shapes.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Study the photo">
+            <figure class="phone"><img width="400" height="774" src="img/help/studies.jpg" alt="The photo, the dark-middle-light picture and the big color shapes on a phone" loading="lazy"><figcaption>The three pictures</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/values.jpg" alt="The Dark, middle, light drawer with the Detail switch and the three grays" loading="lazy"><figcaption>Detail and the three grays</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-tools">
+          <div class="help-text">
+            <h3>Drawing tools</h3>
+            <p>The row of tool buttons works on every picture. Tap a tool to use it. Tap it again to turn it off, so touching a picture just scrolls.</p>
+            <ol>
+              <li><strong>Magnifier</strong> shows the color under your finger. Tap to keep it in Picked colors.</li>
+              <li><strong>Lines</strong> draws straight lines, like a line through both eyes. They show on all three pictures.</li>
+              <li><strong>Measure</strong> compares lengths. Make one line the unit, and every other line says how many units it is.</li>
+              <li><strong>Plumb</strong> drops a straight-down line and a level line through a point, to see what lines up.</li>
+              <li><strong>Grid</strong> lays a 3 × 3 or 4 × 4 grid over the picture, for drawing it square by square.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Drawing tools"><figure class="phone"><img width="400" height="774" src="img/help/lines.jpg" alt="Two red lines drawn on the photo with the Lines tool: one through the eyes, one down the middle of the face" loading="lazy"><figcaption>Lines through the eyes and the middle</figcaption></figure></div>
+        </section>
+
+        <section class="help-part" id="help-loomis">
+          <div class="help-text">
+            <h3>Loomis head</h3>
+            <p>Artists start a head with a ball and a few lines, the way Andrew Loomis taught. This tab fits that construction over any face so you can see where the lines go, then draw them yourself.</p>
+            <ol>
+              <li>The card names one feature at a time: each eye, each eyebrow, the nose, the mouth, the chin and the forehead. Tap it on the photo. A loupe shows the spot magnified, so drag until it is exact, then press <strong>Lock in</strong>. From the keyboard, Tab to the photo: the arrow keys move a crosshair (with Shift, in bigger steps) and Enter or Space puts the mark there. Eyebrows and forehead can be skipped.</li>
+              <li>After the last one the head appears: the <strong>ball</strong> (red), the <strong>flat side</strong>, the <strong>centre line</strong> and <strong>brow line</strong> (blue), and the <strong>eye, nose, mouth and chin lines</strong> (yellow). Lines on the far side of the head are faint and dashed.</li>
+              <li>To adjust it, drag: a dot moves that mark; the centre line turns the head; the brow or eye line nods it; the nose, mouth or chin line changes the face length; the ball's edge sizes it; anywhere else inside moves it. The <strong>arrows</strong> around the ball turn, nod and tilt it a little at a time. Hold one to keep going.</li>
+              <li>Then draw it on your paper in order, or press <strong>Draw it in the Studio</strong> to get it in pencil on the Studio's underdrawing.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Loomis head">
+            <figure class="phone"><img width="400" height="774" src="img/help/loomis-mark.jpg" alt="Placing a mark on the Loomis head tab: the loupe shows the eye magnified under the finger" loading="lazy"><figcaption>Placing a mark with the loupe</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/loomis-head.jpg" alt="The Loomis head fitted over the face, with arrow buttons around the ball to turn, nod and tilt it" loading="lazy"><figcaption>The head and its arrows</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/loomis-adjust.jpg" alt="The head turned to the side after dragging its centre line" loading="lazy"><figcaption>Turned by dragging the centre line</figcaption></figure>
+          </div>
+        </section>
+        <section class="help-part" id="help-pose">
+          <div class="help-text">
+            <h3>Pose and light</h3>
+            <p>A wooden drawing figure, the kind artists keep on the desk, and one lamp. Pose the figure, move the light, and watch where the light side, the shadow side and the cast shadow fall. It follows the <strong>Simple / Advanced</strong> switch at the top: Simple shows just the controls you need, Advanced shows them all.</p>
+            <ol>
+              <li><strong>Choose a pose to start.</strong> It opens on the pose library: tap a picture to put the figure in that pose (or <strong>Where you left off</strong> to carry on). The poses are grouped: standing, moving and sport, low to the floor, and dance (ballet steps such as attitude, passé and grand jeté, and flamenco, jazz, contemporary and hip-hop). Later, the <strong>Poses</strong> button under the figure opens the library again. <strong>Save this pose</strong> keeps your own poses in it too (in this browser), and the × takes one away.</li>
+              <li><strong>Pose it with the colored controls.</strong> Drag a hand's circle and the whole arm follows; drag a foot and the whole leg follows. The ring around the hips moves the body, and the legs bend so the feet stay on the floor. Red is the figure's right, blue its left. Once you touch an arm, a diamond appears at its elbow: drag it to swing the elbow around while the hand stays put. A leg gets one at the knee, and moving the hips shows a ring around the chest that bends the body, with the arms and head going along. Tap the background and the extra controls go away. In Advanced they all show all the time.</li>
+              <li><strong>Pick a part</strong> by tapping it (it gets a yellow outline), then drag it. In Advanced, yellow arrows move it a little at a time; hold an arrow to keep it moving. From the keyboard, choose the part by name in the <strong>Pick a part</strong> list under the Pose heading; in Advanced, its arrows then move it with Enter or Space.</li>
+              <li><strong>Move the light</strong> by dragging the lamp, or pick Front, Rembrandt, Side, Rim, Top or From below. In Advanced, <strong>Light settings</strong> opens the sliders for its height, distance, shadow edge and room light.</li>
+              <li><strong>See it as</strong> Gray or Dark, middle, light to check the values, then <strong>Snapshot</strong> to save a picture to draw from. Drag the background to walk around the figure.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Pose and light">
+            <figure class="phone"><img width="400" height="774" src="img/help/pose-rig.jpg" alt="The wooden figure in a throwing pose in Simple mode: circles at the hands, ovals under the feet, the ring around the hips, and a diamond at the right elbow after the right hand was moved" loading="lazy"><figcaption>Posing with the rig controls</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/pose-library.jpg" alt="The pose library over the stage: small pictures of the figure in each pose, in groups" loading="lazy"><figcaption>Choosing a pose</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/pose-values.jpg" alt="The same pose seen as dark, middle and light values, with the lamp high to one side" loading="lazy"><figcaption>Dark, middle and light</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-trace">
+          <div class="help-text">
+            <h3>Trace onto paper</h3>
+            <p>Your photo over the camera's picture of your paper, so you can trace it in pencil on the real paper. What the camera sees stays on your device: it is shown, never kept or sent.</p>
+            <ol>
+              <li><strong>Set up the phone</strong> above the paper, camera down: on a stand, or across a glass or a stack of books. The whole sheet should be in the picture.</li>
+              <li><strong>Start camera.</strong> The browser asks first: allow it. The screen stays on while the camera runs, where the browser allows it. The camera stops when you leave the tab; coming back starts it again, or asks you to press Start camera.</li>
+              <li><strong>Photo</strong> chooses the picture to trace from your photos, or <strong>Study photo</strong> takes the one on Study the photo. <strong>Transparency</strong> makes it more or less see-through.</li>
+              <li><strong>Place it</strong> on the paper: drag it to move it and pinch it to size it, or use the <strong>Size</strong> slider. <strong>Fit</strong> puts it back in the middle. In Advanced, <strong>Turn 90°</strong> turns it for paper the other way round. From the keyboard, Tab to the picture: the arrow keys move the photo, and + and − size it.</li>
+              <li><strong>Lock</strong> it, then draw: a hand on the screen will not move it.</li>
+              <li><strong>Set frame</strong> once it is all lined up. If the phone gets knocked, <strong>Show frame</strong> shows the paper as it was, faintly: move the phone until the paper's edges match it, then hide the frame and go on. A frame fits only the camera and the picture shape it was taken from, so after <strong>Switch</strong>, or when the picture changes shape, it is let go: set it again.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Trace onto paper">
+            <figure class="phone"><img width="400" height="774" src="img/help/trace.jpg" alt="Trace onto paper on a phone: the camera's picture of a sheet of paper on a wooden table, half traced in pencil, with the portrait laid over it half see-through and locked, and the strip of controls along the bottom" loading="lazy"><figcaption>The photo over the paper, locked</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-colors">
+          <div class="help-text">
+            <h3>Colors and paints</h3>
+            <ol>
+              <li><strong>Colors in each value</strong> sets how many colors each of the three grays is split into. Three is a good start.</li>
+              <li><strong>Paints to use</strong> lists palettes, best match first. Each one is a small set of real paints.</li>
+              <li>Tap a palette to see a <strong>recipe for every color</strong>: which paints, and how many parts of each.</li>
+              <li>The <strong>Photo / palette</strong> switch above the big color shapes shows the picture as your paints would mix it.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Colors and paints">
+            <figure class="phone"><img width="400" height="774" src="img/help/colors.jpg" alt="The Colors and paints drawer with the palettes to choose from" loading="lazy"><figcaption>Choosing a palette</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/mixes.jpg" alt="The recipes for every color in the study, mixed from the chosen palette" loading="lazy"><figcaption>A recipe for every color</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-studio">
+          <div class="help-text">
+            <h3>Studio</h3>
+            <p>A paper to paint on. The row of icons at the bottom holds every tool. Tap an icon to open its sheet. Tap the paper to close it.</p>
+            <ol>
+              <li><strong>Brushes</strong>: the chisel, the round brush, the pencil, the underdrawing pencil and the blend brush. The underdrawing goes on its own layer under the paint. <strong>Copy the Study lines</strong> draws your lines from the Study tab onto it.</li>
+              <li><strong>Paints</strong>: tap paints to put parts into the mixing well. <strong>Lock in</strong> keeps the mix. Tap a kept mix to paint with it. The first eight are skin tones mixed from your palette.</li>
+              <li><strong>Reference</strong>: the photo floats over the paper. Drag it anywhere. Show it as the photo, the values or the shapes.</li>
+              <li><strong>Canvas</strong>: a raw, toned or gray ground, a linen or paper texture, and <strong>Save as PNG</strong>.</li>
+              <li>Then <strong>zoom</strong>, <strong>undo</strong>, <strong>turn the paper</strong> and <strong>clear</strong>. Clearing takes two taps, and Undo brings the paper back. Your painting is saved on its own and is there when you come back.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Studio">
+            <figure class="phone"><img width="400" height="774" src="img/help/studio.jpg" alt="The Studio on a phone: the paper with strokes on it, the reference floating in the corner and the row of tool icons at the bottom" loading="lazy"><figcaption>The paper and the tools</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/brushes.jpg" alt="The Brushes sheet with the five brushes and the round brush's size slider" loading="lazy"><figcaption>Brushes</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/paints.jpg" alt="The Paints sheet: the palette's paints, the mixing well with a mix in it and the kept mixes" loading="lazy"><figcaption>Paints and the mixing well</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/reference.jpg" alt="The Reference sheet: the Study photo or a portrait, shown as the original, values or blocks" loading="lazy"><figcaption>Reference</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/canvas.jpg" alt="The Canvas sheet: ground, texture and Save as PNG" loading="lazy"><figcaption>Canvas</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-figure">
+          <div class="help-text">
+            <h3>Figure study</h3>
+            <p>A drawing class with the wooden figure from Pose and light as the model. The poses keep coming, in a random order, until you stop the class. Each pose is the reference, and the paper is a Studio of its own, with all the Studio's tools, kept apart from your painting.</p>
+            <ol>
+              <li><strong>Choose a class.</strong> <strong>Relaxed</strong> has no time limit (its clock only counts up): tap <strong>Done</strong> when you finish a pose. <strong>Timed</strong> gives each pose 10 s, 30 s, 1 min, 5 min or 10 min. Short poses are for the gesture; long ones have time for the shapes and the light.</li>
+              <li><strong>The poses</strong> are the whole pose library, with the poses you saved in Pose and light. A pose with a tick is in the class: tap it to take it out, or tap a group's button to take the whole group out. They come in a random order, never the same twice in a row.</li>
+              <li><strong>Draw.</strong> The pencil starts as charcoal. The bar on top shows the pose, the clock, <strong>Pause</strong> (in Timed), <strong>Done</strong> and ✕. Leaving the tab or the page pauses a timed class; tap <strong>Resume</strong> to start the clock again.</li>
+              <li><strong>After each pose</strong> (Done, or when the time is up) a card pops up, as in the games: your gesture match and stars, and the pose's gesture laid over your drawing. Blue is a stick figure made from the figure's own joints, orange its line of action, green the tilt of the shoulders and hips, and a part with no marks near it is dashed in pink. The notes say what to look for. Then <strong>Next pose</strong>, or <strong>Stop class</strong>.</li>
+              <li><strong>The stars</strong> say how much of the gesture your marks follow and how much of your drawing is on the figure. Each dashed part costs stars, and a scribble gets none.</li>
+              <li>When you stop, every drawing comes back beside its pose, with its stars, gesture and notes. <strong>Save as PNG</strong> keeps one. <strong>Draw again</strong> starts the same class over. After <strong>New class</strong>, <strong>Back to your drawings</strong> returns to them until the next class starts.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Figure study">
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-setup.jpg" alt="The Figure study setup on a phone: Timed, with 1 minute a pose, 27 of the 30 poses in the class, and the pose library with a tick on each pose in it" loading="lazy"><figcaption>Setting up a class</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-draw.jpg" alt="Drawing a pose: the bar with the pose, the clock and Done on top, the reference in the corner and a quick charcoal gesture drawing on the paper" loading="lazy"><figcaption>Drawing a pose</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-card.jpg" alt="The card after a pose: the gesture match, five stars and Gesture master!, the drawing with the blue stick figure, orange line of action and green tilt lines over it beside the pose, the notes, and Next pose and Stop class" loading="lazy"><figcaption>The card after each pose</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/figure-review.jpg" alt="The review after the class: each drawing beside its pose, with its stars, the gesture over it and its notes" loading="lazy"><figcaption>The review</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-check">
+          <div class="help-text">
+            <h3>How close did I get?</h3>
+            <p>Open the last drawer on the Study tab to score a painting against the photo.</p>
+            <ol>
+              <li><strong>Load a photo of my painting</strong>, or <strong>Use my Studio painting</strong>.</li>
+              <li>If the photo is crooked, open <strong>Line up the photo</strong> and slide it until it matches. <strong>Fix color cast</strong> takes out a yellow or blue tint from the room's light.</li>
+              <li>The <strong>Color score</strong> says how close your colors are. The <strong>light and dark score</strong> ignores color and looks only at light and dark.</li>
+              <li><strong>What to fix first</strong> lists the biggest differences, with plain notes like "too light by 0.4 value, too warm".</li>
+              <li>The last picture shows every shape with its own score. White labels are the ones to fix first.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: How close did I get?">
+            <figure class="phone"><img width="400" height="774" src="img/help/check.jpg" alt="The How close did I get drawer with its buttons" loading="lazy"><figcaption>Loading a painting</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/score.jpg" alt="The scores and the list of what to fix first" loading="lazy"><figcaption>The scores</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/shapes.jpg" alt="Every shape labelled with how close the painting matches it" loading="lazy"><figcaption>Shape by shape</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-game">
+          <div class="help-text">
+            <h3>Paint by numbers</h3>
+            <ol>
+              <li>Choose <strong>a photo or a painting</strong>, a <strong>palette</strong>, a <strong>level</strong> and a <strong>mode</strong>. Relaxed has no timer. Then <strong>Start painting</strong>.</li>
+              <li>Tap a <strong>number</strong>, then tap <strong>paints</strong> to mix its color, a part at a time (a slider sets how much a tap adds). Every shape with that number fills with your mix.</li>
+              <li>The chip shows your mix. When it is spot on, it chimes. <strong>Next</strong> jumps to the next unpainted number.</li>
+              <li><strong>Lock in portrait</strong> ends the game and shows your score and stars. <strong>Analyze</strong> shows which numbers were off and the recipe that would have matched.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Paint by numbers">
+            <figure class="phone"><img width="400" height="774" src="img/help/game-setup.jpg" alt="The game setup: the portrait to paint, the palette, the level and the mode" loading="lazy"><figcaption>Setting up a game</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/game-play.jpg" alt="A game in play: the numbered board, the paints, the mix for number 1 and the number buttons" loading="lazy"><figcaption>Mixing number 1</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/game-score.jpg" alt="The score popup after locking in a portrait" loading="lazy"><figcaption>The score</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-battle">
+          <div class="help-text">
+            <h3>Value battle</h3>
+            <ol>
+              <li>Pick a <strong>palette</strong> and how many <strong>colors</strong> a round has, then <strong>Start the battle</strong>. Every color is mixed from that palette.</li>
+              <li>With two colors, a question asks which is <strong>darker</strong>, <strong>lighter</strong>, <strong>cooler</strong> or <strong>warmer</strong>. Tap the color, or <strong>Both the same</strong>.</li>
+              <li>With three or four, answer on the swatches: tap the <strong>darkest</strong> or the <strong>lightest</strong>, or tap them <strong>in order</strong> from darkest to lightest. Choose how many colors on the setup, or Mix for all three.</li>
+              <li>The answer explains itself: the values on the 0 to 10 scale, or which way each color leans. Then <strong>Next</strong>.</li>
+              <li>The rounds keep coming, each a little harder. In <strong>Streak</strong> mode one miss ends it. On the <strong>clock</strong> (1, 2 or 5 minutes) you get as many right as you can. A miss pops up the right answer with the colors in order, then the score pops up with stars and your best is kept.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Value battle">
+            <figure class="phone"><img width="400" height="774" src="img/help/battle-play.jpg" alt="Value battle: two color squares on a gray board, the question, and the three answer buttons" loading="lazy"><figcaption>A round</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/battle-answer.jpg" alt="After answering: the right swatch is ringed in gold and a line explains the values" loading="lazy"><figcaption>The answer explained</figcaption></figure>
+            <figure class="phone"><img width="400" height="774" src="img/help/battle-four.jpg" alt="Four lettered swatches and the prompt to tap them in order from darkest to lightest" loading="lazy"><figcaption>Four colors in order</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-tips">
+          <div class="help-text">
+            <h3>Good to know</h3>
+            <ul>
+              <li>Nothing is uploaded. Photos, paintings and scores stay in this browser.</li>
+              <li>The Studio saves your painting as you go. Close the tab, come back later, and it is still there.</li>
+              <li>Undo is everywhere: on the Studio strip, in the mixing well, and under the game's paints.</li>
+              <li>On a phone, the tabs hide while you paint, draw or play. The arrow at the left of the Studio strip, or ✕ twice in a game or a Figure study class, brings them back.</li>
+              <li>Figure study keeps a class's drawings until you start another or close the page. Save the ones you want to keep.</li>
+              <li>Stuck? Switch to <strong>Simple</strong> at the top of the page, and start again with the sample portrait.</li>
+              <li>Using the app inside another site's page? The browser keeps that copy's settings, saved painting and saved poses apart from the ones here, and Copy needs the embedding page's permission.</li>
+              <li><strong>Your work stays on this device.</strong> Settings, palettes, scores, the Studio painting, your saved poses in Pose and light and your Figure study class are kept in this browser only. The button below clears all of it, including saved poses and the painting, and reloads the page. The first tap arms it; the second clears.</li>
+            </ul>
+            <p class="forget-row"><button type="button" class="btn btn-danger" id="forgetBtn">Forget my work on this device</button></p>
+          </div>
+        </section>
+      </section>
+    </main>
+    </div>
+  </div>
+
+<div class="busy" id="busy" hidden>Updating…</div>
+<div class="loupe" id="loupe" hidden aria-hidden="true">
+  <canvas id="loupeCanvas"></canvas>
+  <div class="loupe-info">
+    <span class="chip" id="loupeChip"></span>
+    <span class="loupe-hex" id="loupeHex"></span>
+    <span class="loupe-val" id="loupeVal"></span>
+  </div>
+</div>
+<div class="drop-hint" id="dropHint" hidden><span>Drop the portrait to load it</span></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog class="paint-dialog" id="paintDialog" aria-labelledby="paintDialogTitle">
+  <div class="paint-dialog-head">
+    <h2 id="paintDialogTitle">My paints <span class="count" id="paintDialogCount"></span></h2>
+    <button type="button" class="btn btn-small" id="paintDialogDone">Done</button>
+  </div>
+  <p class="hint">Tick the paints you own. Suggestions only use these. The colors are typical of artist-grade oils.</p>
+  <div class="paint-dialog-tools">
+    <input type="search" id="paintSearch" placeholder="Find a paint or pigment" aria-label="Find a paint or pigment">
+    <select id="paintAddPreset" aria-label="Tick a known palette's paints"></select>
+    <button type="button" class="btn btn-small btn-danger" id="paintNone">Untick all</button>
+  </div>
+  <div class="paint-cats" id="paintCats"></div>
+  <p class="hint" id="paintNoMatch" hidden>No paint matches that. Try a color, a pigment code such as PY42, or a family such as earths.</p>
+</dialog>
+<dialog class="again-dialog" id="againDialog" aria-labelledby="againTitle" aria-describedby="againHint">
+  <h2 id="againTitle">Play again</h2>
+  <p class="hint" id="againHint">Try the same portrait again, or take on a new one?</p>
+  <div class="again-choices">
+    <button type="button" class="btn btn-primary" id="againSame">Same portrait</button>
+    <button type="button" class="btn" id="againNew">New portrait</button>
+  </div>
+  <button type="button" class="btn btn-ghost again-cancel" id="againCancel">Cancel</button>
+</dialog>
+<dialog class="save-dialog" id="saveDialog" aria-labelledby="saveTitle" aria-describedby="saveHint">
+  <div class="save-head">
+    <h2 id="saveTitle">Save image</h2>
+    <button type="button" class="btn btn-small" id="saveClose">Close</button>
+  </div>
+  <div class="matte"><img id="saveImg" alt=""></div>
+  <p class="save-name" id="saveName"></p>
+  <p class="hint" id="saveHint">If no download started, right-click or long-press the image to save it. Some embedded views block downloads; they always work when you open index.html directly.</p>
+</dialog>
+
+<!-- Classic scripts, in dependency order: processing (Study), mixing (Mixing) and paints (Paints) first; app (Studio) next;
+     then the modules that use them (painting before figure, which draws on a copy of the Studio). guard.js is loaded in <head>. -->
+<script src="js/processing.js"></script>
+<script src="js/mixing.js"></script>
+<script src="js/paints.js"></script>
+<script src="js/app.js"></script>
+<script src="js/palette.js"></script>
+<script src="js/subjects.js"></script>
+<script src="js/game.js"></script>
+<script src="js/painting.js"></script>
+<script src="js/figure.js"></script>
+<script src="js/loomis.js"></script>
+<script src="js/trace.js"></script>
+<script src="js/battle.js"></script>
+</body>
+</html>

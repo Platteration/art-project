@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en" class="simple">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' blob:; manifest-src 'self'; frame-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
+<meta name="description" content="A wooden drawing figure with rig controls and one lamp: pose it, light it, and see its values.">
+<title>Pose and Light</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="pose.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Pose and Light</h1>
+      <p>A wooden drawing figure and one lamp. Pose every limb, move the light, and watch where the light side, the shadow side and the cast shadow fall.</p>
+    </div>
+    <div class="top-side">
+      <span class="mode-switch" role="group" aria-label="Simple or advanced controls"><button type="button" data-mode="simple" aria-pressed="true" title="Just the controls you need">Simple</button><button type="button" data-mode="advanced" aria-pressed="false" title="Every control">Advanced</button></span>
+      <span class="badge">Test version</span>
+    </div>
+  </header>
+
+  <main class="tool">
+    <div class="stage" id="stage">
+      <canvas id="view" aria-label="The wooden figure and the lamp. Drag a hand, a foot, the ring around the hips or the ring around the chest to pose the figure. Tap a part of the figure to pick it, then use the arrows to move it. Drag the lamp to move the light, or drag the background to walk around."></canvas>
+      <div class="hint" id="hint"><span>Drag a colored control to pose</span><span class="adv-only">Tap a part for arrows</span><span class="simple-only">Tap a part to pick it</span><span>Drag the lamp to move the light</span><span>Drag the background to walk around</span></div>
+      <div class="picked" id="picked" hidden></div>
+      <svg class="rig" id="rig" aria-hidden="true"></svg>
+      <div class="arrows" id="arrows"></div>
+      <button type="button" class="lamp" id="lampHandle" aria-label="The lamp: drag it to move the light, or use the arrow keys"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+      <div class="stage-bar">
+        <button type="button" class="btn btn-primary" id="posesBtn" aria-haspopup="dialog" aria-controls="library" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.5" r="2.2"/><path d="M12 7.5v6.5M12 14l-3.5 6M12 14l3.5 6M6 10.5l6-1.5 6 1.5"/></svg>Poses</button>
+        <button type="button" class="btn" id="undo" disabled>Undo</button>
+        <button type="button" class="btn" id="snap">Snapshot</button>
+      </div>
+      <section class="sheet" id="library" role="dialog" aria-modal="true" aria-labelledby="libTitle" aria-describedby="libNote" hidden>
+        <div class="sheet-head">
+          <div class="sheet-title"><h2 id="libTitle">Pose library</h2><span class="note" id="libNote">Tap a pose to start from it</span></div>
+          <button type="button" class="sheet-x" id="libClose" aria-label="Close the pose library" title="Close">×</button>
+        </div>
+        <div class="sheet-body">
+          <div class="lib-group" id="continueWrap" hidden><h3>Where you left off</h3><div class="library" id="continue"></div></div>
+          <div class="lib-group" id="mineWrap" hidden><h3>Your poses <button type="button" class="btn btn-small" id="mineBack" hidden>Put back the pose you removed</button></h3><div class="library" id="mine"></div></div>
+          <div class="lib-groups" id="poses"></div>
+        </div>
+      </section>
+      <div class="fail" id="fail" hidden><p><b>The 3D view could not start.</b><br>This browser has WebGL turned off, or the 3D library could not load. Try another browser, or check the connection and reload.</p></div>
+    </div>
+
+    <div class="rail">
+      <section class="card" aria-labelledby="partTitle">
+        <div class="card-head"><h2 id="partTitle">Pose</h2><span class="note" id="partName">Nothing picked</span></div>
+        <p class="empty" id="partEmpty">Drag the colored controls to pose the figure, or tap a part to pick it. <b>Poses</b>, under the figure, opens the pose library.</p>
+        <p class="empty" id="partHow" hidden><span class="adv-only">Tap the yellow arrows to move it. Hold an arrow to keep it moving. You can also drag the part itself.</span><span class="simple-only">Drag it to move it. Advanced adds arrows that move it a little at a time.</span> Left and right are the figure's own.</p>
+        <p class="empty" id="partDepth" hidden><b>◉</b> brings it toward you and <b>⊗</b> sends it away from you.</p>
+        <div class="pick-part"><label for="partPick">Pick a part</label><select id="partPick"></select></div>
+        <div class="row" id="partButtons" hidden>
+          <button type="button" class="btn" id="straighten">Straighten</button>
+          <button type="button" class="btn" id="mirror">Copy to the other side</button>
+        </div>
+        <p class="legend"><span><i class="dot dot-right"></i>Figure's right</span><span><i class="dot dot-left"></i>Figure's left</span><span><i class="dot dot-body"></i>Body</span></p>
+        <details class="more adv-only" id="rigMore">
+          <summary>Rig controls <span class="sum-note" id="rigSum"></span></summary>
+          <div class="more-body">
+            <p class="lesson">Drag a hand's circle and the whole arm follows. The diamond at the elbow swings the elbow around while the hand stays put. The feet and the knees work the same way. Drag the ring around the hips to move the body: the legs bend and the feet stay put. The ring around the chest bends the body, and the arms and the head go with it.</p>
+            <label class="check" for="showRig"><input type="checkbox" id="showRig" checked> Show the rig controls</label>
+            <label class="check" for="plantFeet"><input type="checkbox" id="plantFeet" checked> Keep the feet planted when the body moves</label>
+          </div>
+        </details>
+        <div class="row">
+          <button type="button" class="btn" id="ground">Put the feet on the floor</button>
+          <button type="button" class="btn btn-wrap" id="savePose">Save this pose</button>
+        </div>
+        <p class="empty" id="keepNote" role="status" hidden></p>
+      </section>
+
+      <section class="card" aria-labelledby="lightTitle">
+        <div class="card-head"><h2 id="lightTitle">Light</h2><span class="note" id="lightName">Rembrandt</span></div>
+        <div class="chips" id="lights"></div>
+        <p class="lesson" id="lightLesson"></p>
+        <details class="more adv-only" id="lightMore">
+          <summary>Light settings <span class="sum-note" id="lightSum"></span></summary>
+          <div class="more-body">
+            <div class="field"><div class="field-head"><label for="lAz">Around the figure</label><output id="lAzOut" for="lAz"></output></div><input type="range" id="lAz" min="-180" max="180" step="1"></div>
+            <div class="field"><div class="field-head"><label for="lEl">Height</label><output id="lElOut" for="lEl"></output></div><input type="range" id="lEl" min="-20" max="85" step="1"></div>
+            <div class="field"><div class="field-head"><label for="lDist">Distance</label><output id="lDistOut" for="lDist"></output></div><input type="range" id="lDist" min="1.6" max="4.6" step="0.1"></div>
+            <div class="field"><div class="field-head"><label for="lSoft">Shadow edge</label><output id="lSoftOut" for="lSoft"></output></div><input type="range" id="lSoft" min="0" max="10" step="1"></div>
+            <div class="field"><div class="field-head"><label for="lFill">Room light</label><output id="lFillOut" for="lFill"></output></div><input type="range" id="lFill" min="0" max="100" step="5"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="card" aria-labelledby="viewTitle">
+        <div class="card-head"><h2 id="viewTitle">See it as</h2></div>
+        <div class="seg" role="radiogroup" aria-label="See it as">
+          <input type="radio" name="look" id="lookColor" value="0" checked><label for="lookColor">Color</label>
+          <input type="radio" name="look" id="lookGray" value="1"><label for="lookGray">Gray</label>
+          <input type="radio" name="look" id="lookValues" value="2"><label for="lookValues">Dark, middle, light</label>
+        </div>
+        <details class="more adv-only" id="splitFields" hidden>
+          <summary>Where the values split <span class="sum-note" id="splitSum"></span></summary>
+          <div class="more-body">
+            <div class="field"><div class="field-head"><label for="t1">Dark / middle split</label><output id="t1Out" for="t1"></output></div><input type="range" id="t1" min="5" max="60" step="1" value="30"></div>
+            <div class="field"><div class="field-head"><label for="t2">Middle / light split</label><output id="t2Out" for="t2"></output></div><input type="range" id="t2" min="30" max="95" step="1" value="58"></div>
+          </div>
+        </details>
+        <details class="more adv-only" id="showMore">
+          <summary>Show or hide <span class="sum-note" id="showSum"></span></summary>
+          <div class="more-body">
+            <label class="check" for="showStand"><input type="checkbox" id="showStand" checked> Show the stand</label>
+            <label class="check" for="showLamp"><input type="checkbox" id="showLamp" checked> Show the lamp</label>
+          </div>
+        </details>
+        <div class="row">
+          <button type="button" class="btn" id="resetView">Front view</button>
+          <button type="button" class="btn" id="resetAll">Start over</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="snapDialog" aria-label="Snapshot">
+  <img id="snapImg" alt="A snapshot of the posed figure">
+  <p>Press and hold the picture (or right-click it) to save it.</p>
+  <button type="button" class="btn btn-primary" id="snapClose">Close</button>
+</dialog>
+
+
+<script src="js/pose-embed.js"></script>
+<script src="js/vendor/three.min.js"></script>
+<script src="js/pose.js"></script>
+
+</body>
+</html>
