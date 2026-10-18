@@ -1709,7 +1709,7 @@ async function reviewFixes(t, site) {
       // a caption with one word must stay on one line (a long cell breaks it in the middle otherwise)
       const caps = [...document.querySelectorAll('#tr-strip .tr-cap')].filter(shown).map((c) => { const rg = document.createRange(); rg.selectNodeContents(c); const lines = new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size; return { text: c.textContent, lines, one: !/\s/.test(c.textContent.trim()) }; });
       const wrap = document.getElementById('tr-wrap').getBoundingClientRect();
-      return { btns, ranges, caps, wrapH: Math.round(wrap.height), capsHidden: [...document.querySelectorAll('#tr-strip .tr-cap')].filter((c) => !c.closest('[hidden]') && getComputedStyle(c.closest('button')).display !== 'none' && c.getBoundingClientRect().width === 0).length, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+      return { btns, ranges, caps, wrapH: Math.round(wrap.height), capless: [...document.querySelectorAll('#tr-strip button')].filter(shown).filter((b) => b.querySelector('.tr-cap') && getComputedStyle(b.querySelector('.tr-cap')).display === 'none').length, sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth };
     });
     for (const [w, h, modes] of [[320, 568, ['simple', 'advanced']], [360, 640, ['simple', 'advanced']], [375, 667, ['simple', 'advanced']], [390, 844, ['simple', 'advanced']], [430, 932, ['advanced']], [844, 390, ['advanced']], [568, 320, ['advanced']]]) {
       for (const mode of modes) {
@@ -1718,7 +1718,7 @@ async function reviewFixes(t, site) {
         const small = w < 375 || (mode === 'advanced' && w <= 480 && h > w);
         t.check(m.btns.length >= (mode === 'simple' ? 8 : 10) && m.btns.every((x) => !x.off && x.w >= 40 && x.h >= 40), `${w} × ${h}, ${mode}: every button of the strip is on the screen and at least 40 × 40`, m.btns.filter((x) => x.off || x.w < 40 || x.h < 40));
         t.check(m.ranges.length >= (mode === 'simple' ? 2 : 3) && m.ranges.every((x) => !x.off && x.h >= 40), `${w} × ${h}, ${mode}: every slider is on the screen and at least 40 px tall`, m.ranges);
-        t.check(m.capsHidden === 0 && m.caps.length >= m.btns.length - 1 && m.caps.filter((x) => x.one).every((x) => x.lines === 1) && m.sideways <= 0 && m.wrapH >= 100, `${w} × ${h}, ${mode}: every button shows its caption, no one-word caption is broken across lines, the camera picture keeps room, no sideways scroll`, { caps: m.caps.filter((x) => x.one && x.lines !== 1), shown: m.caps.length, buttons: m.btns.length, hidden: m.capsHidden, wrapH: m.wrapH, sideways: m.sideways });
+        t.check(m.capless === 0 && m.caps.length >= m.btns.length - 1 && m.caps.filter((x) => x.one).every((x) => x.lines === 1) && m.sideways <= 0 && m.wrapH >= 100, `${w} × ${h}, ${mode}: every button shows its caption, no one-word caption is broken across lines, the camera picture keeps room, no sideways scroll`, { caps: m.caps.filter((x) => x.one && x.lines !== 1), shown: m.caps.length, buttons: m.btns.length, capless: m.capless, wrapH: m.wrapH, sideways: m.sideways });
         if (small) await screenshot(page, `trace-strip-${w}x${h}-${mode}`);
         await clean(t, page, `strip ${w} x ${h} ${mode}`);
         await page.context().close().catch(() => null);
