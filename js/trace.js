@@ -249,7 +249,22 @@
   const MAX_SIDE = 2048; // more than a phone's screen shows, and a quarter of the memory of a 4096 px photo
   // puts a picture (already checked by the app's photo checks) over the camera, fitted and centred; false if it cannot be
   // drawn, and the photo before stays
-  function usePicture(src, name) {
+  // a canvas that drew nothing: every pixel of a 16 px copy is see-through (some browsers hand back a blank canvas for an image
+  // element they have let go of, or draw a picture that is fully transparent)
+  function blank(cv) {
+    const t = document.createElement('canvas');
+    t.width = t.height = 16;
+    const g = t.getContext('2d');
+    if (!g) return false;
+    try {
+      g.drawImage(cv, 0, 0, 16, 16);
+      const d = g.getImageData(0, 0, 16, 16).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+  // soft: a picture that drew nothing is only reported (false), not said, so the caller can try another way to read the file
+  function usePicture(src, name, soft) {
     const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
     if (!w || !h) return false;
     const k = Math.min(1, MAX_SIDE / Math.max(w, h));
@@ -262,6 +277,10 @@
       g.drawImage(src, 0, 0, next.width, next.height);
     } catch (e) {
       Studio.toast('That picture could not be drawn here. Save it as a PNG or JPG first.', 5000);
+      return false;
+    }
+    if (blank(next)) {
+      if (!soft) Studio.toast(`That picture came out blank here (${w} × ${h} px). If it is not fully see-through, save it as a JPG and try again.`, 6000);
       return false;
     }
     photoCv.width = next.width; photoCv.height = next.height;
@@ -280,7 +299,16 @@
     // the app's own checks (not a picture, empty, too small, an SVG that cannot be read back, a huge photo reduced): a
     // refused file is said in the toast and the photo over the camera stays as it was
     Studio.readImage(file, (img, note) => {
-      if (usePicture(img, file.name || 'photo')) Studio.toast([`${file.name || 'The photo'} is over the camera.`, note].filter(Boolean).join(' '), note ? 6000 : 2500);
+      const name = file.name || 'photo';
+      const said = () => Studio.toast([`${file.name || 'The photo'} is over the camera.`, note].filter(Boolean).join(' '), note ? 6000 : 2500);
+      if (usePicture(img, name, true)) { said(); return; }
+      // the image element drew nothing (iOS Safari does this for some PNGs, screenshots among them): the file is decoded directly
+      if (!window.createImageBitmap) { usePicture(img, name); return; }
+      createImageBitmap(file).then((bmp) => {
+        const ok = usePicture(bmp, name);
+        if (bmp.close) bmp.close();
+        if (ok) said();
+      }, () => usePicture(img, name));
     }, 'trace');
   });
   function useStudy() {
