@@ -242,7 +242,7 @@
     const again = state.frame;
     state.frame = true;
     render();
-    Studio.toast(again ? 'Frame set again from what the camera sees now.' : 'Frame set. If the phone moves, Show frame lays this view over the camera: move the phone until the paper lines up with it.', 5000);
+    Studio.toast(again ? 'Frame set again from what the camera sees now.' : 'Frame set. If the phone moves, Show frame lays it over the camera.', 5000);
   }
 
   // ---- The photo to trace -------------------------------------------------------------------------------------------
@@ -508,6 +508,7 @@
     setFrameBtn.title = state.frame ? 'Set the frame again from what the camera sees now' : 'Keep the camera\'s view of the paper now, to line it up again later';
     able(showFrameBtn, on && state.frame, on ? 'tr-whyFrame' : 'tr-whyCamera');
     showFrameBtn.setAttribute('aria-pressed', String(on && state.frame && state.frameShown));
+    showFrameBtn.title = on && !state.frame ? 'Set a frame first: Set frame keeps the camera\'s view of the paper' : 'Show the kept view faintly over the camera';
     switchBtn.hidden = state.cameras.length < 2;
     able(switchBtn, on, 'tr-whyCamera');
     // the sliders' values, in words for a screen reader too

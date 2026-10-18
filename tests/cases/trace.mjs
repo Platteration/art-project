@@ -1100,11 +1100,13 @@ async function edgeCases(t, site) {
     // (the card sits in the middle of the stage until the camera runs: the drag starts near its corner)
     const H = await app(pre).evaluate(() => { const r = document.getElementById('tr-hit').getBoundingClientRect(); return { x: r.left + r.width * 0.12, y: r.top + r.height * 0.2 }; });
     await pre.mouse.move(H.x, H.y); await pre.mouse.down(); await pre.mouse.move(H.x + 90, H.y + 40, { steps: 4 }); await pre.mouse.up();
-    const b1 = await boxes(pre);
+    const b1 = await boxes(pre), z1 = await st(pre);
     t.check(b1.cx > 0.55 && b1.cy > 0.5, 'the photo dragged before the camera started (the card is up in the middle of the stage): it moved with the pointer', { cx: b1.cx, cy: b1.cy });
     await startCamera(pre); await sleep(300); await settled(pre);
-    const b2 = await boxes(pre);
-    t.check(near(b2.cx, b1.cx, 0.01) && near(b2.cy, b1.cy, 0.01) && near(b2.pw, b1.pw, 0.01), 'the camera started after the photo was placed: the photo keeps its place and size as fractions of the picture', { before: [b1.cx, b1.cy, b1.pw], after: [b2.cx, b2.cy, b2.pw] });
+    const b2 = await boxes(pre), z2 = await st(pre);
+    // (the size is the Size read-out, a share of the fitted size, which the picture's shape sets: the picture a different shape
+    // from the stage's, the photo's share of the picture's width follows it, as the review of the build asked and the README says)
+    t.check(near(b2.cx, b1.cx, 0.01) && near(b2.cy, b1.cy, 0.01) && z1.pct === z2.pct && z2.size === z1.size, 'the camera started after the photo was placed: the photo keeps its centre as a fraction of the picture and its Size read-out', { before: [b1.cx, b1.cy, z1.size], after: [b2.cx, b2.cy, z2.size], width: [b1.pw, b2.pw] });
     await clean(t, pre, 'a photo before the camera');
 
     // a big file chosen and Study photo pressed before the file has been read: which photo is over the camera in the end? (observed, not asserted: the README is silent)
