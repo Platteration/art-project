@@ -84,9 +84,11 @@
     if (!allowed) return framed() ? FRAMED : POLICY;
     return '';
   }
+  // the visitor or the site said no to the camera (as against a camera that is gone, busy or broken)
+  const refused = (err) => ['NotAllowedError', 'SecurityError', 'PermissionDeniedError'].includes(err && err.name);
   function cameraError(err) {
     const name = (err && err.name) || 'Error';
-    if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+    if (refused(err)) {
       return framed()
         ? 'The camera was refused: the browser was told no, or the site this page sits inside does not let it use the camera. Allow the camera for this site in the browser\'s settings, or open Portrait Value Studio in a tab of its own, then press Start camera.'
         : 'The camera was refused. Allow the camera for this site in the browser\'s settings (the icon beside the address, or the site settings), then press Start camera.';
@@ -97,6 +99,7 @@
   }
   const ENDED = 'The camera stopped: another app may have taken it, or it was unplugged. Press Start camera to go on.';
   const PAUSED = 'The camera stopped when you left, to keep its picture private and save the battery. Press Start camera to go on.';
+  const OTHER = 'The frame showed the other camera\'s view, so it is gone: set it again from this camera.';
 
   // ---- The camera ----------------------------------------------------------------------------------------------------
   const stopTracks = (s) => { if (s) s.getTracks().forEach((tr) => { try { tr.stop(); } catch (e) { /* already stopped */ } }); };
@@ -104,7 +107,15 @@
     const which = state.deviceId ? { deviceId: { exact: state.deviceId } } : { facingMode: { ideal: 'environment' } };
     return { audio: false, video: { ...which, width: { ideal: 1920 }, height: { ideal: 1080 } } };
   }
-  async function start() {
+  // the control that has the focus goes off while the browser is asked (Start camera) or the camera changes over (Switch), or
+  // goes with the card, and the focus falls to the page: when the answer is in it goes to `to`, unless the visitor moved it
+  const holding = (b) => (document.activeElement === b ? b : null);
+  function giveFocus(from, to) {
+    const a = document.activeElement;
+    if (from && (!a || a === document.body || a === from) && !to.disabled && !to.closest('[hidden]')) to.focus({ preventScroll: true });
+  }
+  // from: the button that asked, if it held the focus
+  async function start(from) {
     if (state.stream || state.starting) return;
     if (blocked()) { state.wanted = false; render(); return; }
     const job = ++state.job;
@@ -115,11 +126,18 @@
       stream = await navigator.mediaDevices.getUserMedia(constraints());
     } catch (err) {
       if (job !== state.job) return;
-      // a camera Switch camera chose that has gone (unplugged): the default one is tried once instead
-      if (state.deviceId && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) { state.deviceId = ''; state.starting = false; start(); return; }
+      // a camera Switch camera chose that will not open (unplugged, or in use: a phone lists lenses that never open): the
+      // default one is tried once instead, and the frame, taken from the other camera, goes
+      if (state.deviceId && !refused(err)) {
+        state.deviceId = ''; state.starting = false;
+        dropFrame(OTHER);
+        start(from);
+        return;
+      }
       state.starting = false; state.wanted = false;
       state.note = { text: cameraError(err), retry: true };
       render();
+      giveFocus(from, startBtn);
       return;
     }
     // stopped, left or hidden while the browser was asking: the camera goes straight off again
@@ -134,6 +152,7 @@
     wakeOn();
     listCameras();
     render();
+    giveFocus(from, from === startBtn ? camBtn : from);
   }
   // keepWanted: the tab or the page went away, and the camera comes back with it
   function stop(keepWanted) {
@@ -171,10 +190,11 @@
     const now = (track && track.getSettings && track.getSettings().deviceId) || state.deviceId;
     const i = state.cameras.findIndex((c) => c.deviceId === now);
     state.deviceId = state.cameras[(i + 1) % state.cameras.length].deviceId;
-    dropFrame('The frame showed the other camera\'s view, so it is gone: set it again from this camera.');
+    dropFrame(OTHER);
+    const from = holding(switchBtn);
     stop(true); // a phone opens one camera at a time: the one on goes off first
     state.wanted = true;
-    start();
+    start(from);
   }
 
   // the screen stays on while the camera runs (a phone dims and locks in the middle of a drawing otherwise); a browser
@@ -209,8 +229,10 @@
     render();
     Studio.toast(why, 5000);
   }
+  // (a video whose size is known (loadedmetadata) may not have a picture yet: drawn then, it would keep a blank still)
+  const hasPicture = () => video.videoWidth > 0 && video.readyState >= 2;
   function setFrame() {
-    if (!state.stream || !video.videoWidth) return;
+    if (!state.stream || !hasPicture()) return;
     const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
     ghost.width = Math.max(1, Math.round(video.videoWidth * k));
     ghost.height = Math.max(1, Math.round(video.videoHeight * k));
@@ -419,11 +441,14 @@
     const W = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     const H = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
     if (W <= 0 || H <= 0) return;
+    // the fitted size follows the picture's shape, and a size of its own is a share of it (what Size says): it keeps its share
+    const was = view(), fitted = state.photo && !state.place.fitted && was.w && was.h ? fitW() : 0;
     if (state.stream && video.videoWidth && video.videoHeight) state.aspect = video.videoWidth / video.videoHeight;
     let w = W, h = H;
     if (state.aspect) { const k = Math.min(W / state.aspect, H); w = Math.floor(k * state.aspect); h = Math.floor(k); }
     wrap.style.width = `${w}px`;
     wrap.style.height = `${h}px`;
+    if (fitted && fitW() !== fitted) setWidth((state.place.w * fitW()) / fitted);
     // the toast sits at the foot of the camera's picture, clear of the strip
     const r = stage.getBoundingClientRect();
     document.body.style.setProperty('--tr-toast-x', `${Math.round(r.left + r.width / 2)}px`);
@@ -436,7 +461,7 @@
   window.addEventListener('orientationchange', () => setTimeout(layout, 60));
   if (window.visualViewport) { visualViewport.addEventListener('resize', layout); visualViewport.addEventListener('scroll', layout); }
   if (window.ResizeObserver) new ResizeObserver(() => fitView()).observe(stage);
-  ['loadedmetadata', 'resize', 'playing'].forEach((type) => video.addEventListener(type, () => {
+  ['loadedmetadata', 'loadeddata', 'resize', 'playing'].forEach((type) => video.addEventListener(type, () => {
     if (state.frame && video.videoWidth && Math.abs(ghost.width / ghost.height - video.videoWidth / video.videoHeight) > 0.01) {
       dropFrame('The camera picture changed shape, so the frame no longer lines up with it: set it again.');
     }
@@ -479,7 +504,7 @@
     able(lockBtn, photo, 'tr-whyPhoto');
     lockBtn.setAttribute('aria-pressed', String(locked));
     lockBtn.title = locked ? 'Unlock the photo, to move or size it' : 'Lock the photo in place: drags and pinches do nothing';
-    able(setFrameBtn, on && video.videoWidth > 0, 'tr-whyCamera');
+    able(setFrameBtn, on && hasPicture(), 'tr-whyCamera');
     setFrameBtn.title = state.frame ? 'Set the frame again from what the camera sees now' : 'Keep the camera\'s view of the paper now, to line it up again later';
     able(showFrameBtn, on && state.frame, on ? 'tr-whyFrame' : 'tr-whyCamera');
     showFrameBtn.setAttribute('aria-pressed', String(on && state.frame && state.frameShown));
@@ -492,7 +517,7 @@
     if (document.activeElement !== strength) strength.value = String(settings.frame);
     $('strengthOut').textContent = `${settings.frame}%`;
     strength.setAttribute('aria-valuetext', `${settings.frame}%`);
-    if (!photo) { sizeIn.value = String(toSlider(100)); $('sizeOut').textContent = '100%'; sizeIn.removeAttribute('aria-valuetext'); }
+    if (!photo) { sizeIn.value = String(toSlider(100)); $('sizeOut').textContent = '100%'; sizeIn.setAttribute('aria-valuetext', '100% of the fitted size'); }
     // the stage: the frame over the camera (under the photo), the photo, and what the status line says
     ghost.hidden = !(on && state.frame && state.frameShown);
     ghost.style.opacity = String(fs / 100);
@@ -509,7 +534,7 @@
   }
 
   // ---- The buttons ---------------------------------------------------------------------------------------------------
-  startBtn.addEventListener('click', () => { start(); });
+  startBtn.addEventListener('click', () => { start(holding(startBtn)); });
   camBtn.addEventListener('click', () => { if (state.stream || state.starting) { stop(); state.note = null; render(); } else start(); });
   setFrameBtn.addEventListener('click', setFrame);
   showFrameBtn.addEventListener('click', () => { if (!state.frame) return; state.frameShown = !state.frameShown; render(); });
