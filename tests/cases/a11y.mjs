@@ -1066,6 +1066,8 @@ export default async function a11y(t, site) {
     await run(page, 'Paint by numbers analysis and Compare with target');
     await click(page, '#gameShowScore'); await click(page, '#gamePopup [data-game="again"]');
     await waitFor(page, () => document.getElementById('againDialog').open, null, 3000);
+    // See the score just played the score card's popup-in (from opacity 0): axe reads a half-faded Analyze as low contrast
+    await settled(page);
     await run(page, 'Play again dialog');
     await click(page, '#againCancel');
     // Value battle: setup, a round, the miss, the score
