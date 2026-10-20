@@ -1137,7 +1137,7 @@ async function edgeCases(t, site) {
         await page.mouse.click(...at); await sleep(300);
         const r = await app(page).evaluate((b) => {
           const btnEl = document.querySelector(b), menu = document.getElementById(btnEl.getAttribute('aria-controls'));
-          return { open: btnEl.getAttribute('aria-expanded'), items: [...menu.querySelectorAll('.tab-item:not([hidden])')].map((it) => { const q = it.getBoundingClientRect(), hit = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return [it.id, !!hit && it.contains(hit)]; }) };
+          return { open: btnEl.getAttribute('aria-expanded'), items: [...menu.querySelectorAll('.tab-item:not([hidden])')].map((it) => { it.scrollIntoView({ block: 'nearest' }); /* a menu longer than the room under it scrolls inside itself */ const q = it.getBoundingClientRect(), hit = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return [it.id, !!hit && it.contains(hit)]; }) };
         }, btn);
         t.check(r.open === 'true' && r.items.length >= 2 && r.items.every(([, ok]) => ok), `${vp.width} wide, the camera running: the ${btn === '#tabLearnBtn' ? 'Learning tools' : 'Games'} menu opens over the tool and every item is what a click at its middle reaches`, r);
         await page.keyboard.press('Escape'); await sleep(200);
