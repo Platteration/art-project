@@ -2302,7 +2302,15 @@
     btn.addEventListener('click', () => {
       const open = menu.hidden;
       closeMenus();
-      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); focusIn(); }
+      if (open) {
+        menu.hidden = false; btn.setAttribute('aria-expanded', 'true');
+        // a menu longer than the room under its button (a phone's bar takes the foot of the screen, and the page behind it
+        // does not scroll the menu) scrolls inside itself, so the last items can be reached
+        const seen = window.visualViewport ? visualViewport.height : window.innerHeight;
+        menu.style.maxHeight = `${Math.max(160, Math.floor(seen - menu.getBoundingClientRect().top - 12))}px`;
+        menu.scrollIntoView({ block: 'nearest' }); // a short screen (a phone on its side) leaves less than the least height: the page goes up
+        focusIn();
+      }
     });
     // ArrowDown opens the menu, or moves into it when it is already open (it never closes it)
     btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); if (menu.hidden) btn.click(); else focusIn(); } });
