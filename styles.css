@@ -379,7 +379,7 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tab:active { transform: translateY(1px); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tab[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 6px var(--shadow); }
-.tab-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; min-width: min(320px, 92vw); display: grid; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow); }
+.tab-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; min-width: min(320px, 92vw); display: grid; overflow-y: auto; overscroll-behavior: contain; gap: 2px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px var(--shadow); }
 .tab-group:last-child .tab-menu { left: auto; right: 0; }
 .tab-item { appearance: none; display: grid; gap: 2px; width: 100%; padding: 10px 12px; border: 0; border-radius: 7px; background: none; color: var(--ink); text-align: left; cursor: pointer; font: 600 0.95rem/1.2 var(--display); }
 .tab-item small { font: 400 0.78rem/1.3 var(--body); color: var(--muted); }
