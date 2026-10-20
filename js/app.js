@@ -2295,7 +2295,9 @@
     const menu = $(btn.getAttribute('aria-controls'));
     // Tab (or anything) taking the focus out of the group closes its menu, as Esc and a tap elsewhere do
     const group = btn.closest('.tab-group');
-    if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
+    // (a focus that goes nowhere, relatedTarget null, is not a Tab out: Safari drops the focus when a menu item is tapped, which would
+    // close the menu before the tap lands; leaving the window and a tap elsewhere are closed by their own listeners below)
+    if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && e.relatedTarget && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
     // the items the guard has not taken off the menu (a hidden one cannot take the focus)
     const items = () => [...menu.querySelectorAll('.tab-item')].filter((b) => !b.hidden);
     const focusIn = () => { const on = items().find((b) => b.getAttribute('aria-checked') === 'true') || items()[0]; if (on) on.focus(); };
