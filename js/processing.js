@@ -978,10 +978,15 @@
   // CIEDE2000 color difference. About 2 is barely visible, 10 is clearly different.
   function deltaE2000(l1, a1, b1, l2, a2, b2) {
     const rad = Math.PI / 180;
-    const p7 = (v) => Math.pow(v, 7);
     const C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2);
     const Cb = (C1 + C2) / 2;
-    const G = 0.5 * (1 - Math.sqrt(p7(Cb) / (p7(Cb) + p7(25))));
+
+    // Performance optimization: Inline Math.pow(v, 7)
+    const Cb2 = Cb * Cb;
+    const Cb4 = Cb2 * Cb2;
+    const p7Cb = Cb4 * Cb2 * Cb;
+
+    const G = 0.5 * (1 - Math.sqrt(p7Cb / (p7Cb + 6103515625))); // 25^7 = 6103515625
     const a1p = a1 * (1 + G), a2p = a2 * (1 + G);
     const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
     const h1p = C1p === 0 ? 0 : (Math.atan2(b1, a1p) / rad + 360) % 360;
@@ -1004,14 +1009,29 @@
     }
     const T = 1 - 0.17 * Math.cos((hbp - 30) * rad) + 0.24 * Math.cos(2 * hbp * rad)
       + 0.32 * Math.cos((3 * hbp + 6) * rad) - 0.2 * Math.cos((4 * hbp - 63) * rad);
-    const dTheta = 30 * Math.exp(-Math.pow((hbp - 275) / 25, 2));
-    const Rc = 2 * Math.sqrt(p7(Cbp) / (p7(Cbp) + p7(25)));
-    const Sl = 1 + (0.015 * Math.pow(Lbp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbp - 50, 2));
+
+    const dThetaTmp = (hbp - 275) / 25;
+    const dTheta = 30 * Math.exp(-(dThetaTmp * dThetaTmp));
+
+    const Cbp2 = Cbp * Cbp;
+    const Cbp4 = Cbp2 * Cbp2;
+    const p7Cbp = Cbp4 * Cbp2 * Cbp;
+
+    const Rc = 2 * Math.sqrt(p7Cbp / (p7Cbp + 6103515625));
+
+    const LbpTmp = Lbp - 50;
+    const LbpTmp2 = LbpTmp * LbpTmp;
+    const Sl = 1 + (0.015 * LbpTmp2) / Math.sqrt(20 + LbpTmp2);
     const Sc = 1 + 0.045 * Cbp;
     const Sh = 1 + 0.015 * Cbp * T;
     const Rt = -Math.sin(2 * dTheta * rad) * Rc;
+
+    const dLpSl = dLp / Sl;
+    const dCpSc = dCp / Sc;
+    const dHpSh = dHp / Sh;
+
     return Math.sqrt(
-      Math.pow(dLp / Sl, 2) + Math.pow(dCp / Sc, 2) + Math.pow(dHp / Sh, 2) + Rt * (dCp / Sc) * (dHp / Sh)
+      dLpSl * dLpSl + dCpSc * dCpSc + dHpSh * dHpSh + Rt * dCpSc * dHpSh
     );
   }
 
