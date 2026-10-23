@@ -629,6 +629,8 @@ export default async function trace(t, site) {
   await edgeCases(t, site);
   // ---- what the reviews of the build found, each pinned (the end of this file) ----------------------------------------------
   await reviewFixes(t, site);
+  // ---- zoom: the view magnified, the photo kept where it is on the paper (the end of this file) ----------------------------------
+  await zoomTests(t, site);
 }
 
 // =====================================================================================================================
@@ -1738,5 +1740,94 @@ async function reviewFixes(t, site) {
     });
     t.check(r.shown && r.w >= 240 && r.left >= 0 && r.right <= r.vw && r.covers === 0, 'on a 320 px phone the Frame note is as wide as the picture allows (not half the screen), inside the screen, and does not cover the card\'s Start camera button', r);
     await clean(t, page, 'the toast on a small phone');
+  });
+}
+
+// =====================================================================================================================
+// Zoom: the whole view (camera, frame, photo) is magnified about a point; the photo is not moved, so it keeps its place on the
+// paper, is locked while zoomed (a drag looks around), and comes back to normal at 100%
+// =====================================================================================================================
+const placeOf = (page) => app(page).evaluate(() => { const w = document.getElementById('tr-wrap').getBoundingClientRect(), p = document.getElementById('tr-photo').getBoundingClientRect(); return { cx: (p.left + p.width / 2 - w.left) / w.width, cy: (p.top + p.height / 2 - w.top) / w.height, w: p.width / w.width, h: p.height / w.height }; });
+const zoomNow = (page) => app(page).evaluate(() => ({ ...Trace.zoom(), out: document.getElementById('tr-zoomReset').textContent, minus: !document.getElementById('tr-zoomOut').disabled, plus: !document.getElementById('tr-zoomIn').disabled, tf: document.getElementById('tr-wrap').style.transform, locks: ['tr-size', 'tr-fit', 'tr-turn'].map((id) => { const e = document.getElementById(id); return [id, e.disabled, e.getAttribute('aria-describedby')]; }), status: document.getElementById('tr-status').textContent }));
+// the + button's step is 1.4 times, so three taps are 274%
+const zoomTaps = async (page, n) => { for (let i = 0; i < n; i++) await click(page, '#tr-zoomIn'); await settled(page); };
+const samePlace = (a, b, tol = 0.003) => near(a.cx, b.cx, tol) && near(a.cy, b.cy, tol) && near(a.w, b.w, tol) && near(a.h, b.h, tol);
+async function zoomTests(t, site) {
+  await seg(t, 'zoom: the photo keeps its place and is locked while zoomed', async (pages) => {
+    const page = await touchPage(site); pages.push(page);
+    await page.touchscreen.tap(...(await app(page).evaluate(() => { const r = document.getElementById('tr-start').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })));
+    t.check(await live(page), 'zoom: the camera starts');
+    const zb = await app(page).evaluate(() => { const st = document.getElementById('tr-stage').getBoundingClientRect(); return [...document.querySelectorAll('.tr-zb')].map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, name: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height), inside: r.left >= st.left && r.right <= st.right && r.top >= st.top && r.bottom <= st.bottom }; }); });
+    t.check(zb.length === 3 && zb.every((x) => x.name && x.w >= 44 && x.h >= 44 && x.inside), 'zoom: the three zoom buttons are named, at least 44 px and on the camera picture\'s stage', zb);
+    await chosen(page, await makeImage(page, { width: 800, height: 600, name: 'zoom.png' }));
+    let c = await centre(page);
+    // the photo is put off centre and smaller first, so a zoom that re-centres or re-fits it would show
+    await pinchBy(page, c, 80, 50); await dragBy(page, c, 30, -40);
+    const before = await placeOf(page), z0 = await zoomNow(page);
+    t.check(z0.out === '100%' && z0.tf === '' && !z0.minus && z0.plus && z0.locks.every(([, off]) => !off), 'zoom: at 100% there is no transform, − is off, + is on, and Size, Fit and Turn are on', z0);
+    await zoomTaps(page, 3);
+    let z = await zoomNow(page), after = await placeOf(page);
+    t.check(near(z.z, 2.744, 0.01) && z.out === '274%' && /scale\(2\.74/.test(z.tf) && z.minus, 'zoom: three taps on + magnify the view 274% and the readout says so', z);
+    // what the photo is over, on the camera's picture, is the same: its place and size as fractions of the picture
+    t.check(samePlace(before, after), 'zoom: the photo keeps its place and its size on the camera picture (as fractions of it) when zoomed in', { before, after });
+    t.check(z.locks.every(([, off, why]) => off && why === 'tr-whyZoom') && /Zoomed in/.test(z.status), 'zoom: zoomed in, Size, Fit and Turn are off with the reason, and the status line says the photo stays where it is', z);
+    // a finger drags the view, not the photo
+    c = await centre(page, 'tr-stage');
+    await dragBy(page, c, -70, -50);
+    let z2 = await zoomNow(page); after = await placeOf(page);
+    t.check(z2.x > z.x + 0.01 && z2.y > z.y + 0.01, 'zoom: a finger dragged left and up looks further right and down', { z, z2 });
+    t.check(samePlace(before, after), 'zoom: panning leaves the photo where it is on the camera picture', { before, after });
+    // the lock button does not stop looking around (it never moves the photo), and a hand on the screen at 100% still moves nothing
+    await click(page, '#tr-lock'); await settled(page);
+    await dragBy(page, c, 40, 30);
+    const z3 = await zoomNow(page); after = await placeOf(page);
+    t.check(z3.x < z2.x - 0.005 && samePlace(before, after), 'zoom: with Lock on a drag still looks around, and the photo stays', { z2, z3, before, after });
+    // two fingers zoom the view, about the spot between them
+    await pinchBy(page, c, 40, 90);
+    const z4 = await zoomNow(page); after = await placeOf(page);
+    t.check(z4.z > z3.z * 1.5 && z4.z <= 6 && samePlace(before, after), 'zoom: a pinch zooms the view further, and the photo stays where it is on the picture', { z3, z4, before, after });
+    // and pinched back out to the whole picture, it is 100% again: the view is whole, the photo's controls are back
+    await pinchBy(page, c, 150, 10, 12); await pinchBy(page, c, 150, 10, 12);
+    const z5 = await zoomNow(page); after = await placeOf(page);
+    t.check(z5.z === 1 && z5.tf === '' && z5.x === 0.5 && z5.y === 0.5 && samePlace(before, after), 'zoom: pinched out to the whole picture the view is at 100% with no transform, and the photo is where it was', { z5, before, after });
+    // with Lock on at 100% nothing moves it
+    await dragBy(page, c, 60, 60);
+    const z6 = await zoomNow(page); after = await placeOf(page);
+    t.check(z6.z === 1 && samePlace(before, after), 'zoom: at 100% with Lock on a drag moves neither the view nor the photo', { z6, before, after });
+    await click(page, '#tr-lock'); await settled(page);
+    t.check((await zoomNow(page)).locks.every(([, off]) => !off), 'zoom: unlocked at 100%, Size, Fit and Turn are on again');
+    await dragBy(page, c, 40, 40);
+    after = await placeOf(page);
+    t.check(after.cx > before.cx + 0.03, 'zoom: at 100% a drag moves the photo again', { before, after });
+    await clean(t, page, 'zoom with touch');
+  });
+  await seg(t, 'zoom: the keyboard, a turned phone and no photo', async (pages) => {
+    const page = await recorded(site, { url: '#trace', viewport: DESKTOP }); pages.push(page);
+    await startCamera(page);
+    // no photo yet: the view still zooms, and the picture can be looked around
+    await zoomTaps(page, 2);
+    let z = await zoomNow(page);
+    t.check(near(z.z, 1.96, 0.01), 'zoom: with no photo the view zooms too', z);
+    await app(page).evaluate(() => document.getElementById('tr-hit').focus());
+    t.check(await app(page).evaluate(() => document.getElementById('tr-hit').tabIndex === 0), 'zoom: zoomed in, the view takes the keyboard even with no photo');
+    await page.keyboard.press('ArrowRight'); await page.keyboard.press('Shift+ArrowDown');
+    let z2 = await zoomNow(page);
+    t.check(z2.x > z.x && z2.y > z.y, 'zoom: the arrow keys look around when zoomed (Shift for bigger steps)', { z, z2 });
+    await page.keyboard.press('+'); await page.keyboard.press('+');
+    const z3 = await zoomNow(page);
+    t.check(z3.z > 2.3, 'zoom: + zooms in further from the keyboard', z3);
+    await chosen(page, await makeImage(page, { width: 800, height: 600, name: 'k.png' }));
+    const before = await placeOf(page);
+    for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft');
+    t.check(samePlace(before, await placeOf(page)), 'zoom: the arrow keys do not move the photo while zoomed in', { before, after: await placeOf(page) });
+    // turn the window about while zoomed: what is under the middle of the view and the photo's place on the picture are kept
+    const keep = await zoomNow(page);
+    await page.setViewportSize({ width: 844, height: 390 }); await sleep(400); await settled(page);
+    const turned = await zoomNow(page), pl = await placeOf(page);
+    t.check(near(turned.x, keep.x, 0.002) && near(turned.y, keep.y, 0.002) && turned.z === keep.z && samePlace(before, pl, 0.004), 'zoom: resizing the window keeps the zoom, the point looked at and the photo\'s place on the picture', { keep, turned, before, pl });
+    await click(page, '#tr-zoomReset'); await settled(page);
+    const back = await zoomNow(page);
+    t.check(back.tf === '' && back.out === '100%' && back.x === 0.5 && !back.minus, 'zoom: the 100% readout is a button back to the whole picture, with no transform', back);
+    await clean(t, page, 'zoom with the keyboard');
   });
 }

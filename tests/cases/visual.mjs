@@ -39,7 +39,9 @@ export function measure() {
   const inFloat = (el) => !!el.closest(FLOAT);
   const fixedAncestor = (el) => { for (let a = el; a && a.nodeType === 1 && a !== de; a = a.parentElement) { const p = cs(a).position; if (p === 'fixed' || p === 'sticky') return a; } return null; };
   const clipper = (el) => { for (let a = el.parentElement; a && a !== document.body && a !== de; a = a.parentElement) { const s = cs(a); if (s.overflowX !== 'visible' || s.overflowY !== 'visible') return a; } return null; };
-  const related = (a, b) => a === b || a.contains(b) || b.contains(a) || (a.tagName === 'LABEL' && a.control === b) || (b.tagName === 'LABEL' && b.control === a);
+  const related = (a, b) => a === b || a.contains(b) || b.contains(a) || (a.tagName === 'LABEL' && a.control === b) || (b.tagName === 'LABEL' && b.control === a)
+    // Trace's touch layer is the whole camera stage by design (a gesture surface under the zoom buttons and the card's button)
+    || (a.id === 'tr-hit' && !!b.closest('.tr-stage')) || (b.id === 'tr-hit' && !!a.closest('.tr-stage'));
   const parseRGB = (c) => { const m = /^rgba?\((.+)\)$/.exec(c || ''); if (!m) return null; const v = m[1].split(/[\s,/]+/).filter(Boolean).map(Number); if (v.length < 3 || v.slice(0, 3).some((x) => Number.isNaN(x))) return null; return { r: v[0], g: v[1], b: v[2], a: v.length > 3 ? v[3] : 1 }; };
   const bgOf = (el) => {
     const stack = [];

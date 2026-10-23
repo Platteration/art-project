@@ -28,7 +28,7 @@
   const card = $('card'), say = $('say'), startBtn = $('start'), status = $('status'), strip = $('strip');
   const camBtn = $('camera'), chooseBtn = $('choose'), studyBtn = $('useStudy'), fitBtn = $('fit'), lockBtn = $('lock');
   const setFrameBtn = $('setFrame'), showFrameBtn = $('showFrame'), switchBtn = $('switch'), turnBtn = $('turn');
-  const transparency = $('transparency'), sizeIn = $('size'), strength = $('strength'), fileIn = $('file');
+  const transparency = $('transparency'), sizeIn = $('size'), strength = $('strength'), fileIn = $('file'), zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut'), zoomResetBtn = $('zoomReset');
 
   // ---- Kept between visits: conveniences only (how see-through the photo is, how strong the frame shows) ----------------
   const KEY = 'portrait-value-studio.trace';
@@ -52,7 +52,10 @@
   // Simple shows no Frame strength slider and uses the default; the value set in Advanced comes back with Advanced
   const frameStrength = () => (simple() ? DEFAULTS.frame : settings.frame);
 
+  // zoom: the whole view (camera, frame and photo together) magnified; x, y are the point of the camera's picture, as fractions of it,
+  // that sits in the middle of the stage, so the photo keeps its place on the paper whatever the zoom
   const state = {
+    zoom: { z: 1, x: 0.5, y: 0.5 },
     active: false,      // the tab is open
     stream: null,       // the camera's MediaStream while it runs
     starting: false,    // asked for, not answered yet (the browser may be asking the visitor)
@@ -341,6 +344,7 @@
   const toSlider = (pct) => Math.round((STEPS * Math.log(pct / 100 / MIN_SIZE)) / Math.log(MAX_SIZE / MIN_SIZE));
   const fromSlider = (v) => MIN_SIZE * Math.pow(MAX_SIZE / MIN_SIZE, clamp(v, 0, STEPS) / STEPS);
   function drawPhoto() {
+    applyZoom();
     if (!state.photo) { photoCv.hidden = true; return; }
     const v = view();
     if (!v.w || !v.h) return;
@@ -355,6 +359,43 @@
     photoCv.style.opacity = String(1 - settings.transparency / 100);
     photoCv.hidden = false;
   }
+  // ---- Zoom: the whole view magnified about a point; the photo is not moved, so it stays where it is on the paper ----------
+  const MIN_ZOOM = 1, MAX_ZOOM = 6;
+  const zoomed = () => state.zoom.z > 1;
+  function applyZoom() {
+    const zm = state.zoom, v = view();
+    wrap.style.transform = zm.z > 1 && v.w && v.h ? `translate(${-zm.z * (zm.x - 0.5) * v.w}px, ${-zm.z * (zm.y - 0.5) * v.h}px) scale(${zm.z})` : '';
+  }
+  // where the picture's middle sits on the screen when nothing is zoomed (layout ignores transforms)
+  function wrapCentre() {
+    const s = stage.getBoundingClientRect();
+    return { x: s.left + wrap.offsetLeft + wrap.clientWidth / 2, y: s.top + wrap.offsetTop + wrap.clientHeight / 2 };
+  }
+  // the point of the picture (fractions of it) under a point of the screen
+  function pictureAt(sx, sy, zm = state.zoom) {
+    const c = wrapCentre(), v = view();
+    return { x: zm.x + (sx - c.x) / (zm.z * v.w), y: zm.y + (sy - c.y) / (zm.z * v.h) };
+  }
+  // zoom to z with the picture point (nx, ny) under the screen point (sx, sy); back at 100% the view is the whole picture again
+  function zoomTo(z, nx, ny, sx, sy) {
+    const zm = state.zoom, v = view(), c = wrapCentre();
+    z = clamp(z, MIN_ZOOM, MAX_ZOOM);
+    if (z < 1.01) { zm.z = 1; zm.x = 0.5; zm.y = 0.5; return; }
+    zm.z = z;
+    zm.x = clamp(nx - (sx - c.x) / (z * v.w), 0, 1);
+    zm.y = clamp(ny - (sy - c.y) / (z * v.h), 0, 1);
+  }
+  // + and − step the zoom (about the middle of what is on screen: the point there stays there), the readout is back to 100%
+  function zoomBy(f) {
+    const r = stage.getBoundingClientRect(), sx = r.left + r.width / 2, sy = r.top + r.height / 2, n = pictureAt(sx, sy);
+    zoomTo(f ? state.zoom.z * f : 1, n.x, n.y, sx, sy);
+    endGesture();
+    render();
+  }
+  const ZOOM_STEP = 1.4;
+  zoomInBtn.addEventListener('click', () => zoomBy(ZOOM_STEP));
+  zoomOutBtn.addEventListener('click', () => zoomBy(1 / ZOOM_STEP));
+  zoomResetBtn.addEventListener('click', () => zoomBy(0));
   function fitPhoto() { state.place.cx = 0.5; state.place.cy = 0.5; state.place.fitted = true; render(); }
   fitBtn.addEventListener('click', fitPhoto);
   turnBtn.addEventListener('click', () => {
@@ -389,6 +430,16 @@
   function beginGesture() {
     const pts = [...pointers.values()], pl = state.place, r = wrap.getBoundingClientRect();
     if (!pts.length) { gesture = null; return; }
+    // zoomed in the photo is locked: a finger looks around the view and two fingers zoom it, about the spot between them
+    if (zoomed()) {
+      const zm = state.zoom, [a, b] = pts;
+      if (pts.length === 1) gesture = { kind: 'pan', x0: a.x, y0: a.y, zx: zm.x, zy: zm.y };
+      else {
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, n = pictureAt(mx, my);
+        gesture = { kind: 'zoom', d0: Math.hypot(b.x - a.x, b.y - a.y) || 1, z0: zm.z, nx: n.x, ny: n.y };
+      }
+      return;
+    }
     if (pts.length === 1) gesture = { kind: 'drag', x0: pts[0].x, y0: pts[0].y, cx: pl.cx, cy: pl.cy };
     else {
       const [a, b] = pts;
@@ -397,9 +448,11 @@
   }
   function endGesture() { pointers.clear(); gesture = null; }
   hit.addEventListener('pointerdown', (e) => {
-    if (!state.photo || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if ((!state.photo && !zoomed()) || (e.pointerType === 'mouse' && e.button !== 0)) return;
     e.preventDefault();
-    if (state.locked) return; // a touch while drawing leaves it where it is (the status line says it is locked)
+    // a touch while drawing leaves the photo where it is (the status line says it is locked); zoomed in, a touch only looks
+    // around, which never moves the photo over the paper
+    if (state.locked && !zoomed()) return;
     try { hit.setPointerCapture(e.pointerId); } catch (err) { /* the pointer has already gone */ }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     beginGesture();
@@ -409,6 +462,19 @@
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const v = view(), pl = state.place, pts = [...pointers.values()];
     if (!v.w || !v.h) return;
+    if (gesture.kind === 'pan' && pts.length === 1) {
+      const zm = state.zoom;
+      zm.x = clamp(gesture.zx - (pts[0].x - gesture.x0) / (zm.z * v.w), 0, 1);
+      zm.y = clamp(gesture.zy - (pts[0].y - gesture.y0) / (zm.z * v.h), 0, 1);
+      applyZoom();
+      return;
+    }
+    if (gesture.kind === 'zoom' && pts.length >= 2) {
+      const [a, b] = pts;
+      zoomTo((gesture.z0 * Math.hypot(b.x - a.x, b.y - a.y)) / gesture.d0, gesture.nx, gesture.ny, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      applyZoom(); showZoom();
+      return;
+    }
     if (gesture.kind === 'drag' && pts.length === 1) {
       pl.cx = clamp(gesture.cx + (pts[0].x - gesture.x0) / v.w, 0, 1);
       pl.cy = clamp(gesture.cy + (pts[0].y - gesture.y0) / v.h, 0, 1);
@@ -431,10 +497,18 @@
   // from the keyboard: the arrow keys move it (two pixels a press, twenty with Shift) and + and − size it
   const MOVES = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   hit.addEventListener('keydown', (e) => {
-    if (!state.photo || e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((!state.photo && !zoomed()) || e.altKey || e.ctrlKey || e.metaKey) return;
     const d = MOVES[e.key], grow = e.key === '+' || e.key === '=' ? 1.03 : e.key === '-' || e.key === '_' || e.key === '−' ? 1 / 1.03 : 0;
     if (!d && !grow) return;
     e.preventDefault();
+    if (zoomed()) {
+      // zoomed in the keys look around (arrows) and zoom (+ and −); the photo is left where it is
+      const zm = state.zoom, v = view(), px = e.shiftKey ? 20 : 2;
+      if (d) { zm.x = clamp(zm.x + (d[0] * px) / (zm.z * (v.w || 1)), 0, 1); zm.y = clamp(zm.y + (d[1] * px) / (zm.z * (v.h || 1)), 0, 1); }
+      else { const r = stage.getBoundingClientRect(), sx = r.left + r.width / 2, sy = r.top + r.height / 2, n = pictureAt(sx, sy); zoomTo(zm.z * (grow > 1 ? 1.1 : 1 / 1.1), n.x, n.y, sx, sy); }
+      render();
+      return;
+    }
     if (state.locked) return;
     const v = view(), pl = state.place;
     if (d) {
@@ -502,6 +576,13 @@
     el.disabled = !ok;
     if (ok || !why) el.removeAttribute('aria-describedby'); else el.setAttribute('aria-describedby', why);
   }
+  function showZoom() {
+    const z = state.zoom.z, pct = Math.round(z * 100);
+    zoomResetBtn.textContent = `${pct}%`;
+    zoomResetBtn.setAttribute('aria-label', z > 1 ? `Zoom ${pct}%: press to see the whole picture` : 'Zoom 100%, the whole picture');
+    zoomOutBtn.disabled = z <= MIN_ZOOM;
+    zoomInBtn.disabled = z >= MAX_ZOOM - 0.005;
+  }
   function showSize() {
     if (!state.photo) return;
     const pct = clamp(sizePct(), MIN_SIZE * 100, MAX_SIZE * 100);
@@ -526,9 +607,11 @@
     camBtn.title = on || state.starting ? 'Stop the camera' : 'Start the camera (the browser asks first)';
     camBtn.classList.toggle('is-on', on);
     studyBtn.hidden = !Studio.source();
-    able(fitBtn, photo && !locked, locked ? 'tr-whyLocked' : 'tr-whyPhoto');
-    able(turnBtn, photo && !locked, locked ? 'tr-whyLocked' : 'tr-whyPhoto');
-    able(sizeIn, photo && !locked, locked ? 'tr-whyLocked' : 'tr-whyPhoto');
+    // zoomed in the photo is locked (a drag looks around the view): Fit, Turn and Size wait for 100%
+    const zm = zoomed(), stuck = locked || zm, whyStuck = zm ? 'tr-whyZoom' : locked ? 'tr-whyLocked' : 'tr-whyPhoto';
+    able(fitBtn, photo && !stuck, whyStuck);
+    able(turnBtn, photo && !stuck, whyStuck);
+    able(sizeIn, photo && !stuck, whyStuck);
     able(lockBtn, photo, 'tr-whyPhoto');
     lockBtn.setAttribute('aria-pressed', String(locked));
     lockBtn.title = locked ? 'Unlock the photo, to move or size it' : 'Lock the photo in place: drags and pinches do nothing';
@@ -550,16 +633,17 @@
     // the stage: the frame over the camera (under the photo), the photo, and what the status line says
     ghost.hidden = !(on && state.frame && state.frameShown);
     ghost.style.opacity = String(fs / 100);
-    hit.tabIndex = photo ? 0 : -1;
+    hit.tabIndex = photo || zm ? 0 : -1;
     root.classList.toggle('tr-locked', locked);
     root.classList.toggle('tr-live', on);
     const notes = [];
     if (on && !photo) notes.push('Choose a photo to put over the camera.');
     if (on && state.frame && state.frameShown) notes.push('Frame on: move the phone until the paper lines up with it.');
+    if (zm) notes.push('Zoomed in: drag to look around. The photo stays where it is on the paper.');
     if (locked) notes.push('Locked: drags and pinches leave the photo where it is.');
     const line = notes.join(' ');
     if (status.textContent !== line) status.textContent = line;
-    drawPhoto(); showSize();
+    drawPhoto(); showSize(); showZoom();
   }
 
   // ---- The buttons ---------------------------------------------------------------------------------------------------
@@ -610,5 +694,6 @@
     stop,
     sizePct,
     usePicture,
+    zoom: () => ({ ...state.zoom }),
   };
 })();
