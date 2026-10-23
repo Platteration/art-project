@@ -18,9 +18,9 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.json">
-<script src="js/guard.js?v=161e753"></script>
-<link rel="stylesheet" href="fonts.css?v=161e753">
-<link rel="stylesheet" href="styles.css?v=161e753">
+<script src="js/guard.js?v=319ab8c"></script>
+<link rel="stylesheet" href="fonts.css?v=319ab8c">
+<link rel="stylesheet" href="styles.css?v=319ab8c">
 </head>
 <body>
 <div class="oldbrowser-note" role="alert" hidden><strong>This browser is too old for Portrait Value Studio.</strong> Use a current Safari, Chrome, Edge or Firefox (2022 or later). The guide below still reads.</div>
@@ -439,8 +439,13 @@
               <canvas class="tr-ghost" id="tr-ghost" hidden aria-hidden="true"></canvas>
               <canvas class="tr-photo" id="tr-photo" hidden aria-hidden="true"></canvas>
             </div>
-            <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −" aria-describedby="tr-status"></div>
+            <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −. Zoomed in with + (and out with −), a drag looks around instead and the photo stays where it is" aria-describedby="tr-status"></div>
             <p class="tr-status" id="tr-status" role="status"></p>
+            <div class="tr-zoombar" role="group" aria-label="Zoom the view">
+              <button type="button" class="tr-zb" id="tr-zoomIn" aria-label="Zoom in" title="Zoom in: the photo stays where it is on the paper">+</button>
+              <button type="button" class="tr-zb tr-zr" id="tr-zoomReset" aria-label="Zoom 100%, the whole picture" title="Back to the whole picture">100%</button>
+              <button type="button" class="tr-zb" id="tr-zoomOut" aria-label="Zoom out" title="Zoom out" disabled>&minus;</button>
+            </div>
             <div class="tr-card" id="tr-card">
               <h2 class="tr-title">Trace onto paper</h2>
               <p class="tr-say" id="tr-say" aria-live="polite">Fix your phone above the paper, camera down (on a stand, or a glass or a stack of books under it). Start the camera, choose the photo to trace, and draw over it on the paper. The camera picture stays on this device.</p>
@@ -477,6 +482,7 @@
             <span class="visually-hidden" id="tr-whyCamera">Start the camera first.</span>
             <span class="visually-hidden" id="tr-whyFrame">Set a frame first: Set frame keeps the camera's view of the paper.</span>
             <span class="visually-hidden" id="tr-whyPhoto">Choose a photo first.</span>
+            <span class="visually-hidden" id="tr-whyZoom">The view is zoomed in, which keeps the photo where it is: set Zoom back to 100% to move or size it.</span>
             <span class="visually-hidden" id="tr-whyLocked">The photo is locked: press Lock again to move or size it.</span>
           </nav>
           <input type="file" id="tr-file" accept="image/*" class="visually-hidden" tabindex="-1" aria-label="Choose a photo to trace">
@@ -1115,6 +1121,7 @@
               <li><strong>Photo</strong> chooses the picture to trace from your photos, or <strong>Study photo</strong> takes the one on Study the photo. <strong>Transparency</strong> makes it more or less see-through.</li>
               <li><strong>Place it</strong> on the paper: drag it to move it and pinch it to size it, or use the <strong>Size</strong> slider. <strong>Fit</strong> puts it back in the middle. In Advanced, <strong>Turn 90°</strong> turns it for paper the other way round. From the keyboard, Tab to the picture: the arrow keys move the photo, and + and − size it.</li>
               <li><strong>Lock</strong> it, then draw: a hand on the screen will not move it.</li>
+              <li><strong>Zoom</strong> with + and − on the right of the picture (or pinch it) to see the paper close up. The photo stays where it is on the paper while you zoom, and a drag looks around instead of moving it. <strong>100%</strong> shows the whole picture again.</li>
               <li><strong>Set frame</strong> once it is all lined up. If the phone gets knocked, <strong>Show frame</strong> shows the paper as it was, faintly: move the phone until the paper's edges match it, then hide the frame and go on. A frame fits only the camera and the picture shape it was taken from, so after <strong>Switch</strong>, or when the picture changes shape, it is let go: set it again.</li>
             </ol>
           </div>
@@ -1302,18 +1309,18 @@
 
 <!-- Classic scripts, in dependency order: processing (Study), mixing (Mixing) and paints (Paints) first; app (Studio) next;
      then the modules that use them (painting before figure, which draws on a copy of the Studio). guard.js is loaded in <head>. -->
-<script src="js/processing.js?v=161e753"></script>
-<script src="js/mixing.js?v=161e753"></script>
-<script src="js/paints.js?v=161e753"></script>
-<script src="js/app.js?v=161e753"></script>
-<script src="js/palette.js?v=161e753"></script>
-<script src="js/subjects.js?v=161e753"></script>
-<script src="js/game.js?v=161e753"></script>
-<script src="js/painting.js?v=161e753"></script>
-<script src="js/figure.js?v=161e753"></script>
-<script src="js/loomis.js?v=161e753"></script>
-<script src="js/trace.js?v=161e753"></script>
-<script src="js/battle.js?v=161e753"></script>
-<p class="build-stamp">Test build 161e753</p>
+<script src="js/processing.js?v=319ab8c"></script>
+<script src="js/mixing.js?v=319ab8c"></script>
+<script src="js/paints.js?v=319ab8c"></script>
+<script src="js/app.js?v=319ab8c"></script>
+<script src="js/palette.js?v=319ab8c"></script>
+<script src="js/subjects.js?v=319ab8c"></script>
+<script src="js/game.js?v=319ab8c"></script>
+<script src="js/painting.js?v=319ab8c"></script>
+<script src="js/figure.js?v=319ab8c"></script>
+<script src="js/loomis.js?v=319ab8c"></script>
+<script src="js/trace.js?v=319ab8c"></script>
+<script src="js/battle.js?v=319ab8c"></script>
+<p class="build-stamp">Test build 319ab8c</p>
 </body>
 </html>
