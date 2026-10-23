@@ -37,7 +37,11 @@
 
   // L* (0-100) -> relative luminance Y (0-1)
   function lToY(L) {
-    return L > 8 ? Math.pow((L + 16) / 116, 3) : L / KAPPA;
+    if (L > 8) {
+      const v = (L + 16) / 116;
+      return v * v * v;
+    }
+    return L / KAPPA;
   }
 
   function rgbToLab(r, g, b) {
@@ -978,10 +982,12 @@
   // CIEDE2000 color difference. About 2 is barely visible, 10 is clearly different.
   function deltaE2000(l1, a1, b1, l2, a2, b2) {
     const rad = Math.PI / 180;
-    const p7 = (v) => Math.pow(v, 7);
+    const p7 = (v) => { const v2 = v * v; return v2 * v2 * v2 * v; };
+    const p7_25 = 6103515625; // 25^7
     const C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2);
     const Cb = (C1 + C2) / 2;
-    const G = 0.5 * (1 - Math.sqrt(p7(Cb) / (p7(Cb) + p7(25))));
+    const p7Cb = p7(Cb);
+    const G = 0.5 * (1 - Math.sqrt(p7Cb / (p7Cb + p7_25)));
     const a1p = a1 * (1 + G), a2p = a2 * (1 + G);
     const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
     const h1p = C1p === 0 ? 0 : (Math.atan2(b1, a1p) / rad + 360) % 360;
@@ -1004,14 +1010,21 @@
     }
     const T = 1 - 0.17 * Math.cos((hbp - 30) * rad) + 0.24 * Math.cos(2 * hbp * rad)
       + 0.32 * Math.cos((3 * hbp + 6) * rad) - 0.2 * Math.cos((4 * hbp - 63) * rad);
-    const dTheta = 30 * Math.exp(-Math.pow((hbp - 275) / 25, 2));
-    const Rc = 2 * Math.sqrt(p7(Cbp) / (p7(Cbp) + p7(25)));
-    const Sl = 1 + (0.015 * Math.pow(Lbp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbp - 50, 2));
+    const dThetaArg = (hbp - 275) / 25;
+    const dTheta = 30 * Math.exp(-(dThetaArg * dThetaArg));
+    const p7Cbp = p7(Cbp);
+    const Rc = 2 * Math.sqrt(p7Cbp / (p7Cbp + p7_25));
+    const LbpMinus50 = Lbp - 50;
+    const LbpMinus50Sq = LbpMinus50 * LbpMinus50;
+    const Sl = 1 + (0.015 * LbpMinus50Sq) / Math.sqrt(20 + LbpMinus50Sq);
     const Sc = 1 + 0.045 * Cbp;
     const Sh = 1 + 0.015 * Cbp * T;
     const Rt = -Math.sin(2 * dTheta * rad) * Rc;
+    const P1 = dLp / Sl;
+    const P2 = dCp / Sc;
+    const P3 = dHp / Sh;
     return Math.sqrt(
-      Math.pow(dLp / Sl, 2) + Math.pow(dCp / Sc, 2) + Math.pow(dHp / Sh, 2) + Rt * (dCp / Sc) * (dHp / Sh)
+      P1 * P1 + P2 * P2 + P3 * P3 + Rt * P2 * P3
     );
   }
 
