@@ -28,7 +28,7 @@
   const card = $('card'), say = $('say'), startBtn = $('start'), status = $('status'), strip = $('strip');
   const camBtn = $('camera'), chooseBtn = $('choose'), studyBtn = $('useStudy'), fitBtn = $('fit'), lockBtn = $('lock');
   const setFrameBtn = $('setFrame'), showFrameBtn = $('showFrame'), switchBtn = $('switch'), turnBtn = $('turn');
-  const transparency = $('transparency'), sizeIn = $('size'), strength = $('strength'), fileIn = $('file'), toolsBtn = $('tools'), hideBtn = $('toolsHide'), zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut'), zoomResetBtn = $('zoomReset');
+  const transparency = $('transparency'), sizeIn = $('size'), strength = $('strength'), fileIn = $('file'), panEl = $('pan'), panX = $('panX'), panY = $('panY'), toolsBtn = $('tools'), hideBtn = $('toolsHide'), zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut'), zoomResetBtn = $('zoomReset');
 
   // ---- Kept between visits: conveniences only (how see-through the photo is, how strong the frame shows) ----------------
   const KEY = 'portrait-value-studio.trace';
@@ -365,6 +365,12 @@
   const zoomed = () => state.zoom.z > 1;
   function applyZoom() {
     const zm = state.zoom, v = view();
+    // the Left–right and Up–down sliders are there while zoomed in, and follow a drag, a pinch or a key
+    panEl.hidden = zm.z <= 1;
+    if (document.activeElement !== panX) panX.value = String(Math.round(zm.x * 100));
+    if (document.activeElement !== panY) panY.value = String(Math.round(zm.y * 100));
+    panX.setAttribute('aria-valuetext', `${Math.round(zm.x * 100)}% from the left edge`);
+    panY.setAttribute('aria-valuetext', `${Math.round(zm.y * 100)}% from the top edge`);
     wrap.style.transform = zm.z > 1 && v.w && v.h ? `translate(${-zm.z * (zm.x - 0.5) * v.w}px, ${-zm.z * (zm.y - 0.5) * v.h}px) scale(${zm.z})` : '';
   }
   // where the picture's middle sits on the screen when nothing is zoomed (layout ignores transforms)
@@ -393,6 +399,9 @@
     endGesture();
     render();
   }
+  // the pan sliders put the middle of the view at a point of the picture (0 the left or top edge, 100 the right or bottom)
+  panX.addEventListener('input', () => { if (!zoomed()) return; state.zoom.x = clamp(+panX.value / 100, 0, 1); applyZoom(); placeToast(); });
+  panY.addEventListener('input', () => { if (!zoomed()) return; state.zoom.y = clamp(+panY.value / 100, 0, 1); applyZoom(); placeToast(); });
   const ZOOM_STEP = 1.4;
   zoomInBtn.addEventListener('click', () => zoomBy(ZOOM_STEP));
   zoomOutBtn.addEventListener('click', () => zoomBy(1 / ZOOM_STEP));
@@ -560,6 +569,7 @@
   function placeToast() {
     const r = stage.getBoundingClientRect();
     let left = r.left, lift = 64, sheetH = 0, sheetW = 0, top = null;
+    if (!panEl.hidden) lift = Math.max(lift, Math.round(r.bottom - panEl.getBoundingClientRect().top) + 10); // clear of the pan sliders when zoomed
     if (state.tools && !strip.hidden) {
       const sr = strip.getBoundingClientRect();
       if (sr.width < r.width * 0.9) { sheetW = Math.max(0, Math.round(sr.right - r.left)); left = Math.max(left, sr.right); } else { sheetH = Math.max(0, Math.round(r.bottom - sr.top)); lift = Math.max(lift, sheetH + 12); }

@@ -439,9 +439,13 @@
               <canvas class="tr-ghost" id="tr-ghost" hidden aria-hidden="true"></canvas>
               <canvas class="tr-photo" id="tr-photo" hidden aria-hidden="true"></canvas>
             </div>
-            <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −. Zoomed in with + (and out with −), a drag looks around instead and the photo stays where it is" aria-describedby="tr-status"></div>
+            <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −. Zoomed in with + (and out with −), a drag, or the Left–right and Up–down sliders that appear, looks around instead and the photo stays where it is" aria-describedby="tr-status"></div>
             <button type="button" class="tr-float tr-leave" id="tr-exit" title="Leave" aria-label="Leave Trace onto paper"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
             <button type="button" class="tr-float tr-tools" id="tr-tools" aria-expanded="false" aria-controls="tr-strip" title="Open the tools: photo, transparency, size, frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Tools</button>
+            <div class="tr-pan" id="tr-pan" role="group" aria-label="Look around the zoomed view" hidden>
+              <label for="tr-panX">Left&ndash;right</label><input type="range" id="tr-panX" min="0" max="100" step="1" value="50">
+              <label for="tr-panY">Up&ndash;down</label><input type="range" id="tr-panY" min="0" max="100" step="1" value="50">
+            </div>
             <p class="tr-status" id="tr-status" role="status"></p>
             <div class="tr-zoombar" role="group" aria-label="Zoom the view">
               <button type="button" class="tr-zb" id="tr-zoomIn" aria-label="Zoom in" title="Zoom in: the photo stays where it is on the paper">+</button>
@@ -1123,7 +1127,7 @@
               <li><strong>Photo</strong> chooses the picture to trace from your photos, or <strong>Study photo</strong> takes the one on Study the photo. <strong>Transparency</strong> makes it more or less see-through.</li>
               <li><strong>Place it</strong> on the paper: drag it to move it and pinch it to size it, or use the <strong>Size</strong> slider. <strong>Fit</strong> puts it back in the middle. In Advanced, <strong>Turn 90°</strong> turns it for paper the other way round. From the keyboard, Tab to the picture: the arrow keys move the photo, and + and − size it.</li>
               <li><strong>Lock</strong> it, then draw: a hand on the screen will not move it.</li>
-              <li><strong>Zoom</strong> with + and − on the right of the picture (or pinch it) to see the paper close up. The photo stays where it is on the paper while you zoom, and a drag looks around instead of moving it. <strong>100%</strong> shows the whole picture again.</li>
+              <li><strong>Zoom</strong> with + and − on the right of the picture (or pinch it) to see the paper close up. The photo stays where it is on the paper while you zoom, and a drag, or the two sliders that appear, looks around instead of moving it. <strong>100%</strong> shows the whole picture again.</li>
               <li><strong>Set frame</strong> once it is all lined up. If the phone gets knocked, <strong>Show frame</strong> shows the paper as it was, faintly: move the phone until the paper's edges match it, then hide the frame and go on. A frame fits only the camera and the picture shape it was taken from, so after <strong>Switch</strong>, or when the picture changes shape, it is let go: set it again.</li>
             </ol>
           </div>

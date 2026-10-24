@@ -1760,6 +1760,8 @@ const placeOf = (page) => app(page).evaluate(() => { const w = document.getEleme
 const zoomNow = (page) => app(page).evaluate(() => ({ ...Trace.zoom(), out: document.getElementById('tr-zoomReset').textContent, minus: !document.getElementById('tr-zoomOut').disabled, plus: !document.getElementById('tr-zoomIn').disabled, tf: document.getElementById('tr-wrap').style.transform, locks: ['tr-size', 'tr-fit', 'tr-turn'].map((id) => { const e = document.getElementById(id); return [id, e.disabled, e.getAttribute('aria-describedby')]; }), status: document.getElementById('tr-status').textContent }));
 // the + button's step is 1.4 times, so three taps are 274%
 const zoomTaps = async (page, n) => { for (let i = 0; i < n; i++) await click(page, '#tr-zoomIn'); await settled(page); };
+const panNow = (page) => app(page).evaluate(() => { const p = document.getElementById('tr-pan'), x = document.getElementById('tr-panX'), y = document.getElementById('tr-panY'), q = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom].map(Math.round); }; return { hidden: p.hidden || !p.getClientRects().length, x: +x.value, y: +y.value, hx: Math.round(x.getBoundingClientRect().height), hy: Math.round(y.getBoundingClientRect().height), box: q(p), zoombar: q(document.querySelector('.tr-zoombar')), tools: document.getElementById('tr-tools').hidden ? null : q(document.getElementById('tr-tools')), labels: [...p.querySelectorAll('label')].map((l) => l.textContent), vw: innerWidth, vh: innerHeight }; });
+const boxMeet = (a, b) => !!a && !!b && Math.min(a[2], b[2]) - Math.max(a[0], b[0]) > 1 && Math.min(a[3], b[3]) - Math.max(a[1], b[1]) > 1;
 const samePlace = (a, b, tol = 0.003) => near(a.cx, b.cx, tol) && near(a.cy, b.cy, tol) && near(a.w, b.w, tol) && near(a.h, b.h, tol);
 async function zoomTests(t, site) {
   await seg(t, 'zoom: the photo keeps its place and is locked while zoomed', async (pages) => {
@@ -1774,8 +1776,11 @@ async function zoomTests(t, site) {
     await pinchBy(page, c, 80, 50); await dragBy(page, c, 30, -40);
     const before = await placeOf(page), z0 = await zoomNow(page);
     t.check(z0.out === '100%' && z0.tf === '' && !z0.minus && z0.plus && z0.locks.every(([, off]) => !off), 'zoom: at 100% there is no transform, − is off, + is on, and Size, Fit and Turn are on', z0);
+    t.check((await panNow(page)).hidden, 'zoom: at 100% the pan sliders are not there');
     await zoomTaps(page, 3);
     let z = await zoomNow(page), after = await placeOf(page);
+    const pn = await panNow(page);
+    t.check(!pn.hidden && pn.labels.join() === 'Left–right,Up–down' && Math.abs(pn.x - Math.round(z.x * 100)) <= 1 && Math.abs(pn.y - Math.round(z.y * 100)) <= 1 && pn.hx >= 40 && pn.hy >= 40 && pn.box[0] >= 0 && pn.box[2] <= pn.vw && pn.box[3] <= pn.vh && !boxMeet(pn.box, pn.zoombar) && !boxMeet(pn.box, pn.tools), 'zoom: zoomed in, the Left–right and Up–down sliders appear on the picture, at the view\'s place, at least 40 px tall, on the screen and clear of the zoom and Tools buttons', pn);
     t.check(near(z.z, 2.744, 0.01) && z.out === '274%' && /scale\(2\.74/.test(z.tf) && z.minus, 'zoom: three taps on + magnify the view 274% and the readout says so', z);
     // what the photo is over, on the camera's picture, is the same: its place and size as fractions of the picture
     t.check(samePlace(before, after), 'zoom: the photo keeps its place and its size on the camera picture (as fractions of it) when zoomed in', { before, after });
@@ -1785,6 +1790,16 @@ async function zoomTests(t, site) {
     await dragBy(page, c, -70, -50);
     let z2 = await zoomNow(page); after = await placeOf(page);
     t.check(z2.x > z.x + 0.01 && z2.y > z.y + 0.01, 'zoom: a finger dragged left and up looks further right and down', { z, z2 });
+    const pn2 = await panNow(page);
+    t.check(Math.abs(pn2.x - Math.round(z2.x * 100)) <= 1 && Math.abs(pn2.y - Math.round(z2.y * 100)) <= 1, 'zoom: the pan sliders follow a drag', { pn2, z2 });
+    // the sliders look around too: all the way right and all the way up
+    await setRange(page, 'tr-panX', 100); await setRange(page, 'tr-panY', 0); await settled(page);
+    const z2b = await zoomNow(page); after = await placeOf(page);
+    t.check(z2b.x === 1 && z2b.y === 0 && samePlace(before, after), 'zoom: the Left–right slider at 100 and the Up–down slider at 0 look at the right-hand edge, top, and the photo stays where it is on the picture', { z2b, before, after });
+    await setRange(page, 'tr-panX', 40); await setRange(page, 'tr-panY', 60); await settled(page);
+    const z2c = await zoomNow(page);
+    t.check(near(z2c.x, 0.4, 0.001) && near(z2c.y, 0.6, 0.001), 'zoom: the sliders set the point looked at from 0 to 100% of the picture', z2c);
+    z2.x = z2c.x; z2.y = z2c.y;
     t.check(samePlace(before, after), 'zoom: panning leaves the photo where it is on the camera picture', { before, after });
     // the lock button does not stop looking around (it never moves the photo), and a hand on the screen at 100% still moves nothing
     await click(page, '#tr-lock'); await settled(page);
@@ -1798,6 +1813,7 @@ async function zoomTests(t, site) {
     // and pinched back out to the whole picture, it is 100% again: the view is whole, the photo's controls are back
     await pinchBy(page, c, 150, 10, 12); await pinchBy(page, c, 150, 10, 12);
     const z5 = await zoomNow(page); after = await placeOf(page);
+    t.check((await panNow(page)).hidden, 'zoom: back at the whole picture the pan sliders go');
     t.check(z5.z === 1 && z5.tf === '' && z5.x === 0.5 && z5.y === 0.5 && samePlace(before, after), 'zoom: pinched out to the whole picture the view is at 100% with no transform, and the photo is where it was', { z5, before, after });
     // with Lock on at 100% nothing moves it
     await dragBy(page, c, 60, 60);
@@ -1809,6 +1825,19 @@ async function zoomTests(t, site) {
     after = await placeOf(page);
     t.check(after.cx > before.cx + 0.03, 'zoom: at 100% a drag moves the photo again', { before, after });
     await clean(t, page, 'zoom with touch');
+  });
+  await seg(t, 'zoom: the pan sliders on small phones', async (pages) => {
+    for (const vp of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 568, height: 320 }, { width: 844, height: 390 }]) {
+      const page = await recorded(site, { url: '#trace', viewport: vp, closed: true }); pages.push(page);
+      await startCamera(page); await zoomTaps(page, 2);
+      const pn = await panNow(page);
+      t.check(!pn.hidden && pn.box[0] >= 0 && pn.box[2] <= vp.width && pn.box[1] >= 0 && pn.box[3] <= vp.height && !boxMeet(pn.box, pn.zoombar) && !boxMeet(pn.box, pn.tools) && pn.hx >= 40 && pn.hy >= 40, `${vp.width} × ${vp.height}: the pan sliders are on the screen, clear of Tools and the zoom buttons`, pn);
+      // a message while zoomed in sits clear of the sliders
+      await choose(page, await makeImage(page, { width: 700, height: 500, name: 'pz.png' })); await sleep(300);
+      const toast = await rectOf(page, '#toast');
+      t.check(!toast || !meet(toast, { x: pn.box[0], y: pn.box[1], r: pn.box[2], b: pn.box[3] }), `${vp.width} × ${vp.height}: the message about the photo does not cover the pan sliders`, { toast, pn: pn.box });
+      await clean(t, page, `pan sliders ${vp.width}`);
+    }
   });
   await seg(t, 'zoom: the keyboard, a turned phone and no photo', async (pages) => {
     const page = await recorded(site, { url: '#trace', viewport: DESKTOP }); pages.push(page);
