@@ -43,6 +43,8 @@ const RECORD = () => {
   } catch (e) { /* no wake lock to stand in for */ }
 };
 // a page whose camera calls are recorded (the init script runs before the app's scripts on the reload)
+// after every load of the page (a reload too) the pop-up is opened as soon as the module is there
+const OPEN_TOOLS = () => { const iv = setInterval(() => { if (window.Trace && window.Trace.tools) { clearInterval(iv); window.Trace.tools(true); } }, 20); setTimeout(() => clearInterval(iv), 15000); };
 async function recorded(site, opts = {}) {
   const page = await openPage(site, opts);
   // (a stand-in the case puts under the page goes first, so the record shows what the page itself asked for)
@@ -50,6 +52,8 @@ async function recorded(site, opts = {}) {
   await page.addInitScript(RECORD);
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.Studio && Studio.result() && window.Trace, null, { timeout: 30000 }).catch(() => null);
+  // the controls are a pop-up that starts closed: the cases that look at the strip start with it open (opts.closed keeps it shut)
+  if (!opts.closed) { await app(page).evaluate(() => window.Trace && Trace.tools(true)).catch(() => null); await page.addInitScript(OPEN_TOOLS); }
   return page;
 }
 
@@ -141,7 +145,7 @@ export default async function trace(t, site) {
     await screenshot(page, 'trace-desktop-first');
     await clean(t, page, 'the menu');
     // the route, at a phone's width: the focus goes to Start camera (the header and tabs stepped aside)
-    const p2 = await recorded(site, { url: '#trace', viewport: PHONE }); pages.push(p2);
+    const p2 = await recorded(site, { url: '#trace', viewport: PHONE, closed: true }); pages.push(p2);
     await settled(p2);
     s = await st(p2);
     const r2 = await p2.evaluate(() => ({ tabs: getComputedStyle(document.querySelector('.tabs')).display, top: getComputedStyle(document.querySelector('.topbar')).display, focus: document.activeElement && document.activeElement.id }));
@@ -560,6 +564,7 @@ export default async function trace(t, site) {
       page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) page.log.offsite.push(u); });
       await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${e.blockedURI}`); }); });
       await page.addInitScript(RECORD);
+      await page.addInitScript(OPEN_TOOLS);
       pages.push(page);
       const cdp = await context.newCDPSession(page);
       await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets });
@@ -576,7 +581,7 @@ export default async function trace(t, site) {
       await settled(page);
       const lay = await boxes(page);
       const upright = vp.height > vp.width;
-      t.check(upright ? lay.strip.y >= lay.stage.b - 1 && near(lay.strip.w, vp.width, 1) : lay.strip.r <= lay.stage.x + 1 && near(lay.strip.h, vp.height, 1), `${label}: the strip runs ${upright ? 'along the bottom' : 'down the side'}, the camera picture beside it`, { strip: lay.strip, stage: lay.stage });
+      t.check(upright ? lay.strip.b >= lay.stage.b - 1 && lay.strip.y > lay.stage.y + 100 && near(lay.strip.w, vp.width, 1) : lay.strip.x <= lay.stage.x + 1 && lay.strip.w <= 280 && near(lay.strip.h, vp.height, 1), `${label}: the pop-up runs ${upright ? 'along the bottom' : 'down the side'}, over the camera's picture, which has the whole screen`, { strip: lay.strip, stage: lay.stage });
       const bands = await inBands(page, insets);
       t.check(!bands.length, `${label}, the camera on, a photo, Advanced: every control on the screen and clear of the notch, the corners and the home indicator`, bands);
       const sizes = await page.evaluate(() => [...document.querySelectorAll('#tr-strip button')].filter((b) => b.getBoundingClientRect().width > 0).map((b) => { const r = b.getBoundingClientRect(); return [b.id, Math.round(r.width), Math.round(r.height)]; }));
@@ -631,6 +636,8 @@ export default async function trace(t, site) {
   await reviewFixes(t, site);
   // ---- zoom: the view magnified, the photo kept where it is on the paper (the end of this file) ----------------------------------
   await zoomTests(t, site);
+  // ---- the controls are a pop-up over the picture (the end of this file) ---------------------------------------------------------
+  await popupTests(t, site);
 }
 
 // =====================================================================================================================
@@ -678,7 +685,7 @@ async function chosen(page, file, timeout = 30000) {
   const ms = Date.now() - t0; await settled(page); return ms;
 }
 // a phone with a touch screen: its own context, the page's record kept as the others' are, and a CDP session for real fingers
-async function touchPage(site, vp = PHONE, url = '#trace') {
+async function touchPage(site, vp = PHONE, url = '#trace', closed = false) {
   const context = await site.browser.newContext({ viewport: vp, hasTouch: true, isMobile: true });
   const page = await context.newPage();
   page.log = { pageerrors: [], console: [], csp: [], offsite: [], failed: [], warnings: [] };
@@ -690,6 +697,7 @@ async function touchPage(site, vp = PHONE, url = '#trace') {
   page.cdp = await context.newCDPSession(page);
   await page.goto(site.base + url, { waitUntil: 'load' });
   await page.waitForFunction(() => window.Trace && Studio.result(), null, { timeout: 30000 }).catch(() => null);
+  if (!closed) { await page.evaluate(() => window.Trace && Trace.tools(true)).catch(() => null); await page.addInitScript(OPEN_TOOLS); }
   return page;
 }
 // one finger of a set the test makes itself (a trusted set only comes whole from CDP): the page's handlers read nothing but the pointer's id, kind and place
@@ -1095,7 +1103,7 @@ async function edgeCases(t, site) {
     await clean(t, ph, 'a long file name');
 
     // a photo placed before the camera starts keeps its place over the picture when the camera comes
-    const pre = await recorded(site, { url: '#trace' }); pages.push(pre);
+    const pre = await recorded(site, { url: '#trace', closed: true }); pages.push(pre);
     await click(pre, '#tr-useStudy'); await settled(pre);
     s = await st(pre);
     t.check(s.photoShown && !s.live && fitsPicture(await boxes(pre)), 'a photo chosen before the camera starts shows, fitted to the stage (there is no camera picture yet)', { shown: s.photoShown, live: s.live });
@@ -1695,6 +1703,7 @@ async function reviewFixes(t, site) {
       page.on('pageerror', (e) => page.log.pageerrors.push(String(e.message).slice(0, 300)));
       page.on('console', (m) => { if (m.type() === 'error') page.log.console.push(m.text().slice(0, 300)); });
       page.on('request', (r) => { const u = r.url(); if (!u.startsWith(site.base) && !u.startsWith('blob:') && !u.startsWith('data:')) page.log.offsite.push(u); });
+      await page.addInitScript(OPEN_TOOLS);
       await page.addInitScript(() => { document.addEventListener('securitypolicyviolation', (e) => { (window.__csp = window.__csp || []).push(`${e.violatedDirective} ${e.blockedURI}`); }); });
       await page.addInitScript(SECOND_CAMERA);
       await page.addInitScript(RECORD);
@@ -1829,5 +1838,74 @@ async function zoomTests(t, site) {
     const back = await zoomNow(page);
     t.check(back.tf === '' && back.out === '100%' && back.x === 0.5 && !back.minus, 'zoom: the 100% readout is a button back to the whole picture, with no transform', back);
     await clean(t, page, 'zoom with the keyboard');
+  });
+}
+
+// =====================================================================================================================
+// The controls are a pop-up: the camera's picture has the whole screen, Tools opens the strip over it, Hide and Esc close it
+// =====================================================================================================================
+const rectOf = (page, sel) => app(page).evaluate((sel) => { const e = document.querySelector(sel); if (!e || e.hidden || !e.getClientRects().length) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; }, sel);
+const meet = (a, b) => !!a && !!b && Math.min(a.r, b.r) - Math.max(a.x, b.x) > 1 && Math.min(a.b, b.b) - Math.max(a.y, b.y) > 1;
+async function popupTests(t, site) {
+  for (const [label, vp] of [['upright', PHONE], ['on its side', { width: 844, height: 390 }]]) {
+    await seg(t, `pop-up: ${label}`, async (pages) => {
+      const page = await recorded(site, { url: '#trace', viewport: vp, closed: true }); pages.push(page);
+      let s = await app(page).evaluate(() => ({ open: Trace.state.tools, strip: !document.getElementById('tr-strip').hidden, btn: !document.getElementById('tr-tools').hidden, exp: document.getElementById('tr-tools').getAttribute('aria-expanded'), name: document.getElementById('tr-tools').textContent.trim() }));
+      t.check(!s.open && !s.strip && s.btn && s.exp === 'false' && s.name === 'Tools', `${label}: the controls start closed, with a Tools button`, s);
+      t.check(await startCamera(page), `${label}: the camera starts with the tools closed`);
+      await settled(page);
+      const stage = await rectOf(page, '#tr-stage'), wrapClosed = await rectOf(page, '#tr-wrap');
+      t.check(stage.w >= vp.width - 1 && stage.h >= vp.height - 1, `${label}: the camera's stage is the whole screen`, stage);
+      t.check(Math.abs(wrapClosed.w - Math.min(vp.width, Math.round(vp.height * 16 / 9))) <= 2 || wrapClosed.h >= vp.height - 2 || wrapClosed.w >= vp.width - 2, `${label}: the picture fills the screen as far as its shape allows`, { wrapClosed, vp });
+      const tools = await rectOf(page, '#tr-tools');
+      t.check(tools && tools.w >= 44 && tools.h >= 44 && tools.x >= 0 && tools.b <= vp.height, `${label}: the Tools button is at least 44 px and on the screen`, tools);
+      await click(page, '#tr-tools'); await settled(page);
+      s = await app(page).evaluate(() => ({ open: Trace.state.tools, strip: !document.getElementById('tr-strip').hidden, btn: !document.getElementById('tr-tools').hidden, focus: document.activeElement && document.activeElement.id }));
+      t.check(s.open && s.strip && !s.btn && s.focus === 'tr-toolsHide', `${label}: Tools opens the pop-up, the button gives way and the focus goes into it`, s);
+      const strip = await rectOf(page, '#tr-strip'), wrapOpen = await rectOf(page, '#tr-wrap');
+      t.check(wrapOpen.w === wrapClosed.w && wrapOpen.h === wrapClosed.h && wrapOpen.x === wrapClosed.x && wrapOpen.y === wrapClosed.y, `${label}: the pop-up is over the picture, which keeps its size and place`, { wrapClosed, wrapOpen });
+      t.check(label === 'upright' ? strip.b >= vp.height - 1 && strip.x <= 1 && strip.r >= vp.width - 1 && strip.h <= vp.height * 0.73 : strip.x <= 1 && strip.y <= 1 && strip.b >= vp.height - 1 && strip.w <= 260, `${label}: the pop-up runs ${label === 'upright' ? 'along the bottom' : 'down the left'} and leaves the rest of the screen`, strip);
+      await page.keyboard.press('Escape'); await settled(page);
+      s = await app(page).evaluate(() => ({ open: Trace.state.tools, strip: !document.getElementById('tr-strip').hidden, focus: document.activeElement && document.activeElement.id, still: !document.getElementById('tab-trace').hidden }));
+      t.check(!s.open && !s.strip && s.focus === 'tr-tools' && s.still, `${label}: Esc closes the pop-up and the focus goes back to Tools (the tool stays open)`, s);
+      await click(page, '#tr-tools'); await click(page, '#tr-toolsHide'); await settled(page);
+      s = await app(page).evaluate(() => ({ open: Trace.state.tools, focus: document.activeElement && document.activeElement.id }));
+      t.check(!s.open && s.focus === 'tr-tools', `${label}: Hide closes it too`, s);
+      // a photo chosen while it is closed: the message sits clear of the Tools button
+      await choose(page, await makeImage(page, { width: 800, height: 600, name: 'pop.png' }));
+      await app(page).waitForFunction(() => Trace.state.photo, null, { timeout: 10000 }).catch(() => null);
+      await sleep(250);
+      const toast = await rectOf(page, '#toast'), tl = await rectOf(page, '#tr-tools');
+      t.check(!toast || !meet(toast, tl), `${label}: the message after choosing a photo does not cover the Tools button`, { toast, tl });
+      await click(page, '#tr-tools'); await sleep(150); await choose(page, await makeImage(page, { width: 700, height: 500, name: 'pop2.png' })); await sleep(300);
+      const toast2 = await rectOf(page, '#toast'), st2 = await rectOf(page, '#tr-strip');
+      t.check(!toast2 || !meet(toast2, st2), `${label}: with the pop-up open the message sits clear of it`, { toast2, st2 });
+      await clean(t, page, `pop-up ${label}`);
+    });
+  }
+  await seg(t, 'pop-up: the card and the camera off, a small phone', async (pages) => {
+    for (const vp of [{ width: 320, height: 568 }, { width: 568, height: 320 }]) {
+      const page = await recorded(site, { url: '#trace', viewport: vp, closed: true }); pages.push(page);
+      await click(page, '#tr-tools'); await settled(page); await sleep(150);
+      const start = await rectOf(page, '#tr-start'), strip = await rectOf(page, '#tr-strip'), card = await rectOf(page, '#tr-card');
+      t.check(start && strip && !meet(start, strip) && start.x >= 0 && start.r <= vp.width && start.y >= 0 && start.b <= vp.height, `${vp.width} × ${vp.height}: with the pop-up open and the camera off, the card's Start camera button is not under the pop-up`, { start, strip, card });
+      await choose(page, await makeImage(page, { width: 600, height: 400, name: 'c.png' })); await sleep(300);
+      const toast = await rectOf(page, '#toast');
+      t.check(!toast || !meet(toast, start), `${vp.width} × ${vp.height}: the message about the photo does not cover Start camera`, { toast, start });
+      await clean(t, page, `pop-up card ${vp.width}`);
+    }
+  });
+  await seg(t, 'pop-up: the phone\'s ← and the keyboard', async (pages) => {
+    const page = await recorded(site, { url: '#trace', viewport: PHONE, closed: true }); pages.push(page);
+    const ex = await rectOf(page, '#tr-exit');
+    t.check(ex && ex.w >= 44 && ex.h >= 44 && ex.x >= 0 && ex.y >= 0, 'pop-up: with the tools closed ← is on the picture, at least 44 px, top left', ex);
+    await click(page, '#tr-exit'); await sleep(300);
+    t.check((await st(page)).tab === 'study', 'pop-up: ← leaves the tool with the tools closed');
+    await click(page, '[data-tab="trace"]'); await sleep(300); await click(page, '#tabLearnBtn').catch(() => null);
+    // from the keyboard: Tab reaches Tools, Enter opens it, the focus is inside, Tab stays inside the controls until Hide
+    await app(page).evaluate(() => { Studio.go('trace'); Trace.tools(false); document.getElementById('tr-tools').focus(); });
+    await page.keyboard.press('Enter'); await settled(page);
+    t.check((await active(page)) === 'tr-toolsHide' && (await app(page).evaluate(() => Trace.state.tools)), 'pop-up: Enter on Tools opens it and the focus is on its first control');
+    await clean(t, page, 'pop-up ← and keyboard');
   });
 }
