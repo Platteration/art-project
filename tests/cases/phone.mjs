@@ -192,7 +192,10 @@ export default async function phone(t, site) {
           const root = await rect(page, '#tr-root');
           const full = vp.width < 760 || vp.height < 560;
           t.check(full ? fills(root, vp) : root && root.x >= 0 && root.r <= vp.width && root.b <= vp.height + 1 && root.h >= 240, `${size(vp)}: ${LABEL[name]} ${full ? 'fills the screen' : 'sits inside the window below the tabs'}`, round(root));
-          const ctl = await page.evaluate(() => [...document.querySelectorAll('#tr-strip button, #tr-strip input[type=range], #tr-card button')].filter((b) => b.getBoundingClientRect().width > 0 && !b.closest('[hidden]')).map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, w: Math.round(r.width), h: Math.round(r.height), off: r.left < -1 || r.top < -1 || r.right > innerWidth + 1 || r.bottom > innerHeight + 1 }; }));
+          // the controls are a pop-up that starts closed: opened by its Tools button, as a finger does, and the zoom buttons count too
+          if (await page.evaluate(() => document.getElementById('tr-strip').hidden)) await tapEl(page, '#tr-tools'); // (it stays open from an earlier size)
+          await settle(page);
+          const ctl = await page.evaluate(() => [...document.querySelectorAll('#tr-strip button, #tr-strip input[type=range], #tr-card button, .tr-zb')].filter((b) => b.getBoundingClientRect().width > 0 && !b.closest('[hidden]')).map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, w: Math.round(r.width), h: Math.round(r.height), off: r.left < -1 || r.top < -1 || r.right > innerWidth + 1 || r.bottom > innerHeight + 1 }; }));
           const bad = ctl.filter((c) => c.off || (c.id !== 'tr-transparency' && c.id !== 'tr-size' && (c.h < 44 || c.w < 24)));
           t.check(ctl.length >= 9 && !bad.length, `${size(vp)}: every control of ${LABEL[name]} is on the screen, its buttons at least 44 px tall and 24 px wide`, bad.slice(0, 4).concat(bad.length ? [] : [`${ctl.length} controls`]));
         }
