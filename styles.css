@@ -1685,6 +1685,10 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tr-tools { left: max(12px, env(safe-area-inset-left, 0px)); bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
 .tr-tools[hidden], .tr-leave[hidden] { display: none; }
 .tr-leave { display: none; left: max(8px, env(safe-area-inset-left, 0px)); top: calc(env(safe-area-inset-top, 0px) + 8px); padding: 0; }
+.tr-pan { position: absolute; z-index: 5; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + 54px); width: min(300px, calc(100% - 24px - max(0px, env(safe-area-inset-left, 0px)) - max(0px, env(safe-area-inset-right, 0px)))); display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 10px; padding: 4px 12px; border-radius: 14px; color: #faf5ea; background: rgba(20, 24, 20, 0.88); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); }
+.tr-pan[hidden] { display: none; }
+.tr-pan label { font: 600 0.72rem/1.2 var(--body); white-space: nowrap; }
+.tr-pan input[type="range"] { width: 100%; height: 40px; margin: 0; accent-color: #faf5ea; }
 .tr-hit { position: absolute; inset: 0; z-index: 2; touch-action: none; cursor: grab; }
 .tr-hit:active { cursor: grabbing; }
 .tr-hit[tabindex="-1"], .tr-locked .tr-hit { cursor: default; }
@@ -1729,7 +1733,7 @@ body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 
   .tr-sliders { gap: 2px; }
 }
 /* phones: the header and tabs step aside (above), so the strip leads back with ← */
-@media (max-width: 759px), (max-height: 559px) { .tr-leave { display: inline-flex; } }
+@media (max-width: 759px), (max-height: 559px) { .tr-leave { display: inline-flex; } .tr-status { max-width: calc(100% - 128px); } } /* (the status line is centred: room for ← on the left and as much on the right) */
 /* a phone upright: the buttons in rows of equal cells, each as wide as a finger and with its caption (Simple has eight, in
    two rows of four where a row of eight would be too narrow; Advanced has ten, in two rows of five) */
 @media (max-width: 374px) and (orientation: portrait) {
