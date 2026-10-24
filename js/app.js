@@ -515,8 +515,24 @@
         refuse('That picture cannot be read here (an SVG that holds text or HTML laid out by the browser is one). Save it as a PNG or JPG first.', 6000);
         return;
       }
-      const r = shrinkIfHuge(img, w, h);
-      done(r.source, r.note);
+      // a PNG (a phone's screenshots are PNGs, and so is a file with no type) is kept as a canvas copy, not as the image element:
+      // on an iPhone in Safari such an element can draw as nothing, and the studies, which draw the picture again at every
+      // change, then turn it into a flat gray. A copy that comes out blank is made again from the file itself (createImageBitmap),
+      // and a picture that is blank either way (fully see-through) is left as it was.
+      const finish = (src) => { const r = shrinkIfHuge(src, w, h); done(r.source, r.note); };
+      if ((!typed || /png/i.test(file.type)) && w * h <= HUGE_PIXELS) {
+        const first = copyOf(img, w, h);
+        if (first && !drewNothing(first)) { finish(first); return; }
+        if (window.createImageBitmap) {
+          createImageBitmap(file).then((bmp) => {
+            const second = copyOf(bmp, w, h);
+            if (bmp.close) bmp.close();
+            if (job === readJobs[slot]) finish(second && !drewNothing(second) ? second : img);
+          }, () => { if (job === readJobs[slot]) finish(img); });
+          return;
+        }
+      }
+      finish(img);
     };
     const failed = () => {
       if (settled) return;
@@ -537,6 +553,29 @@
   // than twice the biggest working size, which is more than the studies ever use, and the big
   // decoded image is let go.
   const HUGE_PIXELS = 24e6;
+  // a copy of a picture on a canvas of its own, at its own size (a phone's canvas holds about 16 million pixels: larger is scaled down)
+  function copyOf(src, w, h) {
+    const k = Math.min(1, Math.sqrt(16e6 / (w * h)));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const g = c.getContext('2d');
+    if (!g) return null;
+    try { g.drawImage(src, 0, 0, c.width, c.height); } catch (err) { return null; }
+    return c;
+  }
+  // nothing was drawn: every pixel of a 16 px copy is see-through
+  function drewNothing(cv) {
+    const t = document.createElement('canvas');
+    t.width = t.height = 16;
+    const g = t.getContext('2d');
+    if (!g) return false;
+    try {
+      g.drawImage(cv, 0, 0, 16, 16);
+      const d = g.getImageData(0, 0, 16, 16).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return false;
+      return true;
+    } catch (err) { return false; }
+  }
   const SHRINK_SIDE = 2800;
   // Returns { source, note }: the image or its reduced copy, and the sentence to tell the visitor (or '').
   function shrinkIfHuge(img, w, h) {
