@@ -1836,6 +1836,13 @@ async function zoomTests(t, site) {
       await choose(page, await makeImage(page, { width: 700, height: 500, name: 'pz.png' })); await sleep(300);
       const toast = await rectOf(page, '#toast');
       t.check(!toast || !meet(toast, { x: pn.box[0], y: pn.box[1], r: pn.box[2], b: pn.box[3] }), `${vp.width} × ${vp.height}: the message about the photo does not cover the pan sliders`, { toast, pn: pn.box });
+      // with Tools open the sliders are not under the pop-up: both are on top at their middle, and they come back down when it closes
+      await click(page, '#tr-tools'); await settled(page); await sleep(150);
+      const po = await app(page).evaluate(() => { const q = (id) => { const e = document.getElementById(id), r = e.getBoundingClientRect(); return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), top: (() => { const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return h && h.id; })() }; }; return { x: q('tr-panX'), y: q('tr-panY'), pan: q('tr-pan').box, strip: q('tr-strip').box, vw: innerWidth, vh: innerHeight }; });
+      t.check(po.x.top === 'tr-panX' && po.y.top === 'tr-panY' && !boxMeet(po.pan, po.strip) && po.pan[0] >= 0 && po.pan[2] <= po.vw && po.pan[3] <= po.vh, `${vp.width} × ${vp.height}: with Tools open the pan sliders are above or beside the pop-up, not under it`, po);
+      await click(page, '#tr-toolsHide'); await settled(page); await sleep(150);
+      const pc = await panNow(page);
+      t.check(!pc.hidden && !boxMeet(pc.box, pc.tools) && pc.box[3] <= pc.vh, `${vp.width} × ${vp.height}: closed again, the sliders are back above Tools`, pc);
       await clean(t, page, `pan sliders ${vp.width}`);
     }
   });
