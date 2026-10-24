@@ -773,8 +773,8 @@ async function phoneMenus(t, site, pages) {
   }));
   const box = (sel) => page.evaluate((s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), shown: !e.hidden && getComputedStyle(e).display !== 'none' && r.width > 0 }; }, sel);
   const tabsShown = async () => !!(await box('.tabs')).shown;
-  const NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', help: 'How to use', game: 'Paint by numbers', battle: 'Value battle' };
-  const GROUP = { study: 'tabLearnBtn', loomis: 'tabLearnBtn', pose: 'tabLearnBtn', help: 'tabLearnBtn', game: 'tabGamesBtn', battle: 'tabGamesBtn', paint: 'tabPaintBtn', figure: 'tabFigureBtn' };
+  const NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', trace: 'Trace onto paper', help: 'How to use', game: 'Paint by numbers', battle: 'Value battle' };
+  const GROUP = { study: 'tabLearnBtn', loomis: 'tabLearnBtn', pose: 'tabLearnBtn', trace: 'tabLearnBtn', help: 'tabLearnBtn', game: 'tabGamesBtn', battle: 'tabGamesBtn', paint: 'tabPaintBtn', figure: 'tabFigureBtn' };
   // a section reached by a tap on its menu, as a visitor does: the menu opens on the screen and closes on the choice
   async function viaMenu(name) {
     const btn = GROUP[name], menu = btn === 'tabLearnBtn' ? '#tabLearnMenu' : '#tabGamesMenu';

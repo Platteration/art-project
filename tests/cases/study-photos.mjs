@@ -1463,4 +1463,31 @@ export default async function studyPhotos(t, site) {
     await page.context().close();
   }
   t.note('Round 2 closed these from the first pass\'s list: the GIF (written in the case, the first note above is out of date for it); a drop that announces Files but carries none (now a finding); a reload in the middle of a 1400 px study; Forget in a second tab while this one reads a photo. Still left out: the toast race (a marks-cleared message and a text drop at once: the later message replaces the earlier one by design, so there is no defect to assert).');
+
+  // ---- a screenshot on an iPhone: the image element can draw nothing, and the studies were then flat gray ----------------
+  {
+    // Safari did this for PNG screenshots: the page's own image element drew blank. It is made here by a drawImage that ignores
+    // image elements (canvases and bitmaps still draw); the PNG must come out as a canvas copy with the picture in it, and the
+    // value study must show the picture, not one gray
+    for (const [name, blindImg] of [['an ordinary browser', false], ['a browser whose image element draws nothing', true]]) {
+      const page = await openPage(site);
+      if (blindImg) {
+        await page.addInitScript(() => { const d = CanvasRenderingContext2D.prototype.drawImage; CanvasRenderingContext2D.prototype.drawImage = function (src, ...r) { if (src instanceof HTMLImageElement && this.canvas.width !== 16) return; return d.call(this, src, ...r); }; });
+        await page.reload();
+      }
+      await page.waitForFunction(() => window.Studio && Studio.result && Studio.result(), null, { timeout: 30000 }).catch(() => null);
+      const shot = await makeImage(page, { width: 1179, height: 2556, type: 'image/png', name: 'Screenshot 2026-10-24.png' });
+      await page.setInputFiles('#file', shot);
+      await waitLabel(page, 'Screenshot 2026-10-24.png');
+      const r = await page.evaluate(() => {
+        const src = Studio.source(), c = document.getElementById('cv-value'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        const seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i]);
+        return { kind: src.constructor.name, w: src.width, h: src.height, grays: seen.size, label: document.getElementById('source').textContent };
+      });
+      t.check(r.w === 1179 && r.h === 2556 && r.kind === 'HTMLCanvasElement', `a PNG screenshot in ${name} is kept as a canvas copy at its own size (not as the image element)`, r);
+      t.check(r.grays >= 3, `a PNG screenshot in ${name}: the value study shows the picture (several grays), not one flat gray`, r);
+      await clean(t, page, `a PNG screenshot in ${name}`);
+      await page.context().close();
+    }
+  }
 }

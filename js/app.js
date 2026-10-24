@@ -33,7 +33,7 @@
       orig: $('cv-orig'), value: $('cv-value'), block: $('cv-block'),
       refblock: $('cv-refblock'), art: $('cv-art'), artblock: $('cv-artblock'), diff: $('cv-diff'),
     },
-    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), paint: $('tab-paint'), figure: $('tab-figure'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
+    tabPanels: { study: $('tab-study'), loomis: $('tab-loomis'), pose: $('tab-pose'), trace: $('tab-trace'), paint: $('tab-paint'), figure: $('tab-figure'), game: $('tab-game'), battle: $('tab-battle'), help: $('tab-help') },
     toolHint: $('toolHint'),
     lineUndo: $('lineUndo'),
     lineClear: $('lineClear'),
@@ -475,7 +475,7 @@
 
   // The last file chosen wins: a read still under way when another file is chosen for the same
   // place (two files in the same instant) shows nothing and says nothing when it finishes.
-  const readJobs = { photo: 0, art: 0 };
+  const readJobs = { photo: 0, art: 0, trace: 0 };
   // extra: a sentence about how the file arrived (the others dropped with it), said before any refusal
   // and with the photo's own note on success
   function readImage(file, done, slot = 'photo', extra = '') {
@@ -504,7 +504,7 @@
       // viewBox, where the browser gives it none: Chromium gives such an SVG 300 x 150, and it loads as
       // that), and one under 16 px a side has nothing to study: each is told what is wrong with it
       if (w < 16 || h < 16) {
-        refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${slot === 'art' ? 'check' : 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
+        refuse(!w || !h ? 'That image has no usable size. Use a JPG, PNG or WebP photo.' : `That picture is too small to ${{ art: 'check', trace: 'trace' }[slot] || 'study'} (${w} × ${h} px): it needs at least 16 px on each side.`, 5000);
         return;
       }
       // a picture the browser draws but will not let the page read back (an SVG with a foreignObject) would
@@ -515,8 +515,24 @@
         refuse('That picture cannot be read here (an SVG that holds text or HTML laid out by the browser is one). Save it as a PNG or JPG first.', 6000);
         return;
       }
-      const r = shrinkIfHuge(img, w, h);
-      done(r.source, r.note);
+      // a PNG (a phone's screenshots are PNGs, and so is a file with no type) is kept as a canvas copy, not as the image element:
+      // on an iPhone in Safari such an element can draw as nothing, and the studies, which draw the picture again at every
+      // change, then turn it into a flat gray. A copy that comes out blank is made again from the file itself (createImageBitmap),
+      // and a picture that is blank either way (fully see-through) is left as it was.
+      const finish = (src) => { const r = shrinkIfHuge(src, w, h); done(r.source, r.note); };
+      if ((!typed || /png/i.test(file.type)) && w * h <= HUGE_PIXELS) {
+        const first = copyOf(img, w, h);
+        if (first && !drewNothing(first)) { finish(first); return; }
+        if (window.createImageBitmap) {
+          createImageBitmap(file).then((bmp) => {
+            const second = copyOf(bmp, w, h);
+            if (bmp.close) bmp.close();
+            if (job === readJobs[slot]) finish(second && !drewNothing(second) ? second : img);
+          }, () => { if (job === readJobs[slot]) finish(img); });
+          return;
+        }
+      }
+      finish(img);
     };
     const failed = () => {
       if (settled) return;
@@ -537,6 +553,29 @@
   // than twice the biggest working size, which is more than the studies ever use, and the big
   // decoded image is let go.
   const HUGE_PIXELS = 24e6;
+  // a copy of a picture on a canvas of its own, at its own size (a phone's canvas holds about 16 million pixels: larger is scaled down)
+  function copyOf(src, w, h) {
+    const k = Math.min(1, Math.sqrt(16e6 / (w * h)));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const g = c.getContext('2d');
+    if (!g) return null;
+    try { g.drawImage(src, 0, 0, c.width, c.height); } catch (err) { return null; }
+    return c;
+  }
+  // nothing was drawn: every pixel of a 16 px copy is see-through
+  function drewNothing(cv) {
+    const t = document.createElement('canvas');
+    t.width = t.height = 16;
+    const g = t.getContext('2d');
+    if (!g) return false;
+    try {
+      g.drawImage(cv, 0, 0, 16, 16);
+      const d = g.getImageData(0, 0, 16, 16).data;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return false;
+      return true;
+    } catch (err) { return false; }
+  }
   const SHRINK_SIDE = 2800;
   // Returns { source, note }: the image or its reduced copy, and the sentence to tell the visitor (or '').
   function shrinkIfHuge(img, w, h) {
@@ -557,8 +596,9 @@
     return { source: c, note: `A very large photo (${w} × ${h}) was reduced to ${c.width} × ${c.height} for speed.` };
   }
 
-  // the tabs that show the loaded photo (the Studio and the Loomis head follow it; the game's setup takes it)
-  const SHOWS_PHOTO = ['study', 'paint', 'loomis', 'game'];
+  // the tabs that show the loaded photo (the Studio and the Loomis head follow it; the game's setup takes it; Trace onto
+  // paper puts it over the camera, which keeps running)
+  const SHOWS_PHOTO = ['study', 'paint', 'loomis', 'game', 'trace'];
   function loadFile(file, extra) {
     readImage(file, (img, note) => {
       // a photo loaded where it is not shown: from the guide or Pose and light, Study the photo opens with it;
@@ -649,7 +689,7 @@
     e.preventDefault();
     dragDepth++;
     els.dropHint.firstElementChild.textContent =
-      checking() ? 'Drop your painting to check it' : 'Drop the portrait to load it';
+      checking() ? 'Drop your painting to check it' : state.tab === 'trace' ? 'Drop the photo to trace it' : 'Drop the portrait to load it';
     els.dropHint.hidden = false;
   });
   // Every drag over the page is claimed, so dropping text, a link or a picture from another tab can
@@ -2223,11 +2263,11 @@
 
   // ---- Tabs ---------------------------------------------------------------
 
-  // Four sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, How to use),
+  // Four sections at the top: Learning tools (a menu: Study the photo, Loomis head, Pose and light, Trace onto paper, How to use),
   // Studio, Figure study, and Games (a menu: Paint by numbers and Value battle). A menu's button shows
   // which of its pages is open.
-  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', help: 'learn', paint: 'paint', figure: 'figure', game: 'games', battle: 'games' };
-  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', help: 'How to use', paint: 'Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
+  const GROUP_OF = { study: 'learn', loomis: 'learn', pose: 'learn', trace: 'learn', help: 'learn', paint: 'paint', figure: 'figure', game: 'games', battle: 'games' };
+  const TAB_NAMES = { study: 'Study the photo', loomis: 'Loomis head', pose: 'Pose and light', trace: 'Trace onto paper', help: 'How to use', paint: 'Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
   const groupBtns = { learn: $('tabLearnBtn'), paint: $('tabPaintBtn'), figure: $('tabFigureBtn'), games: $('tabGamesBtn') };
   const groupSubs = { learn: $('tabLearnSub'), games: $('tabGamesSub') };
   function closeMenus() {
@@ -2294,14 +2334,24 @@
     const menu = $(btn.getAttribute('aria-controls'));
     // Tab (or anything) taking the focus out of the group closes its menu, as Esc and a tap elsewhere do
     const group = btn.closest('.tab-group');
-    if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
+    // (a focus that goes nowhere, relatedTarget null, is not a Tab out: Safari drops the focus when a menu item is tapped, which would
+    // close the menu before the tap lands; leaving the window and a tap elsewhere are closed by their own listeners below)
+    if (group) group.addEventListener('focusout', (e) => { if (!menu.hidden && e.relatedTarget && !group.contains(e.relatedTarget)) { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); } });
     // the items the guard has not taken off the menu (a hidden one cannot take the focus)
     const items = () => [...menu.querySelectorAll('.tab-item')].filter((b) => !b.hidden);
     const focusIn = () => { const on = items().find((b) => b.getAttribute('aria-checked') === 'true') || items()[0]; if (on) on.focus(); };
     btn.addEventListener('click', () => {
       const open = menu.hidden;
       closeMenus();
-      if (open) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); focusIn(); }
+      if (open) {
+        menu.hidden = false; btn.setAttribute('aria-expanded', 'true');
+        // a menu longer than the room under its button (a phone's bar takes the foot of the screen, and the page behind it
+        // does not scroll the menu) scrolls inside itself, so the last items can be reached
+        const seen = window.visualViewport ? visualViewport.height : window.innerHeight;
+        menu.style.maxHeight = `${Math.max(160, Math.floor(seen - menu.getBoundingClientRect().top - 12))}px`;
+        menu.scrollIntoView({ block: 'nearest' }); // a short screen (a phone on its side) leaves less than the least height: the page goes up
+        focusIn();
+      }
     });
     // ArrowDown opens the menu, or moves into it when it is already open (it never closes it)
     btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); if (menu.hidden) btn.click(); else focusIn(); } });
@@ -2817,6 +2867,9 @@
     prep: () => state.prep,
     savePng,
     openDialog,
+    // the photo checks every way in uses (the type, the size, an SVG that cannot be read back, a huge photo reduced), for a
+    // module with a photo of its own: done(picture, note) only for a picture that passed, a refusal is said in the toast
+    readImage: (file, done, slot, extra) => readImage(file, done, slot, extra),
     sourceKey: () => state.source && `${sourceKeyName()}:${state.source.width}x${state.source.height}`,
     sourceTitle: () => state.sourceTitle,
     sourceBase: () => state.baseName, // a photo's name without its extension (its key's name, unless it is sample-study)
@@ -2855,7 +2908,7 @@
   }
   // the address's #part opens that part: at load, and whenever it changes later (Back and Forward between two
   // of them, a link followed, one typed); an address with none, met by going Back, is the Study tab
-  const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
+  const ROUTES = { '#check': 'study', '#game': 'game', '#paint': 'paint', '#help': 'help', '#loomis': 'loomis', '#pose': 'pose', '#trace': 'trace', '#figure': 'figure', '#battle': 'battle', '#study': 'study' };
   function routeHash(e) {
     // a shortcut typed by hand matches however it is written: #Help, #help/ and #loomis?x name their tabs
     const h = location.hash.toLowerCase().replace(/[/?&].*$/, '');

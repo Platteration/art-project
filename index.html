@@ -47,6 +47,7 @@
         <button type="button" role="menuitemradio" class="tab-item" id="tabStudyBtn" data-tab="study" aria-checked="true"><span>Study the photo</span><small>Dark, middle, light; colors and paints; how close you got</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabLoomisBtn" data-tab="loomis" aria-checked="false"><span>Loomis head</span><small>Mark the features, get the head construction</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabPoseBtn" data-tab="pose" aria-checked="false"><span>Pose and light</span><small>Pose a wooden figure, move one lamp, see its values</small></button>
+        <button type="button" role="menuitemradio" class="tab-item" id="tabTraceBtn" data-tab="trace" aria-checked="false"><span>Trace onto paper</span><small>Your photo over the camera, to trace it onto paper</small></button>
         <button type="button" role="menuitemradio" class="tab-item" id="tabHelpBtn" data-tab="help" aria-checked="false"><span>How to use</span><small>Every part of the app, with pictures</small></button>
       </div>
     </div>
@@ -428,6 +429,70 @@
 
       <section class="tabpanel pose-panel" id="tab-pose" hidden>
         <iframe class="pose-frame" id="poseFrame" title="Pose and light: a wooden drawing figure and one lamp" data-src="pose.html?embed=1"></iframe>
+      </section>
+
+      <section class="tabpanel" id="tab-trace" hidden>
+        <div class="ps tr" id="tr-root">
+          <div class="tr-stage" id="tr-stage">
+            <div class="tr-wrap" id="tr-wrap">
+              <video class="tr-video" id="tr-video" playsinline muted autoplay disablepictureinpicture aria-hidden="true"></video>
+              <canvas class="tr-ghost" id="tr-ghost" hidden aria-hidden="true"></canvas>
+              <canvas class="tr-photo" id="tr-photo" hidden aria-hidden="true"></canvas>
+            </div>
+            <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −. Zoomed in with + (and out with −), a drag, or the Left–right and Up–down sliders that appear, looks around instead and the photo stays where it is" aria-describedby="tr-status"></div>
+            <button type="button" class="tr-float tr-leave" id="tr-exit" title="Leave" aria-label="Leave Trace onto paper"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <button type="button" class="tr-float tr-tools" id="tr-tools" aria-expanded="false" aria-controls="tr-strip" title="Open the tools: photo, transparency, size, frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Tools</button>
+            <div class="tr-pan" id="tr-pan" role="group" aria-label="Look around the zoomed view" hidden>
+              <label for="tr-panX">Left&ndash;right</label><input type="range" id="tr-panX" min="0" max="100" step="1" value="50">
+              <label for="tr-panY">Up&ndash;down</label><input type="range" id="tr-panY" min="0" max="100" step="1" value="50">
+            </div>
+            <p class="tr-status" id="tr-status" role="status"></p>
+            <div class="tr-zoombar" role="group" aria-label="Zoom the view">
+              <button type="button" class="tr-zb" id="tr-zoomIn" aria-label="Zoom in" title="Zoom in: the photo stays where it is on the paper">+</button>
+              <button type="button" class="tr-zb tr-zr" id="tr-zoomReset" aria-label="Zoom 100%, the whole picture" title="Back to the whole picture">100%</button>
+              <button type="button" class="tr-zb" id="tr-zoomOut" aria-label="Zoom out" title="Zoom out" disabled>&minus;</button>
+            </div>
+            <div class="tr-card" id="tr-card">
+              <h2 class="tr-title">Trace onto paper</h2>
+              <p class="tr-say" id="tr-say" aria-live="polite">Fix your phone above the paper, camera down (on a stand, or a glass or a stack of books under it). Start the camera, then open Tools to choose the photo to trace, and draw over it on the paper. The camera picture stays on this device.</p>
+              <button type="button" class="btn btn-primary" id="tr-start" aria-describedby="tr-say">Start camera</button>
+            </div>
+          </div>
+          <nav class="tr-strip" id="tr-strip" aria-label="Trace onto paper tools" hidden>
+            <div class="tr-btns">
+              <button type="button" class="tr-ic" id="tr-toolsHide" aria-label="Hide the tools" title="Hide the tools, to see more of the camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10l6 6 6-6"/></svg><span class="tr-cap">Hide</span></button>
+              <button type="button" class="tr-ic" id="tr-camera" aria-label="Start camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H8l1.5-2h5L16 7h3.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><span class="tr-cap">Camera</span></button>
+              <button type="button" class="tr-ic" id="tr-choose" aria-label="Choose a photo" title="Choose a photo to trace"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span class="tr-cap">Photo</span></button>
+              <button type="button" class="tr-ic" id="tr-useStudy" aria-label="Use the Study photo" title="Trace the photo on Study the photo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1.5"/><circle cx="12" cy="10" r="3"/><path d="M6.5 19c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/></svg><span class="tr-cap">Study photo</span></button>
+              <button type="button" class="tr-ic" id="tr-fit" title="Fit the photo to the camera picture, centred"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span class="tr-cap">Fit</span></button>
+              <button type="button" class="tr-ic" id="tr-lock" aria-pressed="false" title="Lock the photo in place: drags and pinches do nothing"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span class="tr-cap">Lock</span></button>
+              <button type="button" class="tr-ic" id="tr-setFrame" title="Keep the camera's view of the paper now, to line it up again later"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg><span class="tr-cap">Set frame</span></button>
+              <button type="button" class="tr-ic" id="tr-showFrame" aria-pressed="false" title="Show the kept view faintly over the camera"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="13" height="12" rx="1" stroke-dasharray="2.5 2"/><rect x="8" y="7.5" width="13" height="12" rx="1"/></svg><span class="tr-cap">Show frame</span></button>
+              <button type="button" class="tr-ic advanced" id="tr-switch" hidden aria-label="Switch camera" title="Use the other camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H8l1.5-2h5L16 7h3.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M9 13a3 3 0 0 1 5.4-1.8M15 13a3 3 0 0 1-5.4 1.8"/><path d="M14.6 9.6v1.8h-1.8M9.4 16.4v-1.8h1.8"/></svg><span class="tr-cap">Switch</span></button>
+              <button type="button" class="tr-ic advanced" id="tr-turn" title="Turn the photo a quarter turn, for paper the other way round"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="9.5" width="11" height="11" rx="1"/><path d="M12 4h2.5a5 5 0 0 1 5 5v2"/><path d="M17.3 9.2l2.2 2.3 2.2-2.3"/></svg><span class="tr-cap">Turn 90°</span></button>
+            </div>
+            <div class="tr-sliders">
+              <div class="tr-range">
+                <label for="tr-transparency">Transparency</label><output id="tr-transparencyOut" for="tr-transparency">50%</output>
+                <input type="range" id="tr-transparency" min="0" max="100" step="1" value="50">
+              </div>
+              <div class="tr-range">
+                <label for="tr-size">Size</label><output id="tr-sizeOut" for="tr-size">100%</output>
+                <input type="range" id="tr-size" min="0" max="200" step="1" value="107">
+              </div>
+              <div class="tr-range advanced">
+                <label for="tr-strength">Frame strength</label><output id="tr-strengthOut" for="tr-strength">40%</output>
+                <input type="range" id="tr-strength" min="10" max="80" step="1" value="40">
+              </div>
+            </div>
+            <span class="visually-hidden" id="tr-whyCamera">Start the camera first.</span>
+            <span class="visually-hidden" id="tr-whyFrame">Set a frame first: Set frame keeps the camera's view of the paper.</span>
+            <span class="visually-hidden" id="tr-whyPhoto">Choose a photo first.</span>
+            <span class="visually-hidden" id="tr-whyZoom">The view is zoomed in, which keeps the photo where it is: set Zoom back to 100% to move or size it.</span>
+            <span class="visually-hidden" id="tr-whyLocked">The photo is locked: press Lock again to move or size it.</span>
+          </nav>
+          <input type="file" id="tr-file" accept="image/*" class="visually-hidden" tabindex="-1" aria-label="Choose a photo to trace">
+        </div>
       </section>
 
       <section class="tabpanel" id="tab-paint" hidden>
@@ -978,7 +1043,7 @@
             <ol>
               <li><strong>Simple or Advanced.</strong> Simple shows only what you need. Advanced shows every setting. Start with Simple.</li>
               <li><strong>Load photo</strong> puts your own portrait in. A photo of a friend, straight on, in good light, works best.</li>
-              <li>The four big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Figure study</strong> is a drawing class with the wooden figure as the model. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
+              <li>The four big buttons are the sections. <strong>Learning tools</strong> opens a menu with Study the photo, the Loomis head, Pose and light, Trace onto paper, and this guide. <strong>Studio</strong> is the paper to paint on. <strong>Figure study</strong> is a drawing class with the wooden figure as the model. <strong>Games</strong> opens a menu with Paint by numbers and Value battle, and more games to come.</li>
             </ol>
           </div>
           <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Getting around"><figure class="phone"><img width="400" height="774" src="img/help/start.jpg" alt="The top of the page on a phone: the Simple and Advanced switch, Load photo, the four big buttons and the Learning tools menu open under the first" loading="lazy"><figcaption>The top of the page</figcaption></figure></div>
@@ -1049,6 +1114,25 @@
             <figure class="phone"><img width="400" height="774" src="img/help/pose-rig.jpg" alt="The wooden figure in a throwing pose in Simple mode: circles at the hands, ovals under the feet, the ring around the hips, and a diamond at the right elbow after the right hand was moved" loading="lazy"><figcaption>Posing with the rig controls</figcaption></figure>
             <figure class="phone"><img width="400" height="774" src="img/help/pose-library.jpg" alt="The pose library over the stage: small pictures of the figure in each pose, in groups" loading="lazy"><figcaption>Choosing a pose</figcaption></figure>
             <figure class="phone"><img width="400" height="774" src="img/help/pose-values.jpg" alt="The same pose seen as dark, middle and light values, with the lamp high to one side" loading="lazy"><figcaption>Dark, middle and light</figcaption></figure>
+          </div>
+        </section>
+
+        <section class="help-part" id="help-trace">
+          <div class="help-text">
+            <h3>Trace onto paper</h3>
+            <p>Your photo over the camera's picture of your paper, so you can trace it in pencil on the real paper. What the camera sees stays on your device: it is shown, never kept or sent.</p>
+            <ol>
+              <li><strong>Set up the phone</strong> above the paper, camera down: on a stand, or across a glass or a stack of books. The whole sheet should be in the picture.</li>
+              <li><strong>Start camera.</strong> The browser asks first: allow it. The screen stays on while the camera runs, where the browser allows it. The camera stops when you leave the tab; coming back starts it again, or asks you to press Start camera.</li>
+              <li><strong>Photo</strong> chooses the picture to trace from your photos, or <strong>Study photo</strong> takes the one on Study the photo. <strong>Transparency</strong> makes it more or less see-through.</li>
+              <li><strong>Place it</strong> on the paper: drag it to move it and pinch it to size it, or use the <strong>Size</strong> slider. <strong>Fit</strong> puts it back in the middle. In Advanced, <strong>Turn 90°</strong> turns it for paper the other way round. From the keyboard, Tab to the picture: the arrow keys move the photo, and + and − size it.</li>
+              <li><strong>Lock</strong> it, then draw: a hand on the screen will not move it.</li>
+              <li><strong>Zoom</strong> with + and − on the right of the picture (or pinch it) to see the paper close up. The photo stays where it is on the paper while you zoom, and a drag, or the two sliders that appear, looks around instead of moving it. <strong>100%</strong> shows the whole picture again.</li>
+              <li><strong>Set frame</strong> once it is all lined up. If the phone gets knocked, <strong>Show frame</strong> shows the paper as it was, faintly: move the phone until the paper's edges match it, then hide the frame and go on. A frame fits only the camera and the picture shape it was taken from, so after <strong>Switch</strong>, or when the picture changes shape, it is let go: set it again.</li>
+            </ol>
+          </div>
+          <div class="help-shots" tabindex="0" role="group" aria-label="Screenshots: Trace onto paper">
+            <figure class="phone"><img width="400" height="774" src="img/help/trace.jpg" alt="Trace onto paper on a phone: the camera's picture of a sheet of paper on a wooden table, half traced in pencil, with the portrait laid over it half see-through and locked, and the strip of controls along the bottom" loading="lazy"><figcaption>The photo over the paper, locked</figcaption></figure>
           </div>
         </section>
 
@@ -1241,6 +1325,7 @@
 <script src="js/painting.js"></script>
 <script src="js/figure.js"></script>
 <script src="js/loomis.js"></script>
+<script src="js/trace.js"></script>
 <script src="js/battle.js"></script>
 </body>
 </html>

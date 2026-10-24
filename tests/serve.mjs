@@ -1,7 +1,8 @@
 // A loopback static server for the tests and for playtesting by hand: it sends the pages with the
-// Content-Security-Policy from _headers (so the policy is enforced as a header, as every host sends
-// it, as well as by the <meta> copy), the fonts with the CORS header the host configs give them, and
-// a missing file as 404.html with status 404. Never exposed beyond 127.0.0.1.
+// Content-Security-Policy and the Permissions-Policy from _headers (so the policy is enforced as a header,
+// as every host sends it, as well as by the <meta> copy, and the camera is allowed or refused as a host
+// would), the fonts with the CORS header the host configs give them, and a missing file as 404.html with
+// status 404. Never exposed beyond 127.0.0.1.
 //   node tests/serve.mjs [root] [port]     (port 0 or none: a free port, printed)
 import http from 'node:http';
 import fs from 'node:fs';
@@ -14,6 +15,7 @@ export function serve(root, port = 0) {
   root = path.resolve(root);
   const headers = fs.readFileSync(path.join(root, '_headers'), 'utf8');
   const csp = (/Content-Security-Policy:\s*(.+)/.exec(headers) || [, ''])[1].trim();
+  const permissions = (/Permissions-Policy:\s*(.+)/.exec(headers) || [, ''])[1].trim();
   const notFound = path.join(root, '404.html');
   const server = http.createServer((req, res) => {
     let p;
@@ -21,6 +23,7 @@ export function serve(root, port = 0) {
     if (p.endsWith('/')) p += 'index.html';
     const f = path.normalize(path.join(root, p));
     const h = { 'x-content-type-options': 'nosniff', 'cache-control': 'no-cache' };
+    if (permissions) h['permissions-policy'] = permissions;
     if (!f.startsWith(root + path.sep) || !fs.existsSync(f) || fs.statSync(f).isDirectory() || /(^|\/)\.(?!well-known\/)/.test(p)) {
       res.writeHead(404, { ...h, 'content-type': TYPES['.html'], 'content-security-policy': csp });
       res.end(fs.existsSync(notFound) ? fs.readFileSync(notFound) : 'Not found');

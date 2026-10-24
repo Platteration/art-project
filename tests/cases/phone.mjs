@@ -17,7 +17,7 @@ import { clean, tab, click, sleep, PHONE, poseFrame, inked } from '../lib.mjs';
 
 const SMALL = { width: 320, height: 568 }, SIDE = { width: 844, height: 390 }, TABLET = { width: 768, height: 1024 };
 const NOISE = /GPU stall|GL Driver Message|SwiftShader|WebGL-0x/i;
-const LABEL = { study: 'Study the photo', loomis: 'the Loomis head', pose: 'Pose and light', help: 'How to use', paint: 'the Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
+const LABEL = { study: 'Study the photo', loomis: 'the Loomis head', pose: 'Pose and light', trace: 'Trace onto paper', help: 'How to use', paint: 'the Studio', figure: 'Figure study', game: 'Paint by numbers', battle: 'Value battle' };
 const size = (vp) => `${vp.width} × ${vp.height}`;
 
 // one block's failure is one failed check, not the end of the case; the time each took goes in the notes, and
@@ -102,7 +102,7 @@ const spill = (page) => page.evaluate(() => {
 // header and tabs step aside there), then the section's tab, or its menu and the menu's item
 async function tapTab(page, name) {
   for (let i = 0; i < 2; i++) {
-    const st = await page.evaluate(() => { const vis = (e) => !!e && e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== 'hidden'; return { tabs: vis(document.querySelector('.tabs')), exit: ['ps-exit', 'lh-exit', 'fs-exit'].find((id) => vis(document.getElementById(id))) || null }; });
+    const st = await page.evaluate(() => { const vis = (e) => !!e && e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== 'hidden'; return { tabs: vis(document.querySelector('.tabs')), exit: ['ps-exit', 'lh-exit', 'tr-exit', 'fs-exit'].find((id) => vis(document.getElementById(id))) || null }; });
     if (st.tabs || !st.exit) break;
     await tapEl(page, '#' + st.exit);
     await page.waitForFunction(() => document.querySelector('.tabs').getBoundingClientRect().width > 0, null, { timeout: 3000 }).catch(() => null);
@@ -161,7 +161,7 @@ export default async function phone(t, site) {
     const menus = [];
     for (const vp of [PHONE, SMALL, SIDE, TABLET]) {
       if (vp !== PHONE) await turn(page, vp);
-      for (const name of ['study', 'loomis', 'help', 'paint', 'figure', 'game', 'battle', 'pose']) {
+      for (const name of ['study', 'loomis', 'trace', 'help', 'paint', 'figure', 'game', 'battle', 'pose']) {
         // the menus, measured as a finger opens them (on the Study tab, before the section is opened)
         if (name === 'study' || name === 'game') {
           await tapTab(page, 'study');
@@ -186,6 +186,18 @@ export default async function phone(t, site) {
           const short = icons.filter((i) => i.h < 44 || i.w < 24);
           if (short.length) shortIcons.push({ size: size(vp), tab: LABEL[name], icons: short.length, of: icons.length, sizes: [...new Set(short.map((i) => `${i.w}×${i.h}`))] });
           t.check(icons.length >= 7 && !short.length, `${size(vp)}: every icon on ${LABEL[name]}'s strip is at least 44 px tall (the strip's own height: 44px) and 24 px wide`, short.slice(0, 4));
+        }
+        if (name === 'trace') {
+          // full screen where the Studio is, and every control of its strip on the screen, a finger's size
+          const root = await rect(page, '#tr-root');
+          const full = vp.width < 760 || vp.height < 560;
+          t.check(full ? fills(root, vp) : root && root.x >= 0 && root.r <= vp.width && root.b <= vp.height + 1 && root.h >= 240, `${size(vp)}: ${LABEL[name]} ${full ? 'fills the screen' : 'sits inside the window below the tabs'}`, round(root));
+          // the controls are a pop-up that starts closed: opened by its Tools button, as a finger does, and the zoom buttons count too
+          if (await page.evaluate(() => document.getElementById('tr-strip').hidden)) await tapEl(page, '#tr-tools'); // (it stays open from an earlier size)
+          await settle(page);
+          const ctl = await page.evaluate(() => [...document.querySelectorAll('#tr-strip button, #tr-strip input[type=range], #tr-card button, .tr-zb')].filter((b) => b.getBoundingClientRect().width > 0 && !b.closest('[hidden]')).map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, w: Math.round(r.width), h: Math.round(r.height), off: r.left < -1 || r.top < -1 || r.right > innerWidth + 1 || r.bottom > innerHeight + 1 }; }));
+          const bad = ctl.filter((c) => c.off || (c.id !== 'tr-transparency' && c.id !== 'tr-size' && (c.h < 44 || c.w < 24)));
+          t.check(ctl.length >= 9 && !bad.length, `${size(vp)}: every control of ${LABEL[name]} is on the screen, its buttons at least 44 px tall and 24 px wide`, bad.slice(0, 4).concat(bad.length ? [] : [`${ctl.length} controls`]));
         }
         if (name === 'help' && vp === PHONE) {
           // a strip of phone screenshots wider than the screen: a finger swipes it sideways, the page stays put
@@ -627,6 +639,12 @@ export default async function phone(t, site) {
       res['the Studio'] = await inBands(page, `#tab-paint ${CONTROLS}`, insets);
       await tab(page, 'loomis', { wait: false }); await frames(page);
       res['the Loomis head'] = await inBands(page, `#tab-loomis ${CONTROLS}`, insets);
+      // Trace onto paper with the camera running and a photo over it (the card goes, the strip is all there is)
+      await tab(page, 'trace', { wait: false }); await frames(page);
+      await click(page, '#tr-start');
+      await page.waitForFunction(() => document.getElementById('tr-video').videoWidth > 0, null, { timeout: 10000 }).catch(() => null);
+      await click(page, '#tr-useStudy'); await frames(page);
+      res['Trace onto paper'] = await inBands(page, `#tab-trace ${CONTROLS}`, insets);
       await tab(page, 'battle', { wait: false });
       await click(page, '#vb-start');
       await page.waitForFunction(() => window.ValueBattle && ValueBattle.state() && document.getElementById('vb-play').classList.contains('is-pinned'), null, { timeout: 5000 }).catch(() => null);
