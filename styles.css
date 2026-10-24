@@ -1666,8 +1666,8 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 /* ---- Trace onto paper: the camera's picture fills the stage (all of it, letterboxed), the photo floats over it, and
    one strip holds the controls: along the bottom on a phone held upright, down the side on a wide or sideways screen.
    Nothing that can be pressed sits under a notch, a rounded corner or the home indicator (env(safe-area-inset-*)). ---- */
-.ps.tr { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; background: #101311; }
-.tr-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: grid; place-items: center; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px); background: #101311; }
+.ps.tr { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); background: #101311; }
+.tr-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: grid; place-items: center; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); background: #101311; }
 .tr-wrap { position: relative; overflow: hidden; background: #000; }
 .tr-wrap > video, .tr-wrap > .tr-ghost { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .tr-ghost { pointer-events: none; }
@@ -1678,24 +1678,31 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tr-zb:hover:not(:disabled) { background: rgba(250, 245, 234, 0.16); }
 .tr-zb:focus-visible { outline: 3px solid #faf5ea; outline-offset: -3px; }
 .tr-zb:disabled { opacity: 0.4; cursor: default; }
+.tr-float { position: absolute; z-index: 5; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 16px; border: 0; border-radius: 22px; font: 700 0.9rem/1 var(--body); color: #faf5ea; background: rgba(20, 24, 20, 0.88); cursor: pointer; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3); }
+.tr-float svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tr-float:hover { background: rgba(20, 24, 20, 0.96); }
+.tr-float:focus-visible { outline: 3px solid #faf5ea; outline-offset: 2px; }
+.tr-tools { left: max(12px, env(safe-area-inset-left, 0px)); bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
+.tr-tools[hidden], .tr-leave[hidden] { display: none; }
+.tr-leave { display: none; left: max(8px, env(safe-area-inset-left, 0px)); top: calc(env(safe-area-inset-top, 0px) + 8px); padding: 0; }
 .tr-hit { position: absolute; inset: 0; z-index: 2; touch-action: none; cursor: grab; }
 .tr-hit:active { cursor: grabbing; }
 .tr-hit[tabindex="-1"], .tr-locked .tr-hit { cursor: default; }
 .tr-hit:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
 .tr-status { position: absolute; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 10px); translate: -50% 0; z-index: 3; width: max-content; max-width: calc(100% - 24px); margin: 0; padding: 4px 10px; border-radius: 12px; font: 500 0.76rem/1.35 var(--body); color: #faf5ea; background: rgba(20, 24, 20, 0.72); text-align: center; pointer-events: none; }
 .tr-status:empty { padding: 0; background: none; }
-.tr-card { position: absolute; z-index: 4; left: 50%; top: 50%; translate: -50% -50%; width: min(360px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; display: grid; gap: 10px; justify-items: start; padding: 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
+.tr-card { position: absolute; z-index: 4; left: calc(50% + var(--tr-sheet-w, 0px) / 2); top: calc((100% - var(--tr-sheet-h, 0px)) / 2); translate: -50% -50%; width: min(360px, calc(100% - var(--tr-sheet-w, 0px) - 24px)); max-height: calc(100% - var(--tr-sheet-h, 0px) - 24px); overflow: auto; display: grid; gap: 10px; justify-items: start; padding: 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
 .tr-title { margin: 0; font: 700 1.15rem/1.2 var(--display); letter-spacing: 0; text-transform: none; color: var(--ink); }
 .tr-say { margin: 0; font-size: 0.86rem; line-height: 1.45; }
 .tr-card .btn { min-height: 44px; padding: 10px 18px; font-size: 0.95rem; }
-.tr-strip { display: grid; gap: 4px; min-width: 0; padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
+.tr-strip { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; max-height: 72%; overflow-y: auto; overscroll-behavior: contain; border-radius: 14px 14px 0 0; box-shadow: 0 -8px 28px var(--shadow); display: grid; gap: 4px; min-width: 0; padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
+.tr-strip[hidden] { display: none; }
 .tr-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; }
 .tr-ic { appearance: none; flex: 1 1 38px; min-width: 38px; max-width: 64px; min-height: 48px; display: grid; justify-items: center; align-content: center; gap: 2px; padding: 3px 1px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink); font: 600 0.6rem/1.05 var(--body); cursor: pointer; }
 .tr-ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tr-ic:hover { border-color: var(--line); }
 .tr-ic[aria-pressed="true"], .tr-ic.is-on { background: var(--accent); color: var(--accent-ink); }
 .tr-ic:disabled { opacity: 0.38; cursor: default; }
-.tr-ic.ps-exit { display: none; }
 .tr-cap { display: block; max-width: 100%; text-align: center; overflow-wrap: anywhere; }
 .tr-sliders { display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 0 4px; }
 .tr-range { flex: 1 1 140px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 6px; }
@@ -1705,13 +1712,11 @@ output { font: 500 0.8rem var(--mono); color: var(--muted); font-variant-numeric
 .tr-range input:disabled { opacity: 0.45; }
 /* the toast sits at the foot of the camera's picture, clear of the strip (trace.js measures the stage); width: max-content, or
    the note is only as wide as the room to the right of its centre (half the picture: a few words a line, and tall) */
-body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 20px); width: max-content; max-width: var(--tr-toast-w, calc(100% - 32px)); }
+body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 20px); top: var(--tr-toast-t, auto); width: max-content; max-width: var(--tr-toast-w, calc(100% - 32px)); }
 /* a screen wider than it is tall (a phone on its side, a laptop): the strip stands down the left, the camera's picture
    beside it; upright (a phone, a tablet held upright) it runs along the bottom, which leaves the picture the most room */
 @media (orientation: landscape) {
-  .ps.tr { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-  .tr-strip { grid-column: 1; grid-row: 1; width: calc(224px + max(10px, env(safe-area-inset-left, 0px))); align-content: start; gap: 8px; overflow-y: auto; border-top: 0; border-right: 1px solid var(--line); padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
-  .tr-stage { grid-column: 2; grid-row: 1; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) 0; }
+  .tr-strip { right: auto; top: 0; max-height: none; border-radius: 0 14px 14px 0; width: calc(224px + max(10px, env(safe-area-inset-left, 0px))); align-content: start; gap: 8px; overflow-y: auto; border-top: 0; border-right: 1px solid var(--line); padding: max(10px, env(safe-area-inset-top, 0px)) 10px max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
   .tr-btns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
   .tr-ic { min-width: 0; max-width: none; min-height: 52px; }
   .tr-sliders { display: grid; gap: 6px; padding: 0 2px; }
@@ -1724,7 +1729,7 @@ body.tab-trace .toast { left: var(--tr-toast-x, 50%); bottom: var(--tr-toast-b, 
   .tr-sliders { gap: 2px; }
 }
 /* phones: the header and tabs step aside (above), so the strip leads back with ← */
-@media (max-width: 759px), (max-height: 559px) { .tr-ic.ps-exit { display: grid; } }
+@media (max-width: 759px), (max-height: 559px) { .tr-leave { display: inline-flex; } }
 /* a phone upright: the buttons in rows of equal cells, each as wide as a finger and with its caption (Simple has eight, in
    two rows of four where a row of eight would be too narrow; Advanced has ten, in two rows of five) */
 @media (max-width: 374px) and (orientation: portrait) {

@@ -18,9 +18,9 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.json">
-<script src="js/guard.js?v=542fc64"></script>
-<link rel="stylesheet" href="fonts.css?v=542fc64">
-<link rel="stylesheet" href="styles.css?v=542fc64">
+<script src="js/guard.js?v=024bf29"></script>
+<link rel="stylesheet" href="fonts.css?v=024bf29">
+<link rel="stylesheet" href="styles.css?v=024bf29">
 </head>
 <body>
 <div class="oldbrowser-note" role="alert" hidden><strong>This browser is too old for Portrait Value Studio.</strong> Use a current Safari, Chrome, Edge or Firefox (2022 or later). The guide below still reads.</div>
@@ -440,6 +440,8 @@
               <canvas class="tr-photo" id="tr-photo" hidden aria-hidden="true"></canvas>
             </div>
             <div class="tr-hit" id="tr-hit" tabindex="-1" role="application" aria-roledescription="photo over the camera" aria-label="The photo over the camera: drag it to move it and pinch it to size it, or move it with the arrow keys (Shift for bigger steps) and size it with + and −. Zoomed in with + (and out with −), a drag looks around instead and the photo stays where it is" aria-describedby="tr-status"></div>
+            <button type="button" class="tr-float tr-leave" id="tr-exit" title="Leave" aria-label="Leave Trace onto paper"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <button type="button" class="tr-float tr-tools" id="tr-tools" aria-expanded="false" aria-controls="tr-strip" title="Open the tools: photo, transparency, size, frame"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Tools</button>
             <p class="tr-status" id="tr-status" role="status"></p>
             <div class="tr-zoombar" role="group" aria-label="Zoom the view">
               <button type="button" class="tr-zb" id="tr-zoomIn" aria-label="Zoom in" title="Zoom in: the photo stays where it is on the paper">+</button>
@@ -448,13 +450,13 @@
             </div>
             <div class="tr-card" id="tr-card">
               <h2 class="tr-title">Trace onto paper</h2>
-              <p class="tr-say" id="tr-say" aria-live="polite">Fix your phone above the paper, camera down (on a stand, or a glass or a stack of books under it). Start the camera, choose the photo to trace, and draw over it on the paper. The camera picture stays on this device.</p>
+              <p class="tr-say" id="tr-say" aria-live="polite">Fix your phone above the paper, camera down (on a stand, or a glass or a stack of books under it). Start the camera, then open Tools to choose the photo to trace, and draw over it on the paper. The camera picture stays on this device.</p>
               <button type="button" class="btn btn-primary" id="tr-start" aria-describedby="tr-say">Start camera</button>
             </div>
           </div>
-          <nav class="tr-strip" id="tr-strip" aria-label="Trace onto paper tools">
+          <nav class="tr-strip" id="tr-strip" aria-label="Trace onto paper tools" hidden>
             <div class="tr-btns">
-              <button type="button" class="ps-ic ps-exit tr-ic" id="tr-exit" title="Leave" aria-label="Leave Trace onto paper"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+              <button type="button" class="tr-ic" id="tr-toolsHide" aria-label="Hide the tools" title="Hide the tools, to see more of the camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10l6 6 6-6"/></svg><span class="tr-cap">Hide</span></button>
               <button type="button" class="tr-ic" id="tr-camera" aria-label="Start camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H8l1.5-2h5L16 7h3.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><span class="tr-cap">Camera</span></button>
               <button type="button" class="tr-ic" id="tr-choose" aria-label="Choose a photo" title="Choose a photo to trace"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 15l5-5 4 4 3-3 6 6"/><circle cx="16" cy="8.5" r="1.5" fill="currentColor"/></svg><span class="tr-cap">Photo</span></button>
               <button type="button" class="tr-ic" id="tr-useStudy" aria-label="Use the Study photo" title="Trace the photo on Study the photo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1.5"/><circle cx="12" cy="10" r="3"/><path d="M6.5 19c1-3 3-4.5 5.5-4.5s4.5 1.5 5.5 4.5"/></svg><span class="tr-cap">Study photo</span></button>
@@ -1309,18 +1311,18 @@
 
 <!-- Classic scripts, in dependency order: processing (Study), mixing (Mixing) and paints (Paints) first; app (Studio) next;
      then the modules that use them (painting before figure, which draws on a copy of the Studio). guard.js is loaded in <head>. -->
-<script src="js/processing.js?v=542fc64"></script>
-<script src="js/mixing.js?v=542fc64"></script>
-<script src="js/paints.js?v=542fc64"></script>
-<script src="js/app.js?v=542fc64"></script>
-<script src="js/palette.js?v=542fc64"></script>
-<script src="js/subjects.js?v=542fc64"></script>
-<script src="js/game.js?v=542fc64"></script>
-<script src="js/painting.js?v=542fc64"></script>
-<script src="js/figure.js?v=542fc64"></script>
-<script src="js/loomis.js?v=542fc64"></script>
-<script src="js/trace.js?v=542fc64"></script>
-<script src="js/battle.js?v=542fc64"></script>
-<p class="build-stamp">Test build 542fc64</p>
+<script src="js/processing.js?v=024bf29"></script>
+<script src="js/mixing.js?v=024bf29"></script>
+<script src="js/paints.js?v=024bf29"></script>
+<script src="js/app.js?v=024bf29"></script>
+<script src="js/palette.js?v=024bf29"></script>
+<script src="js/subjects.js?v=024bf29"></script>
+<script src="js/game.js?v=024bf29"></script>
+<script src="js/painting.js?v=024bf29"></script>
+<script src="js/figure.js?v=024bf29"></script>
+<script src="js/loomis.js?v=024bf29"></script>
+<script src="js/trace.js?v=024bf29"></script>
+<script src="js/battle.js?v=024bf29"></script>
+<p class="build-stamp">Test build 024bf29</p>
 </body>
 </html>

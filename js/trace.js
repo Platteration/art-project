@@ -28,7 +28,7 @@
   const card = $('card'), say = $('say'), startBtn = $('start'), status = $('status'), strip = $('strip');
   const camBtn = $('camera'), chooseBtn = $('choose'), studyBtn = $('useStudy'), fitBtn = $('fit'), lockBtn = $('lock');
   const setFrameBtn = $('setFrame'), showFrameBtn = $('showFrame'), switchBtn = $('switch'), turnBtn = $('turn');
-  const transparency = $('transparency'), sizeIn = $('size'), strength = $('strength'), fileIn = $('file'), zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut'), zoomResetBtn = $('zoomReset');
+  const transparency = $('transparency'), sizeIn = $('size'), strength = $('strength'), fileIn = $('file'), toolsBtn = $('tools'), hideBtn = $('toolsHide'), zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut'), zoomResetBtn = $('zoomReset');
 
   // ---- Kept between visits: conveniences only (how see-through the photo is, how strong the frame shows) ----------------
   const KEY = 'portrait-value-studio.trace';
@@ -55,6 +55,7 @@
   // zoom: the whole view (camera, frame and photo together) magnified; x, y are the point of the camera's picture, as fractions of it,
   // that sits in the middle of the stage, so the photo keeps its place on the paper whatever the zoom
   const state = {
+    tools: false, // the pop-up of controls (the picture has the whole screen until it is asked for)
     zoom: { z: 1, x: 0.5, y: 0.5 },
     active: false,      // the tab is open
     stream: null,       // the camera's MediaStream while it runs
@@ -155,7 +156,7 @@
     wakeOn();
     listCameras();
     render();
-    giveFocus(from, from === startBtn ? camBtn : from);
+    giveFocus(from, strip.hidden ? toolsBtn : from === startBtn ? camBtn : from);
   }
   // keepWanted: the tab or the page went away, and the camera comes back with it
   function stop(keepWanted) {
@@ -551,12 +552,26 @@
     wrap.style.width = `${w}px`;
     wrap.style.height = `${h}px`;
     if (fitted && fitW() !== fitted) setWidth((state.place.w * fitW()) / fitted);
-    // the toast sits at the foot of the camera's picture, clear of the strip
-    const r = stage.getBoundingClientRect();
-    document.body.style.setProperty('--tr-toast-x', `${Math.round(r.left + r.width / 2)}px`);
-    document.body.style.setProperty('--tr-toast-b', `${Math.round(Math.max(0, window.innerHeight - r.bottom) + 12)}px`);
-    document.body.style.setProperty('--tr-toast-w', `${Math.round(Math.max(160, r.width - 24))}px`);
+    placeToast();
     drawPhoto(); showSize();
+  }
+  // the toast sits at the foot of the camera's picture, clear of the Tools button and of the pop-up when it is open (along the
+  // bottom upright, down the left on a wide screen)
+  function placeToast() {
+    const r = stage.getBoundingClientRect();
+    let left = r.left, lift = 64, sheetH = 0, sheetW = 0, top = null;
+    if (state.tools && !strip.hidden) {
+      const sr = strip.getBoundingClientRect();
+      if (sr.width < r.width * 0.9) { sheetW = Math.max(0, Math.round(sr.right - r.left)); left = Math.max(left, sr.right); } else { sheetH = Math.max(0, Math.round(r.bottom - sr.top)); lift = Math.max(lift, sheetH + 12); }
+    }
+    // the card keeps to the room the pop-up leaves, and the message goes to the top while the card is up (it would sit on the card's button)
+    if (!card.hidden && (sheetH || sheetW)) top = Math.round(r.top + 56);
+    root.style.setProperty('--tr-sheet-h', `${sheetH}px`);
+    root.style.setProperty('--tr-sheet-w', `${sheetW}px`);
+    document.body.style.setProperty('--tr-toast-x', `${Math.round(left + (r.right - left) / 2)}px`);
+    document.body.style.setProperty('--tr-toast-b', top === null ? `${Math.round(Math.max(0, window.innerHeight - r.bottom) + lift)}px` : 'auto');
+    document.body.style.setProperty('--tr-toast-t', top === null ? 'auto' : `${top}px`);
+    document.body.style.setProperty('--tr-toast-w', `${Math.round(Math.max(160, r.right - left - 24))}px`);
   }
   function layout() { if (!state.active) return; pinRoot(); fitView(); }
   window.addEventListener('resize', layout);
@@ -601,6 +616,10 @@
     startBtn.hidden = !retry;
     startBtn.disabled = state.starting;
     startBtn.textContent = state.starting ? 'Starting…' : 'Start camera';
+    // the pop-up of controls and the button that opens it
+    strip.hidden = !state.tools;
+    toolsBtn.hidden = state.tools;
+    toolsBtn.setAttribute('aria-expanded', String(state.tools));
     // the strip
     able(camBtn, !why, 'tr-say');
     camBtn.setAttribute('aria-label', on || state.starting ? 'Stop camera' : 'Start camera');
@@ -643,7 +662,7 @@
     if (locked) notes.push('Locked: drags and pinches leave the photo where it is.');
     const line = notes.join(' ');
     if (status.textContent !== line) status.textContent = line;
-    drawPhoto(); showSize(); showZoom();
+    drawPhoto(); showSize(); showZoom(); placeToast();
   }
 
   // ---- The buttons ---------------------------------------------------------------------------------------------------
@@ -652,7 +671,17 @@
   setFrameBtn.addEventListener('click', setFrame);
   showFrameBtn.addEventListener('click', () => { if (!state.frame) return; state.frameShown = !state.frameShown; render(); });
   switchBtn.addEventListener('click', switchCamera);
-  // (the focus goes to the section it opens: the button pressed is hidden with the strip)
+  // the pop-up: Tools opens it over the picture, Hide tools and Esc close it; the focus goes into it and comes back to the button
+  function setTools(open) {
+    if (state.tools === open) return;
+    state.tools = open;
+    render();
+    if (state.active) (open ? hideBtn : toolsBtn).focus({ preventScroll: true });
+  }
+  toolsBtn.addEventListener('click', () => setTools(true));
+  hideBtn.addEventListener('click', () => setTools(false));
+  strip.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.tools) { e.preventDefault(); e.stopPropagation(); setTools(false); } });
+  // (the focus goes to the section it opens: the button pressed is hidden with the pop-up)
   $('exit').addEventListener('click', () => Studio.go('study', true));
   window.addEventListener('studio:mode', render);
 
@@ -662,7 +691,7 @@
     if (!state.active) return;
     const a = document.activeElement;
     if (a && a !== document.body && a.offsetParent !== null && !a.closest('[hidden]')) return;
-    const first = (card.hidden ? [camBtn, chooseBtn] : [startBtn, camBtn, chooseBtn]).find((b) => !b.hidden && !b.disabled && b.offsetParent !== null);
+    const first = [startBtn, toolsBtn, camBtn, chooseBtn].find((b) => !b.hidden && !b.disabled && b.offsetParent !== null);
     if (first) first.focus({ preventScroll: true });
   }
 
@@ -695,5 +724,6 @@
     sizePct,
     usePicture,
     zoom: () => ({ ...state.zoom }),
+    tools: (open) => { if (typeof open === 'boolean') setTools(open); return state.tools; },
   };
 })();
