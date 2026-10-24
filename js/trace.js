@@ -569,13 +569,18 @@
   function placeToast() {
     const r = stage.getBoundingClientRect();
     let left = r.left, lift = 64, sheetH = 0, sheetW = 0, top = null;
-    if (!panEl.hidden) lift = Math.max(lift, Math.round(r.bottom - panEl.getBoundingClientRect().top) + 10); // clear of the pan sliders when zoomed
     if (state.tools && !strip.hidden) {
       const sr = strip.getBoundingClientRect();
       if (sr.width < r.width * 0.9) { sheetW = Math.max(0, Math.round(sr.right - r.left)); left = Math.max(left, sr.right); } else { sheetH = Math.max(0, Math.round(r.bottom - sr.top)); lift = Math.max(lift, sheetH + 12); }
     }
     // the card keeps to the room the pop-up leaves, and the message goes to the top while the card is up (it would sit on the card's button)
     if (!card.hidden && (sheetH || sheetW)) top = Math.round(r.top + 56);
+    // the pan sliders stay above the pop-up (and beside it on a wide screen), not under it
+    const gap = sheetW ? sheetW + 12 : 0;
+    root.style.setProperty('--tr-pan-l', gap ? `${gap}px` : 'max(12px, env(safe-area-inset-left, 0px))');
+    root.style.setProperty('--tr-pan-w', gap ? `${gap + 12}px` : '24px');
+    root.style.setProperty('--tr-pan-b', sheetH ? `${sheetH + 10}px` : sheetW ? 'max(12px, env(safe-area-inset-bottom, 0px))' : 'calc(max(12px, env(safe-area-inset-bottom, 0px)) + 54px)');
+    if (!panEl.hidden) lift = Math.max(lift, Math.round(r.bottom - panEl.getBoundingClientRect().top) + 10); // clear of the pan sliders when zoomed
     root.style.setProperty('--tr-sheet-h', `${sheetH}px`);
     root.style.setProperty('--tr-sheet-w', `${sheetW}px`);
     document.body.style.setProperty('--tr-toast-x', `${Math.round(left + (r.right - left) / 2)}px`);
